@@ -1,11 +1,11 @@
-import { verifyToken } from "../config/auth.js";
+const { verifyToken } = require('../config/auth');
 
-export const authMiddleware = (req, res, next) => {
+const authMiddleware = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
-      return res.status(401).json({ error: "Missing authorization header" });
+      return res.status(401).json({ error: 'Missing authorization header' });
     }
 
     const token = verifyToken(authHeader);
@@ -22,21 +22,21 @@ export const authMiddleware = (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("Auth middleware error:", error.message);
-    return res.status(401).json({ error: "Unauthorized", details: error.message });
+    console.error('Auth middleware error:', error.message);
+    return res.status(401).json({ error: 'Unauthorized', details: error.message });
   }
 };
 
 // Optional: middleware to check if user has specific role
-export const requireRole = (allowedRoles) => {
+const requireRole = (allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ error: "User not authenticated" });
+      return res.status(401).json({ error: 'User not authenticated' });
     }
 
     if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({
-        error: "Forbidden - insufficient permissions",
+        error: 'Forbidden - insufficient permissions',
         required_roles: allowedRoles,
         user_role: req.user.role,
       });
@@ -45,3 +45,5 @@ export const requireRole = (allowedRoles) => {
     next();
   };
 };
+
+module.exports = { authMiddleware, requireRole };
