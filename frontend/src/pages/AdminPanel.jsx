@@ -99,6 +99,7 @@ const AdminPanel = () => {
       </div>
     </div>
   );
+};
 
 export default AdminPanel;
 
