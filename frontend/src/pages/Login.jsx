@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { getRoleRoute } from "../utils/roleRouting";
 import client from "../api/client";
 
 const Login = () => {
@@ -26,8 +27,9 @@ const Login = () => {
         // Use the AuthContext login function to properly store data
         login(response.data.user, response.data.token);
 
-        // Redirect to dashboard
-        navigate("/dashboard");
+        // Redirect to appropriate dashboard based on user role
+        const dashboardRoute = getRoleRoute(response.data.user.role);
+        navigate(dashboardRoute);
       }
     } catch (err) {
       setError(err.response?.data?.error || "Login failed. Please try again.");
