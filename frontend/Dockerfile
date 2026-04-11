@@ -23,6 +23,10 @@ FROM nginx:alpine
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
+# Copy entrypoint script for startup checks
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Copy built files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
@@ -33,5 +37,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start with entrypoint script
+ENTRYPOINT ["/docker-entrypoint.sh"]
