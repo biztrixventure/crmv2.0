@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "../api/client";
+import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import client from "../api/client";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,12 +20,11 @@ const Login = () => {
 
     try {
       // Call backend login endpoint
-      const response = await axios.post("/auth/login", { email, password });
+      const response = await client.post("/auth/login", { email, password });
 
       if (response.data.token && response.data.user) {
-        // Store token and user data
-        localStorage.setItem("token", response.data.token);
-        localStorage.setItem("user", JSON.stringify(response.data.user));
+        // Use the AuthContext login function to properly store data
+        login(response.data.user, response.data.token);
 
         // Redirect to dashboard
         navigate("/dashboard");
