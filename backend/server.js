@@ -40,6 +40,13 @@ app.use((req, res, next) => {
 });
 
 // ============================================================================
+// STATIC FILES - Serve frontend from dist (Nixpacks setup)
+// ============================================================================
+const path = require('path');
+const frontendDistPath = path.join(__dirname, '../frontend/dist');
+app.use(express.static(frontendDistPath));
+
+// ============================================================================
 // HEALTH CHECK (no auth required)
 // ============================================================================
 
@@ -65,32 +72,32 @@ app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
 
 // ============================================================================
-// SPA FALLBACK REDIRECT (for misrouted browser traffic)
+// SPA FALLBACK - Serve index.html for all non-API routes (React Router)
 // ============================================================================
-// If browser page requests hit backend directly (eg, domain misrouting),
-// redirect non-API GET requests to the frontend URL.
 app.get('*', (req, res, next) => {
+  // Don't intercept API routes or health checks
   const isApiPath =
     req.path === '/health' ||
     req.path.startsWith('/api/') ||
-    req.path === '/auth' ||
     req.path.startsWith('/auth/');
+
   if (isApiPath) {
     return next();
   }
 
+  // Check if Accept header wants HTML (browser requests)
   const acceptsHtml = (req.headers.accept || '').includes('text/html');
   if (!acceptsHtml) {
     return next();
   }
 
-  const frontendUrl = process.env.FRONTEND_URL;
-  if (!frontendUrl) {
-    return next();
-  }
-
-  const target = new URL(req.path, frontendUrl).toString();
-  return res.redirect(302, target);
+  // Serve index.html for all other requests
+  const indexPath = path.join(frontendDistPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      res.status(404).json({ error: 'Not found' });
+    }
+  });
 });
 
 // ============================================================================

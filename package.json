@@ -1,0 +1,18 @@
+{
+  "name": "biztrix-crm-v2",
+  "version": "2.0.0",
+  "description": "BizTrix CRM - Customer Relationship Management System",
+  "private": true,
+  "scripts": {
+    "start": "cd backend && npm start",
+    "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+    "test": "echo \"Run tests in backend/frontend separately\""
+  },
+  "keywords": ["crm", "saas"],
+  "author": "@abdulmanan69",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,20 @@
+[build]
+# Build backend first
+cmds = [
+  "cd backend && npm install && cd ..",
+  "cd frontend && npm install && npm run build && cd .."
+]
+
+# Only need node for runtime, frontend outputs static files
+onlyIncludeFiles = [
+  "/backend/**",
+  "/frontend/dist/**",
+  "package.json"
+]
+
+[start]
+# Start the backend server on port 3001
+cmd = "cd backend && npm start"
+
+[[ports]]
+port = 3001
