@@ -7,6 +7,7 @@ import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { UserManagement } from "../components/Admin/UserManagement";
 import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
+import { CompanyManagement } from "../components/Admin/CompanyManagement";
 
 const AdminPanel = () => {
   const { logout } = useAuth();
@@ -71,14 +72,7 @@ const AdminPanel = () => {
 
             {activeTab === "roles" && <RoleManagement />}
 
-            {activeTab === "companies" && (
-              <div>
-                <h2 className="text-3xl font-bold mb-6 text-text">Companies</h2>
-                <Card className="p-6">
-                  <p className="text-text-secondary">Companies management interface coming soon...</p>
-                </Card>
-              </div>
-            )}
+            {activeTab === "companies" && <CompanyManagement />}
 
             {activeTab === "forms" && (
               <div>
