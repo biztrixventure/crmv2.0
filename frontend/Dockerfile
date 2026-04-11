@@ -6,16 +6,20 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies explicitly (including devDependencies for build)
-# Force --include=dev to ensure Vite and build tools are installed
-# Ignore NODE_ENV=production passed by Coolify at build time
-RUN npm install --legacy-peer-deps --include=dev
+# CRITICAL: Unset NODE_ENV completely before npm install
+# This ensures ALL dependencies (devDependencies included) are installed
+RUN unset NODE_ENV && npm install --legacy-peer-deps
 
-# Copy source code
+# Copy entire source including all files needed for build
 COPY . .
 
-# Build the React app
-RUN npm run build
+# Create .env.local for build with required variables
+ENV VITE_SUPABASE_URL=https://placeholder.supabase.co
+ENV VITE_SUPABASE_ANON_KEY=placeholder
+ENV VITE_API_URL=http://localhost:3001
+
+# Build the React app with verbose output
+RUN npm run build --verbose
 
 # Production stage - Use lightweight nginx for serving static files
 FROM nginx:alpine

@@ -6,10 +6,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies - explicitly include all dependencies
-# Ignore NODE_ENV=production passed by Coolify at build time
-# We only use production dependencies in runtime, but builder doesn't need anything special
-RUN npm install
+# CRITICAL: Unset NODE_ENV completely before npm install
+# This ensures ALL dependencies are installed properly
+RUN unset NODE_ENV && npm install
 
 # Copy source code
 COPY . .
