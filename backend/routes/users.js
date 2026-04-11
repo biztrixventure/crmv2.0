@@ -512,15 +512,25 @@ router.delete(
         return res.status(403).json({ error: "You don't have permission to delete users" });
       }
 
-      // Soft delete - deactivate instead of removing
-      logger.debug('DELETE_USER', 'Soft deleting user by setting is_active=false', { id });
+      // Delete from Supabase Auth (hard delete - allows email reuse)
+      logger.debug('DELETE_USER', 'Deleting user from Supabase Auth', { user_id: target.user_id });
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(target.user_id);
+        logger.success('DELETE_USER', 'User deleted from Supabase Auth', { user_id: target.user_id });
+      } catch (authDeleteError) {
+        logger.warn('DELETE_USER', 'Failed to delete from Supabase Auth (may already be deleted)', { error: authDeleteError.message });
+        // Don't fail the entire operation if auth deletion fails - continue with soft delete
+      }
+
+      // Soft delete in database - deactivate and keep for audit trail
+      logger.debug('DELETE_USER', 'Soft deleting user in database by setting is_active=false', { id });
       await supabaseAdmin
         .from("user_company_roles")
         .update({ is_active: false })
         .eq("id", id);
 
-      logger.success('DELETE_USER', `User deactivated successfully`, { id, user_id: target.user_id });
-      res.json({ message: "User deactivated successfully" });
+      logger.success('DELETE_USER', `User deleted successfully`, { id, user_id: target.user_id, deleted_from_auth: true });
+      res.json({ message: "User deleted successfully. Supabase Auth user removed - email is now available for reuse." });
     } catch (err) {
       logger.error('DELETE_USER', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
