@@ -55,10 +55,7 @@ CREATE TABLE IF NOT EXISTS custom_roles (
 );
 
 -- Unique constraint: name should be unique per company (or global for superadmin)
-DO $$ BEGIN
-  CREATE UNIQUE INDEX idx_roles_name_company ON custom_roles(name, company_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_name_company ON custom_roles(name, company_id);
 
 -- 3. Permissions table
 CREATE TABLE IF NOT EXISTS permissions (
@@ -164,45 +161,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- Create indexes for performance (skip if already exist)
-DO $$ BEGIN
-  CREATE INDEX idx_transfers_company_id ON transfers(company_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_transfers_created_by ON transfers(created_by);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_transfers_assigned_to ON transfers(assigned_to);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_sales_company_id ON sales(company_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_sales_created_by ON sales(created_by);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_user_company_roles_user_id ON user_company_roles(user_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_user_company_roles_company_id ON user_company_roles(company_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-  CREATE INDEX idx_custom_roles_company_id ON custom_roles(company_id);
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
+CREATE INDEX IF NOT EXISTS idx_transfers_company_id ON transfers(company_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_created_by ON transfers(created_by);
+CREATE INDEX IF NOT EXISTS idx_transfers_assigned_to ON transfers(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_sales_company_id ON sales(company_id);
+CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by);
+CREATE INDEX IF NOT EXISTS idx_user_company_roles_user_id ON user_company_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_company_roles_company_id ON user_company_roles(company_id);
+CREATE INDEX IF NOT EXISTS idx_custom_roles_company_id ON custom_roles(company_id);
 
 -- Enable RLS on all tables
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
@@ -215,6 +181,25 @@ ALTER TABLE form_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transfers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- DROP EXISTING POLICIES (to allow re-running this script)
+-- ============================================================================
+DO $$
+DECLARE
+  policy_record RECORD;
+BEGIN
+  FOR policy_record IN
+    SELECT schemaname, tablename, policyname
+    FROM pg_policies
+    WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I',
+      policy_record.policyname,
+      policy_record.schemaname,
+      policy_record.tablename);
+  END LOOP;
+END $$;
 
 -- ============================================================================
 -- PHASE 2: ROW LEVEL SECURITY (RLS) POLICIES
