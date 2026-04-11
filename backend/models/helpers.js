@@ -48,9 +48,9 @@ const hasPermission = async (userId, companyId, permissionName) => {
       return false;
     }
 
-    // SuperAdmin has all permissions (level 1)
-    if (userRole.role_level === 1) {
-      console.log(`hasPermission: User ${userId} is SuperAdmin (level 1), granting ${permissionName}`);
+    // SuperAdmin has all permissions (level 'superadmin' - stored as enum string in database)
+    if (userRole.role_level === 'superadmin') {
+      console.log(`hasPermission: User ${userId} is SuperAdmin ('superadmin'), granting ${permissionName}`);
       return true;
     }
 
@@ -86,8 +86,8 @@ const getUserPermissions = async (userId, companyId) => {
       return [];
     }
 
-    // SuperAdmin has all permissions - fetch all (level 1)
-    if (userRole.role_level === 1) {
+    // SuperAdmin has all permissions - fetch all (level 'superadmin')
+    if (userRole.role_level === 'superadmin') {
       const { data } = await supabaseAdmin.from("permissions").select("name");
       return (data || []).map((p) => p.name);
     }
@@ -116,19 +116,20 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
       return false;
     }
 
-    // Convert string targetRoleLevel to numeric if needed
-    // targetRoleLevel can be e.g. "superadmin", "company_admin", "manager", "operations" OR numeric 1,2,3,4
+    // Role hierarchy: superadmin (0) > company_admin (1) > manager (2) > operations (3)
     const roleHierarchy = {
-      superadmin: 1,
-      company_admin: 2,
-      manager: 3,
-      operations: 4,
+      superadmin: 0,
+      company_admin: 1,
+      manager: 2,
+      operations: 3,
     };
 
-    // sourceRole.role_level is numeric (1, 2, 3, 4)
-    const sourceLevel = sourceRole.role_level;
-    // If targetRoleLevel is a string, convert it; if numeric, use it directly
-    const targetLevel = typeof targetRoleLevel === 'string' ? (roleHierarchy[targetRoleLevel] || 999) : (targetRoleLevel || 999);
+    // sourceRole.role_level is string ('superadmin', 'company_admin', etc)
+    const sourceLevel = roleHierarchy[sourceRole.role_level] ?? 999;
+    // If targetRoleLevel is a number (old code), convert it; if string, use hierarchy
+    const targetLevel = typeof targetRoleLevel === 'number'
+      ? targetRoleLevel
+      : (roleHierarchy[targetRoleLevel] ?? 999);
 
     // Can only assign roles at equal or lower level (lower number = higher authority)
     return sourceLevel <= targetLevel;
@@ -247,7 +248,7 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 // ============================================================================
 const isSuperAdmin = async (userId, companyId) => {
   const role = await getUserRole(userId, companyId);
-  return role?.role_level === 1; // level 1 = SuperAdmin
+  return role?.role_level === 'superadmin'; // 'superadmin' = SuperAdmin role
 };
 
 // ============================================================================
