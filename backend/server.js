@@ -65,6 +65,21 @@ app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
 
 // ============================================================================
+// SPA FALLBACK REDIRECT (for misrouted browser traffic)
+// ============================================================================
+// If a browser request for common frontend routes hits backend directly
+// (eg, domain mapped to backend), redirect users to the frontend URL.
+app.get(['/login', '/dashboard', '/admin'], (req, res) => {
+  const frontendUrl = process.env.FRONTEND_URL;
+  if (!frontendUrl) {
+    return res.status(404).json({ error: 'Route not found', path: req.path, method: req.method });
+  }
+
+  const target = new URL(req.path, frontendUrl).toString();
+  return res.redirect(302, target);
+});
+
+// ============================================================================
 // 404 HANDLER
 // ============================================================================
 
