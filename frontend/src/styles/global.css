@@ -2,50 +2,381 @@
 @tailwind components;
 @tailwind utilities;
 
-:root[data-theme="light"] {
-  --color-bg: #ffffff;
-  --color-text: #000000;
-  --color-border: #e5e7eb;
-  --color-primary: #2563eb;
+/* ============================================================================
+   THEME CONFIGURATION - Light & Dark Mode
+   ============================================================================ */
+
+:root {
+  /* Light Mode - Warm Amber/Brown */
+  --color-bg: #F5EDE4;
+  --color-text: #241C11;
+  --color-border: #D4C0A5;
+  --color-primary: #8B7049;
+  --color-primary-50: #F5EDE4;
+  --color-primary-100: #E8D9C8;
+  --color-primary-200: #D4C0A5;
+  --color-primary-300: #C0A682;
+  --color-primary-400: #A88A62;
+  --color-primary-500: #8B7049;
+  --color-primary-600: #6E5838;
+  --color-primary-700: #524228;
+  --color-primary-800: #3A2E1C;
+  --color-primary-900: #241C11;
+  --color-accent: #A67720;
+  --color-cream-200: #E4D4BE;
+  --color-cream-400: #C4A77E;
+  --color-cream-500: #A8885C;
+
+  /* Scrollbar Colors - Light */
+  --scrollbar-track: #E4D4BE;
+  --scrollbar-thumb: #A8885C;
+  --scrollbar-thumb-hover: #8B7049;
+
+  /* Gradients - Light */
+  --gradient-warm: linear-gradient(135deg, #E4D4BE 0%, #D4BE9E 50%, #C4A77E 100%);
+  --gradient-sidebar: linear-gradient(180deg, #A8885C 0%, #C4A77E 100%);
+
+  /* Transitions */
+  --transition-duration: 0.3s;
+  --transition-timing: ease;
 }
 
-:root[data-theme="dark"] {
-  --color-bg: #1f2937;
-  --color-text: #f3f4f6;
-  --color-border: #374151;
-  --color-primary: #3b82f6;
+/* Dark Mode */
+html.dark {
+  --color-bg: #0a0a0a;
+  --color-text: #fafafa;
+  --color-border: #262626;
+  --color-primary: #525252;
+  --color-primary-50: #fafafa;
+  --color-primary-100: #f5f5f5;
+  --color-primary-200: #e5e5e5;
+  --color-primary-300: #d4d4d4;
+  --color-primary-400: #a3a3a3;
+  --color-primary-500: #737373;
+  --color-primary-600: #525252;
+  --color-primary-700: #262626;
+  --color-primary-800: #171717;
+  --color-primary-900: #0a0a0a;
+  --color-accent: #525252;
+  --color-cream-200: #262626;
+  --color-cream-400: #404040;
+  --color-cream-500: #525252;
+
+  /* Scrollbar Colors - Dark */
+  --scrollbar-track: #0a0a0a;
+  --scrollbar-thumb: #262626;
+  --scrollbar-thumb-hover: #404040;
+
+  /* Gradients - Dark */
+  --gradient-warm: linear-gradient(135deg, #171717 0%, #0a0a0a 50%, #000000 100%);
+  --gradient-sidebar: linear-gradient(180deg, #262626 0%, #171717 100%);
 }
+
+/* ============================================================================
+   BASE STYLES
+   ============================================================================ */
 
 * {
   @apply antialiased;
 }
 
+html,
+body,
+#root {
+  @apply h-full w-full;
+}
+
 body {
-  @apply bg-white text-gray-900;
   background-color: var(--color-bg);
   color: var(--color-text);
-  transition: background-color 0.3s, color 0.3s;
+  background-image: var(--gradient-warm);
+  background-attachment: fixed;
+  transition: background-color var(--transition-duration) var(--transition-timing),
+              color var(--transition-duration) var(--transition-timing),
+              border-color var(--transition-duration) var(--transition-timing);
 }
 
-#root {
-  @apply min-h-screen;
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
+
+/* Firefox */
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
 }
 
-/* Custom components */
+/* Chrome/Edge/Safari */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 5px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ============================================================================
+   COMPONENTS
+   ============================================================================ */
+
 @layer components {
+  /* Button Components */
   .btn-primary {
-    @apply px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors;
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-300;
+    background-color: var(--color-primary-600);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--color-primary-700);
+    @apply shadow-lg;
+  }
+
+  .btn-primary:active {
+    background-color: var(--color-primary-800);
   }
 
   .btn-secondary {
-    @apply px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 transition-colors;
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-300;
+    background-color: var(--color-primary-100);
+    color: var(--color-primary-900);
+    border: 1px solid var(--color-primary-200);
   }
 
+  html.dark .btn-secondary {
+    background-color: var(--color-primary-800);
+    color: var(--color-primary-100);
+    border-color: var(--color-primary-600);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--color-primary-200);
+  }
+
+  html.dark .btn-secondary:hover {
+    background-color: var(--color-primary-700);
+  }
+
+  /* Card Component */
   .card {
-    @apply bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow;
+    @apply rounded-lg shadow-sm transition-all duration-300 border;
+    background-color: var(--color-bg);
+    border-color: var(--color-border);
   }
 
+  .card:hover {
+    @apply shadow-md;
+    border-color: var(--color-primary-400);
+  }
+
+  /* Input Component */
   .input {
-    @apply px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply px-3 py-2 rounded-lg border transition-all duration-300;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    border-color: var(--color-border);
+  }
+
+  .input:focus {
+    @apply outline-none;
+    border-color: var(--color-primary-500);
+    box-shadow: 0 0 0 3px rgba(139, 112, 73, 0.1);
+  }
+
+  html.dark .input:focus {
+    box-shadow: 0 0 0 3px rgba(82, 82, 82, 0.1);
+  }
+
+  /* Badge Component */
+  .badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium transition-colors duration-300;
+    background-color: var(--color-primary-100);
+    color: var(--color-primary-700);
+  }
+
+  html.dark .badge {
+    background-color: var(--color-primary-800);
+    color: var(--color-primary-200);
+  }
+
+  /* Sidebar Component */
+  .sidebar {
+    background-image: var(--gradient-sidebar);
+    @apply transition-all duration-300;
+  }
+
+  /* Header Component */
+  .header {
+    @apply border-b transition-all duration-300;
+    background-color: var(--color-bg);
+    border-color: var(--color-border);
+  }
+
+  /* Alert/Notification Styles */
+  .alert {
+    @apply p-4 rounded-lg border;
+    transition: background-color var(--transition-duration) var(--transition-timing),
+                border-color var(--transition-duration) var(--transition-timing),
+                color var(--transition-duration) var(--transition-timing);
+  }
+
+  .alert-success {
+    background-color: #dcfce7;
+    border-color: #86efac;
+    color: #166534;
+  }
+
+  html.dark .alert-success {
+    background-color: #064e3b;
+    border-color: #10b981;
+    color: #d1fae5;
+  }
+
+  .alert-error {
+    background-color: #fee2e2;
+    border-color: #fca5a5;
+    color: #991b1b;
+  }
+
+  html.dark .alert-error {
+    background-color: #7f1d1d;
+    border-color: #f87171;
+    color: #fecaca;
+  }
+
+  .alert-warning {
+    background-color: #fef3c7;
+    border-color: #fde68a;
+    color: #92400e;
+  }
+
+  html.dark .alert-warning {
+    background-color: #78350f;
+    border-color: #fcd34d;
+    color: #fef3c7;
+  }
+
+  .alert-info {
+    background-color: #dbeafe;
+    border-color: #93c5fd;
+    color: #1e40af;
+  }
+
+  html.dark .alert-info {
+    background-color: #1e3a8a;
+    border-color: #0284c7;
+    color: #bfdbfe;
+  }
+
+  /* Table Styles */
+  .table {
+    @apply w-full border-collapse;
+  }
+
+  .table th {
+    @apply px-4 py-3 text-left font-semibold border-b;
+    background-color: var(--color-primary-50);
+    border-color: var(--color-border);
+    color: var(--color-primary-900);
+  }
+
+  html.dark .table th {
+    background-color: var(--color-primary-900);
+    color: var(--color-primary-100);
+  }
+
+  .table td {
+    @apply px-4 py-3 border-b;
+    border-color: var(--color-border);
+  }
+
+  .table tr:hover {
+    background-color: var(--color-primary-50);
+  }
+
+  html.dark .table tr:hover {
+    background-color: var(--color-primary-900);
+  }
+
+  /* Link Styles */
+  .link {
+    @apply transition-colors duration-300 underline-offset-2;
+    color: var(--color-primary-600);
+  }
+
+  .link:hover {
+    color: var(--color-primary-700);
+    @apply underline;
+  }
+
+  html.dark .link {
+    color: var(--color-primary-400);
+  }
+
+  html.dark .link:hover {
+    color: var(--color-primary-300);
   }
 }
+
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
+.text-primary {
+  color: var(--color-primary);
+}
+
+.bg-gradient-warm {
+  background-image: var(--gradient-warm);
+}
+
+.bg-gradient-sidebar {
+  background-image: var(--gradient-sidebar);
+}
+
+.border-primary {
+  border-color: var(--color-border);
+}
+
+/* Loading Spinner */
+.spinner {
+  @apply inline-block animate-spin;
+  border: 3px solid var(--color-primary-200);
+  border-top-color: var(--color-primary-500);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+}
+
+html.dark .spinner {
+  border-color: var(--color-primary-700);
+  border-top-color: var(--color-primary-500);
+}
+
+/* Smooth Transitions */
+.smooth-transition {
+  transition: all var(--transition-duration) var(--transition-timing);
+}
+
+/* Focus Visible States */
+.focus-visible-primary:focus-visible {
+  @apply outline-none ring-2;
+  outline: none;
+  outline-offset: 2px;
+}
+
+.focus-visible-primary:focus-visible {
+  outline-color: var(--color-primary-500);
+}
+

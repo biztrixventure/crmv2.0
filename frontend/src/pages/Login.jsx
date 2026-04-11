@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "../api/client";
+import { useTheme } from "../contexts/ThemeContext";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -35,26 +37,50 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-warm flex flex-col items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      {/* Theme Toggle Button */}
+      <button
+        onClick={toggleTheme}
+        className="absolute top-6 right-6 p-2 rounded-lg btn-secondary"
+        title="Toggle dark mode"
+      >
+        {theme === "light" ? "🌙" : "☀️"}
+      </button>
+
       <div className="w-full max-w-md space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">
-            BizTrix CRM
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">Sign in to your account</p>
+        <div className="text-center">
+          <div className="flex justify-center mb-6">
+            <div className="w-16 h-16 bg-gradient-sidebar rounded-lg flex items-center justify-center shadow-lg">
+              <span className="text-3xl font-bold text-white">B</span>
+            </div>
+          </div>
+          <h1 className="text-4xl font-bold mb-2" style={{ color: "var(--color-text)" }}>
+            BizTrix
+          </h1>
+          <p className="text-lg" style={{ color: "var(--color-primary-500)" }}>
+            Customer Relationship Management
+          </p>
+          <p className="mt-4 text-sm" style={{ color: "var(--color-primary-600)" }}>
+            Sign in to your account to continue
+          </p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+        <form className="mt-8 space-y-6 card p-8" onSubmit={handleLogin}>
           {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <p className="text-sm text-red-700">{error}</p>
+            <div className="alert alert-error">
+              <div className="flex">
+                <div>
+                  <p className="font-semibold">Error</p>
+                  <p>{error}</p>
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="space-y-4 rounded-md shadow-sm">
+          <div className="space-y-4">
             <div>
-              <label htmlFor="email" className="sr-only">
-                Email address
+              <label htmlFor="email" className="block text-sm font-medium mb-2">
+                Email Address
               </label>
               <input
                 id="email"
@@ -64,12 +90,13 @@ const Login = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="relative block w-full appearance-none rounded-none rounded-t-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 focus:z-10 focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
-                placeholder="Email address"
+                className="input w-full"
+                placeholder="you@example.com"
               />
             </div>
+
             <div>
-              <label htmlFor="password" className="sr-only">
+              <label htmlFor="password" className="block text-sm font-medium mb-2">
                 Password
               </label>
               <input
@@ -80,8 +107,8 @@ const Login = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="relative block w-full appearance-none rounded-none rounded-b-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 focus:z-10 focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
-                placeholder="Password"
+                className="input w-full"
+                placeholder="••••••••"
               />
             </div>
           </div>
@@ -89,14 +116,35 @@ const Login = () => {
           <button
             type="submit"
             disabled={loading}
-            className="group relative w-full flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full btn-primary font-semibold py-3"
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? (
+              <span className="flex items-center justify-center">
+                <span className="spinner mr-2" style={{ borderWidth: "2px", width: "16px", height: "16px" }}></span>
+                Signing in...
+              </span>
+            ) : (
+              "Sign In"
+            )}
           </button>
+
+          <div className="text-center text-sm">
+            <p style={{ color: "var(--color-primary-600)" }}>
+              Don't have an account?{" "}
+              <a href="#" className="link font-semibold">
+                Contact support
+              </a>
+            </p>
+          </div>
         </form>
+
+        <p className="text-center text-xs" style={{ color: "var(--color-primary-500)" }}>
+          Protected by BizTrix Security
+        </p>
       </div>
     </div>
   );
 };
 
 export default Login;
+
