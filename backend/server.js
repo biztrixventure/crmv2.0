@@ -58,7 +58,7 @@ app.get('/health', (req, res) => {
 // PUBLIC ROUTES (no auth required)
 // ============================================================================
 
-app.use('/auth', authRoutes);
+app.use('/api/auth', authRoutes);
 
 // ============================================================================
 // PROTECTED ROUTES (auth required)
