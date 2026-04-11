@@ -275,8 +275,28 @@ router.put(
         return res.status(404).json({ error: "Role not found" });
       }
 
+      // For SuperAdmin roles (company_id = null), get user's company context
+      let targetCompanyId = role.company_id;
+      if (!targetCompanyId) {
+        try {
+          const { data: userCompany } = await supabaseAdmin
+            .from("user_company_roles")
+            .select("company_id")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .limit(1)
+            .single();
+
+          if (userCompany) {
+            targetCompanyId = userCompany.company_id;
+          }
+        } catch (err) {
+          console.error("Error fetching user company for SuperAdmin role update:", err.message);
+        }
+      }
+
       // Check permission
-      const hasPerm = await hasPermission(userId, role.company_id, "manage_roles");
+      const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
       if (!hasPerm) {
         return res.status(403).json({ error: "You don't have permission to update roles" });
       }
@@ -339,9 +359,29 @@ router.delete(
         return res.status(404).json({ error: "Role not found" });
       }
 
+      // For SuperAdmin roles (company_id = null), get user's company context
+      let targetCompanyId = role.company_id;
+      if (!targetCompanyId) {
+        try {
+          const { data: userCompany } = await supabaseAdmin
+            .from("user_company_roles")
+            .select("company_id")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .limit(1)
+            .single();
+
+          if (userCompany) {
+            targetCompanyId = userCompany.company_id;
+          }
+        } catch (err) {
+          console.error("Error fetching user company for SuperAdmin role deletion:", err.message);
+        }
+      }
+
       // Check permission
-      const hasPerm = await hasPermission(userId, role.company_id, "manage_roles");
-      console.log(`DELETE /roles/:id: user=${userId}, company=${role.company_id}, hasPerm=${hasPerm}`);
+      const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
+      console.log(`DELETE /roles/:id: user=${userId}, company=${targetCompanyId}, hasPerm=${hasPerm}`);
       if (!hasPerm) {
         return res.status(403).json({ error: "You don't have permission to delete roles" });
       }
