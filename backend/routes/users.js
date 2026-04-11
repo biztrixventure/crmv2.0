@@ -27,12 +27,10 @@ router.get(
     const userId = req.user.id;
 
     try {
-      // We can only list users from our own company
+      // Get user_company_roles
       let query = supabaseAdmin
         .from("user_company_roles")
-        .select(
-          `id,user_id,role_id,is_active,created_at,custom_roles(id,name,level),user_profiles(first_name,last_name)`
-        )
+        .select(`id,user_id,role_id,is_active,created_at,custom_roles(id,name,level)`)
         .eq("company_id", company_id || req.user.company_id)
         .eq("is_active", true);
 
@@ -40,30 +38,40 @@ router.get(
         query = query.eq("role_id", role_id);
       }
 
-      const { data, error } = await query;
+      const { data: ucr, error } = await query;
 
       if (error) {
         return res.status(400).json({ error: error.message });
       }
 
-      // Fetch emails from Supabase auth for these users
-      let users = data || [];
+      let users = ucr || [];
+
+      // Fetch user_profiles for these users
       if (users.length > 0) {
         const userIds = users.map(u => u.user_id);
-        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
-          limit: 1000, // Adjust if needed
+        const { data: profiles } = await supabaseAdmin
+          .from("user_profiles")
+          .select("user_id,first_name,last_name")
+          .in("user_id", userIds);
+
+        const profileMap = {};
+        profiles?.forEach(p => {
+          profileMap[p.user_id] = p;
         });
 
-        // Create a map of user_id to email
+        // Fetch emails from auth
+        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
         const emailMap = {};
-        authUsers?.users?.forEach(user => {
-          emailMap[user.id] = user.email;
+        authUsers?.users?.forEach(u => {
+          emailMap[u.id] = u.email;
         });
 
-        // Add emails to users
+        // Combine all data
         users = users.map(u => ({
           ...u,
           email: emailMap[u.user_id] || 'N/A',
+          first_name: profileMap[u.user_id]?.first_name,
+          last_name: profileMap[u.user_id]?.last_name,
         }));
       }
 
@@ -73,8 +81,8 @@ router.get(
         users = users.filter(
           (u) =>
             u.email?.toLowerCase().includes(searchLower) ||
-            u.user_profiles?.first_name?.toLowerCase().includes(searchLower) ||
-            u.user_profiles?.last_name?.toLowerCase().includes(searchLower)
+            u.first_name?.toLowerCase().includes(searchLower) ||
+            u.last_name?.toLowerCase().includes(searchLower)
         );
       }
 
@@ -84,8 +92,8 @@ router.get(
           id: u.id,
           user_id: u.user_id,
           email: u.email,
-          first_name: u.user_profiles?.first_name,
-          last_name: u.user_profiles?.last_name,
+          first_name: u.first_name,
+          last_name: u.last_name,
           role: u.custom_roles.name,
           role_level: u.custom_roles.level,
           is_active: u.is_active,
@@ -109,15 +117,20 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("user_company_roles")
-        .select(
-          `id,user_id,role_id,company_id,is_active,created_at,custom_roles(id,name,level),user_profiles(first_name,last_name,avatar_url)`
-        )
+        .select(`id,user_id,role_id,company_id,is_active,created_at,custom_roles(id,name,level)`)
         .eq("id", id)
         .single();
 
       if (error || !data) {
         return res.status(404).json({ error: "User not found" });
       }
+
+      // Fetch user profile
+      const { data: profile } = await supabaseAdmin
+        .from("user_profiles")
+        .select("first_name,last_name,avatar_url")
+        .eq("user_id", data.user_id)
+        .single();
 
       // Fetch email from auth
       let email = 'N/A';
@@ -135,8 +148,8 @@ router.get(
         id: data.id,
         user_id: data.user_id,
         email: email,
-        first_name: data.user_profiles?.first_name,
-        last_name: data.user_profiles?.last_name,
+        first_name: profile?.first_name,
+        last_name: profile?.last_name,
         role: data.custom_roles.name,
         role_level: data.custom_roles.level,
         company_id: data.company_id,
