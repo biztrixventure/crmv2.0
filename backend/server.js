@@ -47,16 +47,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    message: 'BizTrix CRM Backend API',
-    version: '2.0.0',
-    status: 'running',
-    docs: 'https://github.com/biztrixventure/crmv2.0'
-  });
-});
-
 // ============================================================================
 // PUBLIC ROUTES (no auth required)
 // ============================================================================
@@ -77,12 +67,26 @@ app.use('/api/sales', authMiddleware, salesRoutes);
 // ============================================================================
 // SPA FALLBACK REDIRECT (for misrouted browser traffic)
 // ============================================================================
-// If a browser request for common frontend routes hits backend directly
-// (eg, domain mapped to backend), redirect users to the frontend URL.
-app.get(['/login', '/dashboard', '/admin'], (req, res) => {
+// If browser page requests hit backend directly (eg, domain misrouting),
+// redirect non-API GET requests to the frontend URL.
+app.get('*', (req, res, next) => {
+  const isApiPath =
+    req.path === '/health' ||
+    req.path.startsWith('/api/') ||
+    req.path === '/auth' ||
+    req.path.startsWith('/auth/');
+  if (isApiPath) {
+    return next();
+  }
+
+  const acceptsHtml = (req.headers.accept || '').includes('text/html');
+  if (!acceptsHtml) {
+    return next();
+  }
+
   const frontendUrl = process.env.FRONTEND_URL;
   if (!frontendUrl) {
-    return res.status(404).json({ error: 'Route not found', path: req.path, method: req.method });
+    return next();
   }
 
   const target = new URL(req.path, frontendUrl).toString();
