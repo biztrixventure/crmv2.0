@@ -10,10 +10,16 @@ COPY package*.json ./
 # This ensures ALL dependencies (devDependencies included) are installed
 RUN unset NODE_ENV && npm install --legacy-peer-deps
 
-# Copy entire source including all files needed for build
+# Copy entire source
 COPY . .
 
-# Build the React app (Vite doesn't support --verbose flag)
+# Vite will use env vars passed at build time via build args or .env
+# The following will be set by Coolify:
+# - VITE_SUPABASE_URL
+# - VITE_SUPABASE_ANON_KEY
+# - VITE_API_URL
+
+# Build the React app (Vite reads env vars prefixed with VITE_)
 RUN npm run build
 
 # Production stage - Use lightweight nginx for serving static files
