@@ -6,7 +6,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install ALL dependencies (including devDependencies needed for build)
+# Must set NODE_ENV=development to ensure vite and build tools are installed
+ENV NODE_ENV=development
 RUN npm install --legacy-peer-deps
 
 # Copy source code
