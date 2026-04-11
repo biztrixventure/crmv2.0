@@ -248,4 +248,4 @@ CREATE POLICY "service_role_can_view_logs" ON audit_logs
   FOR SELECT USING (auth.role() = 'service_role');
 
 CREATE POLICY "service_role_can_create_logs" ON audit_logs
-  FOR INSERT USING (auth.role() = 'service_role');
+  FOR INSERT WITH CHECK (auth.role() = 'service_role');
