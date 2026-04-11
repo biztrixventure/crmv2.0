@@ -44,11 +44,13 @@ const hasPermission = async (userId, companyId, permissionName) => {
     const userRole = await getUserRole(userId, companyId);
 
     if (!userRole) {
+      console.error(`hasPermission: No role found for user ${userId} in company ${companyId}`);
       return false;
     }
 
     // SuperAdmin has all permissions (level 1)
     if (userRole.role_level === 1) {
+      console.log(`hasPermission: User ${userId} is SuperAdmin (level 1), granting ${permissionName}`);
       return true;
     }
 

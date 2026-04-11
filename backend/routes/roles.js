@@ -196,18 +196,20 @@ router.post(
           targetCompanyId = userCompany.company_id;
         }
       } catch (err) {
-        // User might not have a company assignment
+        console.error("Error fetching user company:", err.message);
       }
     }
 
     // If still no company_id, return error
     if (!targetCompanyId) {
+      console.error(`POST /roles: No company_id for user ${userId}`);
       return res.status(400).json({ error: "Company ID is required or user must have a company assignment" });
     }
 
     try {
       // Check permission to manage roles
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
+      console.log(`POST /roles: user=${userId}, company=${targetCompanyId}, hasPerm=${hasPerm}`);
       if (!hasPerm) {
         return res.status(403).json({ error: "You don't have permission to create roles" });
       }
