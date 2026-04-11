@@ -25,13 +25,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const { company_id, role_id, search } = req.query;
     const userId = req.user.id;
+    const targetCompanyId = company_id || req.user.company_id;
+
+    console.log(`GET /users: userId=${userId}, company=${targetCompanyId}, roleId=${role_id}`);
 
     try {
       // Get user_company_roles
       let query = supabaseAdmin
         .from("user_company_roles")
         .select(`id,user_id,role_id,is_active,created_at,custom_roles(id,name,level)`)
-        .eq("company_id", company_id || req.user.company_id)
+        .eq("company_id", targetCompanyId)
         .eq("is_active", true);
 
       if (role_id) {
@@ -39,6 +42,8 @@ router.get(
       }
 
       const { data: ucr, error } = await query;
+
+      console.log(`Query result: error=${error?.message}, count=${ucr?.length || 0}`);
 
       if (error) {
         return res.status(400).json({ error: error.message });
@@ -49,6 +54,8 @@ router.get(
       // Fetch user_profiles for these users
       if (users.length > 0) {
         const userIds = users.map(u => u.user_id);
+        console.log(`Fetching profiles for ${userIds.length} users`);
+
         const { data: profiles } = await supabaseAdmin
           .from("user_profiles")
           .select("user_id,first_name,last_name")
@@ -86,6 +93,8 @@ router.get(
         );
       }
 
+      console.log(`Returning ${users.length} users`);
+
       res.json({
         total: users.length,
         users: users.map((u) => ({
@@ -101,6 +110,7 @@ router.get(
         })),
       });
     } catch (err) {
+      console.error('GET /users error:', err.message);
       res.status(500).json({ error: err.message });
     }
   })
