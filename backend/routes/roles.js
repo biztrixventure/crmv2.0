@@ -81,6 +81,43 @@ router.get(
 );
 
 // ============================================================================
+// GET /permissions - Get all available permissions (MUST be before /:id route)
+// ============================================================================
+router.get(
+  "/permissions",
+  asyncHandler(async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("permissions")
+        .select("id, name, description, category")
+        .order("category")
+        .order("name");
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      // Group by category
+      const grouped = (data || []).reduce((acc, perm) => {
+        if (!acc[perm.category]) {
+          acc[perm.category] = [];
+        }
+        acc[perm.category].push({
+          id: perm.id,
+          name: perm.name,
+          description: perm.description,
+        });
+        return acc;
+      }, {});
+
+      res.json(grouped);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
+
+// ============================================================================
 // GET /roles/:id - Get role details
 // ============================================================================
 router.get(
@@ -298,43 +335,6 @@ router.delete(
       await supabaseAdmin.from("custom_roles").delete().eq("id", id);
 
       res.json({ message: "Role deleted successfully" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  })
-);
-
-// ============================================================================
-// GET /permissions - Get all available permissions
-// ============================================================================
-router.get(
-  "/permissions",
-  asyncHandler(async (req, res) => {
-    try {
-      const { data, error } = await supabaseAdmin
-        .from("permissions")
-        .select("id, name, description, category")
-        .order("category")
-        .order("name");
-
-      if (error) {
-        return res.status(400).json({ error: error.message });
-      }
-
-      // Group by category
-      const grouped = (data || []).reduce((acc, perm) => {
-        if (!acc[perm.category]) {
-          acc[perm.category] = [];
-        }
-        acc[perm.category].push({
-          id: perm.id,
-          name: perm.name,
-          description: perm.description,
-        });
-        return acc;
-      }, {});
-
-      res.json(grouped);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
