@@ -55,7 +55,10 @@ CREATE TABLE IF NOT EXISTS custom_roles (
 );
 
 -- Unique constraint: name should be unique per company (or global for superadmin)
-CREATE UNIQUE INDEX idx_roles_name_company ON custom_roles(name, company_id);
+DO $$ BEGIN
+  CREATE UNIQUE INDEX idx_roles_name_company ON custom_roles(name, company_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 -- 3. Permissions table
 CREATE TABLE IF NOT EXISTS permissions (
