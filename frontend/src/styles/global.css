@@ -102,6 +102,10 @@
   --scrollbar-thumb: #A8885C;
   --scrollbar-thumb-hover: #8B7049;
 
+  /* ========== LOADING STATES ========== */
+  --color-skeleton: #EBE3D9;
+  --color-skeleton-secondary: #D4C0A5;
+
   /* ========== SHADOWS ========== */
   --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
@@ -274,6 +278,10 @@ html.dark {
   --scrollbar-track: #0a0a0a;
   --scrollbar-thumb: #262626;
   --scrollbar-thumb-hover: #404040;
+
+  /* ========== LOADING STATES - Dark Mode ========== */
+  --color-skeleton: #1a1a1a;
+  --color-skeleton-secondary: #262626;
 
   /* ========== SHADOWS - Dark Mode (More Prominent) ========== */
   --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
@@ -487,6 +495,15 @@ strong {
   }
 }
 
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.5rem);
+  }
+}
+
 /* Animation Utility Classes */
 .animate-fade-in {
   animation: fadeIn var(--duration-normal) var(--timing-ease-out);
@@ -510,6 +527,21 @@ strong {
 
 .animate-pulse-slow {
   animation: pulse 2s var(--timing-linear) infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-secondary) 25%,
+    var(--color-bg) 50%,
+    var(--color-bg-secondary) 75%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-bounce {
+  animation: bounce var(--duration-normal) var(--timing-ease-in-out) infinite;
 }
 
 /* ============================================================================
