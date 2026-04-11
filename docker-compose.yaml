@@ -6,8 +6,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: biztrix-backend
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
@@ -30,8 +30,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: biztrix-frontend
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     environment:
       - VITE_API_URL=${VITE_API_URL:-http://backend:3001}
       - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
