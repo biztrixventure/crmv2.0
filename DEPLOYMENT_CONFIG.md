@@ -6,17 +6,17 @@ Deploy as two Nixpacks services from one repo:
 
 1. Frontend service
    - Root directory: `frontend`
-   - Domain: `tokocrypto.live`
+   - Domain: `your-frontend-domain.com`
 2. Backend service
    - Root directory: `backend`
-   - Domain: `api.tokocrypto.live`
+   - Domain: `api.your-domain.com`
 
 ## Required Environment Variables
 
 ### Frontend service
 ```env
 NODE_ENV=production
-VITE_API_URL=https://api.tokocrypto.live
+VITE_API_URL=https://api.your-domain.com
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
@@ -28,12 +28,12 @@ PORT=3001
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-CORS_ORIGIN=https://tokocrypto.live
-FRONTEND_URL=https://tokocrypto.live
+CORS_ORIGIN=https://your-frontend-domain.com
+FRONTEND_URL=https://your-frontend-domain.com
 ```
 
 ## Verification Checklist
 
-- `https://tokocrypto.live/login` loads frontend login page
-- `https://api.tokocrypto.live/health` returns backend health JSON
-- Browser API calls target `https://api.tokocrypto.live`
+- `https://your-frontend-domain.com/login` loads frontend login page
+- `https://api.your-domain.com/health` returns backend health JSON
+- Browser API calls target `https://api.your-domain.com`

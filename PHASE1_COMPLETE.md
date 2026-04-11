@@ -4,7 +4,7 @@
 
 ### Server & Middleware ✅
 - Express server with CORS, body parser, request logging
-- Health check endpoint for Docker
+- Health check endpoint for deployments
 - Error handling middleware with async wrapper
 - JWT auth middleware for protected routes
 - 404 handler
@@ -29,10 +29,9 @@
 - Company data isolation
 - User team management
 
-### Docker & Deployment ✅
-- Multi-stage Dockerfile for backend (Node optimization)
-- Multi-stage Dockerfile for frontend (React + Nginx)
-- docker-compose.yaml with both services
+### Deployment ✅
+- Nixpacks configuration for backend service
+- Nixpacks configuration for frontend service
 - Health checks configured
 - CORS properly configured
 
