@@ -1,5 +1,6 @@
 import React from 'react';
-import { Badge, Table, Button } from '../../../components/UI';
+import { Edit2, Trash2 } from 'lucide-react';
+import { Badge, Table, Button, Card } from '../../../components/UI';
 
 /**
  * CompanyList Component
@@ -8,17 +9,32 @@ import { Badge, Table, Button } from '../../../components/UI';
 const CompanyList = ({ companies, onEdit, onDelete, loading = false }) => {
   if (!companies || companies.length === 0) {
     return (
-      <div className="text-center py-12">
-        <p className="text-text-secondary mb-4">No companies found</p>
-      </div>
+      <Card className="p-8 text-center">
+        <p className="text-text-secondary">No companies found</p>
+      </Card>
     );
   }
 
+  // Transform companies for table display
+  const tableRows = companies.map((company) => ({
+    id: company.id,
+    name: company.name,
+    logo_url: company.logo_url,
+    status: company.is_active ? 'Active' : 'Inactive',
+    created_at: new Date(company.created_at).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }),
+  }));
+
+  // Define columns
   const columns = [
     {
-      header: 'Name',
-      accessor: 'name',
-      render: (value, row) => (
+      key: 'name',
+      label: 'Name',
+      width: '250px',
+      render: (row) => (
         <div className="flex items-center gap-3">
           {row.logo_url && (
             <img
@@ -30,66 +46,60 @@ const CompanyList = ({ companies, onEdit, onDelete, loading = false }) => {
               }}
             />
           )}
-          <span className="font-medium text-text">{value}</span>
+          <span className="font-medium text-text">{row.name}</span>
         </div>
       ),
     },
     {
-      header: 'Status',
-      accessor: 'is_active',
-      render: (value) => (
-        <Badge variant={value ? 'success' : 'secondary'}>
-          {value ? 'Active' : 'Inactive'}
+      key: 'status',
+      label: 'Status',
+      width: '120px',
+      render: (row) => (
+        <Badge variant={row.status === 'Active' ? 'success' : 'secondary'} size="sm">
+          {row.status}
         </Badge>
       ),
     },
     {
-      header: 'Created',
-      accessor: 'created_at',
-      render: (value) => {
-        if (!value) return 'N/A';
-        return new Date(value).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        });
-      },
+      key: 'created_at',
+      label: 'Created',
+      width: '120px',
+    },
+  ];
+
+  // Define actions
+  const actions = [
+    {
+      label: 'Edit',
+      icon: <Edit2 size={16} />,
+      onClick: (row) => onEdit(companies.find((c) => c.id === row.id)),
+      variant: 'ghost',
+      size: 'sm',
     },
     {
-      header: 'Actions',
-      accessor: 'id',
-      render: (value, row) => (
-        <div className="flex gap-2">
-          <Button
-            onClick={() => onEdit(row)}
-            variant="ghost"
-            size="sm"
-          >
-            Edit
-          </Button>
-          <Button
-            onClick={() => {
-              if (window.confirm('Are you sure you want to deactivate this company?')) {
-                onDelete(value);
-              }
-            }}
-            variant="ghost"
-            size="sm"
-            className="text-error"
-          >
-            Deactivate
-          </Button>
-        </div>
-      ),
+      label: 'Deactivate',
+      icon: <Trash2 size={16} />,
+      onClick: (row) => {
+        if (window.confirm('Are you sure you want to deactivate this company?')) {
+          onDelete(row.id);
+        }
+      },
+      variant: 'ghost',
+      size: 'sm',
+      className: 'text-error-600 hover:text-error-700',
     },
   ];
 
   return (
-    <Table
-      data={companies}
-      columns={columns}
-      loading={loading}
-    />
+    <Card variant="outlined">
+      <Table
+        columns={columns}
+        data={tableRows}
+        rowActions={actions}
+        sortable
+        hover
+      />
+    </Card>
   );
 };
 
