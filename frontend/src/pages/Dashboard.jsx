@@ -2,6 +2,7 @@ import React from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
+import { Moon, Sun, LogOut, ClipboardList, Clock, DollarSign, TrendingUp, FileText, CreditCard, BarChart3, Rocket } from "lucide-react";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -32,7 +33,7 @@ const Dashboard = () => {
                 className="p-2 rounded-lg btn-secondary"
                 title="Toggle dark mode"
               >
-                {theme === "light" ? "🌙" : "☀️"}
+                {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
               </button>
 
               <div className="flex items-center space-x-4">
@@ -44,7 +45,7 @@ const Dashboard = () => {
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="px-4 py-2 rounded-lg"
+                  className="px-4 py-2 rounded-lg flex items-center space-x-2"
                   style={{
                     backgroundColor: "var(--color-primary-600)",
                     color: "white",
@@ -56,7 +57,8 @@ const Dashboard = () => {
                     e.target.style.backgroundColor = "var(--color-primary-600)";
                   }}
                 >
-                  Logout
+                  <LogOut size={18} />
+                  <span>Logout</span>
                 </button>
               </div>
             </div>
@@ -83,7 +85,7 @@ const Dashboard = () => {
                 <p className="text-sm opacity-75 mb-1">Total Transfers</p>
                 <p className="text-3xl font-bold">0</p>
               </div>
-              <div className="text-4xl">📋</div>
+              <div className="text-4xl text-amber-600"><ClipboardList size={40} /></div>
             </div>
           </div>
 
@@ -93,7 +95,7 @@ const Dashboard = () => {
                 <p className="text-sm opacity-75 mb-1">Pending</p>
                 <p className="text-3xl font-bold">0</p>
               </div>
-              <div className="text-4xl">⏳</div>
+              <div className="text-4xl text-orange-600"><Clock size={40} /></div>
             </div>
           </div>
 
@@ -103,7 +105,7 @@ const Dashboard = () => {
                 <p className="text-sm opacity-75 mb-1">Total Sales</p>
                 <p className="text-3xl font-bold">0</p>
               </div>
-              <div className="text-4xl">💰</div>
+              <div className="text-4xl text-green-600"><DollarSign size={40} /></div>
             </div>
           </div>
 
@@ -113,7 +115,7 @@ const Dashboard = () => {
                 <p className="text-sm opacity-75 mb-1">Conversion Rate</p>
                 <p className="text-3xl font-bold">0%</p>
               </div>
-              <div className="text-4xl">📈</div>
+              <div className="text-4xl text-blue-600"><TrendingUp size={40} /></div>
             </div>
           </div>
         </div>
@@ -121,25 +123,37 @@ const Dashboard = () => {
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <h3 className="text-lg font-semibold mb-2">📝 Create Transfer</h3>
+            <div className="flex items-center space-x-3 mb-2">
+              <FileText size={24} className="text-amber-600" />
+              <h3 className="text-lg font-semibold">Create Transfer</h3>
+            </div>
             <p className="text-sm opacity-75">Submit a new customer transfer</p>
           </button>
 
           <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <h3 className="text-lg font-semibold mb-2">💳 Create Sale</h3>
+            <div className="flex items-center space-x-3 mb-2">
+              <CreditCard size={24} className="text-green-600" />
+              <h3 className="text-lg font-semibold">Create Sale</h3>
+            </div>
             <p className="text-sm opacity-75">Convert a transfer to a sale</p>
           </button>
 
           <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <h3 className="text-lg font-semibold mb-2">📊 View Reports</h3>
+            <div className="flex items-center space-x-3 mb-2">
+              <BarChart3 size={24} className="text-blue-600" />
+              <h3 className="text-lg font-semibold">View Reports</h3>
+            </div>
             <p className="text-sm opacity-75">Check your performance metrics</p>
           </button>
         </div>
 
         {/* Coming Soon Message */}
         <div className="mt-12 card p-8 text-center">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <Rocket size={32} className="text-amber-600" />
+          </div>
           <p className="text-lg opacity-75">
-            🚀 Dashboard features coming soon...
+            Dashboard features coming soon...
           </p>
         </div>
       </main>

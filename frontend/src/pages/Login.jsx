@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { getRoleRoute } from "../utils/roleRouting";
+import { Moon, Sun } from "lucide-react";
 import client from "../api/client";
 
 const Login = () => {
@@ -47,7 +48,7 @@ const Login = () => {
         className="absolute top-6 right-6 p-2 rounded-lg btn-secondary"
         title="Toggle dark mode"
       >
-        {theme === "light" ? "🌙" : "☀️"}
+        {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
       </button>
 
       <div className="w-full max-w-md space-y-8">
