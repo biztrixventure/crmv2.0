@@ -55,7 +55,7 @@ const Modal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/70 animate-fade-in"
@@ -68,20 +68,20 @@ const Modal = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
-        className={`relative bg-surface dark:bg-surface rounded-xl shadow-elevated animate-scale-in z-10 ${sizeClasses[size] || sizeClasses.md} w-11/12 ${className}`}
+        className={`relative bg-surface dark:bg-surface rounded-xl shadow-elevated animate-scale-in z-10 ${sizeClasses[size] || sizeClasses.md} w-full max-h-[90vh] flex flex-col ${className}`}
         {...props}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
+        <div className="flex items-center justify-between p-6 border-b border-border flex-shrink-0">
           {title && (
-            <h2 id="modal-title" className="text-2xl font-bold">
+            <h2 id="modal-title" className="text-2xl font-bold text-text">
               {title}
             </h2>
           )}
           {showCloseButton && (
             <button
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors"
+              className="p-2 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors ml-4 flex-shrink-0"
               aria-label="Close modal"
             >
               <X size={24} />
@@ -89,14 +89,14 @@ const Modal = ({
           )}
         </div>
 
-        {/* Content */}
-        <div className="p-6">
+        {/* Content - Scrollable */}
+        <div className="p-6 overflow-y-auto flex-1">
           {children}
         </div>
 
         {/* Footer with Actions */}
         {actions.length > 0 && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-border bg-bg dark:bg-primary-900/50">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-border bg-bg dark:bg-primary-900/50 flex-shrink-0">
             {actions.map((action, idx) => (
               <Button
                 key={idx}
