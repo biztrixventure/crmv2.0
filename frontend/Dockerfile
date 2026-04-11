@@ -13,13 +13,8 @@ RUN unset NODE_ENV && npm install --legacy-peer-deps
 # Copy entire source including all files needed for build
 COPY . .
 
-# Create .env.local for build with required variables
-ENV VITE_SUPABASE_URL=https://placeholder.supabase.co
-ENV VITE_SUPABASE_ANON_KEY=placeholder
-ENV VITE_API_URL=http://localhost:3001
-
-# Build the React app with verbose output
-RUN npm run build --verbose
+# Build the React app (Vite doesn't support --verbose flag)
+RUN npm run build
 
 # Production stage - Use lightweight nginx for serving static files
 FROM nginx:alpine
