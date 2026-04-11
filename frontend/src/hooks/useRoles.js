@@ -36,6 +36,7 @@ export const useRoles = (companyId = null) => {
         description,
         level,
         permissions,
+        company_id: companyId,
       });
       setRoles([...roles, response.data.role]);
       return response.data.role;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
+import { useAuth } from '../../../contexts/AuthContext';
 import { useRoles } from '../../../hooks/useRoles';
 import RoleList from './RoleList';
 import RoleModal from './RoleModal';
@@ -11,7 +12,8 @@ import RoleModal from './RoleModal';
  * Handles CRUD operations for roles
  */
 const RoleManagement = () => {
-  const { roles, loading, error, fetchRoles, createRole, updateRole, deleteRole } = useRoles();
+  const { user } = useAuth();
+  const { roles, loading, error, fetchRoles, createRole, updateRole, deleteRole } = useRoles(user?.company_id);
   const [showModal, setShowModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState(null);
 
