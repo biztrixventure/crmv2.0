@@ -2,7 +2,9 @@ import React from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Moon, Sun, LogOut, Award } from "lucide-react";
+import { Award } from "lucide-react";
+import { Card } from "../components/UI";
+import { AppHeader } from "../components/Layout";
 
 const CloserManagerDashboard = () => {
   const { user, logout } = useAuth();
@@ -15,86 +17,56 @@ const CloserManagerDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--color-bg)", color: "var(--color-text)" }}>
-      {/* Navigation */}
-      <nav className="header shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
-                <Award className="text-white" size={24} />
-              </div>
-              <h1 className="text-2xl font-bold">Closer Manager Dashboard</h1>
-            </div>
-
-            <div className="flex items-center space-x-6">
-              <button
-                onClick={toggleTheme}
-                className="p-2 rounded-lg btn-secondary"
-                title="Toggle dark mode"
-              >
-                {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
-              </button>
-
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="font-semibold">{user?.email}</p>
-                  <p className="text-sm" style={{ color: "var(--color-primary-600)" }}>
-                    {user?.role_name || user?.role}
-                  </p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 rounded-lg flex items-center space-x-2"
-                  style={{
-                    backgroundColor: "var(--color-primary-600)",
-                    color: "white",
-                  }}
-                >
-                  <LogOut size={18} />
-                  <span>Logout</span>
-                </button>
-              </div>
-            </div>
+    <div className="min-h-screen bg-bg">
+      <AppHeader
+        title="Closer Manager Dashboard"
+        logo={
+          <div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
+            <Award className="text-white" size={24} />
           </div>
-        </div>
-      </nav>
+        }
+        theme={theme}
+        onThemeToggle={toggleTheme}
+        userEmail={user?.email}
+        userRole={user?.role_name || user?.role}
+        onLogout={handleLogout}
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">Welcome back, {user?.first_name || user?.email}!</h2>
-          <p className="text-lg opacity-75">You're logged in as <strong>{user?.role_name || user?.role}</strong> in <strong>{user?.company_name}</strong></p>
+          <h2 className="text-3xl font-bold mb-2 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
+          <p className="text-lg text-text-secondary">You're logged in as <strong>{user?.role_name || user?.role}</strong> in <strong>{user?.company_name}</strong></p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          <div className="card p-6">
-            <p className="text-sm opacity-75 mb-1">Team Size</p>
-            <p className="text-3xl font-bold">0</p>
-          </div>
-          <div className="card p-6">
-            <p className="text-sm opacity-75 mb-1">Total Sales</p>
-            <p className="text-3xl font-bold">0</p>
-          </div>
-          <div className="card p-6">
-            <p className="text-sm opacity-75 mb-1">Team Conversion</p>
-            <p className="text-3xl font-bold">0%</p>
-          </div>
-          <div className="card p-6">
-            <p className="text-sm opacity-75 mb-1">Avg per Closer</p>
-            <p className="text-3xl font-bold">0</p>
-          </div>
+          <Card className="p-6">
+            <p className="text-sm text-text-secondary mb-1">Team Size</p>
+            <p className="text-3xl font-bold text-text">0</p>
+          </Card>
+          <Card className="p-6">
+            <p className="text-sm text-text-secondary mb-1">Total Sales</p>
+            <p className="text-3xl font-bold text-text">0</p>
+          </Card>
+          <Card className="p-6">
+            <p className="text-sm text-text-secondary mb-1">Team Conversion</p>
+            <p className="text-3xl font-bold text-text">0%</p>
+          </Card>
+          <Card className="p-6">
+            <p className="text-sm text-text-secondary mb-1">Avg per Closer</p>
+            <p className="text-3xl font-bold text-text">0</p>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="card p-6">
-            <h3 className="text-xl font-bold mb-4">Team Performance</h3>
-            <p className="opacity-75">Team performance metrics coming soon...</p>
-          </div>
-          <div className="card p-6">
-            <h3 className="text-xl font-bold mb-4">Manage Closers</h3>
-            <p className="opacity-75">Closer management tools coming soon...</p>
-          </div>
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text">Team Performance</h3>
+            <p className="text-text-secondary">Team performance metrics coming soon...</p>
+          </Card>
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text">Manage Closers</h3>
+            <p className="text-text-secondary">Closer management tools coming soon...</p>
+          </Card>
         </div>
       </main>
     </div>

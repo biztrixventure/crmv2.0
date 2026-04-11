@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, AlertCircle, Loader } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { Button, Alert } from '../../../components/UI';
 import { useRoles } from '../../../hooks/useRoles';
 import RoleList from './RoleList';
 import RoleModal from './RoleModal';
@@ -63,35 +64,32 @@ const RoleManagement = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-bold">Roles & Permissions</h2>
-        <button
+        <h2 className="text-3xl font-bold text-text">Roles & Permissions</h2>
+        <Button
           onClick={handleAddRole}
-          className="btn-primary flex items-center space-x-2"
+          variant="primary"
+          size="md"
+          className="flex items-center gap-2"
         >
           <Plus size={20} />
           <span>Create Role</span>
-        </button>
+        </Button>
       </div>
 
       {/* Error message */}
       {error && (
-        <div
-          className="mb-6 p-4 rounded-lg flex items-center space-x-2"
-          style={{
-            backgroundColor: 'var(--color-error-100)',
-            color: 'var(--color-error-700)',
-            border: '1px solid var(--color-error-300)',
-          }}
-        >
-          <AlertCircle size={20} />
-          <span>{error}</span>
-        </div>
+        <Alert
+          type="error"
+          title="Error"
+          message={error}
+          className="mb-6"
+        />
       )}
 
       {/* Loading state */}
       {loading && (
         <div className="flex justify-center items-center py-12">
-          <Loader size={32} className="animate-spin" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
         </div>
       )}
 

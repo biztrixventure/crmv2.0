@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Button, FormField } from '../../../components/UI';
 import PermissionMatrix from './PermissionMatrix';
 
 /**
@@ -87,8 +88,11 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Role Name */}
-      <div>
-        <label className="block text-sm font-semibold mb-2">Role Name</label>
+      <FormField
+        label="Role Name"
+        required
+        error={errors.name}
+      >
         <input
           type="text"
           name="name"
@@ -96,52 +100,34 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           onChange={handleInputChange}
           disabled={role !== null}
           placeholder="e.g., SuperAdmin, Manager"
-          className="w-full px-4 py-2 rounded-lg border"
-          style={{
-            borderColor: errors.name ? 'var(--color-error-300)' : 'var(--color-border)',
-            backgroundColor: role !== null ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
-            color: 'var(--color-text)',
-          }}
+          className="input"
         />
-        {errors.name && (
-          <p className="text-sm mt-1" style={{ color: 'var(--color-error-600)' }}>
-            {errors.name}
-          </p>
-        )}
-      </div>
+      </FormField>
 
       {/* Description */}
-      <div>
-        <label className="block text-sm font-semibold mb-2">Description</label>
+      <FormField label="Description">
         <textarea
           name="description"
           value={formData.description}
           onChange={handleInputChange}
           placeholder="Role description (optional)"
           rows="3"
-          className="w-full px-4 py-2 rounded-lg border"
-          style={{
-            borderColor: 'var(--color-border)',
-            backgroundColor: 'var(--color-bg)',
-            color: 'var(--color-text)',
-          }}
+          className="input"
         />
-      </div>
+      </FormField>
 
       {/* Role Level */}
-      <div>
-        <label className="block text-sm font-semibold mb-2">Role Level</label>
+      <FormField
+        label="Role Level"
+        required
+        error={errors.level}
+      >
         <select
           name="level"
           value={formData.level}
           onChange={handleInputChange}
           disabled={role !== null}
-          className="w-full px-4 py-2 rounded-lg border"
-          style={{
-            borderColor: errors.level ? 'var(--color-error-300)' : 'var(--color-border)',
-            backgroundColor: role !== null ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
-            color: 'var(--color-text)',
-          }}
+          className="input"
         >
           <option value="">Select level</option>
           <option value="superadmin">SuperAdmin</option>
@@ -149,12 +135,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           <option value="manager">Manager</option>
           <option value="operations">Operations</option>
         </select>
-        {errors.level && (
-          <p className="text-sm mt-1" style={{ color: 'var(--color-error-600)' }}>
-            {errors.level}
-          </p>
-        )}
-      </div>
+      </FormField>
 
       {/* Permissions Matrix */}
       <div>
@@ -163,27 +144,22 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           onChange={handlePermissionsChange}
         />
         {errors.permissions && (
-          <p className="text-sm mt-2" style={{ color: 'var(--color-error-600)' }}>
+          <p className="text-sm mt-2 text-error-600">
             {errors.permissions}
           </p>
         )}
       </div>
 
       {/* Submit Button */}
-      <div className="flex justify-end pt-6 border-t" style={{ borderColor: 'var(--color-border)' }}>
-        <button
+      <div className="flex justify-end pt-6 border-t border-border">
+        <Button
           type="submit"
+          variant="primary"
+          loading={isLoading}
           disabled={isLoading}
-          className="px-6 py-2 rounded-lg font-semibold transition-opacity"
-          style={{
-            backgroundColor: 'var(--color-primary-600)',
-            color: 'white',
-            opacity: isLoading ? 0.6 : 1,
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-          }}
         >
           {isLoading ? 'Saving...' : role ? 'Update Role' : 'Create Role'}
-        </button>
+        </Button>
       </div>
     </form>
   );

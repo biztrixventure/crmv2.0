@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 
 /**
@@ -43,16 +44,22 @@ const PermissionMatrix = ({ selectedPermissions = [], onChange }) => {
   };
 
   if (loading) {
-    return <div className="text-center py-4">Loading permissions...</div>;
+    return <div className="text-center py-4 text-text-secondary">Loading permissions...</div>;
   }
 
   if (error) {
-    return <div className="text-red-600 py-4">Error loading permissions: {error}</div>;
+    return (
+      <Alert
+        type="error"
+        title="Error"
+        message={`Failed to load permissions: ${error}`}
+      />
+    );
   }
 
   return (
     <div className="space-y-6">
-      <h3 className="font-semibold text-lg">Assign Permissions</h3>
+      <h3 className="font-semibold text-lg text-text">Assign Permissions</h3>
 
       {Object.entries(permissions).map(([category, perms]) => {
         const categoryNames = perms.map(p => p.name);
@@ -60,9 +67,9 @@ const PermissionMatrix = ({ selectedPermissions = [], onChange }) => {
         const allSelected = categorySelected === categoryNames.length;
 
         return (
-          <div key={category} className="border rounded-lg p-4" style={{ borderColor: 'var(--color-border)' }}>
+          <div key={category} className="border border-border rounded-lg p-4">
             {/* Category header with select all */}
-            <div className="flex items-center space-x-3 mb-4">
+            <div className="flex items-center gap-3 mb-4">
               <input
                 type="checkbox"
                 id={`category-${category}`}
@@ -72,11 +79,11 @@ const PermissionMatrix = ({ selectedPermissions = [], onChange }) => {
               />
               <label
                 htmlFor={`category-${category}`}
-                className="font-semibold capitalize cursor-pointer flex-1"
+                className="font-semibold capitalize cursor-pointer flex-1 text-text"
               >
                 {category.replace(/_/g, ' ')}
               </label>
-              <span className="text-sm opacity-75">
+              <span className="text-sm text-text-secondary">
                 {categorySelected} of {categoryNames.length}
               </span>
             </div>
@@ -84,7 +91,7 @@ const PermissionMatrix = ({ selectedPermissions = [], onChange }) => {
             {/* Permissions list */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
               {perms.map(perm => (
-                <div key={perm.id} className="flex items-start space-x-2">
+                <div key={perm.id} className="flex items-start gap-2">
                   <input
                     type="checkbox"
                     id={`perm-${perm.id}`}
@@ -96,9 +103,9 @@ const PermissionMatrix = ({ selectedPermissions = [], onChange }) => {
                     htmlFor={`perm-${perm.id}`}
                     className="cursor-pointer flex-1"
                   >
-                    <div className="font-mono text-sm">{perm.name}</div>
+                    <div className="font-mono text-sm text-text">{perm.name}</div>
                     {perm.description && (
-                      <div className="text-xs opacity-60">{perm.description}</div>
+                      <div className="text-xs text-text-tertiary">{perm.description}</div>
                     )}
                   </label>
                 </div>

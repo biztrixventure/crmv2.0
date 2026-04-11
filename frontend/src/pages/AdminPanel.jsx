@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
+import { Card } from "../components/UI";
 import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
@@ -26,7 +27,7 @@ const AdminPanel = () => {
   ];
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--color-bg)", color: "var(--color-text)" }}>
+    <div className="min-h-screen bg-bg">
       {/* Header */}
       <AdminHeader
         theme={theme}
@@ -47,30 +48,30 @@ const AdminPanel = () => {
           <div className="p-8">
             {activeTab === "dashboard" && (
               <div>
-                <h2 className="text-3xl font-bold mb-6">Admin Dashboard</h2>
+                <h2 className="text-3xl font-bold mb-6 text-text">Admin Dashboard</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="card p-6">
-                    <p className="text-sm opacity-75 mb-1">Total Users</p>
-                    <p className="text-3xl font-bold">0</p>
-                  </div>
-                  <div className="card p-6">
-                    <p className="text-sm opacity-75 mb-1">Total Companies</p>
-                    <p className="text-3xl font-bold">0</p>
-                  </div>
-                  <div className="card p-6">
-                    <p className="text-sm opacity-75 mb-1">Total Roles</p>
-                    <p className="text-3xl font-bold">0</p>
-                  </div>
+                  <Card className="p-6">
+                    <p className="text-sm text-text-secondary mb-1">Total Users</p>
+                    <p className="text-3xl font-bold text-text">0</p>
+                  </Card>
+                  <Card className="p-6">
+                    <p className="text-sm text-text-secondary mb-1">Total Companies</p>
+                    <p className="text-3xl font-bold text-text">0</p>
+                  </Card>
+                  <Card className="p-6">
+                    <p className="text-sm text-text-secondary mb-1">Total Roles</p>
+                    <p className="text-3xl font-bold text-text">0</p>
+                  </Card>
                 </div>
               </div>
             )}
 
             {activeTab === "users" && (
               <div>
-                <h2 className="text-3xl font-bold mb-6">Users Management</h2>
-                <div className="card p-6">
-                  <p className="opacity-75">Users management interface coming soon...</p>
-                </div>
+                <h2 className="text-3xl font-bold mb-6 text-text">Users Management</h2>
+                <Card className="p-6">
+                  <p className="text-text-secondary">Users management interface coming soon...</p>
+                </Card>
               </div>
             )}
 
@@ -78,19 +79,19 @@ const AdminPanel = () => {
 
             {activeTab === "companies" && (
               <div>
-                <h2 className="text-3xl font-bold mb-6">Companies</h2>
-                <div className="card p-6">
-                  <p className="opacity-75">Companies management interface coming soon...</p>
-                </div>
+                <h2 className="text-3xl font-bold mb-6 text-text">Companies</h2>
+                <Card className="p-6">
+                  <p className="text-text-secondary">Companies management interface coming soon...</p>
+                </Card>
               </div>
             )}
 
             {activeTab === "forms" && (
               <div>
-                <h2 className="text-3xl font-bold mb-6">Form Fields</h2>
-                <div className="card p-6">
-                  <p className="opacity-75">Form management interface coming soon...</p>
-                </div>
+                <h2 className="text-3xl font-bold mb-6 text-text">Form Fields</h2>
+                <Card className="p-6">
+                  <p className="text-text-secondary">Form management interface coming soon...</p>
+                </Card>
               </div>
             )}
           </div>
@@ -98,7 +99,6 @@ const AdminPanel = () => {
       </div>
     </div>
   );
-};
 
 export default AdminPanel;
 

@@ -2,7 +2,9 @@ import React from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Moon, Sun, LogOut, ClipboardList, Clock, DollarSign, TrendingUp, FileText, CreditCard, BarChart3, Rocket } from "lucide-react";
+import { ClipboardList, Clock, DollarSign, TrendingUp, FileText, CreditCard, BarChart3, Rocket } from "lucide-react";
+import { Button, Card } from "../components/UI";
+import { AppHeader } from "../components/Layout";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -15,147 +17,114 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--color-bg)", color: "var(--color-text)" }}>
-      {/* Navigation */}
-      <nav className="header shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
-                <span className="text-xl font-bold text-white">B</span>
-              </div>
-              <h1 className="text-2xl font-bold">BizTrix CRM</h1>
-            </div>
-
-            <div className="flex items-center space-x-6">
-              <button
-                onClick={toggleTheme}
-                className="p-2 rounded-lg btn-secondary"
-                title="Toggle dark mode"
-              >
-                {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
-              </button>
-
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="font-semibold">{user?.email}</p>
-                  <p className="text-sm" style={{ color: "var(--color-primary-600)" }}>
-                    {user?.role_name}
-                  </p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 rounded-lg flex items-center space-x-2"
-                  style={{
-                    backgroundColor: "var(--color-primary-600)",
-                    color: "white",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = "var(--color-primary-700)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.backgroundColor = "var(--color-primary-600)";
-                  }}
-                >
-                  <LogOut size={18} />
-                  <span>Logout</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-bg">
+      <AppHeader
+        title="BizTrix CRM"
+        theme={theme}
+        onThemeToggle={toggleTheme}
+        userEmail={user?.email}
+        userRole={user?.role_name}
+        onLogout={handleLogout}
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
-        <div className="card p-8 mb-8" style={{ backgroundImage: "var(--gradient-warm)" }}>
+        <Card className="p-8 mb-8" style={{ backgroundImage: "var(--gradient-warm)" }}>
           <h2 className="text-3xl font-bold mb-2 text-white">Welcome back, {user?.first_name}!</h2>
           <p className="text-white opacity-90">
             You're logged in as <strong>{user?.role_name}</strong> in{" "}
             <strong>{user?.company_name}</strong>
           </p>
-        </div>
+        </Card>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="card p-6">
+          <Card className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm opacity-75 mb-1">Total Transfers</p>
-                <p className="text-3xl font-bold">0</p>
+                <p className="text-sm text-text-secondary mb-1">Total Transfers</p>
+                <p className="text-3xl font-bold text-text">0</p>
               </div>
-              <div className="text-4xl text-amber-600"><ClipboardList size={40} /></div>
+              <div className="text-4xl text-primary-600">
+                <ClipboardList size={40} />
+              </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="card p-6">
+          <Card className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm opacity-75 mb-1">Pending</p>
-                <p className="text-3xl font-bold">0</p>
+                <p className="text-sm text-text-secondary mb-1">Pending</p>
+                <p className="text-3xl font-bold text-text">0</p>
               </div>
-              <div className="text-4xl text-orange-600"><Clock size={40} /></div>
+              <div className="text-4xl text-orange-600">
+                <Clock size={40} />
+              </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="card p-6">
+          <Card className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm opacity-75 mb-1">Total Sales</p>
-                <p className="text-3xl font-bold">0</p>
+                <p className="text-sm text-text-secondary mb-1">Total Sales</p>
+                <p className="text-3xl font-bold text-text">0</p>
               </div>
-              <div className="text-4xl text-green-600"><DollarSign size={40} /></div>
+              <div className="text-4xl text-success-600">
+                <DollarSign size={40} />
+              </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="card p-6">
+          <Card className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm opacity-75 mb-1">Conversion Rate</p>
-                <p className="text-3xl font-bold">0%</p>
+                <p className="text-sm text-text-secondary mb-1">Conversion Rate</p>
+                <p className="text-3xl font-bold text-text">0%</p>
               </div>
-              <div className="text-4xl text-blue-600"><TrendingUp size={40} /></div>
+              <div className="text-4xl text-blue-600">
+                <TrendingUp size={40} />
+              </div>
             </div>
-          </div>
+          </Card>
         </div>
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <div className="flex items-center space-x-3 mb-2">
-              <FileText size={24} className="text-amber-600" />
-              <h3 className="text-lg font-semibold">Create Transfer</h3>
+          <Card className="p-6 text-left" onClick={() => {}}>
+            <div className="flex items-center gap-3 mb-2">
+              <FileText size={24} className="text-primary-600" />
+              <h3 className="text-lg font-semibold text-text">Create Transfer</h3>
             </div>
-            <p className="text-sm opacity-75">Submit a new customer transfer</p>
-          </button>
+            <p className="text-sm text-text-secondary">Submit a new customer transfer</p>
+          </Card>
 
-          <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <div className="flex items-center space-x-3 mb-2">
-              <CreditCard size={24} className="text-green-600" />
-              <h3 className="text-lg font-semibold">Create Sale</h3>
+          <Card className="p-6 text-left" onClick={() => {}}>
+            <div className="flex items-center gap-3 mb-2">
+              <CreditCard size={24} className="text-success-600" />
+              <h3 className="text-lg font-semibold text-text">Create Sale</h3>
             </div>
-            <p className="text-sm opacity-75">Convert a transfer to a sale</p>
-          </button>
+            <p className="text-sm text-text-secondary">Convert a transfer to a sale</p>
+          </Card>
 
-          <button className="card p-6 text-left hover:shadow-lg transition-all">
-            <div className="flex items-center space-x-3 mb-2">
+          <Card className="p-6 text-left" onClick={() => {}}>
+            <div className="flex items-center gap-3 mb-2">
               <BarChart3 size={24} className="text-blue-600" />
-              <h3 className="text-lg font-semibold">View Reports</h3>
+              <h3 className="text-lg font-semibold text-text">View Reports</h3>
             </div>
-            <p className="text-sm opacity-75">Check your performance metrics</p>
-          </button>
+            <p className="text-sm text-text-secondary">Check your performance metrics</p>
+          </Card>
         </div>
 
         {/* Coming Soon Message */}
-        <div className="mt-12 card p-8 text-center">
-          <div className="flex items-center justify-center space-x-2 mb-2">
-            <Rocket size={32} className="text-amber-600" />
+        <Card className="mt-12 p-8 text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Rocket size={32} className="text-primary-600" />
           </div>
-          <p className="text-lg opacity-75">
+          <p className="text-lg text-text-secondary">
             Dashboard features coming soon...
           </p>
-        </div>
+        </Card>
       </main>
     </div>
   );

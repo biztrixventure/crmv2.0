@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { getRoleRoute } from "../utils/roleRouting";
 import { Moon, Sun } from "lucide-react";
+import { Button, Card, Alert, FormField } from "../components/UI";
 import client from "../api/client";
 
 const Login = () => {
@@ -43,106 +44,108 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-gradient-warm flex flex-col items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
       {/* Theme Toggle Button */}
-      <button
+      <Button
+        variant="ghost"
+        size="md"
         onClick={toggleTheme}
-        className="absolute top-6 right-6 p-2 rounded-lg btn-secondary"
+        className="absolute top-6 right-6"
         title="Toggle dark mode"
+        aria-label="Toggle dark mode"
       >
-        {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
-      </button>
+        {theme === "light" ? <Moon size={24} /> : <Sun size={24} />}
+      </Button>
 
       <div className="w-full max-w-md space-y-8">
+        {/* Header */}
         <div className="text-center">
           <div className="flex justify-center mb-6">
             <div className="w-16 h-16 bg-gradient-sidebar rounded-lg flex items-center justify-center shadow-lg">
               <span className="text-3xl font-bold text-white">B</span>
             </div>
           </div>
-          <h1 className="text-4xl font-bold mb-2" style={{ color: "var(--color-text)" }}>
-            BizTrix
-          </h1>
-          <p className="text-lg" style={{ color: "var(--color-primary-500)" }}>
-            Customer Relationship Management
-          </p>
-          <p className="mt-4 text-sm" style={{ color: "var(--color-primary-600)" }}>
+          <h1 className="text-4xl font-bold mb-2">BizTrix</h1>
+          <p className="text-lg text-primary-500">Customer Relationship Management</p>
+          <p className="mt-4 text-sm text-primary-600">
             Sign in to your account to continue
           </p>
         </div>
 
-        <form className="mt-8 space-y-6 card p-8" onSubmit={handleLogin}>
-          {error && (
-            <div className="alert alert-error">
-              <div className="flex">
-                <div>
-                  <p className="font-semibold">Error</p>
-                  <p>{error}</p>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* Login Form Card */}
+        <Card className="p-8">
+          <form onSubmit={handleLogin} className="space-y-6">
+            {/* Error Alert */}
+            {error && (
+              <Alert
+                type="error"
+                title="Sign in failed"
+                message={error}
+                dismissible={true}
+                onDismiss={() => setError("")}
+              />
+            )}
 
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium mb-2">
-                Email Address
-              </label>
+            {/* Email Field */}
+            <FormField
+              label="Email Address"
+              required
+              error={email && !email.includes("@") ? "Invalid email" : ""}
+            >
               <input
-                id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="input w-full"
+                className="input"
                 placeholder="you@example.com"
               />
-            </div>
+            </FormField>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium mb-2">
-                Password
-              </label>
+            {/* Password Field */}
+            <FormField
+              label="Password"
+              required
+              hint="At least 6 characters"
+            >
               <input
-                id="password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input w-full"
+                className="input"
                 placeholder="••••••••"
               />
+            </FormField>
+
+            {/* Submit Button */}
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={loading}
+              disabled={loading}
+              className="w-full font-semibold"
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </Button>
+
+            {/* Support Link */}
+            <div className="text-center text-sm text-primary-600">
+              <p>
+                Don't have an account?{" "}
+                <a href="#" className="link font-semibold">
+                  Contact support
+                </a>
+              </p>
             </div>
-          </div>
+          </form>
+        </Card>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full btn-primary font-semibold py-3"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center">
-                <span className="spinner mr-2" style={{ borderWidth: "2px", width: "16px", height: "16px" }}></span>
-                Signing in...
-              </span>
-            ) : (
-              "Sign In"
-            )}
-          </button>
-
-          <div className="text-center text-sm">
-            <p style={{ color: "var(--color-primary-600)" }}>
-              Don't have an account?{" "}
-              <a href="#" className="link font-semibold">
-                Contact support
-              </a>
-            </p>
-          </div>
-        </form>
-
-        <p className="text-center text-xs" style={{ color: "var(--color-primary-500)" }}>
+        {/* Footer */}
+        <p className="text-center text-xs text-primary-500">
           Protected by BizTrix Security
         </p>
       </div>
