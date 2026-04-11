@@ -1,16 +1,42 @@
 /**
  * Role-based routing utility
  * Maps user roles to their appropriate dashboard routes
+ * Handles both underscore and non-underscore role naming conventions
  */
 
+// Role mapping - uses database role values as keys
 export const ROLE_ROUTES = {
+  // Admin roles
+  superadmin: '/admin',
   super_admin: '/admin',
   readonly_admin: '/admin',
+  readonlyadmin: '/admin',
+
+  // Company/Team roles
   company_admin: '/company',
+  companyadmin: '/company',
+
+  // Specialist roles
   closer: '/closer',
   fronter: '/fronter',
+  manager: '/manager',
+
+  // Manager roles
   operations_manager: '/operations',
+  operationsmanager: '/operations',
+  operations: '/operations',
   closer_manager: '/closer-manager',
+  closermanager: '/closer-manager',
+};
+
+/**
+ * Normalize role name by removing underscores for comparison
+ * @param {string} role - The role to normalize
+ * @returns {string} - Normalized role (lowercase, no underscores)
+ */
+export const normalizeRole = (role) => {
+  if (!role) return '';
+  return role.toLowerCase().trim().replace(/_/g, '');
 };
 
 /**
@@ -22,7 +48,21 @@ export const getRoleRoute = (role) => {
   if (!role) return '/dashboard';
 
   const normalizedRole = role.toLowerCase().trim();
-  return ROLE_ROUTES[normalizedRole] || '/dashboard';
+
+  // Try exact match first
+  if (ROLE_ROUTES[normalizedRole]) {
+    return ROLE_ROUTES[normalizedRole];
+  }
+
+  // Try normalized match (without underscores)
+  const normalized = normalizeRole(role);
+  for (const [key, value] of Object.entries(ROLE_ROUTES)) {
+    if (normalizeRole(key) === normalized) {
+      return value;
+    }
+  }
+
+  return '/dashboard';
 };
 
 /**
@@ -35,17 +75,20 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   if (!requiredRole) return true; // No restriction
   if (!userRole) return false;
 
-  const normalizedUserRole = userRole.toLowerCase().trim();
-  const normalizedRequiredRole = requiredRole.toLowerCase().trim();
+  const normalizedUserRole = normalizeRole(userRole);
+  const normalizedRequiredRole = normalizeRole(requiredRole);
 
-  // Exact match
+  // Exact normalized match
   if (normalizedUserRole === normalizedRequiredRole) return true;
 
   // Admin roles have access to all admin routes
-  if ((normalizedUserRole === 'super_admin' || normalizedUserRole === 'readonly_admin')
-      && (normalizedRequiredRole === 'super_admin' || normalizedRequiredRole === 'readonly_admin' || normalizedRequiredRole === 'admin')) {
+  const adminRoles = ['superadmin', 'readonlyadmin'];
+  const adminRequiredRoles = ['superadmin', 'readonlyadmin', 'admin'];
+
+  if (adminRoles.includes(normalizedUserRole) && adminRequiredRoles.includes(normalizedRequiredRole)) {
     return true;
   }
 
   return false;
 };
+
