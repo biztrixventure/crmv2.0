@@ -1,14 +1,26 @@
 // Global error handling middleware
+const logger = require('../utils/logger');
+
 const errorHandler = (err, req, res, next) => {
-  console.error('Error:', {
-    message: err.message,
-    stack: err.stack,
-    path: req.path,
+  const errorContext = {
     method: req.method,
-  });
+    path: req.path,
+    query: req.query,
+    body: req.body,
+    message: err.message,
+    code: err.code,
+    status: err.status,
+  };
+
+  // Log the error with full context
+  logger.error(`${req.method} ${req.path}`, err.message, err);
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('ERROR CONTEXT:', JSON.stringify(errorContext, null, 2));
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   // Supabase errors
   if (err.message?.includes('Supabase') || err.status) {
+    logger.error('SUPABASE', `Status ${err.status || 500}`, err);
     return res.status(err.status || 500).json({
       error: err.message,
       code: err.code,
@@ -17,22 +29,34 @@ const errorHandler = (err, req, res, next) => {
 
   // Validation errors
   if (err.array) {
+    const validationErrors = err.array();
+    logger.error('VALIDATION', `${validationErrors.length} validation errors`, { errors: validationErrors });
     return res.status(400).json({
       error: 'Validation failed',
-      details: err.array(),
+      details: validationErrors,
     });
   }
 
   // Default error
-  res.status(500).json({
+  const statusCode = err.statusCode || 500;
+  logger.error('UNHANDLED', `Status ${statusCode}`, err);
+  res.status(statusCode).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
   });
 };
 
-// Async error wrapper
+// Async error wrapper - enhanced with logging
 const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
+  try {
+    Promise.resolve(fn(req, res, next)).catch(err => {
+      logger.error('ASYNC_HANDLER', `Caught error in ${req.method} ${req.path}`, err);
+      next(err);
+    });
+  } catch (err) {
+    logger.error('ASYNC_HANDLER', `Try-catch error in ${req.method} ${req.path}`, err);
+    next(err);
+  }
 };
 
 module.exports = { errorHandler, asyncHandler };

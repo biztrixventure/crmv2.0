@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { hasPermission, canAssignRole, createRole, isSuperAdmin } = require('../models/helpers');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.use(authMiddleware);
 router.get(
   "/",
   asyncHandler(async (req, res) => {
+    logger.debug('GET_ROLES', 'GET /roles request', req.query);
     const { company_id } = req.query;
     const userId = req.user.id;
     let companyId = company_id;
@@ -22,6 +24,7 @@ router.get(
     // If company_id not provided, fetch from user's company assignment
     if (!companyId) {
       try {
+        logger.debug('GET_ROLES', 'Fetching user company assignment', { userId });
         const { data: userCompany } = await supabaseAdmin
           .from("user_company_roles")
           .select("company_id")
@@ -32,14 +35,19 @@ router.get(
 
         if (userCompany) {
           companyId = userCompany.company_id;
+          logger.success('GET_ROLES', 'Resolved company_id from user assignment', { companyId });
+        } else {
+          logger.warn('GET_ROLES', 'No company assignment found for user', { userId });
         }
       } catch (err) {
         // User might be super admin with no company assignment, which is ok
         // We'll return all roles in that case
+        logger.debug('GET_ROLES', 'Could not fetch user company (expected for superadmin)', { error: err.message });
       }
     }
 
     try {
+      logger.debug('GET_ROLES', 'Querying custom_roles', { companyId });
       let query = supabaseAdmin
         .from("custom_roles")
         .select(
@@ -56,13 +64,17 @@ router.get(
       // If we have a companyId, filter by it (include system roles with null company_id too)
       if (companyId) {
         query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+        logger.debug('GET_ROLES', 'Added company filter', { companyId });
       }
 
       const { data, error } = await query;
 
       if (error) {
+        logger.error('GET_ROLES', 'Query failed', error);
         return res.status(400).json({ error: error.message });
       }
+
+      logger.success('GET_ROLES', `Fetched ${data?.length || 0} roles`, { count: data?.length || 0 });
 
       res.json({
         total: data.length,
@@ -75,6 +87,7 @@ router.get(
         })),
       });
     } catch (err) {
+      logger.error('GET_ROLES', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -86,7 +99,9 @@ router.get(
 router.get(
   "/permissions",
   asyncHandler(async (req, res) => {
+    logger.debug('GET_PERMISSIONS', 'GET /permissions request');
     try {
+      logger.debug('GET_PERMISSIONS', 'Querying permissions table');
       const { data, error } = await supabaseAdmin
         .from("permissions")
         .select("id, name, description, category")
@@ -94,8 +109,11 @@ router.get(
         .order("name");
 
       if (error) {
+        logger.error('GET_PERMISSIONS', 'Query failed', error);
         return res.status(400).json({ error: error.message });
       }
+
+      logger.success('GET_PERMISSIONS', `Fetched ${data?.length || 0} permissions`, { count: data?.length || 0 });
 
       // Group by category
       const grouped = (data || []).reduce((acc, perm) => {
@@ -110,8 +128,10 @@ router.get(
         return acc;
       }, {});
 
+      logger.success('GET_PERMISSIONS', `Grouped ${Object.keys(grouped).length} categories`);
       res.json(grouped);
     } catch (err) {
+      logger.error('GET_PERMISSIONS', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -123,9 +143,11 @@ router.get(
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {
+    logger.debug('GET_ROLE_BY_ID', 'GET /roles/:id request', { id: req.params.id });
     const { id } = req.params;
 
     try {
+      logger.debug('GET_ROLE_BY_ID', 'Querying custom_roles', { id });
       const { data, error } = await supabaseAdmin
         .from("custom_roles")
         .select(
@@ -142,8 +164,11 @@ router.get(
         .single();
 
       if (error || !data) {
+        logger.error('GET_ROLE_BY_ID', 'Role not found', error || new Error('No data returned'));
         return res.status(404).json({ error: "Role not found" });
       }
+
+      logger.success('GET_ROLE_BY_ID', `Found role`, { id, name: data.name, level: data.level });
 
       res.json({
         id: data.id,
@@ -154,6 +179,7 @@ router.get(
         permissions: (data.role_permissions || []).map((rp) => rp.permissions),
       });
     } catch (err) {
+      logger.error('GET_ROLE_BY_ID', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -172,8 +198,10 @@ router.post(
     body("permissions").isArray().optional(),
   ],
   asyncHandler(async (req, res) => {
+    logger.debug('CREATE_ROLE', 'POST /roles request', req.body);
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      logger.error('CREATE_ROLE', 'Validation failed', new Error(JSON.stringify(errors.array())));
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
@@ -181,9 +209,12 @@ router.post(
     const userId = req.user.id;
     let targetCompanyId = company_id;
 
+    logger.info('CREATE_ROLE', `Creating role`, { name, level, userId });
+
     // If company_id not provided, fetch from user's company assignment
     if (!targetCompanyId) {
       try {
+        logger.debug('CREATE_ROLE', 'Fetching user company assignment', { userId });
         const { data: userCompany } = await supabaseAdmin
           .from("user_company_roles")
           .select("company_id")
@@ -194,36 +225,47 @@ router.post(
 
         if (userCompany) {
           targetCompanyId = userCompany.company_id;
+          logger.success('CREATE_ROLE', 'Resolved company_id from user assignment', { targetCompanyId });
         }
       } catch (err) {
-        console.error("Error fetching user company:", err.message);
+        logger.error('CREATE_ROLE', 'Error fetching user company', err);
       }
     }
 
     // If still no company_id, return error
     if (!targetCompanyId) {
-      console.error(`POST /roles: No company_id for user ${userId}`);
+      logger.error('CREATE_ROLE', 'No company_id could be determined', new Error('Missing company context'));
       return res.status(400).json({ error: "Company ID is required or user must have a company assignment" });
     }
 
     try {
       // Check permission to manage roles
+      logger.debug('CREATE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
-      console.log(`POST /roles: user=${userId}, company=${targetCompanyId}, hasPerm=${hasPerm}`);
+      logger.success('CREATE_ROLE', `Permission check: ${hasPerm}`, { userRole: req.user.role });
+
       if (!hasPerm) {
+        logger.error('CREATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to create roles" });
       }
 
       // Check role hierarchy
+      logger.debug('CREATE_ROLE', 'Checking role hierarchy', { userId, targetCompanyId, level });
       const canCreate = await canAssignRole(userId, targetCompanyId, level);
+      logger.success('CREATE_ROLE', `Hierarchy check: ${canCreate}`);
+
       if (!canCreate) {
+        logger.error('CREATE_ROLE', 'Cannot create role - hierarchy violation', new Error('Role level too high'));
         return res.status(403).json({
           error: "Cannot create role with same or higher authority",
         });
       }
 
       // Create role
+      logger.debug('CREATE_ROLE', 'Creating role in database', { name, level, targetCompanyId });
       const role = await createRole(name, description || null, level, targetCompanyId, permissions || []);
+
+      logger.success('CREATE_ROLE', `Role created successfully`, { role_id: role.id, name, level });
 
       res.status(201).json({
         message: "Role created successfully",
@@ -237,8 +279,10 @@ router.post(
       });
     } catch (err) {
       if (err.message.includes("duplicate")) {
+        logger.error('CREATE_ROLE', 'Duplicate role name', err);
         return res.status(400).json({ error: "Role name already exists" });
       }
+      logger.error('CREATE_ROLE', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -254,8 +298,10 @@ router.put(
     body("permissions").isArray().optional(),
   ],
   asyncHandler(async (req, res) => {
+    logger.debug('UPDATE_ROLE', 'PUT /roles/:id request', { id: req.params.id, body: req.body });
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      logger.error('UPDATE_ROLE', 'Validation failed', new Error(JSON.stringify(errors.array())));
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
@@ -263,8 +309,11 @@ router.put(
     const { description, permissions } = req.body;
     const userId = req.user.id;
 
+    logger.info('UPDATE_ROLE', `Updating role`, { id, userId });
+
     try {
       // Get role
+      logger.debug('UPDATE_ROLE', 'Fetching role', { id });
       const { data: role } = await supabaseAdmin
         .from("custom_roles")
         .select("company_id, level")
@@ -272,13 +321,17 @@ router.put(
         .single();
 
       if (!role) {
+        logger.error('UPDATE_ROLE', 'Role not found', new Error('No role data'));
         return res.status(404).json({ error: "Role not found" });
       }
+
+      logger.success('UPDATE_ROLE', `Found role`, { id, level: role.level });
 
       // For SuperAdmin roles (company_id = null), get user's company context
       let targetCompanyId = role.company_id;
       if (!targetCompanyId) {
         try {
+          logger.debug('UPDATE_ROLE', 'Fetching user company for superadmin role context', { userId });
           const { data: userCompany } = await supabaseAdmin
             .from("user_company_roles")
             .select("company_id")
@@ -289,50 +342,66 @@ router.put(
 
           if (userCompany) {
             targetCompanyId = userCompany.company_id;
+            logger.success('UPDATE_ROLE', 'Resolved company context from user', { targetCompanyId });
           }
         } catch (err) {
-          console.error("Error fetching user company for SuperAdmin role update:", err.message);
+          logger.error('UPDATE_ROLE', 'Error fetching user company for SuperAdmin role update', err);
         }
       }
 
       // Check permission
+      logger.debug('UPDATE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
+      logger.success('UPDATE_ROLE', `Permission check: ${hasPerm}`);
+
       if (!hasPerm) {
+        logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to update roles" });
       }
 
       // Update description if provided
       if (description !== undefined) {
+        logger.debug('UPDATE_ROLE', 'Updating role description', { id });
         await supabaseAdmin
           .from("custom_roles")
           .update({ description })
           .eq("id", id);
+        logger.success('UPDATE_ROLE', 'Role description updated');
       }
 
       // Update permissions if provided
       if (permissions && Array.isArray(permissions)) {
+        logger.debug('UPDATE_ROLE', 'Updating permissions', { id, permissionCount: permissions.length });
+
         // Get all permission IDs
         const { data: allPerms } = await supabaseAdmin
           .from("permissions")
           .select("id")
           .in("name", permissions);
 
+        logger.success('UPDATE_ROLE', `Found ${allPerms?.length || 0} matching permissions`);
+
         // Delete old permissions
+        logger.debug('UPDATE_ROLE', 'Deleting old permissions', { id });
         await supabaseAdmin.from("role_permissions").delete().eq("role_id", id);
 
         // Insert new permissions
         if (allPerms && allPerms.length > 0) {
+          logger.debug('UPDATE_ROLE', 'Inserting new permissions', { id, count: allPerms.length });
           await supabaseAdmin.from("role_permissions").insert(
             allPerms.map((p) => ({
               role_id: id,
               permission_id: p.id,
             }))
           );
+          logger.success('UPDATE_ROLE', `Inserted ${allPerms.length} permissions`);
         }
       }
 
+      logger.success('UPDATE_ROLE', 'Role updated successfully', { id });
       res.json({ message: "Role updated successfully" });
     } catch (err) {
+      logger.error('UPDATE_ROLE', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -344,11 +413,15 @@ router.put(
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
+    logger.debug('DELETE_ROLE', 'DELETE /roles/:id request', { id: req.params.id });
     const { id } = req.params;
     const userId = req.user.id;
 
+    logger.info('DELETE_ROLE', `Deleting role`, { id, requestedBy: userId });
+
     try {
       // Get role
+      logger.debug('DELETE_ROLE', 'Fetching role', { id });
       const { data: role } = await supabaseAdmin
         .from("custom_roles")
         .select("company_id")
@@ -356,13 +429,17 @@ router.delete(
         .single();
 
       if (!role) {
+        logger.error('DELETE_ROLE', 'Role not found', new Error('No role data'));
         return res.status(404).json({ error: "Role not found" });
       }
+
+      logger.success('DELETE_ROLE', `Found role`, { id });
 
       // For SuperAdmin roles (company_id = null), get user's company context
       let targetCompanyId = role.company_id;
       if (!targetCompanyId) {
         try {
+          logger.debug('DELETE_ROLE', 'Fetching user company for superadmin role context', { userId });
           const { data: userCompany } = await supabaseAdmin
             .from("user_company_roles")
             .select("company_id")
@@ -373,36 +450,47 @@ router.delete(
 
           if (userCompany) {
             targetCompanyId = userCompany.company_id;
+            logger.success('DELETE_ROLE', 'Resolved company context from user', { targetCompanyId });
           }
         } catch (err) {
-          console.error("Error fetching user company for SuperAdmin role deletion:", err.message);
+          logger.error('DELETE_ROLE', 'Error fetching user company for SuperAdmin role deletion', err);
         }
       }
 
       // Check permission
+      logger.debug('DELETE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
-      console.log(`DELETE /roles/:id: user=${userId}, company=${targetCompanyId}, hasPerm=${hasPerm}`);
+      logger.success('DELETE_ROLE', `Permission check: ${hasPerm}`);
+
       if (!hasPerm) {
+        logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to delete roles" });
       }
 
       // Check if role is in use
+      logger.debug('DELETE_ROLE', 'Checking if role is assigned to users', { id });
       const { data: users } = await supabaseAdmin
         .from("user_company_roles")
         .select("id")
         .eq("role_id", id);
 
+      logger.success('DELETE_ROLE', `Found ${users?.length || 0} users with this role`);
+
       if (users && users.length > 0) {
+        logger.error('DELETE_ROLE', 'Cannot delete - role is assigned to users', new Error(`Role assigned to ${users.length} users`));
         return res.status(400).json({
           error: "Cannot delete role - it's assigned to users",
         });
       }
 
       // Delete role
+      logger.debug('DELETE_ROLE', 'Deleting role from database', { id });
       await supabaseAdmin.from("custom_roles").delete().eq("id", id);
 
+      logger.success('DELETE_ROLE', 'Role deleted successfully', { id });
       res.json({ message: "Role deleted successfully" });
     } catch (err) {
+      logger.error('DELETE_ROLE', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })

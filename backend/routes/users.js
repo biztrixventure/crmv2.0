@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
+const logger = require('../utils/logger');
 const {
   getUserPermissions,
   hasPermission,
@@ -27,10 +28,12 @@ router.get(
     const userId = req.user.id;
     const targetCompanyId = company_id || req.user.company_id;
 
-    console.log(`GET /users: userId=${userId}, company=${targetCompanyId}, roleId=${role_id}`);
+    logger.info('GET_USERS', `Fetching users for company=${targetCompanyId}, roleId=${role_id}, search=${search}`, { userId, targetCompanyId, role_id, search });
 
     try {
       // Get user_company_roles
+      logger.debug('GET_USERS', 'Querying user_company_roles', { company_id: targetCompanyId, is_active: true, role_id });
+
       let query = supabaseAdmin
         .from("user_company_roles")
         .select(`id,user_id,role_id,is_active,created_at,custom_roles(id,name,level)`)
@@ -39,27 +42,35 @@ router.get(
 
       if (role_id) {
         query = query.eq("role_id", role_id);
+        logger.debug('GET_USERS', 'Added role filter', { role_id });
       }
 
       const { data: ucr, error } = await query;
 
-      console.log(`Query result: error=${error?.message}, count=${ucr?.length || 0}`);
-
       if (error) {
+        logger.error('GET_USERS', 'user_company_roles query failed', error);
         return res.status(400).json({ error: error.message });
       }
+
+      logger.success('GET_USERS', `Query returned ${ucr?.length || 0} user assignments`, { count: ucr?.length || 0 });
 
       let users = ucr || [];
 
       // Fetch user_profiles for these users
       if (users.length > 0) {
         const userIds = users.map(u => u.user_id);
-        console.log(`Fetching profiles for ${userIds.length} users`);
+        logger.debug('GET_USERS', `Fetching profiles for ${userIds.length} users`, { userIds });
 
-        const { data: profiles } = await supabaseAdmin
+        const { data: profiles, error: profileError } = await supabaseAdmin
           .from("user_profiles")
           .select("user_id,first_name,last_name")
           .in("user_id", userIds);
+
+        if (profileError) {
+          logger.error('GET_USERS', 'Failed to fetch user profiles', profileError);
+        } else {
+          logger.success('GET_USERS', `Fetched ${profiles?.length || 0} profiles`, { count: profiles?.length || 0 });
+        }
 
         const profileMap = {};
         profiles?.forEach(p => {
@@ -67,7 +78,16 @@ router.get(
         });
 
         // Fetch emails from auth
-        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
+        logger.debug('GET_USERS', 'Fetching emails from Supabase auth');
+
+        const { data: authUsers, error: authError } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
+
+        if (authError) {
+          logger.error('GET_USERS', 'Failed to fetch auth users', authError);
+        } else {
+          logger.success('GET_USERS', `Fetched ${authUsers?.users?.length || 0} auth users`, { count: authUsers?.users?.length || 0 });
+        }
+
         const emailMap = {};
         authUsers?.users?.forEach(u => {
           emailMap[u.id] = u.email;
@@ -80,20 +100,24 @@ router.get(
           first_name: profileMap[u.user_id]?.first_name,
           last_name: profileMap[u.user_id]?.last_name,
         }));
+
+        logger.success('GET_USERS', `Combined data for ${users.length} users`, { total: users.length });
       }
 
       // Filter by search term if provided
       if (search) {
         const searchLower = search.toLowerCase();
+        const beforeSearch = users.length;
         users = users.filter(
           (u) =>
             u.email?.toLowerCase().includes(searchLower) ||
             u.first_name?.toLowerCase().includes(searchLower) ||
             u.last_name?.toLowerCase().includes(searchLower)
         );
+        logger.info('GET_USERS', `Search filter: ${beforeSearch} → ${users.length} users`, { search, beforeCount: beforeSearch, afterCount: users.length });
       }
 
-      console.log(`Returning ${users.length} users`);
+      logger.success('GET_USERS', `Returning ${users.length} users`, { total: users.length });
 
       res.json({
         total: users.length,
@@ -110,7 +134,7 @@ router.get(
         })),
       });
     } catch (err) {
-      console.error('GET /users error:', err.message);
+      logger.error('GET_USERS', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -123,6 +147,7 @@ router.get(
   "/:id",
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    logger.debug('GET_USER_BY_ID', `Fetching user details`, { id });
 
     try {
       const { data, error } = await supabaseAdmin
@@ -132,27 +157,43 @@ router.get(
         .single();
 
       if (error || !data) {
+        logger.error('GET_USER_BY_ID', `User not found`, error || new Error('No data returned'));
         return res.status(404).json({ error: "User not found" });
       }
 
+      logger.success('GET_USER_BY_ID', `Found user assignment`, { id, user_id: data.user_id });
+
       // Fetch user profile
+      logger.debug('GET_USER_BY_ID', `Fetching user profile`, { user_id: data.user_id });
       const { data: profile } = await supabaseAdmin
         .from("user_profiles")
         .select("first_name,last_name,avatar_url")
         .eq("user_id", data.user_id)
         .single();
 
+      if (profile) {
+        logger.success('GET_USER_BY_ID', `Found user profile`, { first_name: profile.first_name, last_name: profile.last_name });
+      } else {
+        logger.warn('GET_USER_BY_ID', `No profile found for user`, { user_id: data.user_id });
+      }
+
       // Fetch email from auth
       let email = 'N/A';
       try {
+        logger.debug('GET_USER_BY_ID', `Fetching email from auth`, { user_id: data.user_id });
         const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
         const authUser = authUsers?.users?.find(u => u.id === data.user_id);
         if (authUser) {
           email = authUser.email;
+          logger.success('GET_USER_BY_ID', `Found auth user email`, { email });
+        } else {
+          logger.warn('GET_USER_BY_ID', `Auth user not found`, { user_id: data.user_id });
         }
       } catch (emailErr) {
-        console.error('Error fetching user email:', emailErr.message);
+        logger.error('GET_USER_BY_ID', 'Error fetching user email', emailErr);
       }
+
+      logger.success('GET_USER_BY_ID', `Returning user details`, { id, email, role: data.custom_roles.name });
 
       res.json({
         id: data.id,
@@ -167,6 +208,7 @@ router.get(
         created_at: data.created_at,
       });
     } catch (err) {
+      logger.error('GET_USER_BY_ID', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -185,8 +227,11 @@ router.post(
     body("company_id").isUUID().optional(),
   ],
   asyncHandler(async (req, res) => {
+    logger.debug('CREATE_USER', 'POST /users request received', req.body);
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      logger.error('CREATE_USER', 'Validation failed', new Error(JSON.stringify(errors.array())));
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
@@ -194,14 +239,21 @@ router.post(
     const userId = req.user.id;
     const userCompanyId = company_id || req.user.company_id;
 
+    logger.info('CREATE_USER', `Creating user`, { email, first_name, last_name, role_id, userCompanyId });
+
     try {
       // Check if user has permission to create users
+      logger.debug('CREATE_USER', 'Checking permissions', { userId, userCompanyId });
       const hasPermissionT = await hasPermission(userId, userCompanyId, "create_user");
+      logger.success('CREATE_USER', `Permission check result: ${hasPermissionT}, role: ${req.user.role}`);
+
       if (!hasPermissionT && req.user.role !== "superadmin") {
+        logger.error('CREATE_USER', 'Permission denied', new Error('User does not have create_user permission'));
         return res.status(403).json({ error: "You don't have permission to create users" });
       }
 
       // Verify role exists and user can assign it
+      logger.debug('CREATE_USER', 'Verifying role exists', { role_id });
       const { data: role, error: roleError } = await supabaseAdmin
         .from("custom_roles")
         .select("level")
@@ -209,18 +261,26 @@ router.post(
         .single();
 
       if (roleError || !role) {
+        logger.error('CREATE_USER', 'Role not found', roleError || new Error('No role data'));
         return res.status(400).json({ error: "Role not found" });
       }
 
+      logger.success('CREATE_USER', `Role verified`, { role_id, level: role.level });
+
       // Check role hierarchy
+      logger.debug('CREATE_USER', 'Checking role hierarchy', { userId, userCompanyId, targetRoleLevel: role.level });
       const canAssign = await canAssignRole(userId, userCompanyId, role.level);
+      logger.success('CREATE_USER', `Hierarchy check: ${canAssign}`);
+
       if (!canAssign) {
+        logger.error('CREATE_USER', 'Cannot assign role due to hierarchy', new Error('Role level too high'));
         return res.status(403).json({
           error: "Cannot assign role with same or higher authority than yours",
         });
       }
 
       // Create user in Supabase Auth
+      logger.debug('CREATE_USER', 'Creating auth user in Supabase', { email });
       const password = Math.random().toString(36).slice(-12); // Temporary password
       const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
@@ -229,18 +289,25 @@ router.post(
       });
 
       if (authError || !authUser.user) {
+        logger.error('CREATE_USER', 'Failed to create auth user', authError || new Error('No user data returned'));
         return res.status(400).json({ error: authError?.message || "Failed to create user" });
       }
 
+      logger.success('CREATE_USER', `Auth user created`, { user_id: authUser.user.id, email });
+
       // Create user profile
-      await supabaseAdmin.from("user_profiles").insert({
+      logger.debug('CREATE_USER', 'Creating user profile', { user_id: authUser.user.id });
+      const profileResult = await supabaseAdmin.from("user_profiles").insert({
         user_id: authUser.user.id,
         first_name,
         last_name,
         theme_preference: "light",
       });
 
+      logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
+
       // Assign user to company with role
+      logger.debug('CREATE_USER', 'Assigning user to company', { user_id: authUser.user.id, company_id: userCompanyId, role_id });
       const { data: assignment, error: assignError } = await supabaseAdmin
         .from("user_company_roles")
         .insert({
@@ -254,8 +321,11 @@ router.post(
         .single();
 
       if (assignError) {
+        logger.error('CREATE_USER', 'Failed to assign user to company', assignError);
         return res.status(400).json({ error: assignError.message });
       }
+
+      logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id });
 
       res.status(201).json({
         message: "User created successfully. Email invitation sent.",
@@ -269,7 +339,7 @@ router.post(
         },
       });
     } catch (err) {
-      console.error("Create user error:", err);
+      logger.error('CREATE_USER', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -287,8 +357,11 @@ router.put(
     body("is_active").isBoolean().optional(),
   ],
   asyncHandler(async (req, res) => {
+    logger.debug('UPDATE_USER', 'PUT /users/:id request received', { id: req.params.id, body: req.body });
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      logger.error('UPDATE_USER', 'Validation failed', new Error(JSON.stringify(errors.array())));
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
@@ -296,8 +369,11 @@ router.put(
     const { first_name, last_name, role_id, is_active } = req.body;
     const userId = req.user.id;
 
+    logger.info('UPDATE_USER', `Updating user`, { id, userId, updates: { first_name, last_name, role_id, is_active } });
+
     try {
       // Get the target user assignment
+      logger.debug('UPDATE_USER', 'Fetching target user assignment', { id });
       const { data: targetAssignment, error: fetchError } = await supabaseAdmin
         .from("user_company_roles")
         .select("*, custom_roles(level)")
@@ -305,31 +381,44 @@ router.put(
         .single();
 
       if (fetchError || !targetAssignment) {
+        logger.error('UPDATE_USER', 'User assignment not found', fetchError || new Error('No data returned'));
         return res.status(404).json({ error: "User assignment not found" });
       }
 
+      logger.success('UPDATE_USER', `Found user assignment`, { id, user_id: targetAssignment.user_id });
+
       // Check permissions
+      logger.debug('UPDATE_USER', 'Checking edit permissions', { userId, company_id: targetAssignment.company_id });
       const hasEditPerm = await hasPermission(userId, targetAssignment.company_id, "edit_user");
+      logger.success('UPDATE_USER', `Permission check: ${hasEditPerm}, isSelf: ${userId === targetAssignment.user_id}`);
+
       if (!hasEditPerm && userId !== targetAssignment.user_id) {
+        logger.error('UPDATE_USER', 'Permission denied', new Error('User lacks edit_user permission and is not self'));
         return res.status(403).json({ error: "You don't have permission to edit this user" });
       }
 
       // If changing role, verify hierarchy
       if (role_id && role_id !== targetAssignment.role_id) {
+        logger.debug('UPDATE_USER', 'Checking role change', { old_role_id: targetAssignment.role_id, new_role_id: role_id });
         const { data: newRole } = await supabaseAdmin
           .from("custom_roles")
           .select("level")
           .eq("id", role_id)
           .single();
 
+        logger.debug('UPDATE_USER', 'Checking hierarchy for new role', { new_role_level: newRole?.level });
         const canAssign = await canAssignRole(userId, targetAssignment.company_id, newRole.level);
+        logger.success('UPDATE_USER', `Hierarchy check for new role: ${canAssign}`);
+
         if (!canAssign) {
+          logger.error('UPDATE_USER', 'Cannot assign new role due to hierarchy', new Error('Role level too high'));
           return res.status(403).json({ error: "Cannot assign this role" });
         }
       }
 
       // Update user profile if provided
       if (first_name || last_name) {
+        logger.debug('UPDATE_USER', 'Updating user profile', { user_id: targetAssignment.user_id });
         await supabaseAdmin
           .from("user_profiles")
           .update({
@@ -338,6 +427,8 @@ router.put(
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", targetAssignment.user_id);
+
+        logger.success('UPDATE_USER', `User profile updated`);
       }
 
       // Update assignment
@@ -346,12 +437,17 @@ router.put(
       if (is_active !== undefined) updateData.is_active = is_active;
 
       if (Object.keys(updateData).length > 0) {
+        logger.debug('UPDATE_USER', 'Updating user assignment', { id, updateData });
         await supabaseAdmin.from("user_company_roles").update(updateData).eq("id", id);
+        logger.success('UPDATE_USER', `User assignment updated`, { updateData });
+      } else {
+        logger.info('UPDATE_USER', 'No assignment data to update');
       }
 
+      logger.success('UPDATE_USER', `User updated successfully`, { id });
       res.json({ message: "User updated successfully" });
     } catch (err) {
-      console.error("Update user error:", err);
+      logger.error('UPDATE_USER', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
@@ -363,11 +459,16 @@ router.put(
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
+    logger.debug('DELETE_USER', 'DELETE /users/:id request received', { id: req.params.id });
+
     const { id } = req.params;
     const userId = req.user.id;
 
+    logger.info('DELETE_USER', `Deleting user`, { id, requestedBy: userId });
+
     try {
       // Get target user
+      logger.debug('DELETE_USER', 'Fetching target user assignment', { id });
       const { data: target } = await supabaseAdmin
         .from("user_company_roles")
         .select("user_id, company_id")
@@ -375,23 +476,33 @@ router.delete(
         .single();
 
       if (!target) {
+        logger.error('DELETE_USER', 'User not found', new Error('No target data'));
         return res.status(404).json({ error: "User not found" });
       }
 
+      logger.success('DELETE_USER', `Found target user`, { id, user_id: target.user_id, company_id: target.company_id });
+
       // Check permission
+      logger.debug('DELETE_USER', 'Checking delete permissions', { userId, company_id: target.company_id });
       const hasPerm = await hasPermission(userId, target.company_id, "delete_user");
+      logger.success('DELETE_USER', `Permission check: ${hasPerm}`);
+
       if (!hasPerm) {
+        logger.error('DELETE_USER', 'Permission denied', new Error('User lacks delete_user permission'));
         return res.status(403).json({ error: "You don't have permission to delete users" });
       }
 
       // Soft delete - deactivate instead of removing
+      logger.debug('DELETE_USER', 'Soft deleting user by setting is_active=false', { id });
       await supabaseAdmin
         .from("user_company_roles")
         .update({ is_active: false })
         .eq("id", id);
 
+      logger.success('DELETE_USER', `User deactivated successfully`, { id, user_id: target.user_id });
       res.json({ message: "User deactivated successfully" });
     } catch (err) {
+      logger.error('DELETE_USER', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
