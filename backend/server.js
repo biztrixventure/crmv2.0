@@ -40,6 +40,13 @@ app.use((req, res, next) => {
 });
 
 // ============================================================================
+// STATIC FILES - Serve frontend from dist (single-service Nixpacks)
+// ============================================================================
+const path = require('path');
+const frontendDistPath = path.join(__dirname, '../frontend/dist');
+app.use(express.static(frontendDistPath));
+
+// ============================================================================
 // HEALTH CHECK (no auth required)
 // ============================================================================
 
@@ -63,6 +70,32 @@ app.use('/api/roles', authMiddleware, rolesRoutes);
 app.use('/api/forms', authMiddleware, formsRoutes);
 app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
+
+// ============================================================================
+// SPA FALLBACK - Serve index.html for all non-API routes (React Router)
+// ============================================================================
+app.get('*', (req, res, next) => {
+  const isApiPath =
+    req.path === '/health' ||
+    req.path.startsWith('/api/') ||
+    req.path.startsWith('/auth/');
+
+  if (isApiPath) {
+    return next();
+  }
+
+  const acceptsHtml = (req.headers.accept || '').includes('text/html');
+  if (!acceptsHtml) {
+    return next();
+  }
+
+  const indexPath = path.join(frontendDistPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      res.status(404).json({ error: 'Not found' });
+    }
+  });
+});
 
 // ============================================================================
 // 404 HANDLER
