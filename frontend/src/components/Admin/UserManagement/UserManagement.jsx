@@ -61,13 +61,14 @@ const UserManagement = () => {
           password: userData.password, // Optional - only sent if user provided it
         });
       } else {
-        // Create new user (password is required)
+        // Create new user with company assignment
         await createUser(
           userData.email,
           userData.first_name,
           userData.last_name,
           userData.role_id,
-          userData.password  // Required for new users
+          userData.password,  // Required for new users
+          userData.company_id  // NEW - pass company selection
         );
       }
       setShowModal(false);

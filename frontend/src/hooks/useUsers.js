@@ -33,7 +33,7 @@ export const useUsers = (companyId = null) => {
   }, [companyId]);
 
   // Create user
-  const createUser = useCallback(async (email, firstName, lastName, roleId, password) => {
+  const createUser = useCallback(async (email, firstName, lastName, roleId, password, companyId) => {
     setLoading(true);
     setError(null);
     try {
@@ -42,8 +42,8 @@ export const useUsers = (companyId = null) => {
         first_name: firstName,
         last_name: lastName,
         role_id: roleId,
-        company_id: companyId,
-        password,  // NEW: include password if provided
+        company_id: companyId,  // NEW - pass company assignment to backend
+        password,  // Include password if provided
       });
       setUsers([...users, response.data.user]);
       return response.data;
@@ -54,7 +54,7 @@ export const useUsers = (companyId = null) => {
     } finally {
       setLoading(false);
     }
-  }, [users, companyId]);
+  }, [users]);
 
   // Update user
   const updateUser = useCallback(async (userAssignmentId, updates) => {

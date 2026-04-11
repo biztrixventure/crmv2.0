@@ -241,7 +241,7 @@ router.post(
     const userId = req.user.id;
     const userCompanyId = company_id || req.user.company_id;
 
-    logger.info('CREATE_USER', `Creating user`, { email, first_name, last_name, role_id, userCompanyId, password_provided: !!password });
+    logger.info('CREATE_USER', `Creating user in company`, { email, first_name, last_name, role_id, userCompanyId, password_provided: !!password, company_source: company_id ? 'admin-specified' : 'user-primary' });
 
     try {
       // Validate password if provided, otherwise will generate secure one
@@ -271,6 +271,18 @@ router.post(
       if (!hasPermissionT && req.user.role !== "superadmin") {
         logger.error('CREATE_USER', 'Permission denied', new Error('User does not have create_user permission'));
         return res.status(403).json({ error: "You don't have permission to create users" });
+      }
+
+      // Validate company assignment based on user role
+      if (company_id) {
+        logger.info('CREATE_USER', 'Validating company assignment', { user_role: req.user.role, requested_company_id: company_id, user_company_id: req.user.company_id });
+
+        if (req.user.role !== 'superadmin' && company_id !== req.user.company_id) {
+          logger.error('CREATE_USER', 'Permission denied - cannot assign to different company', new Error('Non-superadmin cannot assign to different company'));
+          return res.status(403).json({ error: "Can only assign users to your own company" });
+        }
+
+        logger.success('CREATE_USER', 'Company assignment validated');
       }
 
       // Verify role exists and user can assign it
@@ -375,6 +387,7 @@ router.put(
     body("last_name").trim().optional(),
     body("role_id").isUUID().optional(),
     body("is_active").isBoolean().optional(),
+    body("company_id").isUUID().optional(), // NOTE: For future reassignment - not implemented yet
   ],
   asyncHandler(async (req, res) => {
     logger.debug('UPDATE_USER', 'PUT /users/:id request received', { id: req.params.id, body: req.body });

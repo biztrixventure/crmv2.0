@@ -1,19 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Button, FormField } from '../../../components/UI';
+import { useCompanies } from '../../../hooks/useCompanies';
 
 /**
  * UserForm Component
  * Form to create/edit users
  */
 const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
+  const { companies, loading: companiesLoading, fetchAvailableCompanies } = useCompanies();
   const [formData, setFormData] = useState({
     email: '',
     first_name: '',
     last_name: '',
     role_id: '',
     password: '',
+    company_id: '',
   });
   const [errors, setErrors] = useState({});
+
+  // Fetch available companies on mount
+  useEffect(() => {
+    fetchAvailableCompanies();
+  }, [fetchAvailableCompanies]);
 
   // Initialize form with user data if editing
   useEffect(() => {
@@ -24,7 +32,15 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         last_name: user.last_name || '',
         role_id: user.role_id || '',
         password: '', // Always empty in edit mode - only update if explicitly provided
+        company_id: user.company_id || '', // Show user's current company
       });
+    } else {
+      // Pre-select user's primary company for CREATE mode
+      const userCompanyId = localStorage.getItem('user_company_id');
+      setFormData((prev) => ({
+        ...prev,
+        company_id: userCompanyId || '',
+      }));
     }
   }, [user]);
 
@@ -46,6 +62,11 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
 
     if (!formData.role_id) {
       newErrors.role_id = 'Role is required';
+    }
+
+    // Company validation - required in CREATE mode
+    if (!user && !formData.company_id) {
+      newErrors.company_id = 'Company is required';
     }
 
     // Password validation
@@ -164,6 +185,48 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
           ))}
         </select>
       </FormField>
+
+      {/* Company Selection - CREATE MODE */}
+      {!user && (
+        <FormField
+          label="Company"
+          required
+          error={errors.company_id}
+          hint="Select the company to assign this user to"
+        >
+          <select
+            name="company_id"
+            value={formData.company_id}
+            onChange={handleInputChange}
+            disabled={companiesLoading}
+            className="input"
+          >
+            <option value="">Select a company</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
+      )}
+
+      {/* Company Display - EDIT MODE */}
+      {user && (
+        <FormField
+          label="Company"
+          hint="User is currently assigned to this company"
+        >
+          <div className="input-disabled bg-bg-secondary p-3 rounded border border-border">
+            <p className="text-text">
+              {companies.find(c => c.id === user.company_id)?.name || 'Unknown Company'}
+            </p>
+            <p className="text-text-secondary text-sm mt-1">
+              Company reassignment not available in this version
+            </p>
+          </div>
+        </FormField>
+      )}
 
       {/* Password - Different behavior for create vs edit */}
       {!user && (

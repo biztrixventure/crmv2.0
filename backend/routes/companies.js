@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { hasPermission, isSuperAdmin, getUserCompanies, assignUserToCompany } = require('../models/helpers');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -73,6 +74,68 @@ router.get(
 
       res.json(data);
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
+
+// ============================================================================
+// GET /companies/available - List available companies for user assignment
+// ============================================================================
+router.get(
+  "/available",
+  asyncHandler(async (req, res) => {
+    const userRole = req.user.role;
+
+    logger.info('GET_AVAILABLE_COMPANIES', 'Fetching available companies for assignment');
+
+    try {
+      if (userRole === 'superadmin') {
+        // SuperAdmin sees all active companies
+        const { data, error } = await supabaseAdmin
+          .from('companies')
+          .select('id, name, is_active')
+          .eq('is_active', true)
+          .order('name');
+
+        if (error) {
+          logger.error('GET_AVAILABLE_COMPANIES', 'Query failed', error);
+          return res.status(400).json({ error: error.message });
+        }
+
+        logger.success('GET_AVAILABLE_COMPANIES', `Returned ${data?.length || 0} companies for SuperAdmin`);
+        return res.json({
+          total: data.length,
+          companies: data || []
+        });
+      }
+
+      // Company users only see their own company
+      const userCompanyId = req.user.company_id;
+      if (!userCompanyId) {
+        logger.warn('GET_AVAILABLE_COMPANIES', 'User has no company assignment');
+        return res.json({ total: 0, companies: [] });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('companies')
+        .select('id, name, is_active')
+        .eq('id', userCompanyId)
+        .eq('is_active', true)
+        .single();
+
+      if (error) {
+        logger.error('GET_AVAILABLE_COMPANIES', 'Query failed', error);
+        return res.json({ total: 0, companies: [] });
+      }
+
+      logger.success('GET_AVAILABLE_COMPANIES', 'Returned user company');
+      res.json({
+        total: data ? 1 : 0,
+        companies: data ? [data] : []
+      });
+    } catch (err) {
+      logger.error('GET_AVAILABLE_COMPANIES', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })
