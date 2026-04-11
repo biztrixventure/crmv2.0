@@ -341,6 +341,7 @@ router.delete(
 
       // Check permission
       const hasPerm = await hasPermission(userId, role.company_id, "manage_roles");
+      console.log(`DELETE /roles/:id: user=${userId}, company=${role.company_id}, hasPerm=${hasPerm}`);
       if (!hasPerm) {
         return res.status(403).json({ error: "You don't have permission to delete roles" });
       }
