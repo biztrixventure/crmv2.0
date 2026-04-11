@@ -19,10 +19,10 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
   useEffect(() => {
     if (role) {
       setFormData({
-        name: role.name,
+        name: role.name || '',
         description: role.description || '',
-        level: role.level,
-        permissions: role.permissions || [],
+        level: role.level || 'manager',
+        permissions: Array.isArray(role.permissions) ? role.permissions : [],
       });
     }
   }, [role]);
@@ -31,7 +31,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
   const validate = () => {
     const newErrors = {};
 
-    if (!formData.name.trim()) {
+    if (!formData.name || typeof formData.name !== 'string' || !formData.name.trim()) {
       newErrors.name = 'Role name is required';
     }
 
@@ -39,7 +39,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
       newErrors.level = 'Role level is required';
     }
 
-    if (formData.permissions.length === 0) {
+    if (!formData.permissions || formData.permissions.length === 0) {
       newErrors.permissions = 'At least one permission must be selected';
     }
 
