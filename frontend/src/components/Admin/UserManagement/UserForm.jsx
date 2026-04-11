@@ -11,6 +11,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
     first_name: '',
     last_name: '',
     role_id: '',
+    password: '',
   });
   const [errors, setErrors] = useState({});
 
@@ -22,6 +23,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         first_name: user.first_name || '',
         last_name: user.last_name || '',
         role_id: user.role_id || '',
+        password: '', // Always empty in edit mode - only update if explicitly provided
       });
     }
   }, [user]);
@@ -44,6 +46,21 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
 
     if (!formData.role_id) {
       newErrors.role_id = 'Role is required';
+    }
+
+    // Password validation
+    if (!user) {
+      // CREATE mode: password is required
+      if (!formData.password || !formData.password.trim()) {
+        newErrors.password = 'Password is required';
+      } else if (formData.password.length < 8) {
+        newErrors.password = 'Password must be at least 8 characters';
+      }
+    } else {
+      // EDIT mode: password is optional (only update if provided)
+      if (formData.password && formData.password.length < 8) {
+        newErrors.password = 'Password must be at least 8 characters';
+      }
     }
 
     setErrors(newErrors);
@@ -147,6 +164,42 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
           ))}
         </select>
       </FormField>
+
+      {/* Password - Different behavior for create vs edit */}
+      {!user && (
+        <FormField
+          label="Password"
+          required
+          error={errors.password}
+          hint="Minimum 8 characters. User will use this to log in."
+        >
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleInputChange}
+            placeholder="Enter password (min 8 characters)"
+            className="input"
+          />
+        </FormField>
+      )}
+
+      {user && (
+        <FormField
+          label="Password"
+          error={errors.password}
+          hint="Leave blank to keep current password. Enter new password to reset it."
+        >
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleInputChange}
+            placeholder="Leave blank to keep current password"
+            className="input"
+          />
+        </FormField>
+      )}
 
       {/* Submit Button */}
       <div className="flex justify-end pt-6 border-t border-border">

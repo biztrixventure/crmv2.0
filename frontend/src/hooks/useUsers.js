@@ -33,7 +33,7 @@ export const useUsers = (companyId = null) => {
   }, [companyId]);
 
   // Create user
-  const createUser = useCallback(async (email, firstName, lastName, roleId) => {
+  const createUser = useCallback(async (email, firstName, lastName, roleId, password) => {
     setLoading(true);
     setError(null);
     try {
@@ -43,6 +43,7 @@ export const useUsers = (companyId = null) => {
         last_name: lastName,
         role_id: roleId,
         company_id: companyId,
+        password,  // NEW: include password if provided
       });
       setUsers([...users, response.data.user]);
       return response.data;
@@ -60,7 +61,23 @@ export const useUsers = (companyId = null) => {
     setLoading(true);
     setError(null);
     try {
-      await client.put(`users/${userAssignmentId}`, updates);
+      // Separate password from other updates (password goes to different endpoint)
+      const passwordUpdate = updates.password;
+      const otherUpdates = { ...updates };
+      delete otherUpdates.password;
+
+      // Update user profile/role if there are non-password updates
+      if (Object.keys(otherUpdates).length > 0) {
+        await client.put(`users/${userAssignmentId}`, otherUpdates);
+      }
+
+      // Update password separately if provided (different endpoint)
+      if (passwordUpdate && passwordUpdate.trim()) {
+        await client.put(`users/${userAssignmentId}/password`, {
+          password: passwordUpdate,
+        });
+      }
+
       // Refetch to get updated data
       await fetchUsers();
       return true;

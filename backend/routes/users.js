@@ -12,6 +12,7 @@ const {
   getUserRole,
   isSuperAdmin,
 } = require('../models/helpers');
+const { validatePassword, generateSecurePassword } = require('../utils/passwordValidator');
 
 const router = express.Router();
 
@@ -225,9 +226,10 @@ router.post(
     body("last_name").trim().isLength({ min: 1 }),
     body("role_id").isUUID(),
     body("company_id").isUUID().optional(),
+    body("password").optional().isLength({ min: 8 }),
   ],
   asyncHandler(async (req, res) => {
-    logger.debug('CREATE_USER', 'POST /users request received', req.body);
+    logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, first_name: req.body.first_name, last_name: req.body.last_name, role_id: req.body.role_id });
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -235,13 +237,32 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { email, first_name, last_name, role_id, company_id } = req.body;
+    const { email, first_name, last_name, role_id, company_id, password } = req.body;
     const userId = req.user.id;
     const userCompanyId = company_id || req.user.company_id;
 
-    logger.info('CREATE_USER', `Creating user`, { email, first_name, last_name, role_id, userCompanyId });
+    logger.info('CREATE_USER', `Creating user`, { email, first_name, last_name, role_id, userCompanyId, password_provided: !!password });
 
     try {
+      // Validate password if provided, otherwise will generate secure one
+      let finalPassword = password;
+      let passwordSource = 'auto-generated';
+
+      if (password) {
+        logger.debug('CREATE_USER', 'Validating admin-provided password');
+        const passwordValidation = validatePassword(password);
+        if (!passwordValidation.valid) {
+          logger.error('CREATE_USER', 'Password validation failed', new Error(passwordValidation.error));
+          return res.status(400).json({ error: passwordValidation.error });
+        }
+        passwordSource = 'admin-provided';
+        logger.success('CREATE_USER', 'Password validation successful');
+      } else {
+        logger.debug('CREATE_USER', 'Generating secure password for user');
+        finalPassword = generateSecurePassword();
+        logger.success('CREATE_USER', 'Secure password generated');
+      }
+
       // Check if user has permission to create users
       logger.debug('CREATE_USER', 'Checking permissions', { userId, userCompanyId });
       const hasPermissionT = await hasPermission(userId, userCompanyId, "create_user");
@@ -279,12 +300,11 @@ router.post(
         });
       }
 
-      // Create user in Supabase Auth
-      logger.debug('CREATE_USER', 'Creating auth user in Supabase', { email });
-      const password = Math.random().toString(36).slice(-12); // Temporary password
+      // Create user in Supabase Auth with validated/generated password
+      logger.debug('CREATE_USER', 'Creating auth user in Supabase', { email, password_source: passwordSource });
       const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
-        password,
+        password: finalPassword,
         email_confirm: false,
       });
 
@@ -293,7 +313,7 @@ router.post(
         return res.status(400).json({ error: authError?.message || "Failed to create user" });
       }
 
-      logger.success('CREATE_USER', `Auth user created`, { user_id: authUser.user.id, email });
+      logger.success('CREATE_USER', `Auth user created`, { user_id: authUser.user.id, email, password_source: passwordSource });
 
       // Create user profile
       logger.debug('CREATE_USER', 'Creating user profile', { user_id: authUser.user.id });
@@ -325,10 +345,10 @@ router.post(
         return res.status(400).json({ error: assignError.message });
       }
 
-      logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id });
+      logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id, password_source: passwordSource });
 
       res.status(201).json({
-        message: "User created successfully. Email invitation sent.",
+        message: `User created successfully${password ? ' with provided password.' : '. Temporary password generated.'}`,
         user: {
           id: authUser.user.id,
           email: authUser.user.email,
@@ -503,6 +523,91 @@ router.delete(
       res.json({ message: "User deactivated successfully" });
     } catch (err) {
       logger.error('DELETE_USER', 'Unhandled exception', err);
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
+
+// ============================================================================
+// PUT /users/:id/password - Update user password
+// ============================================================================
+router.put(
+  "/:id/password",
+  [
+    body("password").isLength({ min: 8 }),
+  ],
+  asyncHandler(async (req, res) => {
+    logger.debug('UPDATE_PASSWORD', 'PUT /users/:id/password request received', { id: req.params.id });
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.error('UPDATE_PASSWORD', 'Validation failed', new Error(JSON.stringify(errors.array())));
+      return res.status(400).json({ error: "Validation failed", details: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { password } = req.body;
+    const userId = req.user.id;
+
+    logger.info('UPDATE_PASSWORD', `Updating user password`, { id, requestedBy: userId });
+
+    try {
+      // Validate password
+      logger.debug('UPDATE_PASSWORD', 'Validating password');
+      const passwordValidation = validatePassword(password);
+      if (!passwordValidation.valid) {
+        logger.error('UPDATE_PASSWORD', 'Password validation failed', new Error(passwordValidation.error));
+        return res.status(400).json({ error: passwordValidation.error });
+      }
+      logger.success('UPDATE_PASSWORD', 'Password validation successful');
+
+      // Get target user assignment
+      logger.debug('UPDATE_PASSWORD', 'Fetching target user assignment', { id });
+      const { data: target, error: fetchError } = await supabaseAdmin
+        .from("user_company_roles")
+        .select("user_id, company_id")
+        .eq("id", id)
+        .single();
+
+      if (fetchError || !target) {
+        logger.error('UPDATE_PASSWORD', 'User assignment not found', fetchError || new Error('No data returned'));
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      logger.success('UPDATE_PASSWORD', `Found target user`, { id, user_id: target.user_id, company_id: target.company_id });
+
+      // Prevent users from changing their own password via this endpoint
+      if (userId === target.user_id) {
+        logger.error('UPDATE_PASSWORD', 'User attempted to change their own password via admin endpoint', new Error('Cannot change own password'));
+        return res.status(403).json({ error: "Use password change form for your own password" });
+      }
+
+      // Check permission
+      logger.debug('UPDATE_PASSWORD', 'Checking edit permissions', { userId, company_id: target.company_id });
+      const hasPerm = await hasPermission(userId, target.company_id, "edit_user");
+      logger.success('UPDATE_PASSWORD', `Permission check: ${hasPerm}`);
+
+      if (!hasPerm) {
+        logger.error('UPDATE_PASSWORD', 'Permission denied', new Error('User lacks edit_user permission'));
+        return res.status(403).json({ error: "You don't have permission to update user passwords" });
+      }
+
+      // Update password in Supabase Auth
+      logger.debug('UPDATE_PASSWORD', 'Updating password in Supabase Auth', { user_id: target.user_id });
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+        target.user_id,
+        { password }
+      );
+
+      if (updateError) {
+        logger.error('UPDATE_PASSWORD', 'Failed to update password in Supabase Auth', updateError);
+        return res.status(400).json({ error: updateError.message || "Failed to update password" });
+      }
+
+      logger.success('UPDATE_PASSWORD', `Password updated successfully`, { id, user_id: target.user_id });
+      res.json({ message: "Password updated successfully" });
+    } catch (err) {
+      logger.error('UPDATE_PASSWORD', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })

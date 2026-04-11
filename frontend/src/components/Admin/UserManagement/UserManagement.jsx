@@ -53,15 +53,22 @@ const UserManagement = () => {
   const handleSaveUser = async (userData) => {
     try {
       if (selectedUser) {
-        // Update existing user
+        // Update existing user (password is optional)
         await updateUser(selectedUser.id, {
           first_name: userData.first_name,
           last_name: userData.last_name,
           role_id: userData.role_id,
+          password: userData.password, // Optional - only sent if user provided it
         });
       } else {
-        // Create new user
-        await createUser(userData.email, userData.first_name, userData.last_name, userData.role_id);
+        // Create new user (password is required)
+        await createUser(
+          userData.email,
+          userData.first_name,
+          userData.last_name,
+          userData.role_id,
+          userData.password  // Required for new users
+        );
       }
       setShowModal(false);
       setSelectedUser(null);
