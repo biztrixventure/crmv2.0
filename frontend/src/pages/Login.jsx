@@ -22,7 +22,7 @@ const Login = () => {
 
     try {
       // Call backend login endpoint
-      const response = await client.post("/auth/login", { email, password });
+      const response = await client.post("auth/login", { email, password });
 
       if (response.data.token && response.data.user) {
         // Use the AuthContext login function to properly store data
