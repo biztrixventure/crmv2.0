@@ -83,7 +83,7 @@ router.get(
           name: r.name,
           description: r.description,
           level: r.level,
-          permissions: (r.role_permissions || []).map((rp) => rp.permissions.name),
+          permissions: (r.role_permissions || []).map((rp) => rp.permissions),
         })),
       });
     } catch (err) {

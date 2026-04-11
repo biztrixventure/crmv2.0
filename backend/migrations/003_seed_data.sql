@@ -63,6 +63,12 @@ INSERT INTO custom_roles (name, description, level, company_id, parent_role_id) 
 ('Super Admin', 'Full system access - can manage all companies', 'superadmin', NULL, NULL)
 ON CONFLICT DO NOTHING;
 
+-- Assign all permissions to Super Admin role
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM custom_roles r, permissions p
+WHERE r.name = 'Super Admin'
+ON CONFLICT DO NOTHING;
+
 -- You will need to run this query to get the superadmin role ID, then use it for other inserts
 -- OR run this script with a service role context
 
@@ -82,13 +88,6 @@ ON CONFLICT DO NOTHING;
 -- INSERT INTO custom_roles (name, description, level, company_id, parent_role_id) VALUES
 -- ('Fronter', 'Create and manage transfers', 'operations', <COMPANY_ID>, <MANAGER_ID>),
 -- ('Closer', 'Receive transfers and create sales', 'operations', <COMPANY_ID>, <MANAGER_ID>)
--- ON CONFLICT DO NOTHING;
-
--- Run the following query to attach permissions to roles:
--- Insert SuperAdmin permissions (has all permissions)
--- INSERT INTO role_permissions (role_id, permission_id)
--- SELECT r.id, p.id FROM custom_roles r, permissions p
--- WHERE r.name = 'Super Admin'
 -- ON CONFLICT DO NOTHING;
 
 -- ============================================================================

@@ -30,7 +30,6 @@ const FormField = ({
           className={`form-label ${required ? 'required' : ''}`}
         >
           {label}
-          {required && <span className="text-error-600 ml-1">*</span>}
         </label>
       )}
 
