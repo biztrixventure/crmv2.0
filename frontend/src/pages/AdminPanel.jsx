@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "../components/UI";
 import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
+import { UserManagement } from "../components/Admin/UserManagement";
 import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
 
 const AdminPanel = () => {
@@ -66,14 +67,7 @@ const AdminPanel = () => {
               </div>
             )}
 
-            {activeTab === "users" && (
-              <div>
-                <h2 className="text-3xl font-bold mb-6 text-text">Users Management</h2>
-                <Card className="p-6">
-                  <p className="text-text-secondary">Users management interface coming soon...</p>
-                </Card>
-              </div>
-            )}
+            {activeTab === "users" && <UserManagement />}
 
             {activeTab === "roles" && <RoleManagement />}
 
