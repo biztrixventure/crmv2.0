@@ -31,16 +31,7 @@ router.get(
       let query = supabaseAdmin
         .from("user_company_roles")
         .select(
-          `
-          id,
-          user_id,
-          role_id,
-          is_active,
-          created_at,
-          custom_roles (id, name, level),
-          user_profiles (first_name, last_name),
-          auth.users!inner (email)
-        `
+          `id,user_id,role_id,is_active,created_at,custom_roles(id,name,level),user_profiles(first_name,last_name)`
         )
         .eq("company_id", company_id || req.user.company_id)
         .eq("is_active", true);
@@ -55,13 +46,33 @@ router.get(
         return res.status(400).json({ error: error.message });
       }
 
-      // Filter by search term if provided
+      // Fetch emails from Supabase auth for these users
       let users = data || [];
+      if (users.length > 0) {
+        const userIds = users.map(u => u.user_id);
+        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
+          limit: 1000, // Adjust if needed
+        });
+
+        // Create a map of user_id to email
+        const emailMap = {};
+        authUsers?.users?.forEach(user => {
+          emailMap[user.id] = user.email;
+        });
+
+        // Add emails to users
+        users = users.map(u => ({
+          ...u,
+          email: emailMap[u.user_id] || 'N/A',
+        }));
+      }
+
+      // Filter by search term if provided
       if (search) {
         const searchLower = search.toLowerCase();
         users = users.filter(
           (u) =>
-            u.auth?.email.toLowerCase().includes(searchLower) ||
+            u.email?.toLowerCase().includes(searchLower) ||
             u.user_profiles?.first_name?.toLowerCase().includes(searchLower) ||
             u.user_profiles?.last_name?.toLowerCase().includes(searchLower)
         );
@@ -72,7 +83,7 @@ router.get(
         users: users.map((u) => ({
           id: u.id,
           user_id: u.user_id,
-          email: u.auth?.email,
+          email: u.email,
           first_name: u.user_profiles?.first_name,
           last_name: u.user_profiles?.last_name,
           role: u.custom_roles.name,
@@ -99,17 +110,7 @@ router.get(
       const { data, error } = await supabaseAdmin
         .from("user_company_roles")
         .select(
-          `
-          id,
-          user_id,
-          role_id,
-          company_id,
-          is_active,
-          created_at,
-          custom_roles (id, name, level),
-          user_profiles (first_name, last_name, avatar_url),
-          auth.users!inner (email)
-        `
+          `id,user_id,role_id,company_id,is_active,created_at,custom_roles(id,name,level),user_profiles(first_name,last_name,avatar_url)`
         )
         .eq("id", id)
         .single();
@@ -118,10 +119,22 @@ router.get(
         return res.status(404).json({ error: "User not found" });
       }
 
+      // Fetch email from auth
+      let email = 'N/A';
+      try {
+        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
+        const authUser = authUsers?.users?.find(u => u.id === data.user_id);
+        if (authUser) {
+          email = authUser.email;
+        }
+      } catch (emailErr) {
+        console.error('Error fetching user email:', emailErr.message);
+      }
+
       res.json({
         id: data.id,
         user_id: data.user_id,
-        email: data.auth?.email,
+        email: email,
         first_name: data.user_profiles?.first_name,
         last_name: data.user_profiles?.last_name,
         role: data.custom_roles.name,
