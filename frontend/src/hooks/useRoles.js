@@ -16,7 +16,7 @@ export const useRoles = (companyId = null) => {
     setError(null);
     try {
       const params = companyId ? { company_id: companyId } : {};
-      const response = await client.get('/api/roles', { params });
+      const response = await client.get('roles', { params });
       setRoles(response.data.roles || []);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to fetch roles';
@@ -31,7 +31,7 @@ export const useRoles = (companyId = null) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await client.post('/api/roles', {
+      const response = await client.post('roles', {
         name,
         description,
         level,
@@ -53,7 +53,7 @@ export const useRoles = (companyId = null) => {
     setLoading(true);
     setError(null);
     try {
-      await client.put(`/api/roles/${roleId}`, {
+      await client.put(`roles/${roleId}`, {
         description,
         permissions,
       });
@@ -74,7 +74,7 @@ export const useRoles = (companyId = null) => {
     setLoading(true);
     setError(null);
     try {
-      await client.delete(`/api/roles/${roleId}`);
+      await client.delete(`roles/${roleId}`);
       setRoles(roles.filter(r => r.id !== roleId));
       return true;
     } catch (err) {
