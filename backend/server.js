@@ -47,6 +47,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'BizTrix CRM Backend API',
+    version: '2.0.0',
+    status: 'running',
+    docs: 'https://github.com/biztrixventure/crmv2.0'
+  });
+});
+
 // ============================================================================
 // PUBLIC ROUTES (no auth required)
 // ============================================================================
