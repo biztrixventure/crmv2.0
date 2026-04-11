@@ -30,7 +30,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Copy built application from builder
-COPY --from=builder /app . .
+COPY --from=builder /app .
 
 # Expose port
 EXPOSE 3001
@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3001/health || exit 1
 
 # Start the application
-CMD ["node", "server.js"]
+CMD ["npm", "start"]
