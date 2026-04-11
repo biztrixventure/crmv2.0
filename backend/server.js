@@ -6,6 +6,10 @@ import { authMiddleware } from "./middleware/authMiddleware.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
+import usersRoutes from "./routes/users.js";
+import companiesRoutes from "./routes/companies.js";
+import rolesRoutes from "./routes/roles.js";
+import formsRoutes from "./routes/forms.js";
 
 // Load environment variables
 dotenv.config({ path: ".env.local" });
@@ -40,12 +44,10 @@ app.use("/auth", authRoutes);
 // ============================================================================
 // Protected Routes (auth required)
 // ============================================================================
-// Uncomment when adding protected routes
-// app.use("/api", authMiddleware);
-// app.use("/api/users", require("./routes/users.js"));
-// app.use("/api/companies", require("./routes/companies.js"));
-// app.use("/api/transfers", require("./routes/transfers.js"));
-// app.use("/api/sales", require("./routes/sales.js"));
+app.use("/api/users", authMiddleware, usersRoutes);
+app.use("/api/companies", authMiddleware, companiesRoutes);
+app.use("/api/roles", authMiddleware, rolesRoutes);
+app.use("/api/forms", authMiddleware, formsRoutes);
 
 // 404 handler
 app.use((req, res) => {
