@@ -27,17 +27,21 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 
 -- 2. Custom Roles table with updated role_level enum
-CREATE TYPE role_level AS ENUM (
-  'superadmin',
-  'readonly_admin',
-  'company_admin',
-  'closer',
-  'fronter',
-  'manager',
-  'operations_manager',
-  'closer_manager',
-  'operations'
-);
+-- Note: If enum already exists, this will be skipped
+DO $$ BEGIN
+  CREATE TYPE role_level AS ENUM (
+    'superadmin',
+    'readonly_admin',
+    'company_admin',
+    'closer',
+    'fronter',
+    'manager',
+    'operations_manager',
+    'closer_manager',
+    'operations'
+  );
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS custom_roles (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -96,7 +100,10 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 
 -- 7. Form Fields table (global, not per-company)
-CREATE TYPE field_type AS ENUM ('text', 'email', 'number', 'textarea', 'select', 'date', 'phone');
+DO $$ BEGIN
+  CREATE TYPE field_type AS ENUM ('text', 'email', 'number', 'textarea', 'select', 'date', 'phone');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS form_fields (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -110,7 +117,10 @@ CREATE TABLE IF NOT EXISTS form_fields (
 );
 
 -- 8. Transfers table
-CREATE TYPE transfer_status AS ENUM ('pending', 'assigned', 'completed', 'cancelled');
+DO $$ BEGIN
+  CREATE TYPE transfer_status AS ENUM ('pending', 'assigned', 'completed', 'cancelled');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS transfers (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -124,7 +134,10 @@ CREATE TABLE IF NOT EXISTS transfers (
 );
 
 -- 9. Sales table
-CREATE TYPE sale_status AS ENUM ('open', 'closed_won', 'closed_lost');
+DO $$ BEGIN
+  CREATE TYPE sale_status AS ENUM ('open', 'closed_won', 'closed_lost');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS sales (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -147,15 +160,46 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indexes for performance
-CREATE INDEX idx_transfers_company_id ON transfers(company_id);
-CREATE INDEX idx_transfers_created_by ON transfers(created_by);
-CREATE INDEX idx_transfers_assigned_to ON transfers(assigned_to);
-CREATE INDEX idx_sales_company_id ON sales(company_id);
-CREATE INDEX idx_sales_created_by ON sales(created_by);
-CREATE INDEX idx_user_company_roles_user_id ON user_company_roles(user_id);
-CREATE INDEX idx_user_company_roles_company_id ON user_company_roles(company_id);
-CREATE INDEX idx_custom_roles_company_id ON custom_roles(company_id);
+-- Create indexes for performance (skip if already exist)
+DO $$ BEGIN
+  CREATE INDEX idx_transfers_company_id ON transfers(company_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_transfers_created_by ON transfers(created_by);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_transfers_assigned_to ON transfers(assigned_to);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_sales_company_id ON sales(company_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_sales_created_by ON sales(created_by);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_user_company_roles_user_id ON user_company_roles(user_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_user_company_roles_company_id ON user_company_roles(company_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE INDEX idx_custom_roles_company_id ON custom_roles(company_id);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 -- Enable RLS on all tables
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
