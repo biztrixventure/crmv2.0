@@ -94,7 +94,7 @@ const UserList = ({ users, onEdit, onDelete }) => {
     <Card variant="outlined">
       <Table
         columns={columns}
-        rows={tableRows}
+        data={tableRows}
         rowActions={actions}
         sortable
         hover
