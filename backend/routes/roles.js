@@ -17,10 +17,30 @@ router.get(
   asyncHandler(async (req, res) => {
     const { company_id } = req.query;
     const userId = req.user.id;
-    const companyId = company_id || req.user.company_id;
+    let companyId = company_id;
+
+    // If company_id not provided, fetch from user's company assignment
+    if (!companyId) {
+      try {
+        const { data: userCompany } = await supabaseAdmin
+          .from("user_company_roles")
+          .select("company_id")
+          .eq("user_id", userId)
+          .eq("is_active", true)
+          .limit(1)
+          .single();
+
+        if (userCompany) {
+          companyId = userCompany.company_id;
+        }
+      } catch (err) {
+        // User might be super admin with no company assignment, which is ok
+        // We'll return all roles in that case
+      }
+    }
 
     try {
-      const { data, error } = await supabaseAdmin
+      let query = supabaseAdmin
         .from("custom_roles")
         .select(
           `
@@ -31,8 +51,14 @@ router.get(
           company_id,
           role_permissions (permissions(name))
         `
-        )
-        .or(`company_id.eq.${companyId},company_id.is.null`);
+        );
+
+      // If we have a companyId, filter by it (include system roles with null company_id too)
+      if (companyId) {
+        query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         return res.status(400).json({ error: error.message });
