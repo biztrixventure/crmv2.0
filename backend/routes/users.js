@@ -1,16 +1,16 @@
-import express from "express";
-import { body, validationResult } from "express-validator";
-import { supabaseAdmin } from "../config/database.js";
-import { asyncHandler } from "../middleware/errorHandler.js";
-import { authMiddleware, requireRole } from "../middleware/authMiddleware.js";
-import {
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const { supabaseAdmin } = require('../config/database');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
+const {
   getUserPermissions,
   hasPermission,
   canAssignRole,
   assignUserToCompany,
   getUserRole,
   isSuperAdmin,
-} from "../models/helpers.js";
+} = require('../models/helpers');
 
 const router = express.Router();
 
@@ -361,4 +361,4 @@ router.delete(
   })
 );
 
-export default router;
+module.exports = router;

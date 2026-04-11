@@ -1,9 +1,9 @@
-import { supabaseAdmin } from "../config/database.js";
+const { supabaseAdmin } = require('../config/database');
 
 // ============================================================================
 // Get User Role in Company
 // ============================================================================
-export const getUserRole = async (userId, companyId) => {
+const getUserRole = async (userId, companyId) => {
   try {
     const { data, error } = await supabaseAdmin
       .from("user_company_roles")
@@ -39,7 +39,7 @@ export const getUserRole = async (userId, companyId) => {
 // ============================================================================
 // Check if User has Permission
 // ============================================================================
-export const hasPermission = async (userId, companyId, permissionName) => {
+const hasPermission = async (userId, companyId, permissionName) => {
   try {
     const userRole = await getUserRole(userId, companyId);
 
@@ -76,7 +76,7 @@ export const hasPermission = async (userId, companyId, permissionName) => {
 // ============================================================================
 // Get User Permissions
 // ============================================================================
-export const getUserPermissions = async (userId, companyId) => {
+const getUserPermissions = async (userId, companyId) => {
   try {
     const userRole = await getUserRole(userId, companyId);
 
@@ -106,7 +106,7 @@ export const getUserPermissions = async (userId, companyId) => {
 // ============================================================================
 // Check Role Hierarchy (Can assign lower or equal role)
 // ============================================================================
-export const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => {
+const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => {
   try {
     const sourceRole = await getUserRole(sourceUserId, sourceCompanyId);
 
@@ -136,7 +136,7 @@ export const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLev
 // ============================================================================
 // Get All Companies for User
 // ============================================================================
-export const getUserCompanies = async (userId) => {
+const getUserCompanies = async (userId) => {
   try {
     const { data, error } = await supabaseAdmin
       .from("user_company_roles")
@@ -167,7 +167,7 @@ export const getUserCompanies = async (userId) => {
 // ============================================================================
 // Create Custom Role
 // ============================================================================
-export const createRole = async (name, description, level, companyId, permissions = []) => {
+const createRole = async (name, description, level, companyId, permissions = []) => {
   try {
     // Insert role
     const { data: role, error: roleError } = await supabaseAdmin
@@ -212,7 +212,7 @@ export const createRole = async (name, description, level, companyId, permission
 // ============================================================================
 // Assign User to Company
 // ============================================================================
-export const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
+const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
   try {
     const { data, error } = await supabaseAdmin
       .from("user_company_roles")
@@ -240,7 +240,7 @@ export const assignUserToCompany = async (userId, companyId, roleId, assignedBy)
 // ============================================================================
 // Check if is SuperAdmin
 // ============================================================================
-export const isSuperAdmin = async (userId, companyId) => {
+const isSuperAdmin = async (userId, companyId) => {
   const role = await getUserRole(userId, companyId);
   return role?.role_level === "superadmin";
 };
@@ -248,7 +248,7 @@ export const isSuperAdmin = async (userId, companyId) => {
 // ============================================================================
 // Get Team Members (for managers)
 // ============================================================================
-export const getTeamMembers = async (managerId, companyId) => {
+const getTeamMembers = async (managerId, companyId) => {
   try {
     // Get manager's role level
     const managerRole = await getUserRole(managerId, companyId);
@@ -287,4 +287,16 @@ export const getTeamMembers = async (managerId, companyId) => {
     console.error("Error getting team members:", err);
     return [];
   }
+};
+
+module.exports = {
+  getUserRole,
+  hasPermission,
+  getUserPermissions,
+  canAssignRole,
+  getUserCompanies,
+  createRole,
+  assignUserToCompany,
+  isSuperAdmin,
+  getTeamMembers,
 };

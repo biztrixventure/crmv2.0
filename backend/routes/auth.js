@@ -1,8 +1,7 @@
-import express from "express";
-import axios from "axios";
-import { body, validationResult } from "express-validator";
-import { supabaseAdmin, supabaseAnon } from "../config/database.js";
-import { asyncHandler } from "../middleware/errorHandler.js";
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const { supabaseAdmin, supabaseClient } = require('../config/database');
+const { asyncHandler } = require('../middleware/errorHandler');
 
 const router = express.Router();
 
@@ -28,7 +27,7 @@ router.post(
 
     try {
       // Authenticate with Supabase
-      const { data, error } = await supabaseAnon.auth.signInWithPassword({
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
         email,
         password,
       });
@@ -183,7 +182,7 @@ router.post(
     const { refresh_token } = req.body;
 
     try {
-      const { data, error } = await supabaseAnon.auth.refreshSession({
+      const { data, error } = await supabaseClient.auth.refreshSession({
         refresh_token,
       });
 
@@ -238,7 +237,7 @@ router.post(
     const { token } = req.body;
 
     try {
-      const { data, error } = await supabaseAnon.auth.verifyOtp({
+      const { data, error } = await supabaseClient.auth.verifyOtp({
         token_hash: token,
         type: "email",
       });
@@ -267,8 +266,8 @@ router.post(
     const { email } = req.body;
 
     try {
-      const { error } = await supabaseAnon.auth.resetPasswordForEmail(email, {
-        redirectTo: `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password`,
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password`,
       });
 
       if (error) {
@@ -293,7 +292,7 @@ router.post(
     const { token_hash, new_password } = req.body;
 
     try {
-      const { data, error } = await supabaseAnon.auth.updateUser({
+      const { data, error } = await supabaseClient.auth.updateUser({
         password: new_password,
       });
 
@@ -308,4 +307,4 @@ router.post(
   })
 );
 
-export default router;
+module.exports = router;

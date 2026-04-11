@@ -1,9 +1,9 @@
-import express from "express";
-import { body, validationResult } from "express-validator";
-import { supabaseAdmin } from "../config/database.js";
-import { asyncHandler } from "../middleware/errorHandler.js";
-import { authMiddleware } from "../middleware/authMiddleware.js";
-import { hasPermission, isSuperAdmin, getUserCompanies, assignUserToCompany } from "../models/helpers.js";
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const { supabaseAdmin } = require('../config/database');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { authMiddleware } = require('../middleware/authMiddleware');
+const { hasPermission, isSuperAdmin, getUserCompanies, assignUserToCompany } = require('../models/helpers');
 
 const router = express.Router();
 
@@ -314,4 +314,4 @@ router.get(
   })
 );
 
-export default router;
+module.exports = router;
