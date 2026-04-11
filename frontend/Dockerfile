@@ -6,10 +6,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (including devDependencies needed for build)
-# Must set NODE_ENV=development to ensure vite and build tools are installed
-ENV NODE_ENV=development
-RUN npm install --legacy-peer-deps
+# Install ALL dependencies explicitly (including devDependencies for build)
+# Force --include=dev to ensure Vite and build tools are installed
+# Ignore NODE_ENV=production passed by Coolify at build time
+RUN npm install --legacy-peer-deps --include=dev
 
 # Copy source code
 COPY . .

@@ -6,9 +6,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies - make sure devDependencies are included for build
-# Override NODE_ENV to ensure all dependencies are installed
-ENV NODE_ENV=development
+# Install dependencies - explicitly include all dependencies
+# Ignore NODE_ENV=production passed by Coolify at build time
+# We only use production dependencies in runtime, but builder doesn't need anything special
 RUN npm install
 
 # Copy source code
@@ -26,7 +26,6 @@ RUN apk add --no-cache curl
 COPY package*.json ./
 
 # Install production dependencies only
-# Set NODE_ENV before install to skip devDependencies
 ENV NODE_ENV=production
 RUN npm install --production
 
