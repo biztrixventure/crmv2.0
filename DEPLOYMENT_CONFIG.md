@@ -15,14 +15,15 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```env
 VITE_API_URL=http://backend:3001  # For Docker/Coolify
 # or
-VITE_API_URL=https://your-domain.com  # For production
+VITE_API_URL=https://api.your-domain.com  # For production with backend subdomain
 ```
 
 ### Server Configuration
 ```env
 PORT=3001
 NODE_ENV=production
-CORS_ORIGIN=*  # or your specific domain
+CORS_ORIGIN=https://your-domain.com
+FRONTEND_URL=https://your-domain.com
 ```
 
 ## Docker Build Fixes Applied
@@ -89,7 +90,7 @@ docker-compose --env-file .env.local up --build
 
 **CORS errors**: Check CORS_ORIGIN environment variable is set correctly
 
-**API can't reach backend**: In Docker, backend is at `http://backend:3001` from frontend
+**API can't reach backend**: For public traffic, set `VITE_API_URL=https://api.your-domain.com`
 
 **Health check fails**: Wait 40+ seconds for startup, containers may take time to initialize
 
@@ -113,7 +114,7 @@ docker-compose --env-file .env.local up --build
 - [ ] GitHub webhook configured
 - [ ] Health checks passing (wait 40+ seconds)
 - [ ] Login page loads: `https://your-domain/login`
-- [ ] Backend health check: `https://your-domain/api/health`
+- [ ] Backend health check: `https://api.your-domain.com/health`
 
 ## Next Deployment
 

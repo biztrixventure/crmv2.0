@@ -60,8 +60,9 @@ VITE_SUPABASE_ANON_KEY=xxxxx
 SUPABASE_SERVICE_ROLE_KEY=xxxxx
 
 # API Configuration
-VITE_API_URL=https://your-domain.com
+VITE_API_URL=https://api.your-domain.com
 CORS_ORIGIN=https://your-domain.com
+FRONTEND_URL=https://your-domain.com
 
 # App Mode
 NODE_ENV=production
@@ -100,8 +101,8 @@ Coolify will automatically:
 | Service | Port | URL |
 |---------|------|-----|
 | Frontend | 80/443 | https://your-domain.com |
-| Backend API | 3001 | https://your-domain.com/api |
-| Health Check | - | https://your-domain.com/health |
+| Backend API | 3001 | https://api.your-domain.com |
+| Health Check | - | https://api.your-domain.com/health |
 
 ## Docker Compose Details
 
@@ -158,7 +159,7 @@ Both services have health checks that Coolify monitors:
 curl https://your-domain.com/health
 
 # Backend health
-curl https://your-domain.com/api/health
+curl https://api.your-domain.com/health
 ```
 
 ### Logs
