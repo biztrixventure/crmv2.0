@@ -35,12 +35,12 @@ const RoleList = ({ roles, onEdit, onDelete }) => {
     {
       label: 'Edit',
       icon: <Edit2 size={18} />,
-      onClick: onEdit,
+      onClick: (row) => onEdit(row.role || row), // Pass original role object
     },
     {
       label: 'Delete',
       icon: <Trash2 size={18} className="text-error-600" />,
-      onClick: onDelete,
+      onClick: (row) => onDelete(row.id || row.role?.id), // Extract ID for delete
     },
   ];
 

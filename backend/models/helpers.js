@@ -47,8 +47,8 @@ const hasPermission = async (userId, companyId, permissionName) => {
       return false;
     }
 
-    // SuperAdmin has all permissions
-    if (userRole.role_level === "superadmin") {
+    // SuperAdmin has all permissions (level 1)
+    if (userRole.role_level === 1) {
       return true;
     }
 
@@ -84,8 +84,8 @@ const getUserPermissions = async (userId, companyId) => {
       return [];
     }
 
-    // SuperAdmin has all permissions - fetch all
-    if (userRole.role_level === "superadmin") {
+    // SuperAdmin has all permissions - fetch all (level 1)
+    if (userRole.role_level === 1) {
       const { data } = await supabaseAdmin.from("permissions").select("name");
       return (data || []).map((p) => p.name);
     }
@@ -114,7 +114,8 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
       return false;
     }
 
-    // Role levels: superadmin (1) > company_admin (2) > manager (3) > operations (4)
+    // Convert string targetRoleLevel to numeric if needed
+    // targetRoleLevel can be e.g. "superadmin", "company_admin", "manager", "operations" OR numeric 1,2,3,4
     const roleHierarchy = {
       superadmin: 1,
       company_admin: 2,
@@ -122,10 +123,12 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
       operations: 4,
     };
 
-    const sourceLevel = roleHierarchy[sourceRole.role_level] || 999;
-    const targetLevel = roleHierarchy[targetRoleLevel] || 999;
+    // sourceRole.role_level is numeric (1, 2, 3, 4)
+    const sourceLevel = sourceRole.role_level;
+    // If targetRoleLevel is a string, convert it; if numeric, use it directly
+    const targetLevel = typeof targetRoleLevel === 'string' ? (roleHierarchy[targetRoleLevel] || 999) : (targetRoleLevel || 999);
 
-    // Can only assign roles at equal or lower level
+    // Can only assign roles at equal or lower level (lower number = higher authority)
     return sourceLevel <= targetLevel;
   } catch (err) {
     console.error("Error checking role hierarchy:", err);
@@ -242,7 +245,7 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 // ============================================================================
 const isSuperAdmin = async (userId, companyId) => {
   const role = await getUserRole(userId, companyId);
-  return role?.role_level === "superadmin";
+  return role?.role_level === 1; // level 1 = SuperAdmin
 };
 
 // ============================================================================

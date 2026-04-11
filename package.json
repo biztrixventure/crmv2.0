@@ -9,10 +9,16 @@
     "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
     "test": "echo \"Run tests in backend/frontend separately\""
   },
-  "keywords": ["crm", "saas"],
+  "keywords": [
+    "crm",
+    "saas"
+  ],
   "author": "@abdulmanan69",
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.0"
   }
 }
