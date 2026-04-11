@@ -13,13 +13,8 @@ RUN unset NODE_ENV && npm install --legacy-peer-deps
 # Copy entire source
 COPY . .
 
-# Vite will use env vars passed at build time via build args or .env
-# The following will be set by Coolify:
-# - VITE_SUPABASE_URL
-# - VITE_SUPABASE_ANON_KEY
-# - VITE_API_URL
-
-# Build the React app (Vite reads env vars prefixed with VITE_)
+# Build the React app
+# Vite will use VITE_* environment variables set by Coolify at build time
 RUN npm run build
 
 # Production stage - Use lightweight nginx for serving static files
