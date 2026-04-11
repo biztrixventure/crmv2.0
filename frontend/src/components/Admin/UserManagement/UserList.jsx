@@ -46,12 +46,12 @@ const UserList = ({ users, onEdit, onDelete }) => {
       key: 'role',
       label: 'Role',
       width: '120px',
-      render: (value) => (
+      render: (row) => (
         <Badge
-          variant={roleColors[value] || 'secondary'}
+          variant={roleColors[row.role] || 'secondary'}
           size="sm"
         >
-          {value}
+          {row.role}
         </Badge>
       ),
     },
@@ -59,12 +59,12 @@ const UserList = ({ users, onEdit, onDelete }) => {
       key: 'status',
       label: 'Status',
       width: '100px',
-      render: (value) => (
+      render: (row) => (
         <Badge
-          variant={value === 'Active' ? 'success' : 'secondary'}
+          variant={row.status === 'Active' ? 'success' : 'secondary'}
           size="sm"
         >
-          {value}
+          {row.status}
         </Badge>
       ),
     },
