@@ -179,7 +179,31 @@ router.post(
 
     const { name, description, level, company_id, permissions } = req.body;
     const userId = req.user.id;
-    const targetCompanyId = company_id || req.user.company_id;
+    let targetCompanyId = company_id;
+
+    // If company_id not provided, fetch from user's company assignment
+    if (!targetCompanyId) {
+      try {
+        const { data: userCompany } = await supabaseAdmin
+          .from("user_company_roles")
+          .select("company_id")
+          .eq("user_id", userId)
+          .eq("is_active", true)
+          .limit(1)
+          .single();
+
+        if (userCompany) {
+          targetCompanyId = userCompany.company_id;
+        }
+      } catch (err) {
+        // User might not have a company assignment
+      }
+    }
+
+    // If still no company_id, return error
+    if (!targetCompanyId) {
+      return res.status(400).json({ error: "Company ID is required or user must have a company assignment" });
+    }
 
     try {
       // Check permission to manage roles
