@@ -1,6 +1,8 @@
 const { verifyToken } = require('../config/auth');
+const { supabaseAdmin } = require('../config/database');
+const logger = require('../utils/logger');
 
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -10,11 +12,39 @@ const authMiddleware = (req, res, next) => {
 
     const token = verifyToken(authHeader);
 
+    // Get user's current company and role from database
+    let userRole = token.role;
+    let userCompanyId = token.company_id;
+
+    try {
+      // Fetch user's active company assignment with role details
+      const { data: assignment, error } = await supabaseAdmin
+        .from('user_company_roles')
+        .select(`
+          company_id,
+          custom_roles (level)
+        `)
+        .eq('user_id', token.sub)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!error && assignment) {
+        userCompanyId = assignment.company_id;
+        userRole = assignment.custom_roles?.level || token.role;
+        logger.info('AUTH_MIDDLEWARE', `Resolved role for user ${token.sub}: ${userRole}`);
+      }
+    } catch (dbErr) {
+      logger.warn('AUTH_MIDDLEWARE', `Could not fetch user role from database: ${dbErr.message}`);
+      // Fall back to token role
+    }
+
     // Attach user info to request
     req.user = {
       id: token.sub,
-      role: token.role,
-      company_id: token.company_id,
+      role: userRole,
+      company_id: userCompanyId,
       email: token.email,
       iat: token.iat,
       exp: token.exp,
