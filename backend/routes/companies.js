@@ -44,43 +44,8 @@ router.get(
 );
 
 // ============================================================================
-// GET /companies/:id - Get company details
-// ============================================================================
-router.get(
-  "/:id",
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const userId = req.user.id;
-
-    try {
-      const { data, error } = await supabaseAdmin
-        .from("companies")
-        .select("id, name, logo_url, is_active, created_at")
-        .eq("id", id)
-        .single();
-
-      if (error || !data) {
-        return res.status(404).json({ error: "Company not found" });
-      }
-
-      // Check if user has access (must be member or superadmin)
-      const userCompanies = await getUserCompanies(userId);
-      if (
-        req.user.role !== "superadmin" &&
-        !userCompanies.some((c) => c.id === id)
-      ) {
-        return res.status(403).json({ error: "You don't have access to this company" });
-      }
-
-      res.json(data);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  })
-);
-
-// ============================================================================
 // GET /companies/available - List available companies for user assignment
+// MUST BE BEFORE /:id routes
 // ============================================================================
 router.get(
   "/available",
@@ -194,6 +159,42 @@ router.post(
         message: "Company created successfully",
         company: data,
       });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
+
+// ============================================================================
+// GET /companies/:id - Get company details
+// ============================================================================
+router.get(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("companies")
+        .select("id, name, logo_url, is_active, created_at")
+        .eq("id", id)
+        .single();
+
+      if (error || !data) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+
+      // Check if user has access (must be member or superadmin)
+      const userCompanies = await getUserCompanies(userId);
+      if (
+        req.user.role !== "superadmin" &&
+        !userCompanies.some((c) => c.id === id)
+      ) {
+        return res.status(403).json({ error: "You don't have access to this company" });
+      }
+
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
