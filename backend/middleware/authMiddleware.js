@@ -18,7 +18,8 @@ const authMiddleware = async (req, res, next) => {
 
     try {
       // Fetch user's active company assignment with role details
-      const { data: assignment, error } = await supabaseAdmin
+      // Don't use .single() - use normal select to avoid errors if no results
+      const { data: assignments, error } = await supabaseAdmin
         .from('user_company_roles')
         .select(`
           company_id,
@@ -27,13 +28,17 @@ const authMiddleware = async (req, res, next) => {
         .eq('user_id', token.sub)
         .eq('is_active', true)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (!error && assignment) {
+      if (!error && assignments && assignments.length > 0) {
+        const assignment = assignments[0];
         userCompanyId = assignment.company_id;
         userRole = assignment.custom_roles?.level || token.role;
-        logger.info('AUTH_MIDDLEWARE', `Resolved role for user ${token.sub}: ${userRole}`);
+        logger.info('AUTH_MIDDLEWARE', `Resolved role for user ${token.sub}: ${userRole} in company ${userCompanyId}`);
+      } else if (error) {
+        logger.warn('AUTH_MIDDLEWARE', `Database query error: ${error.message}`);
+      } else {
+        logger.warn('AUTH_MIDDLEWARE', `No active company assignments found for user ${token.sub}`);
       }
     } catch (dbErr) {
       logger.warn('AUTH_MIDDLEWARE', `Could not fetch user role from database: ${dbErr.message}`);

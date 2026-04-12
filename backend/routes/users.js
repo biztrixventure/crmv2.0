@@ -300,9 +300,13 @@ router.post(
 
       logger.success('CREATE_USER', `Role verified`, { role_id, level: role.level });
 
-      // Check role hierarchy
-      logger.debug('CREATE_USER', 'Checking role hierarchy', { userId, userCompanyId, targetRoleLevel: role.level });
-      const canAssign = await canAssignRole(userId, userCompanyId, role.level);
+      // Check role hierarchy (skip for SuperAdmin - they can assign any role)
+      logger.debug('CREATE_USER', 'Checking role hierarchy', { userId, userCompanyId, targetRoleLevel: role.level, isSuperAdmin: req.user.role === 'superadmin' });
+
+      let canAssign = req.user.role === 'superadmin'; // SuperAdmin can assign any role
+      if (!canAssign) {
+        canAssign = await canAssignRole(userId, userCompanyId, role.level);
+      }
       logger.success('CREATE_USER', `Hierarchy check: ${canAssign}`);
 
       if (!canAssign) {
@@ -421,11 +425,12 @@ router.put(
       logger.success('UPDATE_USER', `Found user assignment`, { id, user_id: targetAssignment.user_id });
 
       // Check permissions
-      logger.debug('UPDATE_USER', 'Checking edit permissions', { userId, company_id: targetAssignment.company_id });
+      logger.debug('UPDATE_USER', 'Checking edit permissions', { userId, company_id: targetAssignment.company_id, isSuperAdmin: req.user.role === 'superadmin' });
       const hasEditPerm = await hasPermission(userId, targetAssignment.company_id, "edit_user");
-      logger.success('UPDATE_USER', `Permission check: ${hasEditPerm}, isSelf: ${userId === targetAssignment.user_id}`);
+      logger.success('UPDATE_USER', `Permission check: ${hasEditPerm}, isSuperAdmin: ${req.user.role === 'superadmin'}, isSelf: ${userId === targetAssignment.user_id}`);
 
-      if (!hasEditPerm && userId !== targetAssignment.user_id) {
+      // Allow if: SuperAdmin OR has edit_user permission OR editing self
+      if (req.user.role !== 'superadmin' && !hasEditPerm && userId !== targetAssignment.user_id) {
         logger.error('UPDATE_USER', 'Permission denied', new Error('User lacks edit_user permission and is not self'));
         return res.status(403).json({ error: "You don't have permission to edit this user" });
       }
@@ -440,7 +445,10 @@ router.put(
           .single();
 
         logger.debug('UPDATE_USER', 'Checking hierarchy for new role', { new_role_level: newRole?.level });
-        const canAssign = await canAssignRole(userId, targetAssignment.company_id, newRole.level);
+        let canAssign = req.user.role === 'superadmin'; // SuperAdmin can assign any role
+        if (!canAssign) {
+          canAssign = await canAssignRole(userId, targetAssignment.company_id, newRole.level);
+        }
         logger.success('UPDATE_USER', `Hierarchy check for new role: ${canAssign}`);
 
         if (!canAssign) {
@@ -516,11 +524,11 @@ router.delete(
       logger.success('DELETE_USER', `Found target user`, { id, user_id: target.user_id, company_id: target.company_id });
 
       // Check permission
-      logger.debug('DELETE_USER', 'Checking delete permissions', { userId, company_id: target.company_id });
+      logger.debug('DELETE_USER', 'Checking delete permissions', { userId, company_id: target.company_id, isSuperAdmin: req.user.role === 'superadmin' });
       const hasPerm = await hasPermission(userId, target.company_id, "delete_user");
-      logger.success('DELETE_USER', `Permission check: ${hasPerm}`);
+      logger.success('DELETE_USER', `Permission check: ${hasPerm}, isSuperAdmin: ${req.user.role === 'superadmin'}`);
 
-      if (!hasPerm) {
+      if (req.user.role !== 'superadmin' && !hasPerm) {
         logger.error('DELETE_USER', 'Permission denied', new Error('User lacks delete_user permission'));
         return res.status(403).json({ error: "You don't have permission to delete users" });
       }
@@ -606,11 +614,11 @@ router.put(
       }
 
       // Check permission
-      logger.debug('UPDATE_PASSWORD', 'Checking edit permissions', { userId, company_id: target.company_id });
+      logger.debug('UPDATE_PASSWORD', 'Checking edit permissions', { userId, company_id: target.company_id, isSuperAdmin: req.user.role === 'superadmin' });
       const hasPerm = await hasPermission(userId, target.company_id, "edit_user");
-      logger.success('UPDATE_PASSWORD', `Permission check: ${hasPerm}`);
+      logger.success('UPDATE_PASSWORD', `Permission check: ${hasPerm}, isSuperAdmin: ${req.user.role === 'superadmin'}`);
 
-      if (!hasPerm) {
+      if (req.user.role !== 'superadmin' && !hasPerm) {
         logger.error('UPDATE_PASSWORD', 'Permission denied', new Error('User lacks edit_user permission'));
         return res.status(403).json({ error: "You don't have permission to update user passwords" });
       }
