@@ -148,7 +148,17 @@ router.post(
   "/",
   [
     body("name").trim().isLength({ min: 1 }),
-    body("logo_url").trim().isURL().optional(),
+    body("logo_url").trim().custom(value => {
+      // Allow empty string or null
+      if (!value) return true;
+      // If provided, must be valid URL
+      try {
+        new URL(value);
+        return true;
+      } catch {
+        throw new Error('Invalid URL format');
+      }
+    }).optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -197,7 +207,17 @@ router.put(
   "/:id",
   [
     body("name").trim().isLength({ min: 1 }).optional(),
-    body("logo_url").trim().isURL().optional(),
+    body("logo_url").trim().custom(value => {
+      // Allow empty string, null, or undefined
+      if (!value) return true;
+      // If provided, must be valid URL
+      try {
+        new URL(value);
+        return true;
+      } catch {
+        throw new Error('Invalid URL format');
+      }
+    }).optional(),
     body("is_active").isBoolean().optional(),
   ],
   asyncHandler(async (req, res) => {
