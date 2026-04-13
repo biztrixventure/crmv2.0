@@ -1,0 +1,79 @@
+import { useState, useCallback } from 'react';
+import client from '../api/client';
+
+/**
+ * Custom hook to manage transfers data
+ * Handles fetching, creating, and updating transfers
+ */
+export const useTransfers = (companyId = null) => {
+  const [transfers, setTransfers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [total, setTotal] = useState(0);
+
+  // Fetch transfers (role-based filtering done server-side)
+  const fetchTransfers = useCallback(async (filters = {}) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = { company_id: companyId, ...filters };
+      const response = await client.get('transfers', { params });
+      setTransfers(response.data.transfers || []);
+      setTotal(response.data.total || 0);
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to fetch transfers';
+      setError(errorMsg);
+      console.error('Fetch transfers error:', errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  // Create a new transfer
+  const createTransfer = useCallback(async (formData) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await client.post('transfers', {
+        company_id: companyId,
+        form_data: formData,
+      });
+      const newTransfer = response.data.transfer;
+      setTransfers(prev => [newTransfer, ...prev]);
+      return newTransfer;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to create transfer';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  // Update transfer status or assignment
+  const updateTransfer = useCallback(async (transferId, updates) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await client.put(`transfers/${transferId}`, updates);
+      await fetchTransfers(); // Refresh list
+      return response.data.transfer;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to update transfer';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchTransfers]);
+
+  return {
+    transfers,
+    total,
+    loading,
+    error,
+    fetchTransfers,
+    createTransfer,
+    updateTransfer,
+  };
+};

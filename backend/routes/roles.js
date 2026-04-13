@@ -2,13 +2,11 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authMiddleware } = require('../middleware/authMiddleware');
+// Auth middleware is applied in server.js
 const { hasPermission, canAssignRole, createRole, isSuperAdmin } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-
-router.use(authMiddleware);
 
 // ============================================================================
 // GET /roles - List available roles in company
@@ -193,7 +191,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "company_admin", "manager", "operations"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "manager", "operations_manager", "closer_manager", "operations"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],

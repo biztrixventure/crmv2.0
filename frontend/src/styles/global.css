@@ -134,7 +134,7 @@
   --radius-full: 9999px;   /* pill-shaped */
 
   /* ========== TYPOGRAPHY ========== */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   --font-serif: 'Merriweather', 'Georgia', serif;
   --font-mono: 'Fira Code', 'Courier New', monospace;
 

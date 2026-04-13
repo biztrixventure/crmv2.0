@@ -1,18 +1,13 @@
 import React from 'react';
 import {
-  BarChart3,
-  Users,
-  Shield,
-  Building2,
-  FileText,
+  BarChart3, Users, Shield, Building2, FileText,
 } from 'lucide-react';
 
 /**
  * AdminSidebar Component
- * Displays navigation menu with Lucide icons
+ * Premium sidebar with icons and active state animations
  */
 const AdminSidebar = ({ navItems, activeTab, onTabChange }) => {
-  // Icon mapping from item ID to Lucide component
   const iconMap = {
     dashboard: <BarChart3 size={20} />,
     users: <Users size={20} />,
@@ -22,46 +17,59 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange }) => {
   };
 
   return (
-    <aside
-      className="sidebar w-64 border-r shadow-sm"
-      style={{ borderColor: 'var(--color-border)' }}
-    >
-      <nav className="p-6 space-y-2">
-        <h3 className="text-lg font-semibold mb-6 px-4">Admin Menu</h3>
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onTabChange(item.id)}
-            className="w-full text-left px-4 py-3 rounded-lg transition-all smooth-transition flex items-center space-x-3"
-            style={{
-              backgroundColor:
-                activeTab === item.id
-                  ? 'var(--color-primary-600)'
-                  : 'transparent',
-              color:
-                activeTab === item.id
-                  ? 'white'
-                  : 'var(--color-text)',
-            }}
-            onMouseEnter={(e) => {
-              if (activeTab !== item.id) {
-                e.currentTarget.style.backgroundColor =
-                  'var(--color-primary-100)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTab !== item.id) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }
-            }}
-          >
-            <span className="flex-shrink-0">
-              {iconMap[item.id] || item.icon}
-            </span>
-            <span>{item.label}</span>
-          </button>
-        ))}
+    <aside className="w-64 border-r flex-shrink-0 overflow-y-auto"
+           style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+      <nav className="p-4 space-y-1">
+        <h3 className="text-xs font-semibold uppercase tracking-wider px-4 py-2 mb-2"
+            style={{ color: 'var(--color-text-tertiary)' }}>
+          Navigation
+        </h3>
+        {navItems.map((item) => {
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onTabChange(item.id)}
+              className="w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center space-x-3 group relative"
+              style={{
+                backgroundColor: isActive ? 'var(--color-primary-600)' : 'transparent',
+                color: isActive ? 'white' : 'var(--color-text)',
+                fontWeight: isActive ? '600' : '500',
+              }}
+              onMouseEnter={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }
+              }}
+            >
+              {/* Active indicator bar */}
+              {isActive && (
+                <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full"
+                     style={{ backgroundColor: 'white' }}></div>
+              )}
+              <span className="flex-shrink-0">
+                {iconMap[item.id] || item.icon}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
+
+      {/* Version info at bottom */}
+      <div className="absolute bottom-0 left-0 w-64 p-4 border-t"
+           style={{ borderColor: 'var(--color-border)' }}>
+        <p className="text-xs text-center" style={{ color: 'var(--color-text-tertiary)' }}>
+          BizTrix CRM v2.0
+        </p>
+      </div>
     </aside>
   );
 };

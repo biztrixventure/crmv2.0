@@ -2,12 +2,10 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authMiddleware } = require('../middleware/authMiddleware');
+// Auth middleware is applied in server.js
 const { hasPermission, isSuperAdmin } = require('../models/helpers');
 
 const router = express.Router();
-
-router.use(authMiddleware);
 
 // ============================================================================
 // GET /forms/fields - Get all form fields

@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
-import { hasRoleAccess } from "./utils/roleRouting";
+import { ThemeProvider } from "./contexts/ThemeContext";
+import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
 import AdminPanel from "./pages/AdminPanel";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import CloserDashboard from "./pages/CloserDashboard";
@@ -23,10 +22,19 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
   }
 
   if (requiredRole && !hasRoleAccess(user?.role, requiredRole)) {
-    return <Navigate to="/dashboard" />;
+    // Redirect to their appropriate dashboard instead of generic /dashboard
+    const userRoute = getRoleRoute(user?.role);
+    return <Navigate to={userRoute} />;
   }
 
   return children;
+};
+
+// Smart Dashboard Redirector — redirects to role-specific dashboard
+const DashboardRedirect = () => {
+  const { user } = useAuth();
+  const roleRoute = getRoleRoute(user?.role);
+  return <Navigate to={roleRoute} replace />;
 };
 
 // App Content (inside context providers)
@@ -38,19 +46,19 @@ const AppContent = () => {
       <Routes>
         <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
 
-        {/* Default dashboard - accessible to all authenticated users */}
+        {/* Smart redirect — sends to role-appropriate dashboard */}
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <Dashboard />
+              <DashboardRedirect />
             </ProtectedRoute>
           }
         />
 
         {/* Admin Dashboard */}
         <Route
-          path="/admin"
+          path="/admin/*"
           element={
             <ProtectedRoute requiredRole="admin">
               <AdminPanel />
@@ -60,7 +68,7 @@ const AppContent = () => {
 
         {/* Company Admin Dashboard */}
         <Route
-          path="/company"
+          path="/company/*"
           element={
             <ProtectedRoute requiredRole="company_admin">
               <CompanyDashboard />
@@ -70,7 +78,7 @@ const AppContent = () => {
 
         {/* Closer Dashboard */}
         <Route
-          path="/closer"
+          path="/closer/*"
           element={
             <ProtectedRoute requiredRole="closer">
               <CloserDashboard />
@@ -80,7 +88,7 @@ const AppContent = () => {
 
         {/* Fronter Dashboard */}
         <Route
-          path="/fronter"
+          path="/fronter/*"
           element={
             <ProtectedRoute requiredRole="fronter">
               <FronterDashboard />
@@ -90,7 +98,7 @@ const AppContent = () => {
 
         {/* Operations Manager Dashboard */}
         <Route
-          path="/operations"
+          path="/operations/*"
           element={
             <ProtectedRoute requiredRole="operations_manager">
               <OperationsDashboard />
@@ -100,7 +108,7 @@ const AppContent = () => {
 
         {/* Closer Manager Dashboard */}
         <Route
-          path="/closer-manager"
+          path="/closer-manager/*"
           element={
             <ProtectedRoute requiredRole="closer_manager">
               <CloserManagerDashboard />
@@ -127,4 +135,3 @@ function App() {
 }
 
 export default App;
-

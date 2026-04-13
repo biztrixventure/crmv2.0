@@ -2,14 +2,11 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authMiddleware } = require('../middleware/authMiddleware');
+// Auth middleware is applied in server.js
 const { hasPermission, isSuperAdmin, getUserCompanies, assignUserToCompany } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-
-// All routes require authentication
-router.use(authMiddleware);
 
 // ============================================================================
 // GET /companies - List accessible companies

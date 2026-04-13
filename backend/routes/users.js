@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
+const { requireRole } = require('../middleware/authMiddleware');
 const logger = require('../utils/logger');
 const {
   getUserPermissions,
@@ -16,8 +16,7 @@ const { validatePassword, generateSecurePassword } = require('../utils/passwordV
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(authMiddleware);
+// Auth is applied in server.js — no duplicate middleware here
 
 // ============================================================================
 // GET /users - List company users (with filtering)

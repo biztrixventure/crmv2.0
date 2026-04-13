@@ -131,8 +131,13 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
         >
           <option value="">Select level</option>
           <option value="superadmin">SuperAdmin</option>
+          <option value="readonly_admin">Readonly Admin</option>
           <option value="company_admin">Company Admin</option>
           <option value="manager">Manager</option>
+          <option value="operations_manager">Operations Manager</option>
+          <option value="closer_manager">Closer Manager</option>
+          <option value="closer">Closer</option>
+          <option value="fronter">Fronter</option>
           <option value="operations">Operations</option>
         </select>
       </FormField>

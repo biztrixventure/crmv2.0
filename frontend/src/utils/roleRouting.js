@@ -4,7 +4,7 @@
  * Handles both underscore and non-underscore role naming conventions
  */
 
-// Role mapping - uses database role values as keys
+// Role mapping - uses database role level values as keys
 export const ROLE_ROUTES = {
   // Admin roles
   superadmin: '/admin',
@@ -19,14 +19,27 @@ export const ROLE_ROUTES = {
   // Specialist roles
   closer: '/closer',
   fronter: '/fronter',
-  manager: '/manager',
 
   // Manager roles
+  manager: '/operations',
   operations_manager: '/operations',
   operationsmanager: '/operations',
   operations: '/operations',
   closer_manager: '/closer-manager',
   closermanager: '/closer-manager',
+};
+
+// Role hierarchy - lower number = higher authority
+const ROLE_HIERARCHY = {
+  superadmin: 0,
+  readonlyadmin: 1,
+  companyadmin: 2,
+  manager: 3,
+  operationsmanager: 4,
+  closermanager: 5,
+  closer: 6,
+  fronter: 7,
+  operations: 8,
 };
 
 /**
@@ -66,7 +79,8 @@ export const getRoleRoute = (role) => {
 };
 
 /**
- * Check if a role has access to a specific route
+ * Check if a role has access to a specific route/required role
+ * Supports hierarchy: higher authority roles can access lower authority dashboards
  * @param {string} userRole - The user's role
  * @param {string} requiredRole - The role required for the route
  * @returns {boolean} - True if user has access
@@ -81,14 +95,22 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   // Exact normalized match
   if (normalizedUserRole === normalizedRequiredRole) return true;
 
-  // Admin roles have access to all admin routes
+  // SuperAdmin and ReadonlyAdmin can access ALL dashboards
   const adminRoles = ['superadmin', 'readonlyadmin'];
-  const adminRequiredRoles = ['superadmin', 'readonlyadmin', 'admin'];
-
-  if (adminRoles.includes(normalizedUserRole) && adminRequiredRoles.includes(normalizedRequiredRole)) {
+  if (adminRoles.includes(normalizedUserRole)) {
     return true;
   }
 
-  return false;
-};
+  // Company Admin can access company, closer, fronter, operations, closer-manager dashboards
+  if (normalizedUserRole === 'companyadmin') {
+    const companyAccessible = ['companyadmin', 'closer', 'fronter', 'manager', 'operationsmanager', 'closermanager', 'operations', 'admin'];
+    return companyAccessible.includes(normalizedRequiredRole);
+  }
 
+  // Managers can access their subordinate dashboards
+  const userLevel = ROLE_HIERARCHY[normalizedUserRole] ?? 999;
+  const requiredLevel = ROLE_HIERARCHY[normalizedRequiredRole] ?? 999;
+  
+  // Higher authority (lower number) can access lower authority dashboards
+  return userLevel <= requiredLevel;
+};

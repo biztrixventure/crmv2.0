@@ -116,12 +116,17 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
       return false;
     }
 
-    // Role hierarchy: superadmin (0) > company_admin (1) > manager (2) > operations (3)
+    // Role hierarchy: lower number = higher authority
     const roleHierarchy = {
       superadmin: 0,
-      company_admin: 1,
-      manager: 2,
-      operations: 3,
+      readonly_admin: 1,
+      company_admin: 2,
+      manager: 3,
+      operations_manager: 4,
+      closer_manager: 5,
+      closer: 6,
+      fronter: 7,
+      operations: 8,
     };
 
     // sourceRole.role_level is string ('superadmin', 'company_admin', etc)

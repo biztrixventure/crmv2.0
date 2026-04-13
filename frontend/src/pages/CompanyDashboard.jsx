@@ -1,63 +1,145 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Building2 } from "lucide-react";
-import { Card } from "../components/UI";
+import { Building2, Users, TrendingUp, DollarSign, ArrowUpRight, Activity } from "lucide-react";
+import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
+import { useDashboardStats } from "../hooks/useDashboardStats";
+import { useTransfers } from "../hooks/useTransfers";
+import { useSales } from "../hooks/useSales";
 
 const CompanyDashboard = () => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
+  const { transfers, loading: transfersLoading, fetchTransfers } = useTransfers(user?.company_id);
+  const { sales, loading: salesLoading, fetchSales } = useSales(user?.company_id);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
+  useEffect(() => {
+    fetchStats();
+    fetchTransfers();
+    fetchSales();
+  }, []);
+
+  const handleLogout = () => { logout(); navigate("/login"); };
+
+  const statusColors = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
+  const saleStatusColors = { open: 'info', closed_won: 'success', closed_lost: 'error' };
 
   return (
     <div className="min-h-screen bg-bg">
       <AppHeader
-        title="Company Admin Dashboard"
-        logo={
-          <div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
-            <Building2 className="text-white" size={24} />
-          </div>
-        }
-        theme={theme}
-        onThemeToggle={toggleTheme}
-        userEmail={user?.email}
-        userRole={user?.role_name || user?.role}
-        onLogout={handleLogout}
+        title="Company Admin"
+        logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Building2 className="text-white" size={24} /></div>}
+        theme={theme} onThemeToggle={toggleTheme}
+        userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
       />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
-          <p className="text-lg text-text-secondary">You're logged in as <strong>{user?.role_name || user?.role}</strong> in <strong>{user?.company_name}</strong></p>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8 animate-fade-in">
+          <h2 className="text-3xl font-bold mb-2 text-text">Company Overview</h2>
+          <p className="text-lg text-text-secondary">
+            Managing <strong>{user?.company_name}</strong>
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card className="p-6">
-            <p className="text-sm text-text-secondary mb-1">Active Users</p>
-            <p className="text-3xl font-bold text-text">0</p>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-text-secondary mb-1">Team Members</p>
+                <p className="text-3xl font-bold text-text">{statsLoading ? '—' : stats.teamSize || stats.totalUsers || 0}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-info-100 dark:bg-info-900"><Users size={22} className="text-info-600" /></div>
+            </div>
           </Card>
           <Card className="p-6">
-            <p className="text-sm text-text-secondary mb-1">Active Transfers</p>
-            <p className="text-3xl font-bold text-text">0</p>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-text-secondary mb-1">Active Transfers</p>
+                <p className="text-3xl font-bold text-text">{statsLoading ? '—' : stats.totalTransfers || 0}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-warning-100 dark:bg-warning-900"><Activity size={22} className="text-warning-600" /></div>
+            </div>
           </Card>
           <Card className="p-6">
-            <p className="text-sm text-text-secondary mb-1">Completed Sales</p>
-            <p className="text-3xl font-bold text-text">0</p>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-text-secondary mb-1">Total Sales</p>
+                <p className="text-3xl font-bold text-success-600">{statsLoading ? '—' : stats.totalSales || 0}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-success-100 dark:bg-success-900"><DollarSign size={22} className="text-success-600" /></div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-text-secondary mb-1">Conversion Rate</p>
+                <p className="text-3xl font-bold text-info-600">{statsLoading ? '—' : `${stats.conversionRate || 0}%`}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-info-100 dark:bg-info-900"><TrendingUp size={22} className="text-info-600" /></div>
+            </div>
           </Card>
         </div>
 
-        <Card className="p-6">
-          <h3 className="text-xl font-bold mb-4 text-text">Company Management</h3>
-          <p className="text-text-secondary">Company admin dashboard interface coming soon...</p>
-        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Recent Transfers */}
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
+              <Activity size={20} /> Recent Transfers
+            </h3>
+            {transfersLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div></div>
+            ) : transfers.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No transfers yet.</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {transfers.slice(0, 10).map(t => (
+                  <div key={t.id} className="p-3 rounded-lg border border-border hover:border-primary-400 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-text">{t.form_data?.customer_name || 'Transfer'}</p>
+                        <p className="text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <Badge variant={statusColors[t.status]} size="sm">{t.status}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Recent Sales */}
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
+              <DollarSign size={20} /> Recent Sales
+            </h3>
+            {salesLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div></div>
+            ) : sales.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No sales yet.</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {sales.slice(0, 10).map(s => (
+                  <div key={s.id} className="p-3 rounded-lg border border-border hover:border-primary-400 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-text">{s.transfers?.form_data?.customer_name || 'Sale'}</p>
+                        <p className="text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <Badge variant={saleStatusColors[s.status]} size="sm">
+                        {s.status === 'closed_won' ? 'Won' : s.status === 'closed_lost' ? 'Lost' : 'Open'}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       </main>
     </div>
   );
