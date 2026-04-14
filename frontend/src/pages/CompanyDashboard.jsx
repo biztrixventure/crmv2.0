@@ -8,6 +8,7 @@ import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
+import { useNotifications } from "../hooks/useNotifications";
 
 const CompanyDashboard = () => {
   const { user, logout } = useAuth();
@@ -16,6 +17,7 @@ const CompanyDashboard = () => {
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, loading: transfersLoading, fetchTransfers } = useTransfers(user?.company_id);
   const { sales, loading: salesLoading, fetchSales } = useSales(user?.company_id);
+  const notifHook = useNotifications();
 
   useEffect(() => {
     fetchStats();
@@ -35,6 +37,12 @@ const CompanyDashboard = () => {
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Building2 className="text-white" size={24} /></div>}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -124,15 +132,26 @@ const CompanyDashboard = () => {
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {sales.slice(0, 10).map(s => (
-                  <div key={s.id} className="p-3 rounded-lg border border-border hover:border-primary-400 transition-colors">
+                  <div key={s.id} className="p-3 rounded-xl border transition-all hover:shadow-md"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-text">{s.transfers?.form_data?.customer_name || 'Sale'}</p>
-                        <p className="text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</p>
+                        <p className="font-medium text-text">
+                          {s.customer_name || s.transfers?.form_data?.customer_name || 'Sale'}
+                        </p>
+                        {s.car_year && (
+                          <p className="text-xs text-text-secondary">{s.car_year} {s.car_make} {s.car_model}</p>
+                        )}
+                        <p className="text-xs text-text-tertiary mt-0.5">{new Date(s.created_at).toLocaleDateString()}</p>
                       </div>
-                      <Badge variant={saleStatusColors[s.status]} size="sm">
-                        {s.status === 'closed_won' ? 'Won' : s.status === 'closed_lost' ? 'Lost' : 'Open'}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant={saleStatusColors[s.status] || 'secondary'} size="sm">
+                          {s.status === 'closed_won' ? 'Won' : s.status === 'closed_lost' ? 'Lost' : s.status === 'sold' ? 'Sold' : 'Open'}
+                        </Badge>
+                        {s.monthly_payment && (
+                          <span className="text-xs font-semibold text-success-600">${s.monthly_payment}/mo</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}

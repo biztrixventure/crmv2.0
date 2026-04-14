@@ -8,6 +8,7 @@ import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
 import { useFormFields } from "../hooks/useFormFields";
+import { useNotifications } from "../hooks/useNotifications";
 
 const FronterDashboard = () => {
   const { user, logout } = useAuth();
@@ -16,6 +17,7 @@ const FronterDashboard = () => {
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, loading: transfersLoading, fetchTransfers, createTransfer } = useTransfers(user?.company_id);
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
+  const notifHook = useNotifications();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData] = useState({});
@@ -50,6 +52,12 @@ const FronterDashboard = () => {
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Users className="text-white" size={24} /></div>}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -153,20 +161,40 @@ const FronterDashboard = () => {
             ) : transfers.length === 0 ? (
               <p className="text-text-secondary text-center py-8">No leads created yet. Start by creating your first lead!</p>
             ) : (
-              <div className="space-y-3 max-h-[500px] overflow-y-auto">
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
                 {transfers.map(t => (
-                  <div key={t.id} className="p-4 rounded-lg border border-border hover:border-primary-400 transition-colors">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-semibold text-text">{t.form_data?.customer_name || 'Lead'}</p>
-                        <p className="text-sm text-text-secondary">{t.form_data?.customer_email || t.form_data?.customer_phone || ''}</p>
+                  <div key={t.id} className="p-4 rounded-xl border transition-all duration-150 hover:shadow-md"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                    <div className="flex items-start justify-between mb-1">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-text truncate">{t.form_data?.customer_name || 'Lead'}</p>
+                        <p className="text-xs text-text-secondary mt-0.5">
+                          {t.form_data?.customer_phone || t.form_data?.customer_email || ''}
+                        </p>
                       </div>
                       <Badge variant={statusColors[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                     </div>
-                    {t.form_data?.product_service && (
-                      <p className="text-sm text-text-tertiary">{t.form_data.product_service}</p>
-                    )}
-                    <p className="text-xs text-text-tertiary mt-1">{new Date(t.created_at).toLocaleDateString()}</p>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-3">
+                        {t.form_data?.product_service && (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                            {t.form_data.product_service}
+                          </span>
+                        )}
+                        {t.status === 'assigned' && (
+                          <span className="text-xs text-info-600 font-medium flex items-center gap-1">
+                            <Send size={10} /> Assigned to closer
+                          </span>
+                        )}
+                        {t.status === 'completed' && (
+                          <span className="text-xs text-success-600 font-medium flex items-center gap-1">
+                            <CheckCircle size={10} /> Converted to sale
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</p>
+                    </div>
                   </div>
                 ))}
               </div>

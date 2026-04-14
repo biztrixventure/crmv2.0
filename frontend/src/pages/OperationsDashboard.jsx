@@ -7,6 +7,7 @@ import { Card, Badge, Button } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
+import { useNotifications } from "../hooks/useNotifications";
 import client from "../api/client";
 
 const OperationsDashboard = () => {
@@ -15,8 +16,9 @@ const OperationsDashboard = () => {
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, loading: transfersLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
+  const notifHook = useNotifications();
   const [closers, setClosers] = useState([]);
-  const [assigning, setAssigning] = useState(null); // transferId being assigned
+  const [assigning, setAssigning] = useState(null);
 
   useEffect(() => {
     fetchStats();
@@ -56,6 +58,12 @@ const OperationsDashboard = () => {
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Settings className="text-white" size={24} /></div>}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

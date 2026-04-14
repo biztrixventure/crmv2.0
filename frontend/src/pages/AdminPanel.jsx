@@ -10,6 +10,7 @@ import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useFormFields } from "../hooks/useFormFields";
+import { useNotifications } from "../hooks/useNotifications";
 import {
   BarChart3, Users, Shield, Building2, FileText, TrendingUp, ArrowUpRight,
   Activity, Plus, Edit2, Trash2, GripVertical
@@ -146,6 +147,7 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("dashboard");
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
+  const notifHook = useNotifications();
 
   useEffect(() => { fetchStats(); }, []);
 
@@ -188,7 +190,15 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-bg">
       {/* Header */}
-      <AdminHeader theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout} />
+      <AdminHeader
+        theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
+      />
 
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
         {/* Sidebar */}

@@ -1,12 +1,9 @@
 import React from 'react';
 import { Moon, Sun, LogOut, Settings, User } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
+import NotificationBell from '../../UI/NotificationBell';
 
-/**
- * AdminHeader Component
- * Premium header with user info, theme toggle, and navigation
- */
-const AdminHeader = ({ theme, onToggleTheme, onLogout }) => {
+const AdminHeader = ({ theme, onToggleTheme, onLogout, notifications = [], unreadCount = 0, onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications }) => {
   const { user } = useAuth();
 
   return (
@@ -26,8 +23,16 @@ const AdminHeader = ({ theme, onToggleTheme, onLogout }) => {
             </div>
           </div>
 
-          {/* Right: User Info + Theme + Logout */}
+          {/* Right: Notifications + User Info + Theme + Logout */}
           <div className="flex items-center space-x-3">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkRead={onMarkRead}
+              onMarkAllRead={onMarkAllRead}
+              onDelete={onDeleteNotification}
+              onClearAll={onClearNotifications}
+            />
             {/* User Info */}
             <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl"
                  style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
