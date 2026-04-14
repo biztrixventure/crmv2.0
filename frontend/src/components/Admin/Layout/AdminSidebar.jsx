@@ -1,20 +1,27 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, ListChecks, Search, DollarSign } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
     label: 'Overview',
     items: [
-      { id: 'dashboard', label: 'Dashboard', icon: BarChart3, badge: null },
+      { id: 'dashboard',    label: 'Dashboard',    icon: BarChart3  },
     ],
   },
   {
     label: 'Management',
     items: [
-      { id: 'users',     label: 'Users',     icon: Users,     badge: null },
-      { id: 'roles',     label: 'Roles',     icon: Shield,    badge: null },
-      { id: 'companies', label: 'Companies', icon: Building2, badge: null },
-      { id: 'forms',     label: 'Form Builder', icon: FileText, badge: null },
+      { id: 'users',        label: 'Users',        icon: Users      },
+      { id: 'roles',        label: 'Roles',        icon: Shield     },
+      { id: 'companies',    label: 'Companies',    icon: Building2  },
+      { id: 'forms',        label: 'Form Builder', icon: FileText   },
+    ],
+  },
+  {
+    label: 'Sales',
+    items: [
+      { id: 'sale-configs', label: 'Sale Config',  icon: ListChecks },
+      { id: 'sale-search',  label: 'Sale Search',  icon: Search     },
     ],
   },
 ];

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Phone, Mail, MapPin, Car, DollarSign, FileText, Users, Calendar, Hash, Tag } from 'lucide-react';
 import client from '../../api/client';
+import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -49,7 +50,6 @@ const Input = ({ icon: Icon, prefix, ...props }) => (
   </div>
 );
 
-const PLANS = ['Signature', 'Basic', 'Premium', 'Elite', 'Gold', 'Platinum', 'Custom'];
 const STATUSES = [
   { value: 'sold',      label: 'SOLD',      color: '#22c55e' },
   { value: 'open',      label: 'PENDING',   color: '#f59e0b' },
@@ -67,6 +67,9 @@ const STATUSES = [
 const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
   const [fronters, setFronters] = useState([]);
   const [errors, setErrors] = useState({});
+  const { plans, clients, fetchConfigs } = useSaleConfigs(user?.company_id);
+
+  useEffect(() => { fetchConfigs(); }, [fetchConfigs]);
 
   // Pull customer info from the linked transfer if available
   const tfd = transfer?.form_data || {};
@@ -238,7 +241,7 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
           <Field label="Plan">
             <select name="plan" value={form.plan} onChange={onChange} className="input">
               <option value="">Select plan…</option>
-              {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
+              {plans.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
             </select>
           </Field>
           <Field label="Reference No" hint="Auto-generated if left blank">
@@ -310,12 +313,22 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
             </div>
           </Field>
 
-          {/* Client short name */}
-          <Field label="Client (short name)" hint='Internal reference, e.g. "Jim"'>
-            <Input
-              icon={Tag} name="client_name" value={form.client_name}
-              onChange={onChange} placeholder="Jim"
-            />
+          {/* Client dropdown (or free-text if no options) */}
+          <Field label="Client" hint='Internal client reference'>
+            {clients.length > 0 ? (
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Tag size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+                </div>
+                <select name="client_name" value={form.client_name} onChange={onChange} className="input pl-9">
+                  <option value="">Select client…</option>
+                  {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+                </select>
+              </div>
+            ) : (
+              <Input icon={Tag} name="client_name" value={form.client_name}
+                onChange={onChange} placeholder="Jim" />
+            )}
           </Field>
 
           {/* Sale date */}

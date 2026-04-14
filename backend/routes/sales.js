@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const notifications = require('../utils/notificationService');
+const { hasPermission, isSuperAdmin } = require('../models/helpers');
 
 const router = express.Router();
 
@@ -14,6 +15,50 @@ function generateReferenceNo() {
   const r = (s, n) => Array.from({ length: n }, () => s[Math.floor(Math.random() * s.length)]).join('');
   return r(alpha, 3) + r(num, 4) + r(alpha, 3);
 }
+
+// ============================================================================
+// GET /sales/search?q=...&company_id=... — Fast full-text sale search
+// Requires search_sales permission OR superadmin.
+// Uses pg_trgm GIN indexes for sub-10ms partial match on name/phone/ref/vin.
+// ============================================================================
+router.get('/search', asyncHandler(async (req, res) => {
+  const userId    = req.user.id;
+  const companyId = req.query.company_id || req.user.company_id;
+  const q         = (req.query.q || '').trim();
+
+  if (!q || q.length < 2) return res.json({ sales: [], total: 0 });
+
+  // Permission gate
+  const superadmin  = await isSuperAdmin(userId);
+  const canSearch   = superadmin || await hasPermission(userId, companyId, 'search_sales');
+  if (!canSearch) {
+    return res.status(403).json({ error: 'You do not have permission to search sale records' });
+  }
+
+  // Build OR filter across all searchable columns using ilike (leverages trgm GIN indexes)
+  const filter = [
+    `customer_name.ilike.%${q}%`,
+    `customer_phone.ilike.%${q}%`,
+    `customer_phone_2.ilike.%${q}%`,
+    `customer_email.ilike.%${q}%`,
+    `reference_no.ilike.%${q}%`,
+    `car_vin.ilike.%${q}%`,
+    `client_name.ilike.%${q}%`,
+  ].join(',');
+
+  const { data, error, count } = await supabaseAdmin
+    .from('sales')
+    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at', { count: 'exact' })
+    .eq('company_id', companyId)
+    .or(filter)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  logger.info('SEARCH_SALES', `q="${q}", hits=${count}, user=${userId}`);
+  res.json({ sales: data || [], total: count || 0 });
+}));
 
 // ============================================================================
 // GET /sales - List sales (role-based filtering)

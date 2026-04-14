@@ -16,6 +16,7 @@ const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const statsRoutes = require('./routes/stats');
 const notificationsRoutes = require('./routes/notifications');
+const saleConfigsRoutes = require('./routes/sale-configs');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,6 +73,7 @@ app.use('/api/roles', authMiddleware, rolesRoutes);
 app.use('/api/forms', authMiddleware, formsRoutes);
 app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
+app.use('/api/sale-configs', authMiddleware, saleConfigsRoutes);
 app.use('/api/stats', authMiddleware, statsRoutes);
 app.use('/api/notifications', authMiddleware, notificationsRoutes);
 
