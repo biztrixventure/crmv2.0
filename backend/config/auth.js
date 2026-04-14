@@ -30,26 +30,4 @@ const verifyToken = (token) => {
   }
 };
 
-/**
- * Generate a new JWT token (for testing or special cases)
- * Note: This generates a test token. In production, use Supabase auth.
- * @param {string} userId - User ID
- * @param {string} role - User role
- * @param {string} companyId - Company ID
- * @returns {string} JWT token
- */
-const generateToken = (userId, role, companyId) => {
-  const testSecret = '%!N:M)=C@v}d-{Vz';
-  return jwt.sign(
-    {
-      sub: userId,
-      role,
-      company_id: companyId,
-      iat: Math.floor(Date.now() / 1000),
-    },
-    testSecret,
-    { algorithm: 'HS256', expiresIn: '24h' }
-  );
-};
-
-module.exports = { verifyToken, generateToken };
+module.exports = { verifyToken };

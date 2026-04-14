@@ -16,8 +16,6 @@ const UserModal = ({ user = null, onClose, onSave }) => {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const response = await client.get('roles/permissions'); // Actually just get /roles
-        // Fetch roles instead
         const rolesRes = await client.get('roles');
         setRoles(rolesRes.data.roles || []);
       } catch (err) {

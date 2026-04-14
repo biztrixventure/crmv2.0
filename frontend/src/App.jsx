@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import AdminPanel from "./pages/AdminPanel";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import CloserDashboard from "./pages/CloserDashboard";
@@ -45,6 +47,8 @@ const AppContent = () => {
     <Router>
       <Routes>
         <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Smart redirect — sends to role-appropriate dashboard */}
         <Route

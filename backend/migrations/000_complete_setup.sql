@@ -135,21 +135,58 @@ CREATE TABLE IF NOT EXISTS transfers (
 
 -- 9. Sales table
 DO $$ BEGIN
-  CREATE TYPE sale_status AS ENUM ('open', 'closed_won', 'closed_lost');
+  CREATE TYPE sale_status AS ENUM ('open', 'closed_won', 'closed_lost', 'sold', 'cancelled', 'follow_up');
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
 
 CREATE TABLE IF NOT EXISTS sales (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  transfer_id UUID NOT NULL UNIQUE REFERENCES transfers(id) ON DELETE CASCADE,
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-  status sale_status DEFAULT 'open',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  id               UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- transfer_id is optional (standalone sales allowed)
+  transfer_id      UUID UNIQUE REFERENCES transfers(id) ON DELETE CASCADE,
+  created_by       UUID NOT NULL REFERENCES auth.users(id),
+  company_id       UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  status           sale_status DEFAULT 'open',
+  -- Customer info
+  customer_name    TEXT,
+  customer_phone   TEXT,
+  customer_phone_2 TEXT,
+  customer_email   TEXT,
+  customer_address TEXT,
+  -- Vehicle info
+  car_year         INTEGER,
+  car_make         TEXT,
+  car_model        TEXT,
+  car_miles        INTEGER,
+  car_vin          TEXT,
+  -- Deal details
+  plan             TEXT,
+  down_payment     NUMERIC(10,2),
+  monthly_payment  NUMERIC(10,2),
+  payment_due_note TEXT,
+  reference_no     TEXT,
+  client_name      TEXT,
+  -- People
+  fronter_id       UUID REFERENCES auth.users(id),
+  closer_id        UUID REFERENCES auth.users(id),
+  sale_date        DATE DEFAULT CURRENT_DATE,
+  created_at       TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 10. Audit Log table (for tracking changes)
+-- 10. Notifications table
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+  type       VARCHAR(60) NOT NULL,  -- 'transfer_created' | 'transfer_assigned' | 'sale_created' | 'sale_updated'
+  title      TEXT NOT NULL,
+  message    TEXT,
+  data       JSONB,                 -- { transfer_id, sale_id, reference_no, ... }
+  is_read    BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. Audit Log table (for tracking changes)
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id),
@@ -166,9 +203,16 @@ CREATE INDEX IF NOT EXISTS idx_transfers_created_by ON transfers(created_by);
 CREATE INDEX IF NOT EXISTS idx_transfers_assigned_to ON transfers(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_sales_company_id ON sales(company_id);
 CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by);
+CREATE INDEX IF NOT EXISTS idx_sales_reference_no ON sales(reference_no);
+CREATE INDEX IF NOT EXISTS idx_sales_fronter_id ON sales(fronter_id);
+CREATE INDEX IF NOT EXISTS idx_sales_closer_id ON sales(closer_id);
+CREATE INDEX IF NOT EXISTS idx_sales_sale_date ON sales(sale_date);
 CREATE INDEX IF NOT EXISTS idx_user_company_roles_user_id ON user_company_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_company_roles_company_id ON user_company_roles(company_id);
 CREATE INDEX IF NOT EXISTS idx_custom_roles_company_id ON custom_roles(company_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(user_id, is_read) WHERE is_read = false;
+CREATE INDEX IF NOT EXISTS idx_notifications_company ON notifications(company_id);
 
 -- Enable RLS on all tables
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
@@ -180,6 +224,7 @@ ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transfers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
@@ -445,6 +490,21 @@ CREATE POLICY "service_role_can_delete_sales" ON sales
   FOR DELETE USING (auth.role() = 'service_role');
 
 -- ============================================================================
+-- NOTIFICATIONS - Users see and manage only their own
+-- ============================================================================
+CREATE POLICY "users_see_own_notifications" ON notifications
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "users_update_own_notifications" ON notifications
+  FOR UPDATE USING (user_id = auth.uid());
+
+CREATE POLICY "service_role_can_insert_notifications" ON notifications
+  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_can_delete_notifications" ON notifications
+  FOR DELETE USING (auth.role() = 'service_role');
+
+-- ============================================================================
 -- AUDIT_LOGS - Admins and service role only
 -- ============================================================================
 CREATE POLICY "service_role_can_view_logs" ON audit_logs
@@ -490,7 +550,16 @@ INSERT INTO permissions (name, description, category) VALUES
 ('view_reports', 'Can view reports and analytics', 'reports'),
 
 -- Form Management
-('manage_forms', 'Can manage form fields', 'forms')
+('manage_forms', 'Can manage form fields', 'forms'),
+
+-- Extended Sales
+('delete_sale', 'Can delete sales', 'sales'),
+
+-- Transfers extended
+('delete_transfer', 'Can delete transfers', 'transfers'),
+
+-- Notifications
+('view_notifications', 'Can view own notifications', 'notifications')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
@@ -513,6 +582,13 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 INSERT INTO custom_roles (name, description, level, company_id, parent_role_id) VALUES
 ('Super Admin', 'Full system access - can manage all companies', 'superadmin', NULL, NULL)
+ON CONFLICT DO NOTHING;
+
+-- Grant ALL permissions to Super Admin
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM custom_roles r, permissions p
+WHERE r.name = 'Super Admin'
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================

@@ -15,6 +15,7 @@ const formsRoutes = require('./routes/forms');
 const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const statsRoutes = require('./routes/stats');
+const notificationsRoutes = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,6 +73,7 @@ app.use('/api/forms', authMiddleware, formsRoutes);
 app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
 app.use('/api/stats', authMiddleware, statsRoutes);
+app.use('/api/notifications', authMiddleware, notificationsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

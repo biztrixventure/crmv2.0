@@ -402,10 +402,10 @@ router.put(
     }
 
     const { id } = req.params;
-    const { first_name, last_name, role_id, is_active } = req.body;
+    const { first_name, last_name, role_id, is_active, company_id } = req.body;
     const userId = req.user.id;
 
-    logger.info('UPDATE_USER', `Updating user`, { id, userId, updates: { first_name, last_name, role_id, is_active } });
+    logger.info('UPDATE_USER', `Updating user`, { id, userId, updates: { first_name, last_name, role_id, is_active, company_id } });
 
     try {
       // Get the target user assignment
@@ -475,6 +475,7 @@ router.put(
       const updateData = {};
       if (role_id) updateData.role_id = role_id;
       if (is_active !== undefined) updateData.is_active = is_active;
+      if (company_id) updateData.company_id = company_id;
 
       if (Object.keys(updateData).length > 0) {
         logger.debug('UPDATE_USER', 'Updating user assignment', { id, updateData });
@@ -638,6 +639,64 @@ router.put(
       res.json({ message: "Password updated successfully" });
     } catch (err) {
       logger.error('UPDATE_PASSWORD', 'Unhandled exception', err);
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
+
+// ============================================================================
+// POST /users/:id/send-invite - Resend password reset email to a user
+// ============================================================================
+router.post(
+  "/:id/send-invite",
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const requesterId = req.user.id;
+
+    logger.info('SEND_INVITE', `Sending invite for assignment id=${id}`, { requestedBy: requesterId });
+
+    try {
+      // Fetch the user assignment to get user_id and company_id
+      const { data: target, error: fetchError } = await supabaseAdmin
+        .from("user_company_roles")
+        .select("user_id, company_id")
+        .eq("id", id)
+        .single();
+
+      if (fetchError || !target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Permission check
+      const hasPerm = await hasPermission(requesterId, target.company_id, "edit_user");
+      if (req.user.role !== "superadmin" && !hasPerm) {
+        return res.status(403).json({ error: "Permission denied" });
+      }
+
+      // Get user email from Supabase Auth
+      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(target.user_id);
+      if (authError || !authUser?.user?.email) {
+        return res.status(400).json({ error: "Could not retrieve user email" });
+      }
+
+      // Send password reset email (acts as invite/welcome email)
+      const { error: resetError } = await supabaseAdmin.auth.admin.generateLink({
+        type: "recovery",
+        email: authUser.user.email,
+        options: {
+          redirectTo: `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password`,
+        },
+      });
+
+      if (resetError) {
+        logger.error('SEND_INVITE', 'Failed to generate invite link', resetError);
+        return res.status(500).json({ error: "Failed to send invite email" });
+      }
+
+      logger.success('SEND_INVITE', `Invite sent to ${authUser.user.email}`);
+      res.json({ message: "Invite email sent successfully" });
+    } catch (err) {
+      logger.error('SEND_INVITE', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
   })

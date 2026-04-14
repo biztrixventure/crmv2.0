@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const notifications = require('../utils/notificationService');
 
 const router = express.Router();
 
@@ -112,6 +113,12 @@ router.post(
     }
 
     logger.success('CREATE_TRANSFER', `Transfer created: ${transfer.id}`);
+
+    // Notify managers asynchronously
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const fronterName = authUser?.user?.email || 'A fronter';
+    notifications.onTransferCreated({ transfer, fronterName }).catch(() => {});
+
     res.status(201).json({ transfer });
   })
 );
@@ -188,7 +195,68 @@ router.put(
     }
 
     logger.success('UPDATE_TRANSFER', `Transfer updated: ${id}`);
+
+    // Notify closer when newly assigned
+    if (assigned_to && assigned_to !== existing.assigned_to) {
+      notifications.onTransferAssigned({ transfer: updated, closerUserId: assigned_to }).catch(() => {});
+    }
+
     res.json({ transfer: updated });
+  })
+);
+
+// ============================================================================
+// DELETE /transfers/:id - Delete a transfer (creator or manager only)
+// ============================================================================
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    logger.info('DELETE_TRANSFER', `id=${id}, user=${userId}, role=${userRole}`);
+
+    const { data: existing, error: fetchError } = await supabaseAdmin
+      .from('transfers')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const isCreator = existing.created_by === userId;
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'operations_manager'].includes(userRole);
+
+    if (!isCreator && !isManager) {
+      return res.status(403).json({ error: 'You do not have permission to delete this transfer' });
+    }
+
+    // Prevent deleting transfers that are linked to a sale
+    const { data: linkedSale } = await supabaseAdmin
+      .from('sales')
+      .select('id')
+      .eq('transfer_id', id)
+      .single();
+
+    if (linkedSale) {
+      return res.status(409).json({ error: 'Cannot delete a transfer that has an associated sale' });
+    }
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('transfers')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      logger.error('DELETE_TRANSFER', 'Delete failed', deleteError);
+      return res.status(500).json({ error: deleteError.message });
+    }
+
+    logger.success('DELETE_TRANSFER', `Transfer deleted: ${id}`);
+    res.json({ message: 'Transfer deleted successfully' });
   })
 );
 

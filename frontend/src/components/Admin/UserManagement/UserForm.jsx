@@ -211,20 +211,26 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         </FormField>
       )}
 
-      {/* Company Display - EDIT MODE */}
+      {/* Company Selection - EDIT MODE */}
       {user && (
         <FormField
           label="Company"
-          hint="User is currently assigned to this company"
+          hint="Reassign user to a different company"
         >
-          <div className="input-disabled bg-bg-secondary p-3 rounded border border-border">
-            <p className="text-text">
-              {companies.find(c => c.id === user.company_id)?.name || 'Unknown Company'}
-            </p>
-            <p className="text-text-secondary text-sm mt-1">
-              Company reassignment not available in this version
-            </p>
-          </div>
+          <select
+            name="company_id"
+            value={formData.company_id}
+            onChange={handleInputChange}
+            disabled={companiesLoading}
+            className="input"
+          >
+            <option value="">Keep current company</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
         </FormField>
       )}
 

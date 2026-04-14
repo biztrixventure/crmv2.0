@@ -207,23 +207,55 @@ router.post(
   "/invite",
   [
     body("email").isEmail().normalizeEmail(),
+    body("company_id").isUUID(),
     body("role_id").isUUID(),
     body("first_name").trim().optional(),
     body("last_name").trim().optional(),
   ],
   asyncHandler(async (req, res) => {
-    // This would require auth middleware verification
-    // For now, just define the endpoint structure
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: "Validation failed", details: errors.array() });
+    }
 
-    const { email, role_id, first_name, last_name } = req.body;
+    const { email, company_id, role_id, first_name, last_name } = req.body;
 
-    // TODO: Implement invitation logic
-    // 1. Generate invitation token
-    // 2. Send email to user
-    // 3. Store invitation in database
-    // 4. User clicks link and completes signup
+    try {
+      // Create user via Supabase invite (sends email automatically)
+      const { data, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/accept-invite`,
+        data: { first_name, last_name },
+      });
 
-    res.status(501).json({ error: "Invitation endpoint not yet implemented" });
+      if (inviteError) {
+        return res.status(400).json({ error: inviteError.message });
+      }
+
+      const userId = data.user.id;
+
+      // Create user profile
+      await supabaseAdmin.from("user_profiles").upsert({
+        user_id: userId,
+        first_name: first_name || "",
+        last_name: last_name || "",
+        theme_preference: "light",
+      });
+
+      // Assign user to company with role
+      await supabaseAdmin.from("user_company_roles").insert({
+        user_id: userId,
+        company_id,
+        role_id,
+        is_active: true,
+      });
+
+      res.status(201).json({
+        message: "Invitation sent successfully",
+        user_id: userId,
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send invitation", details: err.message });
+    }
   })
 );
 
@@ -287,17 +319,34 @@ router.post(
 // ============================================================================
 router.post(
   "/reset-password",
-  [body("token_hash").trim(), body("new_password").isLength({ min: 6 })],
+  [body("token_hash").trim().notEmpty(), body("new_password").isLength({ min: 6 })],
   asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: "Validation failed", details: errors.array() });
+    }
+
     const { token_hash, new_password } = req.body;
 
     try {
-      const { data, error } = await supabaseClient.auth.updateUser({
-        password: new_password,
+      // Step 1: Verify the OTP token to get the user identity
+      const { data: otpData, error: otpError } = await supabaseClient.auth.verifyOtp({
+        token_hash,
+        type: "recovery",
       });
 
-      if (error) {
-        return res.status(400).json({ error: "Password reset failed" });
+      if (otpError || !otpData?.user) {
+        return res.status(400).json({ error: "Invalid or expired reset token" });
+      }
+
+      // Step 2: Update password using admin API (bypasses session requirement)
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+        otpData.user.id,
+        { password: new_password }
+      );
+
+      if (updateError) {
+        return res.status(400).json({ error: "Failed to update password" });
       }
 
       res.json({ message: "Password reset successfully" });

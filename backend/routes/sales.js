@@ -3,8 +3,17 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const notifications = require('../utils/notificationService');
 
 const router = express.Router();
+
+// Generate a reference number like "MBH4220SBN"
+function generateReferenceNo() {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const num   = '0123456789';
+  const r = (s, n) => Array.from({ length: n }, () => s[Math.floor(Math.random() * s.length)]).join('');
+  return r(alpha, 3) + r(num, 4) + r(alpha, 3);
+}
 
 // ============================================================================
 // GET /sales - List sales (role-based filtering)
@@ -32,26 +41,16 @@ router.get(
       `, { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    // Company filter  
-    if (companyId) {
-      query = query.eq('company_id', companyId);
-    }
+    if (companyId) query = query.eq('company_id', companyId);
 
-    // Role-based filtering
     if (userRole === 'closer') {
-      // Closers see only their own sales
-      query = query.eq('created_by', userId);
-    }
-    // Managers, company_admin, superadmin see all company sales
-
-    // Status filter
-    if (status) {
-      query = query.eq('status', status);
+      query = query.eq('closer_id', userId);
     }
 
-    // Pagination
+    if (status) query = query.eq('status', status);
+
     const offset = (page - 1) * limit;
-    query = query.range(offset, offset + limit - 1);
+    query = query.range(offset, offset + parseInt(limit) - 1);
 
     const { data, error, count } = await query;
 
@@ -70,13 +69,35 @@ router.get(
 );
 
 // ============================================================================
-// POST /sales - Create sale from a transfer (closers only)
+// POST /sales - Create sale (closer fills full sale details)
 // ============================================================================
 router.post(
   '/',
   [
-    body('transfer_id').isUUID().withMessage('Valid transfer ID is required'),
     body('company_id').isUUID().optional(),
+    body('transfer_id').isUUID().optional(),
+    // Customer info
+    body('customer_name').trim().notEmpty().withMessage('Customer name is required'),
+    body('customer_phone').trim().notEmpty().withMessage('Phone number is required'),
+    body('customer_phone_2').trim().optional(),
+    body('customer_email').isEmail().optional({ nullable: true, checkFalsy: true }),
+    body('customer_address').trim().optional(),
+    // Vehicle info
+    body('car_year').isInt({ min: 1900, max: 2100 }).optional({ nullable: true, checkFalsy: true }),
+    body('car_make').trim().optional(),
+    body('car_model').trim().optional(),
+    body('car_miles').isInt({ min: 0 }).optional({ nullable: true, checkFalsy: true }),
+    body('car_vin').trim().optional(),
+    // Deal info
+    body('plan').trim().optional(),
+    body('down_payment').isFloat({ min: 0 }).optional({ nullable: true, checkFalsy: true }),
+    body('monthly_payment').isFloat({ min: 0 }).optional({ nullable: true, checkFalsy: true }),
+    body('payment_due_note').trim().optional(),
+    body('reference_no').trim().optional(),
+    body('client_name').trim().optional(),
+    body('fronter_id').isUUID().optional({ nullable: true, checkFalsy: true }),
+    body('sale_date').isISO8601().optional({ nullable: true, checkFalsy: true }),
+    body('status').isIn(['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost']).optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -86,48 +107,69 @@ router.post(
 
     const userId = req.user.id;
     const companyId = req.body.company_id || req.user.company_id;
-    const { transfer_id } = req.body;
 
-    logger.info('CREATE_SALE', `user=${userId}, transfer=${transfer_id}`);
-
-    // Verify the transfer exists and is assigned to this user
-    const { data: transfer, error: transferError } = await supabaseAdmin
-      .from('transfers')
-      .select('*')
-      .eq('id', transfer_id)
-      .single();
-
-    if (transferError || !transfer) {
-      return res.status(404).json({ error: 'Transfer not found' });
+    if (!companyId) {
+      return res.status(400).json({ error: 'Company ID is required' });
     }
 
-    // Verify transfer is in correct state
-    if (transfer.status !== 'assigned' && transfer.status !== 'completed') {
-      return res.status(400).json({
-        error: 'Transfer must be in "assigned" or "completed" status to create a sale',
-        current_status: transfer.status,
-      });
+    logger.info('CREATE_SALE', `user=${userId}, company=${companyId}`);
+
+    const {
+      transfer_id,
+      customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
+      car_year, car_make, car_model, car_miles, car_vin,
+      plan, down_payment, monthly_payment, payment_due_note,
+      reference_no, client_name, fronter_id,
+      sale_date, status,
+    } = req.body;
+
+    // If linked to a transfer, validate it
+    if (transfer_id) {
+      const { data: transfer, error: tErr } = await supabaseAdmin
+        .from('transfers').select('*').eq('id', transfer_id).single();
+      if (tErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
+
+      const { data: existingSale } = await supabaseAdmin
+        .from('sales').select('id').eq('transfer_id', transfer_id).single();
+      if (existingSale) return res.status(409).json({ error: 'A sale already exists for this transfer' });
+
+      // Auto-complete the transfer
+      await supabaseAdmin.from('transfers')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', transfer_id);
     }
 
-    // Check if sale already exists for this transfer
-    const { data: existingSale } = await supabaseAdmin
-      .from('sales')
-      .select('id')
-      .eq('transfer_id', transfer_id)
-      .single();
+    const refNo = reference_no || generateReferenceNo();
 
-    if (existingSale) {
-      return res.status(409).json({ error: 'A sale already exists for this transfer' });
-    }
-
-    // Create the sale
     const { data: sale, error: saleError } = await supabaseAdmin
       .from('sales')
       .insert({
-        transfer_id,
+        transfer_id: transfer_id || null,
         created_by: userId,
-        company_id: companyId || transfer.company_id,
-        status: 'open',
+        company_id: companyId,
+        status: status || 'sold',
+        // Customer
+        customer_name,
+        customer_phone,
+        customer_phone_2: customer_phone_2 || null,
+        customer_email: customer_email || null,
+        customer_address: customer_address || null,
+        // Vehicle
+        car_year: car_year || null,
+        car_make: car_make || null,
+        car_model: car_model || null,
+        car_miles: car_miles || null,
+        car_vin: car_vin ? car_vin.toUpperCase() : null,
+        // Deal
+        plan: plan || null,
+        down_payment: down_payment || null,
+        monthly_payment: monthly_payment || null,
+        payment_due_note: payment_due_note || null,
+        reference_no: refNo,
+        client_name: client_name || null,
+        fronter_id: fronter_id || null,
+        closer_id: userId,
+        sale_date: sale_date || new Date().toISOString().split('T')[0],
       })
       .select()
       .single();
@@ -137,19 +179,47 @@ router.post(
       return res.status(500).json({ error: saleError.message });
     }
 
-    // Update transfer status to completed
-    await supabaseAdmin
-      .from('transfers')
-      .update({ status: 'completed', updated_at: new Date().toISOString() })
-      .eq('id', transfer_id);
+    logger.success('CREATE_SALE', `Sale created: ${sale.id} ref=${refNo}`);
 
-    logger.success('CREATE_SALE', `Sale created: ${sale.id} from transfer ${transfer_id}`);
+    // Fire notifications asynchronously (don't block response)
+    notifications.onSaleCreated({
+      sale,
+      fronterUserId: fronter_id || null,
+    }).catch(() => {});
+
     res.status(201).json({ sale });
   })
 );
 
 // ============================================================================
-// PUT /sales/:id - Update sale status
+// GET /sales/:id - Get a single sale
+// ============================================================================
+router.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    const { data: sale, error } = await supabaseAdmin
+      .from('sales')
+      .select('*, transfers(id, form_data, created_by)')
+      .eq('id', id)
+      .single();
+
+    if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
+
+    // Permission: creator, closer, or manager
+    const isOwner = sale.created_by === userId || sale.closer_id === userId;
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    if (!isOwner && !isManager) return res.status(403).json({ error: 'Access denied' });
+
+    res.json({ sale });
+  })
+);
+
+// ============================================================================
+// PUT /sales/:id - Update sale
 // ============================================================================
 router.put(
   '/:id',
@@ -157,55 +227,95 @@ router.put(
     const { id } = req.params;
     const userId = req.user.id;
     const userRole = req.user.role;
-    const { status } = req.body;
 
-    logger.info('UPDATE_SALE', `id=${id}, user=${userId}, status=${status}`);
+    logger.info('UPDATE_SALE', `id=${id}, user=${userId}`);
 
-    // Fetch existing sale
     const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('sales')
-      .select('*')
-      .eq('id', id)
-      .single();
+      .from('sales').select('*').eq('id', id).single();
+    if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
-    if (fetchError || !existing) {
-      return res.status(404).json({ error: 'Sale not found' });
-    }
-
-    // Permission check
-    const isCreator = existing.created_by === userId;
+    const isCreator = existing.created_by === userId || existing.closer_id === userId;
     const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
-    if (!isCreator && !isManager) {
-      return res.status(403).json({ error: 'You do not have permission to update this sale' });
-    }
+    const {
+      status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
+      car_year, car_make, car_model, car_miles, car_vin,
+      plan, down_payment, monthly_payment, payment_due_note,
+      reference_no, client_name, fronter_id, sale_date,
+    } = req.body;
 
-    // Validate status
-    const validStatuses = ['open', 'closed_won', 'closed_lost'];
+    const validStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
     if (status && !validStatuses.includes(status)) {
-      return res.status(400).json({
-        error: 'Invalid status',
-        allowed: validStatuses,
-      });
+      return res.status(400).json({ error: 'Invalid status', allowed: validStatuses });
     }
 
     const updates = { updated_at: new Date().toISOString() };
-    if (status) updates.status = status;
+    if (status !== undefined)          updates.status           = status;
+    if (customer_name !== undefined)   updates.customer_name    = customer_name;
+    if (customer_phone !== undefined)  updates.customer_phone   = customer_phone;
+    if (customer_phone_2 !== undefined) updates.customer_phone_2 = customer_phone_2;
+    if (customer_email !== undefined)  updates.customer_email   = customer_email;
+    if (customer_address !== undefined) updates.customer_address = customer_address;
+    if (car_year !== undefined)        updates.car_year         = car_year;
+    if (car_make !== undefined)        updates.car_make         = car_make;
+    if (car_model !== undefined)       updates.car_model        = car_model;
+    if (car_miles !== undefined)       updates.car_miles        = car_miles;
+    if (car_vin !== undefined)         updates.car_vin          = car_vin?.toUpperCase();
+    if (plan !== undefined)            updates.plan             = plan;
+    if (down_payment !== undefined)    updates.down_payment     = down_payment;
+    if (monthly_payment !== undefined) updates.monthly_payment  = monthly_payment;
+    if (payment_due_note !== undefined) updates.payment_due_note = payment_due_note;
+    if (reference_no !== undefined)    updates.reference_no     = reference_no;
+    if (client_name !== undefined)     updates.client_name      = client_name;
+    if (fronter_id !== undefined)      updates.fronter_id       = fronter_id;
+    if (sale_date !== undefined)       updates.sale_date        = sale_date;
 
     const { data: updated, error: updateError } = await supabaseAdmin
-      .from('sales')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+      .from('sales').update(updates).eq('id', id).select().single();
 
     if (updateError) {
       logger.error('UPDATE_SALE', 'Update failed', updateError);
       return res.status(500).json({ error: updateError.message });
     }
 
-    logger.success('UPDATE_SALE', `Sale updated: ${id}, status=${updated.status}`);
+    // Notify on status change
+    if (status && status !== existing.status) {
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const updaterName = authUser?.user?.email || 'Someone';
+      notifications.onSaleUpdated({ sale: updated, updaterName }).catch(() => {});
+    }
+
+    logger.success('UPDATE_SALE', `Sale updated: ${id}`);
     res.json({ sale: updated });
+  })
+);
+
+// ============================================================================
+// DELETE /sales/:id
+// ============================================================================
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    logger.info('DELETE_SALE', `id=${id}, user=${userId}`);
+
+    const { data: existing, error: fetchError } = await supabaseAdmin
+      .from('sales').select('*').eq('id', id).single();
+    if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
+
+    const isCreator = existing.created_by === userId;
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+
+    const { error: deleteError } = await supabaseAdmin.from('sales').delete().eq('id', id);
+    if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+    logger.success('DELETE_SALE', `Sale deleted: ${id}`);
+    res.json({ message: 'Sale deleted successfully' });
   })
 );
 

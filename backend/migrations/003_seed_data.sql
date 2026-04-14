@@ -41,16 +41,18 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 -- FORM_FIELDS - Default transfer form structure
 -- ============================================================================
-INSERT INTO form_fields (name, label, field_type, is_required, "order") VALUES
-('customer_name', 'Customer Name', 'text', true, 1),
-('customer_email', 'Email Address', 'email', true, 2),
-('customer_phone', 'Phone Number', 'phone', true, 3),
-('customer_company', 'Company Name', 'text', false, 4),
-('product_service', 'Product/Service Type', 'select', true, 5),
-('deal_value', 'Deal Value', 'number', false, 6),
-('deal_currency', 'Currency', 'select', false, 7),
-('notes', 'Additional Notes', 'textarea', false, 8),
-('follow_up_date', 'Follow-up Date', 'date', false, 9)
+INSERT INTO form_fields (name, label, field_type, is_required, "order", options) VALUES
+('customer_name', 'Customer Name', 'text', true, 1, NULL),
+('customer_email', 'Email Address', 'email', true, 2, NULL),
+('customer_phone', 'Phone Number', 'phone', true, 3, NULL),
+('customer_company', 'Company Name', 'text', false, 4, NULL),
+('product_service', 'Product/Service Type', 'select', true, 5,
+  '["SaaS", "Consulting", "Marketing", "IT Services", "E-commerce", "Real Estate", "Finance", "Insurance", "Education", "Healthcare", "Other"]'::jsonb),
+('deal_value', 'Deal Value', 'number', false, 6, NULL),
+('deal_currency', 'Currency', 'select', false, 7,
+  '["USD", "EUR", "GBP", "CAD", "AUD", "AED", "SAR", "EGP", "Other"]'::jsonb),
+('notes', 'Additional Notes', 'textarea', false, 8, NULL),
+('follow_up_date', 'Follow-up Date', 'date', false, 9, NULL)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================

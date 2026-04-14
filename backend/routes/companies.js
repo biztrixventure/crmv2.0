@@ -365,8 +365,7 @@ router.get(
           is_active,
           created_at,
           custom_roles (name, level),
-          user_profiles (first_name, last_name, avatar_url),
-          auth.users!inner (email)
+          user_profiles (first_name, last_name, avatar_url)
         `
         )
         .eq("company_id", companyId)
@@ -376,16 +375,21 @@ router.get(
         return res.status(400).json({ error: error.message });
       }
 
+      // Fetch emails from Supabase Auth admin API
+      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
+      const emailMap = {};
+      authUsers?.users?.forEach((u) => { emailMap[u.id] = u.email; });
+
       res.json({
-        total: data.length,
+        total: (data || []).length,
         members: (data || []).map((m) => ({
           id: m.id,
           user_id: m.user_id,
-          email: m.auth?.email,
+          email: emailMap[m.user_id] || "N/A",
           first_name: m.user_profiles?.first_name,
           last_name: m.user_profiles?.last_name,
-          role: m.custom_roles.name,
-          role_level: m.custom_roles.level,
+          role: m.custom_roles?.name,
+          role_level: m.custom_roles?.level,
           avatarUrl: m.user_profiles?.avatar_url,
         })),
       });

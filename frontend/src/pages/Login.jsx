@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { getRoleRoute } from "../utils/roleRouting";
+import { Link } from "react-router-dom";
 import { Moon, Sun, Lock, Mail, ArrowRight, Shield } from "lucide-react";
 import { Alert } from "../components/UI";
 import client from "../api/client";
@@ -122,7 +123,12 @@ const Login = () => {
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Password</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Password</label>
+                <Link to="/forgot-password" className="text-xs font-medium transition-colors hover:underline" style={{ color: 'var(--color-primary-500)' }}>
+                  Forgot password?
+                </Link>
+              </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Lock size={18} style={{ color: 'var(--color-text-tertiary)' }} />
