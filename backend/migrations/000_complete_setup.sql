@@ -186,7 +186,18 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. Audit Log table (for tracking changes)
+-- 11. Sale Configs table (dynamic Plans/Clients per company, managed by SuperAdmin)
+CREATE TABLE IF NOT EXISTS sale_configs (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  company_id UUID REFERENCES companies(id) ON DELETE CASCADE,  -- NULL = global default
+  type       VARCHAR(20) NOT NULL CHECK (type IN ('plan', 'client')),
+  value      TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(company_id, type, value)
+);
+
+-- 12. Audit Log table (for tracking changes)
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id),
@@ -213,6 +224,15 @@ CREATE INDEX IF NOT EXISTS idx_custom_roles_company_id ON custom_roles(company_i
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(user_id, is_read) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_notifications_company ON notifications(company_id);
+CREATE INDEX IF NOT EXISTS idx_sale_configs_company_type ON sale_configs(company_id, type);
+
+-- pg_trgm extension + GIN indexes for fast partial-text sale search
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_sales_search_name  ON sales USING gin (customer_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_sales_search_phone ON sales USING gin (customer_phone gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_sales_search_email ON sales USING gin (customer_email gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_sales_search_vin   ON sales USING gin (car_vin gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_sales_search_ref   ON sales USING gin (reference_no gin_trgm_ops);
 
 -- Enable RLS on all tables
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
@@ -225,6 +245,7 @@ ALTER TABLE form_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transfers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
@@ -505,6 +526,21 @@ CREATE POLICY "service_role_can_delete_notifications" ON notifications
   FOR DELETE USING (auth.role() = 'service_role');
 
 -- ============================================================================
+-- SALE_CONFIGS - Service role full access; users view global + their company
+-- ============================================================================
+CREATE POLICY "service_role_sale_configs_all" ON sale_configs
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "users_view_sale_configs" ON sale_configs
+  FOR SELECT USING (
+    company_id IS NULL
+    OR company_id IN (
+      SELECT company_id FROM user_company_roles
+      WHERE user_id = auth.uid() AND is_active = true
+    )
+  );
+
+-- ============================================================================
 -- AUDIT_LOGS - Admins and service role only
 -- ============================================================================
 CREATE POLICY "service_role_can_view_logs" ON audit_logs
@@ -559,7 +595,10 @@ INSERT INTO permissions (name, description, category) VALUES
 ('delete_transfer', 'Can delete transfers', 'transfers'),
 
 -- Notifications
-('view_notifications', 'Can view own notifications', 'notifications')
+('view_notifications', 'Can view own notifications', 'notifications'),
+
+-- Search
+('search_sales', 'Can search and view all sale records in the company', 'sales')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
@@ -589,6 +628,19 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM custom_roles r, permissions p
 WHERE r.name = 'Super Admin'
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- SALE_CONFIGS - Global default plans (available to all companies)
+-- ============================================================================
+INSERT INTO sale_configs (company_id, type, value, sort_order) VALUES
+  (NULL, 'plan', 'Signature', 1),
+  (NULL, 'plan', 'Basic',     2),
+  (NULL, 'plan', 'Premium',   3),
+  (NULL, 'plan', 'Elite',     4),
+  (NULL, 'plan', 'Gold',      5),
+  (NULL, 'plan', 'Platinum',  6),
+  (NULL, 'plan', 'Custom',    7)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
