@@ -13,7 +13,8 @@ import { useFormFields } from "../hooks/useFormFields";
 import { useNotifications } from "../hooks/useNotifications";
 import {
   BarChart3, Users, Shield, Building2, FileText, TrendingUp, ArrowUpRight,
-  Activity, Plus, Edit2, Trash2, GripVertical
+  Activity, Plus, Edit2, Trash2, GripVertical, DollarSign, Target,
+  CheckCircle, UserPlus, Layers,
 } from "lucide-react";
 
 // ============================================================================
@@ -158,38 +159,33 @@ const AdminPanel = () => {
 
   const navItems = [
     { id: "dashboard", label: "Dashboard" },
-    { id: "users", label: "Users" },
-    { id: "roles", label: "Roles" },
+    { id: "users",     label: "Users" },
+    { id: "roles",     label: "Roles" },
     { id: "companies", label: "Companies" },
-    { id: "forms", label: "Form Builder" },
+    { id: "forms",     label: "Form Builder" },
   ];
 
-  // Stat card component for dashboard
-  const StatCard = ({ icon: Icon, label, value, color = "primary", trend = null }) => (
-    <Card className="p-6 group hover:scale-[1.02] transition-transform duration-200">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-text-secondary mb-1">{label}</p>
-          <p className="text-3xl font-bold text-text">
-            {statsLoading ? <span className="animate-pulse-slow">—</span> : (value ?? 0)}
-          </p>
-          {trend !== null && (
-            <div className="flex items-center gap-1 mt-2">
-              <ArrowUpRight size={14} className="text-success-500" />
-              <span className="text-sm text-success-600">{trend}</span>
-            </div>
-          )}
-        </div>
-        <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
-          <Icon size={22} className={`text-${color}-600`} />
-        </div>
-      </div>
-    </Card>
-  );
+  // ── Stat metric cards ──
+  const metrics = [
+    { icon: Users,      label: 'Total Users',      value: stats.totalUsers,      sub: 'Active accounts',       accent: '#6366f1' },
+    { icon: Building2,  label: 'Companies',         value: stats.totalCompanies,  sub: 'Registered companies',  accent: '#10b981' },
+    { icon: Activity,   label: 'Transfers',         value: stats.totalTransfers,  sub: 'All time',              accent: '#f59e0b' },
+    { icon: DollarSign, label: 'Total Sales',       value: stats.totalSales,      sub: 'All closers',           accent: '#8b5cf6' },
+    { icon: CheckCircle,label: 'Won',               value: stats.closedWon,       sub: 'Closed won',            accent: '#10b981' },
+    { icon: Target,     label: 'Conversion',        value: stats.conversionRate ? `${stats.conversionRate}%` : '0%', sub: 'Transfer → sale', accent: '#3b82f6' },
+    { icon: Shield,     label: 'Roles',             value: stats.totalRoles,      sub: 'Permission groups',     accent: '#f59e0b' },
+    { icon: Layers,     label: 'Pending Transfers', value: stats.pendingTransfers, sub: 'Awaiting assignment',  accent: '#ef4444' },
+  ];
+
+  const quickActions = [
+    { id: 'users',     label: 'Manage Users',     desc: 'Create, edit, deactivate users',    icon: UserPlus,  accent: '#6366f1' },
+    { id: 'roles',     label: 'Configure Roles',  desc: 'Permissions and role hierarchy',    icon: Shield,    accent: '#f59e0b' },
+    { id: 'companies', label: 'Companies',         desc: 'Add and configure companies',       icon: Building2, accent: '#10b981' },
+    { id: 'forms',     label: 'Form Builder',      desc: 'Customize transfer intake fields',  icon: FileText,  accent: '#8b5cf6' },
+  ];
 
   return (
     <div className="min-h-screen bg-bg">
-      {/* Header */}
       <AdminHeader
         theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout}
         notifications={notifHook.notifications}
@@ -201,70 +197,156 @@ const AdminPanel = () => {
       />
 
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
-        {/* Sidebar */}
         <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-auto">
-          <div className="p-8">
+        <main className="flex-1 overflow-auto bg-bg">
+          <div className="p-6 lg:p-8 max-w-7xl">
+
+            {/* ── Dashboard ── */}
             {activeTab === "dashboard" && (
-              <div className="animate-fade-in">
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-text">Admin Dashboard</h2>
-                  <p className="text-text-secondary mt-1">System overview and quick metrics</p>
+              <div className="animate-fade-in space-y-8">
+
+                {/* Page header */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-text">
+                      Good day, {user?.first_name || 'Admin'}
+                    </h2>
+                    <p className="text-text-secondary mt-0.5 text-sm">
+                      Here's what's happening across BizTrix CRM
+                    </p>
+                  </div>
+                  <div className="text-right hidden sm:block">
+                    <p className="text-xs text-text-tertiary">
+                      {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                  <StatCard icon={Users} label="Total Users" value={stats.totalUsers} color="info" />
-                  <StatCard icon={Building2} label="Companies" value={stats.totalCompanies} color="success" />
-                  <StatCard icon={Shield} label="Roles" value={stats.totalRoles} color="warning" />
-                  <StatCard icon={Activity} label="Active Transfers" value={stats.totalTransfers} color="primary" />
+                {/* Metrics grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {metrics.map((m, i) => (
+                    <div key={i} className="rounded-2xl p-5 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5"
+                      style={{
+                        backgroundColor: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        boxShadow: 'var(--shadow-sm)',
+                      }}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                          style={{ backgroundColor: `${m.accent}18` }}>
+                          <m.icon size={19} style={{ color: m.accent }} />
+                        </div>
+                        {!statsLoading && (
+                          <div className="w-2 h-2 rounded-full mt-1" style={{ backgroundColor: m.accent }} />
+                        )}
+                      </div>
+                      <p className="text-2xl font-bold text-text mb-0.5">
+                        {statsLoading ? <span className="opacity-30">—</span> : (m.value ?? 0)}
+                      </p>
+                      <p className="text-xs font-semibold text-text truncate">{m.label}</p>
+                      <p className="text-xs text-text-tertiary truncate">{m.sub}</p>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  <StatCard icon={TrendingUp} label="Total Sales" value={stats.totalSales} color="success" />
-                  <StatCard icon={BarChart3} label="Won" value={stats.closedWon} color="success" />
-                  <StatCard icon={Activity} label="Conversion Rate" value={stats.conversionRate ? `${stats.conversionRate}%` : '0%'} color="info" />
-                </div>
+                {/* Sales pipeline bar */}
+                {!statsLoading && ((stats.closedWon || 0) + (stats.closedLost || 0)) > 0 && (
+                  <div className="rounded-2xl p-6"
+                    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-text">Sales Pipeline</h3>
+                        <p className="text-xs text-text-secondary">Won vs Lost breakdown</p>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded-full bg-success-500" />
+                          <span className="text-text-secondary">Won <strong className="text-success-600">{stats.closedWon || 0}</strong></span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded-full bg-error-500" />
+                          <span className="text-text-secondary">Lost <strong className="text-error-600">{stats.closedLost || 0}</strong></span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded-full bg-info-500" />
+                          <span className="text-text-secondary">Open <strong className="text-info-600">{stats.openSales || 0}</strong></span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-full h-3 rounded-full overflow-hidden flex gap-0.5"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {(() => {
+                        const total = (stats.closedWon || 0) + (stats.closedLost || 0) + (stats.openSales || 0);
+                        return total > 0 ? (
+                          <>
+                            <div className="h-full rounded-l-full bg-success-500 transition-all"
+                              style={{ width: `${((stats.closedWon || 0) / total) * 100}%` }} />
+                            <div className="h-full bg-info-500 transition-all"
+                              style={{ width: `${((stats.openSales || 0) / total) * 100}%` }} />
+                            <div className="h-full rounded-r-full bg-error-500 transition-all"
+                              style={{ width: `${((stats.closedLost || 0) / total) * 100}%` }} />
+                          </>
+                        ) : <div className="h-full w-full rounded-full bg-gray-200" />;
+                      })()}
+                    </div>
+                  </div>
+                )}
 
                 {/* Quick Actions */}
-                <h3 className="text-xl font-bold text-text mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <button onClick={() => setActiveTab('users')} className="card text-left hover:border-primary-500 group cursor-pointer p-5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-info-100 dark:bg-info-900"><Users size={20} className="text-info-600" /></div>
-                      <div>
-                        <p className="font-semibold text-text">Manage Users</p>
-                        <p className="text-sm text-text-secondary">Add, edit, or remove users</p>
-                      </div>
-                    </div>
-                  </button>
-                  <button onClick={() => setActiveTab('roles')} className="card text-left hover:border-primary-500 group cursor-pointer p-5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-warning-100 dark:bg-warning-900"><Shield size={20} className="text-warning-600" /></div>
-                      <div>
-                        <p className="font-semibold text-text">Manage Roles</p>
-                        <p className="text-sm text-text-secondary">Configure permissions</p>
-                      </div>
-                    </div>
-                  </button>
-                  <button onClick={() => setActiveTab('companies')} className="card text-left hover:border-primary-500 group cursor-pointer p-5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-success-100 dark:bg-success-900"><Building2 size={20} className="text-success-600" /></div>
-                      <div>
-                        <p className="font-semibold text-text">Manage Companies</p>
-                        <p className="text-sm text-text-secondary">Company configuration</p>
-                      </div>
-                    </div>
-                  </button>
+                <div>
+                  <h3 className="font-bold text-text mb-3 flex items-center gap-2">
+                    <span>Quick Actions</span>
+                  </h3>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {quickActions.map(action => (
+                      <button key={action.id} onClick={() => setActiveTab(action.id)}
+                        className="text-left p-4 rounded-2xl transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 group"
+                        style={{
+                          backgroundColor: 'var(--color-surface)',
+                          border: '1px solid var(--color-border)',
+                          boxShadow: 'var(--shadow-sm)',
+                        }}>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-3 transition-transform group-hover:scale-110"
+                          style={{ backgroundColor: `${action.accent}18` }}>
+                          <action.icon size={18} style={{ color: action.accent }} />
+                        </div>
+                        <p className="font-semibold text-sm text-text">{action.label}</p>
+                        <p className="text-xs text-text-secondary mt-0.5 leading-snug">{action.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Role access legend */}
+                <div className="rounded-2xl p-5"
+                  style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
+                  <h3 className="font-bold text-text mb-3 text-sm">Role Hierarchy</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: 'Super Admin',       color: '#6366f1' },
+                      { label: 'Company Admin',     color: '#8b5cf6' },
+                      { label: 'Closer Manager',    color: '#3b82f6' },
+                      { label: 'Operations Mgr',    color: '#f59e0b' },
+                      { label: 'Fronter',           color: '#10b981' },
+                      { label: 'Closer',            color: '#10b981' },
+                      { label: 'Operations',        color: '#6b7280' },
+                    ].map(r => (
+                      <span key={r.label} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium"
+                        style={{ backgroundColor: `${r.color}15`, color: r.color, border: `1px solid ${r.color}30` }}>
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: r.color }} />
+                        {r.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
-            {activeTab === "users" && <UserManagement />}
-            {activeTab === "roles" && <RoleManagement />}
+            {activeTab === "users"     && <UserManagement />}
+            {activeTab === "roles"     && <RoleManagement />}
             {activeTab === "companies" && <CompanyManagement />}
-            {activeTab === "forms" && <FormFieldManagement />}
+            {activeTab === "forms"     && <FormFieldManagement />}
           </div>
         </main>
       </div>

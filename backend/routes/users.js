@@ -217,6 +217,9 @@ router.get(
 // ============================================================================
 // POST /users - Create new user (Admin only)
 // ============================================================================
+// require_verification: true  → sends invite email, user must click to activate
+//                      false → creates immediately with email+password (no email needed)
+// ============================================================================
 router.post(
   "/",
   [
@@ -226,9 +229,10 @@ router.post(
     body("role_id").isUUID(),
     body("company_id").isUUID().optional(),
     body("password").optional().isLength({ min: 8 }),
+    body("require_verification").optional().isBoolean(),
   ],
   asyncHandler(async (req, res) => {
-    logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, first_name: req.body.first_name, last_name: req.body.last_name, role_id: req.body.role_id });
+    logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, first_name: req.body.first_name, last_name: req.body.last_name, role_id: req.body.role_id, require_verification: req.body.require_verification });
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -236,7 +240,8 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { email, first_name, last_name, role_id, company_id, password } = req.body;
+    const { email, first_name, last_name, role_id, company_id, password, require_verification } = req.body;
+    const needsVerification = require_verification === true || require_verification === 'true';
     const userId = req.user.id;
     const userCompanyId = company_id || req.user.company_id;
 
@@ -315,20 +320,38 @@ router.post(
         });
       }
 
-      // Create user in Supabase Auth with validated/generated password
-      logger.debug('CREATE_USER', 'Creating auth user in Supabase', { email, password_source: passwordSource });
-      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: finalPassword,
-        email_confirm: false,
-      });
+      // Create user in Supabase Auth
+      // - require_verification=true  → invite email sent, user clicks link to activate
+      // - require_verification=false → created immediately, password works right away
+      logger.debug('CREATE_USER', 'Creating auth user in Supabase', { email, password_source: passwordSource, needsVerification });
 
-      if (authError || !authUser.user) {
+      let authUser, authError;
+
+      if (needsVerification) {
+        // Invite flow: Supabase sends magic link — no password yet
+        const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          data: { first_name, last_name },
+        });
+        authUser = data;
+        authError = error;
+        passwordSource = 'invite-sent';
+      } else {
+        // Direct create: immediately active, no email click required
+        const { data, error } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: finalPassword,
+          email_confirm: true,  // mark confirmed — no verification step
+        });
+        authUser = data;
+        authError = error;
+      }
+
+      if (authError || !authUser?.user) {
         logger.error('CREATE_USER', 'Failed to create auth user', authError || new Error('No user data returned'));
         return res.status(400).json({ error: authError?.message || "Failed to create user" });
       }
 
-      logger.success('CREATE_USER', `Auth user created`, { user_id: authUser.user.id, email, password_source: passwordSource });
+      logger.success('CREATE_USER', `Auth user created`, { user_id: authUser.user.id, email, password_source: passwordSource, needsVerification });
 
       // Create user profile
       logger.debug('CREATE_USER', 'Creating user profile', { user_id: authUser.user.id });
@@ -363,7 +386,10 @@ router.post(
       logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id, password_source: passwordSource });
 
       res.status(201).json({
-        message: `User created successfully${password ? ' with provided password.' : '. Temporary password generated.'}`,
+        message: needsVerification
+          ? `Invitation sent to ${email}. User must verify email before logging in.`
+          : `User created successfully. They can log in immediately with the provided password.`,
+        require_verification: needsVerification,
         user: {
           id: authUser.user.id,
           email: authUser.user.email,

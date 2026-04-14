@@ -1,74 +1,112 @@
 import React from 'react';
-import {
-  BarChart3, Users, Shield, Building2, FileText,
-} from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight } from 'lucide-react';
 
-/**
- * AdminSidebar Component
- * Premium sidebar with icons and active state animations
- */
-const AdminSidebar = ({ navItems, activeTab, onTabChange }) => {
-  const iconMap = {
-    dashboard: <BarChart3 size={20} />,
-    users: <Users size={20} />,
-    roles: <Shield size={20} />,
-    companies: <Building2 size={20} />,
-    forms: <FileText size={20} />,
-  };
+const NAV_SECTIONS = [
+  {
+    label: 'Overview',
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: BarChart3, badge: null },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { id: 'users',     label: 'Users',     icon: Users,     badge: null },
+      { id: 'roles',     label: 'Roles',     icon: Shield,    badge: null },
+      { id: 'companies', label: 'Companies', icon: Building2, badge: null },
+      { id: 'forms',     label: 'Form Builder', icon: FileText, badge: null },
+    ],
+  },
+];
 
+const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) => {
   return (
-    <aside className="w-64 border-r flex-shrink-0 overflow-y-auto"
-           style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
-      <nav className="p-4 space-y-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wider px-4 py-2 mb-2"
-            style={{ color: 'var(--color-text-tertiary)' }}>
-          Navigation
-        </h3>
-        {navItems.map((item) => {
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onTabChange(item.id)}
-              className="w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center space-x-3 group relative"
-              style={{
-                backgroundColor: isActive ? 'var(--color-primary-600)' : 'transparent',
-                color: isActive ? 'white' : 'var(--color-text)',
-                fontWeight: isActive ? '600' : '500',
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
-                  e.currentTarget.style.transform = 'translateX(4px)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.transform = 'translateX(0)';
-                }
-              }}
-            >
-              {/* Active indicator bar */}
-              {isActive && (
-                <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full"
-                     style={{ backgroundColor: 'white' }}></div>
-              )}
-              <span className="flex-shrink-0">
-                {iconMap[item.id] || item.icon}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
+    <aside className="w-64 flex-shrink-0 flex flex-col"
+      style={{
+        backgroundColor: 'var(--color-surface)',
+        borderRight: '1px solid var(--color-border)',
+        height: 'calc(100vh - 64px)',
+        position: 'sticky',
+        top: 64,
+      }}>
+
+      {/* Nav sections */}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-5">
+        {NAV_SECTIONS.map(section => (
+          <div key={section.label}>
+            <p className="text-xs font-bold uppercase tracking-widest px-3 mb-2"
+              style={{ color: 'var(--color-text-tertiary)' }}>
+              {section.label}
+            </p>
+            <div className="space-y-0.5">
+              {section.items
+                .filter(item => navItems.find(n => n.id === item.id))
+                .map(item => {
+                  const isActive = activeTab === item.id;
+                  const badge = badgeCounts[item.id];
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => onTabChange(item.id)}
+                      className="w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-3 group"
+                      style={{
+                        background: isActive ? 'var(--gradient-sidebar)' : 'transparent',
+                        color: isActive ? 'white' : 'var(--color-text-secondary)',
+                        fontWeight: isActive ? '600' : '500',
+                        fontSize: '14px',
+                      }}
+                      onMouseEnter={e => {
+                        if (!isActive) e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      {/* Icon */}
+                      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all`}
+                        style={{
+                          backgroundColor: isActive ? 'rgba(255,255,255,0.2)' : 'var(--color-bg-secondary)',
+                        }}>
+                        <item.icon size={16}
+                          style={{ color: isActive ? 'white' : 'var(--color-text-secondary)' }} />
+                      </div>
+
+                      <span className="flex-1">{item.label}</span>
+
+                      {/* Badge */}
+                      {badge > 0 && (
+                        <span className="text-xs font-bold px-1.5 py-0.5 rounded-full min-w-5 text-center"
+                          style={{
+                            backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : '#ef4444',
+                            color: 'white',
+                          }}>
+                          {badge}
+                        </span>
+                      )}
+
+                      {/* Chevron */}
+                      {isActive && <ChevronRight size={14} style={{ color: 'rgba(255,255,255,0.7)' }} />}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        ))}
       </nav>
 
-      {/* Version info at bottom */}
-      <div className="absolute bottom-0 left-0 w-64 p-4 border-t"
-           style={{ borderColor: 'var(--color-border)' }}>
-        <p className="text-xs text-center" style={{ color: 'var(--color-text-tertiary)' }}>
-          BizTrix CRM v2.0
-        </p>
+      {/* Bottom: version */}
+      <div className="p-4 border-t flex-shrink-0"
+        style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            B
+          </div>
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>BizTrix CRM</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>v2.0</p>
+          </div>
+        </div>
       </div>
     </aside>
   );

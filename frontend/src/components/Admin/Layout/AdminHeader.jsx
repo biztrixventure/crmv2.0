@@ -1,82 +1,103 @@
 import React from 'react';
-import { Moon, Sun, LogOut, Settings, User } from 'lucide-react';
+import { Moon, Sun, LogOut, Settings } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
 
-const AdminHeader = ({ theme, onToggleTheme, onLogout, notifications = [], unreadCount = 0, onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications }) => {
+const AdminHeader = ({
+  theme, onToggleTheme, onLogout,
+  notifications = [], unreadCount = 0,
+  onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications,
+}) => {
   const { user } = useAuth();
+  const initials = user?.first_name
+    ? `${user.first_name[0]}${user.last_name?.[0] || ''}`.toUpperCase()
+    : (user?.email?.[0] || 'A').toUpperCase();
 
   return (
-    <nav className="header shadow-sm border-b sticky top-0 z-40"
-         style={{ borderColor: 'var(--color-border)', backdropFilter: 'blur(12px)' }}>
-      <div className="px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Left: Logo & Title */}
-          <div className="flex items-center space-x-4">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                 style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
-              <Settings size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>Admin Panel</h1>
-              <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>BizTrix CRM v2.0</p>
-            </div>
-          </div>
-
-          {/* Right: Notifications + User Info + Theme + Logout */}
-          <div className="flex items-center space-x-3">
-            <NotificationBell
-              notifications={notifications}
-              unreadCount={unreadCount}
-              onMarkRead={onMarkRead}
-              onMarkAllRead={onMarkAllRead}
-              onDelete={onDeleteNotification}
-              onClearAll={onClearNotifications}
-            />
-            {/* User Info */}
-            <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl"
-                 style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center"
-                   style={{ background: 'var(--gradient-sidebar)' }}>
-                <User size={16} className="text-white" />
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  {user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user?.email}
-                </p>
-                <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {user?.role_name || user?.role || 'Admin'}
-                </p>
-              </div>
-            </div>
-
-            {/* Theme Toggle */}
-            <button
-              onClick={onToggleTheme}
-              className="p-2.5 rounded-xl transition-all duration-300 hover:scale-105"
-              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
-              title="Toggle dark mode"
-            >
-              {theme === 'light' ? (
-                <Moon size={18} style={{ color: 'var(--color-text)' }} />
-              ) : (
-                <Sun size={18} style={{ color: 'var(--color-text)' }} />
-              )}
-            </button>
-
-            {/* Logout */}
-            <button
-              onClick={onLogout}
-              className="px-4 py-2.5 rounded-xl transition-all duration-300 flex items-center space-x-2 text-white font-medium hover:scale-105"
-              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
-            >
-              <LogOut size={16} />
-              <span className="hidden sm:inline">Logout</span>
-            </button>
-          </div>
+    <header
+      className="h-16 px-6 flex items-center justify-between sticky top-0 z-40"
+      style={{
+        backgroundColor: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border)',
+        backdropFilter: 'blur(12px)',
+        boxShadow: 'var(--shadow-sm)',
+      }}
+    >
+      {/* Left: Logo + Title */}
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
+          <Settings size={18} className="text-white" />
+        </div>
+        <div>
+          <h1 className="text-base font-bold leading-tight" style={{ color: 'var(--color-text)' }}>
+            Admin Panel
+          </h1>
+          <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
+            BizTrix CRM v2.0
+          </p>
+        </div>
+        {/* Divider */}
+        <div className="hidden sm:block w-px h-7 mx-2" style={{ backgroundColor: 'var(--color-border)' }} />
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+          style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+          <div className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse" />
+          Live
         </div>
       </div>
-    </nav>
+
+      {/* Right */}
+      <div className="flex items-center gap-2">
+        <NotificationBell
+          notifications={notifications}
+          unreadCount={unreadCount}
+          onMarkRead={onMarkRead}
+          onMarkAllRead={onMarkAllRead}
+          onDelete={onDeleteNotification}
+          onClearAll={onClearNotifications}
+        />
+
+        {/* Theme toggle */}
+        <button
+          onClick={onToggleTheme}
+          className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+          title="Toggle theme"
+        >
+          {theme === 'light'
+            ? <Moon size={17} style={{ color: 'var(--color-text-secondary)' }} />
+            : <Sun size={17} style={{ color: 'var(--color-text-secondary)' }} />
+          }
+        </button>
+
+        {/* User pill */}
+        <div className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            {initials}
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--color-text)' }}>
+              {user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user?.email}
+            </p>
+            <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
+              {user?.role_name || user?.role || 'Admin'}
+            </p>
+          </div>
+        </div>
+
+        {/* Logout */}
+        <button
+          onClick={onLogout}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 hover:scale-[1.02]"
+          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+        >
+          <LogOut size={15} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
+      </div>
+    </header>
   );
 };
 

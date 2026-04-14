@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Button, FormField } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
+import { Mail, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 
-/**
- * UserForm Component
- * Form to create/edit users
- */
+// Roles that require email verification by default (big roles)
+const HIGH_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'closer_manager', 'operations_manager', 'manager'];
+
 const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
   const { companies, loading: companiesLoading, fetchAvailableCompanies } = useCompanies();
   const [formData, setFormData] = useState({
@@ -15,15 +15,12 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
     role_id: '',
     password: '',
     company_id: '',
+    require_verification: false,
   });
   const [errors, setErrors] = useState({});
 
-  // Fetch available companies on mount
-  useEffect(() => {
-    fetchAvailableCompanies();
-  }, [fetchAvailableCompanies]);
+  useEffect(() => { fetchAvailableCompanies(); }, [fetchAvailableCompanies]);
 
-  // Initialize form with user data if editing
   useEffect(() => {
     if (user) {
       setFormData({
@@ -31,254 +28,202 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         first_name: user.first_name || '',
         last_name: user.last_name || '',
         role_id: user.role_id || '',
-        password: '', // Always empty in edit mode - only update if explicitly provided
-        company_id: user.company_id || '', // Show user's current company
+        password: '',
+        company_id: user.company_id || '',
+        require_verification: false,
       });
     } else {
-      // Pre-select user's primary company for CREATE mode
       const userCompanyId = localStorage.getItem('user_company_id');
-      setFormData((prev) => ({
-        ...prev,
-        company_id: userCompanyId || '',
-      }));
+      setFormData(prev => ({ ...prev, company_id: userCompanyId || '' }));
     }
   }, [user]);
 
-  // Validate form
+  // Auto-update require_verification when role changes
+  useEffect(() => {
+    if (!user && formData.role_id) {
+      const selectedRole = roles.find(r => r.id === formData.role_id);
+      if (selectedRole) {
+        const isHighRole = HIGH_ROLES.includes(selectedRole.level);
+        setFormData(prev => ({ ...prev, require_verification: isHighRole }));
+      }
+    }
+  }, [formData.role_id, roles, user]);
+
+  const selectedRole = roles.find(r => r.id === formData.role_id);
+  const isHighRole = selectedRole ? HIGH_ROLES.includes(selectedRole.level) : false;
+
   const validate = () => {
     const newErrors = {};
+    if (!formData.email || !formData.email.includes('@')) newErrors.email = 'Valid email is required';
+    if (!formData.first_name?.trim()) newErrors.first_name = 'First name is required';
+    if (!formData.last_name?.trim()) newErrors.last_name = 'Last name is required';
+    if (!formData.role_id) newErrors.role_id = 'Role is required';
+    if (!user && !formData.company_id) newErrors.company_id = 'Company is required';
 
-    if (!formData.email || !formData.email.includes('@')) {
-      newErrors.email = 'Valid email is required';
+    // Password only required when NOT using email verification
+    if (!user && !formData.require_verification) {
+      if (!formData.password?.trim()) newErrors.password = 'Password is required';
+      else if (formData.password.length < 8) newErrors.password = 'Minimum 8 characters';
     }
-
-    if (!formData.first_name || !formData.first_name.trim()) {
-      newErrors.first_name = 'First name is required';
-    }
-
-    if (!formData.last_name || !formData.last_name.trim()) {
-      newErrors.last_name = 'Last name is required';
-    }
-
-    if (!formData.role_id) {
-      newErrors.role_id = 'Role is required';
-    }
-
-    // Company validation - required in CREATE mode
-    if (!user && !formData.company_id) {
-      newErrors.company_id = 'Company is required';
-    }
-
-    // Password validation
-    if (!user) {
-      // CREATE mode: password is required
-      if (!formData.password || !formData.password.trim()) {
-        newErrors.password = 'Password is required';
-      } else if (formData.password.length < 8) {
-        newErrors.password = 'Password must be at least 8 characters';
-      }
-    } else {
-      // EDIT mode: password is optional (only update if provided)
-      if (formData.password && formData.password.length < 8) {
-        newErrors.password = 'Password must be at least 8 characters';
-      }
+    if (user && formData.password && formData.password.length < 8) {
+      newErrors.password = 'Minimum 8 characters';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (validate()) {
-      onSubmit(formData);
-    }
+    if (validate()) onSubmit(formData);
   };
 
-  // Handle input change
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-5">
+
+      {/* Name row */}
+      <div className="grid grid-cols-2 gap-4">
+        <FormField label="First Name" required error={errors.first_name}>
+          <input type="text" name="first_name" value={formData.first_name}
+            onChange={handleInputChange} placeholder="John" className="input" />
+        </FormField>
+        <FormField label="Last Name" required error={errors.last_name}>
+          <input type="text" name="last_name" value={formData.last_name}
+            onChange={handleInputChange} placeholder="Doe" className="input" />
+        </FormField>
+      </div>
+
       {/* Email */}
-      <FormField
-        label="Email Address"
-        required
-        error={errors.email}
-        hint="User will receive invitation at this email"
-      >
-        <input
-          type="email"
-          name="email"
-          value={formData.email}
-          onChange={handleInputChange}
-          disabled={user !== null}
-          placeholder="user@example.com"
-          className="input"
-        />
+      <FormField label="Email Address" required error={errors.email}>
+        <div className="relative">
+          <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          <input type="email" name="email" value={formData.email}
+            onChange={handleInputChange} disabled={user !== null}
+            placeholder="user@example.com"
+            className="input pl-9" />
+        </div>
       </FormField>
 
-      {/* First Name */}
-      <FormField
-        label="First Name"
-        required
-        error={errors.first_name}
-      >
-        <input
-          type="text"
-          name="first_name"
-          value={formData.first_name}
-          onChange={handleInputChange}
-          placeholder="John"
-          className="input"
-        />
-      </FormField>
-
-      {/* Last Name */}
-      <FormField
-        label="Last Name"
-        required
-        error={errors.last_name}
-      >
-        <input
-          type="text"
-          name="last_name"
-          value={formData.last_name}
-          onChange={handleInputChange}
-          placeholder="Doe"
-          className="input"
-        />
-      </FormField>
-
-      {/* Role Selection */}
-      <FormField
-        label="Role"
-        required
-        error={errors.role_id}
-        hint="Select the user's role in the company"
-      >
-        <select
-          name="role_id"
-          value={formData.role_id}
-          onChange={handleInputChange}
-          className="input"
-        >
+      {/* Role */}
+      <FormField label="Role" required error={errors.role_id}
+        hint={selectedRole ? `Level: ${selectedRole.level}` : 'Select the user\'s role'}>
+        <select name="role_id" value={formData.role_id}
+          onChange={handleInputChange} className="input">
           <option value="">Select a role</option>
-          {roles.map((role) => (
-            <option key={role.id} value={role.id}>
-              {role.name}
-            </option>
+          {roles.map(role => (
+            <option key={role.id} value={role.id}>{role.name}</option>
           ))}
         </select>
       </FormField>
 
-      {/* Company Selection - CREATE MODE */}
+      {/* Company — CREATE MODE */}
       {!user && (
-        <FormField
-          label="Company"
-          required
-          error={errors.company_id}
-          hint="Select the company to assign this user to"
-        >
-          <select
-            name="company_id"
-            value={formData.company_id}
-            onChange={handleInputChange}
-            disabled={companiesLoading}
-            className="input"
-          >
+        <FormField label="Company" required error={errors.company_id}
+          hint="Assign this user to a company">
+          <select name="company_id" value={formData.company_id}
+            onChange={handleInputChange} disabled={companiesLoading} className="input">
             <option value="">Select a company</option>
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
+            {companies.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </FormField>
       )}
 
-      {/* Company Selection - EDIT MODE */}
+      {/* Company — EDIT MODE */}
       {user && (
-        <FormField
-          label="Company"
-          hint="Reassign user to a different company"
-        >
-          <select
-            name="company_id"
-            value={formData.company_id}
-            onChange={handleInputChange}
-            disabled={companiesLoading}
-            className="input"
-          >
+        <FormField label="Company" hint="Reassign user to a different company">
+          <select name="company_id" value={formData.company_id}
+            onChange={handleInputChange} disabled={companiesLoading} className="input">
             <option value="">Keep current company</option>
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
+            {companies.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </FormField>
       )}
 
-      {/* Password - Different behavior for create vs edit */}
+      {/* Verification toggle — CREATE MODE only */}
       {!user && (
-        <FormField
-          label="Password"
-          required
-          error={errors.password}
-          hint="Minimum 8 characters. User will use this to log in."
-        >
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleInputChange}
-            placeholder="Enter password (min 8 characters)"
-            className="input"
-          />
+        <div className="rounded-xl border p-4 space-y-3"
+          style={{
+            borderColor: formData.require_verification ? 'var(--color-primary-400)' : 'var(--color-border)',
+            backgroundColor: formData.require_verification ? 'var(--color-primary-50, rgba(99,102,241,0.04))' : 'var(--color-bg-secondary)',
+          }}>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <div className="relative flex-shrink-0 mt-0.5">
+              <input type="checkbox" name="require_verification"
+                checked={formData.require_verification}
+                onChange={handleInputChange} className="sr-only" />
+              <div className={`w-10 h-6 rounded-full transition-colors duration-200 ${formData.require_verification ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${formData.require_verification ? 'translate-x-5' : 'translate-x-1'}`} />
+              </div>
+            </div>
+            <div>
+              <p className="font-semibold text-sm text-text flex items-center gap-2">
+                {formData.require_verification
+                  ? <><ShieldCheck size={15} className="text-primary-600" /> Require email verification</>
+                  : <><UserCheck size={15} className="text-success-600" /> Direct access (no email needed)</>
+                }
+              </p>
+              <p className="text-xs text-text-secondary mt-0.5">
+                {formData.require_verification
+                  ? 'User receives an invite email. They must click the link before they can log in.'
+                  : 'User can log in immediately using the email and password you set below.'
+                }
+              </p>
+              {isHighRole && (
+                <p className="text-xs mt-1 font-medium" style={{ color: 'var(--color-primary-600)' }}>
+                  Recommended: email verification for {selectedRole?.level} role
+                </p>
+              )}
+            </div>
+          </label>
+        </div>
+      )}
+
+      {/* Password — only show when NOT using verification */}
+      {!user && !formData.require_verification && (
+        <FormField label="Password" required error={errors.password}
+          hint="Min 8 characters. User logs in with this immediately.">
+          <div className="relative">
+            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+            <input type="password" name="password" value={formData.password}
+              onChange={handleInputChange}
+              placeholder="Min 8 characters"
+              className="input pl-9" />
+          </div>
         </FormField>
       )}
 
+      {/* Password — EDIT MODE */}
       {user && (
-        <FormField
-          label="Password"
-          error={errors.password}
-          hint="Leave blank to keep current password. Enter new password to reset it."
-        >
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleInputChange}
-            placeholder="Leave blank to keep current password"
-            className="input"
-          />
+        <FormField label="Reset Password" error={errors.password}
+          hint="Leave blank to keep current password.">
+          <div className="relative">
+            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+            <input type="password" name="password" value={formData.password}
+              onChange={handleInputChange}
+              placeholder="Leave blank to keep unchanged"
+              className="input pl-9" />
+          </div>
         </FormField>
       )}
 
-      {/* Submit Button */}
-      <div className="flex justify-end pt-6 border-t border-border">
-        <Button
-          type="submit"
-          variant="primary"
-          loading={isLoading}
-          disabled={isLoading}
-        >
-          {isLoading ? 'Saving...' : user ? 'Update User' : 'Create User'}
+      {/* Submit */}
+      <div className="flex justify-end pt-4 border-t border-border">
+        <Button type="submit" variant="primary" loading={isLoading} disabled={isLoading}
+          className="px-8">
+          {isLoading ? 'Saving...' : user
+            ? 'Update User'
+            : formData.require_verification ? 'Send Invite' : 'Create User'
+          }
         </Button>
       </div>
     </form>
