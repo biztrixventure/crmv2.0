@@ -250,10 +250,21 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 
 // ============================================================================
 // Check if is SuperAdmin
+// Does NOT require companyId — checks any active role across all companies.
 // ============================================================================
-const isSuperAdmin = async (userId, companyId) => {
-  const role = await getUserRole(userId, companyId);
-  return role?.role_level === 'superadmin'; // 'superadmin' = SuperAdmin role
+const isSuperAdmin = async (userId) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('custom_roles(level)')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (error || !data) return false;
+    return data.some(r => r.custom_roles?.level === 'superadmin');
+  } catch {
+    return false;
+  }
 };
 
 // ============================================================================
