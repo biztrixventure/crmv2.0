@@ -4,16 +4,19 @@ import client from "../api/client";
 export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser]   = useState(() => {
+  const [user, setUser]         = useState(() => {
     const stored = localStorage.getItem("user");
     return stored ? JSON.parse(stored) : null;
   });
-  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [token, setToken]       = useState(() => localStorage.getItem("token"));
+  const [isRefreshing, setIsRefreshing] = useState(!!localStorage.getItem("token")); // true while /auth/me is in-flight
   const refreshedRef = useRef(false);
 
   const login = useCallback((userData, accessToken) => {
     setUser(userData);
     setToken(accessToken);
+    setIsRefreshing(false); // login already has fresh data — skip /auth/me
+    refreshedRef.current = true;
     localStorage.setItem("user", JSON.stringify(userData));
     localStorage.setItem("token", accessToken);
   }, []);
@@ -21,6 +24,7 @@ export const AuthProvider = ({ children }) => {
   const logout = useCallback(() => {
     setUser(null);
     setToken(null);
+    setIsRefreshing(false);
     localStorage.removeItem("user");
     localStorage.removeItem("token");
     refreshedRef.current = false;
@@ -38,6 +42,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!token || refreshedRef.current) return;
     refreshedRef.current = true;
+    setIsRefreshing(true);
     client.get("auth/me")
       .then(res => {
         const fresh = res.data;
@@ -45,7 +50,10 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem("user", JSON.stringify(fresh));
       })
       .catch(() => {
-        // 401 → axios interceptor already redirects to /login
+        // 401 → axios interceptor already clears storage + redirects to /login
+      })
+      .finally(() => {
+        setIsRefreshing(false);
       });
   }, [token]);
 
@@ -64,6 +72,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateUser,
     hasPermission,
+    isRefreshing,
     isAuthenticated: !!user && !!token,
   };
 

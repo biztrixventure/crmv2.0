@@ -32,9 +32,21 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
   return children;
 };
 
-// Smart Dashboard Redirector — redirects to role-specific dashboard
+// Smart Dashboard Redirector — waits for /auth/me to resolve, then redirects
 const DashboardRedirect = () => {
-  const { user } = useAuth();
+  const { user, isRefreshing } = useAuth();
+
+  if (isRefreshing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: 'var(--color-primary-600)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Loading your dashboard…</p>
+        </div>
+      </div>
+    );
+  }
+
   const roleRoute = getRoleRoute(user?.role);
   return <Navigate to={roleRoute} replace />;
 };
