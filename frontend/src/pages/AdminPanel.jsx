@@ -283,7 +283,7 @@ const SaleSearchPanel = () => {
 // AdminPanel — main component
 // ============================================================================
 const AdminPanel = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -304,7 +304,7 @@ const AdminPanel = () => {
     { id: "companies",    label: "Companies"       },
     { id: "forms",        label: "Form Builder"    },
     { id: "sale-configs", label: "Sale Config"     },
-    { id: "sale-search",  label: "Sale Search"     },
+    ...(hasPermission('search_sales') ? [{ id: "sale-search", label: "Sale Search" }] : []),
   ];
 
   // ── Stat metric cards ──

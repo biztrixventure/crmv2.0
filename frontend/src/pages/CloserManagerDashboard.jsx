@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import SaleSearch from "../components/Sales/SaleSearch";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
-  Clock, CheckCircle, Hash, Car, User, ArrowRight,
+  Clock, CheckCircle, Hash, Car, User, ArrowRight, Search,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -19,7 +20,7 @@ const saleLabel = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follo
 const xferBadge = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
 
 const CloserManagerDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
@@ -154,6 +155,7 @@ const CloserManagerDashboard = () => {
             { key: 'sales',     label: 'All Sales',     icon: DollarSign },
             { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
             { key: 'team',      label: 'Team Stats',    icon: BarChart3 },
+            ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
@@ -379,6 +381,16 @@ const CloserManagerDashboard = () => {
               )}
             </Card>
           </div>
+        )}
+
+        {/* === Tab: Sale Search === */}
+        {activeTab === 'search' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
+              <Search size={20} /> Sale Record Search
+            </h3>
+            <SaleSearch companyId={user?.company_id} user={user} />
+          </Card>
         )}
       </main>
     </div>

@@ -2,11 +2,66 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin, supabaseClient } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { authMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+
+// ============================================================================
+// GET /auth/me — Returns fresh role + permissions for the logged-in user.
+// Called by frontend on app load to keep role/permissions in sync with DB.
+// ============================================================================
+router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+
+  const { data: userRoles } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('role_id, company_id, custom_roles(id, name, level), companies(name)')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!userRoles?.length) {
+    return res.status(401).json({ error: 'No active company assignment' });
+  }
+
+  const ur = userRoles[0];
+  const roleLevel = ur.custom_roles.level;
+
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('first_name, last_name')
+    .eq('user_id', userId)
+    .single();
+
+  // SuperAdmin gets every permission; others get role-specific
+  let userPermissions;
+  if (roleLevel === 'superadmin') {
+    const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
+    userPermissions = (allPerms || []).map(p => p.name);
+  } else {
+    const { data: perms } = await supabaseAdmin
+      .from('role_permissions')
+      .select('permissions(name)')
+      .eq('role_id', ur.role_id);
+    userPermissions = (perms || []).map(p => p.permissions.name);
+  }
+
+  res.json({
+    id: userId,
+    email: req.user.email,
+    role: roleLevel,
+    role_name: ur.custom_roles.name,
+    company_id: ur.company_id,
+    company_name: ur.companies?.name,
+    first_name: profile?.first_name,
+    last_name: profile?.last_name,
+    permissions: userPermissions,
+  });
+}));
 
 // ============================================================================
 // POST /auth/login - Login with email and password
