@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Zap } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useRoles } from '../../../hooks/useRoles';
+import client from '../../../api/client';
 import RoleList from './RoleList';
 import RoleModal from './RoleModal';
 
@@ -16,6 +17,8 @@ const RoleManagement = () => {
   const { roles, loading, error, fetchRoles, createRole, updateRole, deleteRole } = useRoles(user?.company_id);
   const [showModal, setShowModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState('');
 
   // Fetch roles on component mount
   useEffect(() => {
@@ -46,6 +49,23 @@ const RoleManagement = () => {
     }
   };
 
+  const handleSeedDefaults = async () => {
+    if (!window.confirm('Create default BLP roles for this company? Existing roles with same names will be skipped.')) return;
+    setSeeding(true);
+    setSeedMsg('');
+    try {
+      const res = await client.post(`roles/seed-defaults?company_id=${user.company_id}`);
+      setSeedMsg(`Created ${res.data.created} role(s). ${res.data.skipped} skipped (already exist).`);
+      fetchRoles();
+      setTimeout(() => setSeedMsg(''), 6000);
+    } catch (err) {
+      setSeedMsg(err.response?.data?.error || 'Seed failed');
+      setTimeout(() => setSeedMsg(''), 6000);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   // Handle modal save
   const handleSaveRole = async (roleData) => {
     try {
@@ -67,16 +87,39 @@ const RoleManagement = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-3xl font-bold text-text">Roles & Permissions</h2>
-        <Button
-          onClick={handleAddRole}
-          variant="primary"
-          size="md"
-          className="flex items-center gap-2"
-        >
-          <Plus size={20} />
-          <span>Create Role</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleSeedDefaults}
+            variant="secondary"
+            size="md"
+            loading={seeding}
+            disabled={seeding}
+            className="flex items-center gap-2"
+          >
+            <Zap size={16} />
+            <span>Seed BLP Defaults</span>
+          </Button>
+          <Button
+            onClick={handleAddRole}
+            variant="primary"
+            size="md"
+            className="flex items-center gap-2"
+          >
+            <Plus size={20} />
+            <span>Create Role</span>
+          </Button>
+        </div>
       </div>
+
+      {seedMsg && (
+        <Alert
+          type={seedMsg.includes('failed') || seedMsg.includes('error') ? 'error' : 'success'}
+          message={seedMsg}
+          className="mb-4"
+          dismissible
+          onDismiss={() => setSeedMsg('')}
+        />
+      )}
 
       {/* Error message */}
       {error && (

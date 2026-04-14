@@ -1,17 +1,19 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Users, Send, CheckCircle, PlusCircle, FileText, Clock } from "lucide-react";
+import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
 import { useFormFields } from "../hooks/useFormFields";
 import { useNotifications } from "../hooks/useNotifications";
+import CallbacksPage from "../components/Callbacks/CallbacksPage";
 
 const FronterDashboard = () => {
   const { user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState('transfers');
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
@@ -61,12 +63,35 @@ const FronterDashboard = () => {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8 animate-fade-in">
-          <h2 className="text-3xl font-bold mb-2 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
-          <p className="text-lg text-text-secondary">
+        <div className="mb-6 animate-fade-in">
+          <h2 className="text-3xl font-bold mb-1 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
+          <p className="text-text-secondary">
             <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>
           </p>
         </div>
+
+        {/* Tab bar */}
+        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {[
+            { key: 'transfers', label: 'My Transfers', icon: Send    },
+            { key: 'callbacks', label: 'Callbacks',    icon: Phone   },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+              style={{
+                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+              }}>
+              <tab.icon size={15} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'transfers' && <div>
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -201,6 +226,7 @@ const FronterDashboard = () => {
             )}
           </Card>
         </div>
+      </div>}
       </main>
     </div>
   );

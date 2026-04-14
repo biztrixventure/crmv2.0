@@ -16,7 +16,10 @@ const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const statsRoutes = require('./routes/stats');
 const notificationsRoutes = require('./routes/notifications');
-const saleConfigsRoutes = require('./routes/sale-configs');
+const saleConfigsRoutes   = require('./routes/sale-configs');
+const callbacksRoutes     = require('./routes/callbacks');
+const pushRoutes          = require('./routes/push');
+const { startCallbackScheduler } = require('./utils/callbackScheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -74,7 +77,9 @@ app.use('/api/forms', authMiddleware, formsRoutes);
 app.use('/api/transfers', authMiddleware, transfersRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
 app.use('/api/sale-configs', authMiddleware, saleConfigsRoutes);
-app.use('/api/stats', authMiddleware, statsRoutes);
+app.use('/api/callbacks',   authMiddleware, callbacksRoutes);
+app.use('/api/push',        authMiddleware, pushRoutes);
+app.use('/api/stats',       authMiddleware, statsRoutes);
 app.use('/api/notifications', authMiddleware, notificationsRoutes);
 
 // ============================================================================
@@ -122,6 +127,7 @@ app.use(errorHandler);
 // ============================================================================
 
 app.listen(PORT, () => {
+  startCallbackScheduler();
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Supabase URL: ${process.env.VITE_SUPABASE_URL}`);

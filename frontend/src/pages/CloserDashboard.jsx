@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Target, Clock,
-  CheckCircle, XCircle, Plus, Hash, User, Car,
+  CheckCircle, XCircle, Plus, Hash, User, Car, Phone,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -13,6 +13,7 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
 import SaleModal from "../components/Closer/SaleModal";
+import CallbacksPage from "../components/Callbacks/CallbacksPage";
 
 const statusBadge = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
 const saleBadge   = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
@@ -27,6 +28,7 @@ const CloserDashboard = () => {
   const { transfers, loading: tLoading, fetchTransfers } = useTransfers(user?.company_id);
   const { sales, loading: sLoading, fetchSales, createSale, updateSale } = useSales(user?.company_id);
   const notifHook = useNotifications();
+  const [activeTab, setActiveTab] = useState('sales');
 
   // Modal state
   const [modalOpen, setModalOpen]       = useState(false);
@@ -121,6 +123,29 @@ const CloserDashboard = () => {
             New Sale
           </button>
         </div>
+
+        {/* Tab bar */}
+        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {[
+            { key: 'sales',     label: 'My Sales',   icon: DollarSign },
+            { key: 'callbacks', label: 'Callbacks',  icon: Phone      },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+              style={{
+                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+              }}>
+              <tab.icon size={15} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'sales' && <div>
 
         {/* Alerts */}
         {saleSuccess && (
@@ -304,6 +329,7 @@ const CloserDashboard = () => {
             )}
           </Card>
         </div>
+        </div>}
       </main>
 
       {/* Sale Modal */}

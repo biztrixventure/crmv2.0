@@ -494,4 +494,110 @@ router.delete(
   })
 );
 
+// ============================================================================
+// POST /roles/seed-defaults?company_id=... — Create BLP default roles
+// Creates 6 standard sales-floor roles with correct permissions.
+// Skips any role whose name already exists for the company.
+// SuperAdmin only.
+// ============================================================================
+const BLP_DEFAULTS = [
+  {
+    name: 'Fronter',
+    description: 'Creates transfers/leads, manages own pipeline',
+    level: 'fronter',
+    permissions: ['create_transfer', 'view_own_transfers', 'update_transfer',
+                  'view_callbacks', 'manage_callbacks', 'view_notifications'],
+  },
+  {
+    name: 'Closer',
+    description: 'Converts assigned transfers to sales',
+    level: 'closer',
+    permissions: ['create_sale', 'view_own_sales', 'update_sale', 'view_own_transfers',
+                  'view_callbacks', 'manage_callbacks', 'view_notifications'],
+  },
+  {
+    name: 'Fronter Manager',
+    description: 'Manages fronter team, routes and assigns transfers',
+    level: 'manager',
+    permissions: ['create_transfer', 'view_own_transfers', 'view_team_transfers',
+                  'assign_transfer', 'update_transfer', 'delete_transfer',
+                  'create_user', 'view_reports',
+                  'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
+  },
+  {
+    name: 'Closer Manager',
+    description: 'Manages closer team, tracks all sales, can search records',
+    level: 'closer_manager',
+    permissions: ['create_sale', 'view_own_sales', 'view_team_sales', 'update_sale',
+                  'assign_transfer', 'view_team_transfers',
+                  'view_reports', 'search_sales', 'create_user',
+                  'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
+  },
+  {
+    name: 'Operations Manager',
+    description: 'Oversees ops, runs reports, searches all sale records',
+    level: 'operations_manager',
+    permissions: ['view_team_transfers', 'view_team_sales', 'update_sale', 'update_transfer',
+                  'view_reports', 'search_sales',
+                  'view_callbacks', 'view_team_callbacks', 'view_notifications'],
+  },
+  {
+    name: 'Company Admin',
+    description: 'Full company access — manages users, roles, forms, all data',
+    level: 'company_admin',
+    permissions: ['create_user', 'edit_user', 'delete_user', 'manage_roles',
+                  'create_transfer', 'view_team_transfers', 'assign_transfer', 'update_transfer', 'delete_transfer',
+                  'create_sale', 'view_team_sales', 'update_sale', 'delete_sale',
+                  'view_reports', 'manage_forms', 'view_company_members', 'search_sales',
+                  'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
+  },
+];
+
+router.post('/seed-defaults', asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const companyId = req.query.company_id || req.body.company_id || req.user.company_id;
+
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+
+  const superadmin = await isSuperAdmin(userId);
+  if (!superadmin) return res.status(403).json({ error: 'SuperAdmin only' });
+
+  // Fetch all permission IDs once
+  const { data: allPerms } = await supabaseAdmin.from('permissions').select('id, name');
+  const permMap = Object.fromEntries((allPerms || []).map(p => [p.name, p.id]));
+
+  // Fetch existing role names for this company to skip duplicates
+  const { data: existing } = await supabaseAdmin
+    .from('custom_roles')
+    .select('name')
+    .eq('company_id', companyId);
+  const existingNames = new Set((existing || []).map(r => r.name));
+
+  const created = [];
+  const skipped = [];
+
+  for (const tpl of BLP_DEFAULTS) {
+    if (existingNames.has(tpl.name)) { skipped.push(tpl.name); continue; }
+
+    const { data: role, error: roleErr } = await supabaseAdmin
+      .from('custom_roles')
+      .insert({ name: tpl.name, description: tpl.description, level: tpl.level, company_id: companyId })
+      .select()
+      .single();
+
+    if (roleErr) { logger.warn('SEED_ROLES', `Failed to create ${tpl.name}: ${roleErr.message}`); continue; }
+
+    const permIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
+    if (permIds.length > 0) {
+      await supabaseAdmin.from('role_permissions').insert(
+        permIds.map(pid => ({ role_id: role.id, permission_id: pid }))
+      );
+    }
+    created.push(tpl.name);
+  }
+
+  logger.success('SEED_ROLES', `Seeded defaults: created=${created.join(',')}, skipped=${skipped.join(',')}`);
+  res.json({ message: 'Default roles seeded', created, skipped });
+}));
+
 module.exports = router;
