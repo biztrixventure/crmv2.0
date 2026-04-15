@@ -22,8 +22,12 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (type) query = query.eq('type', type);
 
-  // Fetch both global (null) AND company-specific configs
-  query = query.or(`company_id.is.null,company_id.eq.${companyId}`);
+  // Fetch global (null) configs + company-specific if company_id present
+  if (companyId) {
+    query = query.or(`company_id.is.null,company_id.eq.${companyId}`);
+  } else {
+    query = query.is('company_id', null);
+  }
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });

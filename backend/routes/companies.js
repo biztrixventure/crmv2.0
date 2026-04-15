@@ -251,6 +251,14 @@ router.put(
         return res.status(400).json({ error: error.message });
       }
 
+      // Cascade: deactivate all users when company is deactivated
+      if (is_active === false) {
+        await supabaseAdmin
+          .from("user_company_roles")
+          .update({ is_active: false })
+          .eq("company_id", id);
+      }
+
       res.json({ message: "Company updated successfully", company: data });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -396,6 +404,47 @@ router.get(
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  })
+);
+
+// ============================================================================
+// DELETE /companies/:id — Deactivate company + all its users (SuperAdmin only)
+// Sales and transfers are kept intact.
+// ============================================================================
+router.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (req.user.role !== "superadmin") {
+      return res.status(403).json({ error: "Only SuperAdmin can delete companies" });
+    }
+
+    const { data: company, error: fetchErr } = await supabaseAdmin
+      .from("companies")
+      .select("id, name, is_active")
+      .eq("id", id)
+      .single();
+
+    if (fetchErr || !company) return res.status(404).json({ error: "Company not found" });
+
+    // Soft-delete: deactivate company
+    const { error: compErr } = await supabaseAdmin
+      .from("companies")
+      .update({ is_active: false })
+      .eq("id", id);
+
+    if (compErr) return res.status(500).json({ error: compErr.message });
+
+    // Cascade: deactivate all user assignments for this company
+    await supabaseAdmin
+      .from("user_company_roles")
+      .update({ is_active: false })
+      .eq("company_id", id);
+
+    res.json({
+      message: `Company "${company.name}" deactivated. All users deactivated. Sales and transfers preserved.`,
+    });
   })
 );
 

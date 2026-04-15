@@ -38,7 +38,15 @@ const authMiddleware = async (req, res, next) => {
       } else if (error) {
         logger.warn('AUTH_MIDDLEWARE', `Database query error: ${error.message}`);
       } else {
-        logger.warn('AUTH_MIDDLEWARE', `No active company assignments found for user ${token.sub}`);
+        // No company assignment — check SUPERADMIN_EMAIL env for system-level superadmin
+        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+        if (superadminEmails.includes(token.email)) {
+          userRole = 'superadmin';
+          userCompanyId = null;
+          logger.info('AUTH_MIDDLEWARE', `System superadmin identified: ${token.email}`);
+        } else {
+          logger.warn('AUTH_MIDDLEWARE', `No active company assignments found for user ${token.sub}`);
+        }
       }
     } catch (dbErr) {
       logger.warn('AUTH_MIDDLEWARE', `Could not fetch user role from database: ${dbErr.message}`);
