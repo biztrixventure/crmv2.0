@@ -29,14 +29,16 @@ export const useTransfers = (companyId = null) => {
     }
   }, [companyId]);
 
-  // Create a new transfer
-  const createTransfer = useCallback(async (formData) => {
+  // Create a new transfer — payload must include assigned_closer_id
+  const createTransfer = useCallback(async (payload) => {
     setLoading(true);
     setError(null);
     try {
+      const { assigned_closer_id, ...rest } = payload;
       const response = await client.post('transfers', {
-        company_id: companyId,
-        form_data: formData,
+        company_id:         companyId,
+        form_data:          rest,
+        assigned_closer_id,
       });
       const newTransfer = response.data.transfer;
       setTransfers(prev => [newTransfer, ...prev]);

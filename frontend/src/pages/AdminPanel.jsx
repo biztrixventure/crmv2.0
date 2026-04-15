@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
@@ -9,137 +9,17 @@ import { UserManagement } from "../components/Admin/UserManagement";
 import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useDashboardStats } from "../hooks/useDashboardStats";
-import { useFormFields } from "../hooks/useFormFields";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import SaleSearch from "../components/Sales/SaleSearch";
+import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
 import {
   BarChart3, Users, Shield, Building2, FileText, TrendingUp, ArrowUpRight,
   Activity, Plus, Edit2, Trash2, GripVertical, DollarSign, Target,
   CheckCircle, UserPlus, Layers, Search, Tag, ListChecks, X,
 } from "lucide-react";
 
-// ============================================================================
-// FormFieldManagement — inline in AdminPanel for simplicity
-// ============================================================================
-const FormFieldManagement = () => {
-  const { fields, loading, error, fetchFields, createField, updateField, deleteField } = useFormFields();
-  const [showForm, setShowForm] = useState(false);
-  const [editingField, setEditingField] = useState(null);
-  const [formData, setFormData] = useState({ name: '', label: '', field_type: 'text', is_required: false, order: 0, options: null });
-
-  useEffect(() => { fetchFields(); }, []);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingField) {
-        await updateField(editingField.id, formData);
-      } else {
-        await createField(formData);
-      }
-      setShowForm(false);
-      setEditingField(null);
-      setFormData({ name: '', label: '', field_type: 'text', is_required: false, order: 0, options: null });
-    } catch (err) { /* hook handles error */ }
-  };
-
-  const handleEdit = (field) => {
-    setEditingField(field);
-    setFormData({ name: field.name, label: field.label, field_type: field.field_type, is_required: field.is_required, order: field.order || 0, options: field.options });
-    setShowForm(true);
-  };
-
-  const handleDelete = async (fieldId) => {
-    if (window.confirm('Delete this form field?')) {
-      try { await deleteField(fieldId); } catch (err) { /* hook handles error */ }
-    }
-  };
-
-  const fieldTypes = ['text', 'email', 'number', 'textarea', 'select', 'date', 'phone'];
-
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-bold text-text">Form Fields</h2>
-        <button onClick={() => { setShowForm(!showForm); setEditingField(null); setFormData({ name: '', label: '', field_type: 'text', is_required: false, order: 0, options: null }); }}
-          className="btn-primary flex items-center gap-2">
-          <Plus size={20} />
-          <span>{showForm ? 'Cancel' : 'Add Field'}</span>
-        </button>
-      </div>
-
-      {error && <div className="alert alert-error mb-4"><p>{error}</p></div>}
-
-      {showForm && (
-        <Card className="p-6 mb-6 animate-slide-up">
-          <h3 className="text-xl font-bold mb-4 text-text">{editingField ? 'Edit Field' : 'New Field'}</h3>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Field Name (key)</label>
-              <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
-                className="input" placeholder="customer_name" required disabled={!!editingField} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Display Label</label>
-              <input type="text" value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })}
-                className="input" placeholder="Customer Name" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Field Type</label>
-              <select value={formData.field_type} onChange={e => setFormData({ ...formData, field_type: e.target.value })}
-                className="input">
-                {fieldTypes.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Display Order</label>
-              <input type="number" value={formData.order} onChange={e => setFormData({ ...formData, order: parseInt(e.target.value) || 0 })}
-                className="input" />
-            </div>
-            <div className="flex items-center gap-2 col-span-full">
-              <input type="checkbox" id="required" checked={formData.is_required}
-                onChange={e => setFormData({ ...formData, is_required: e.target.checked })}
-                className="rounded border-border" />
-              <label htmlFor="required" className="text-sm text-text">Required field</label>
-            </div>
-            <div className="col-span-full flex justify-end gap-3">
-              <button type="button" onClick={() => { setShowForm(false); setEditingField(null); }} className="btn-secondary">Cancel</button>
-              <button type="submit" className="btn-primary">{editingField ? 'Update' : 'Create'} Field</button>
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
-      ) : (
-        <div className="space-y-3">
-          {fields.length === 0 ? (
-            <Card className="p-8 text-center"><p className="text-text-secondary">No form fields configured yet.</p></Card>
-          ) : fields.sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => (
-            <Card key={field.id} className="p-4 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <GripVertical size={18} className="text-text-tertiary" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-text">{field.label}</p>
-                    {field.is_required && <Badge variant="error" size="sm">Required</Badge>}
-                  </div>
-                  <p className="text-sm text-text-secondary">{field.name} • {field.field_type}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => handleEdit(field)} className="p-2 rounded-lg hover:bg-primary-100 transition-colors"><Edit2 size={16} /></button>
-                <button onClick={() => handleDelete(field.id)} className="p-2 rounded-lg hover:bg-error-100 transition-colors text-error-600"><Trash2 size={16} /></button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+// FormFieldManagement replaced by FormBuilder (drag-drop 3-col) — see FormBuilder.jsx
 
 // ============================================================================
 // SaleConfigManager — manage Plans and Client options
@@ -490,7 +370,7 @@ const AdminPanel = () => {
             {activeTab === "users"        && <UserManagement />}
             {activeTab === "roles"        && <RoleManagement />}
             {activeTab === "companies"    && <CompanyManagement />}
-            {activeTab === "forms"        && <FormFieldManagement />}
+            {activeTab === "forms"        && <FormBuilder />}
             {activeTab === "sale-configs" && <SaleConfigManager />}
             {activeTab === "sale-search"  && <SaleSearchPanel />}
           </div>

@@ -7,257 +7,302 @@ const notifications = require('../utils/notificationService');
 
 const router = express.Router();
 
-// ============================================================================
-// GET /transfers - List transfers (role-based filtering)
-// ============================================================================
-router.get(
-  '/',
-  asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const companyId = req.query.company_id || req.user.company_id;
-    const userRole = req.user.role;
-    const { status, page = 1, limit = 50 } = req.query;
-
-    logger.info('GET_TRANSFERS', `user=${userId}, role=${userRole}, company=${companyId}`);
-
-    let query = supabaseAdmin
-      .from('transfers')
-      .select(`
-        *,
-        user_profiles!transfers_created_by_fkey (first_name, last_name)
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false });
-
-    // Company filter
-    if (companyId) {
-      query = query.eq('company_id', companyId);
-    }
-
-    // Role-based filtering
-    switch (userRole) {
-      case 'fronter':
-        // Fronters see only their own created transfers
-        query = query.eq('created_by', userId);
-        break;
-      case 'closer':
-        // Closers see only transfers assigned to them
-        query = query.eq('assigned_to', userId);
-        break;
-      // Managers, company_admin, superadmin see all company transfers (no extra filter)
-    }
-
-    // Status filter
-    if (status) {
-      query = query.eq('status', status);
-    }
-
-    // Pagination
-    const offset = (page - 1) * limit;
-    query = query.range(offset, offset + limit - 1);
-
-    const { data, error, count } = await query;
-
-    if (error) {
-      logger.error('GET_TRANSFERS', 'Query failed', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.json({
-      transfers: data || [],
-      total: count || 0,
-      page: parseInt(page),
-      limit: parseInt(limit),
-    });
-  })
-);
+const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'operations_manager', 'closer_manager'];
 
 // ============================================================================
-// POST /transfers - Create a new transfer (fronters/managers)
+// GET /transfers
 // ============================================================================
-router.post(
-  '/',
-  [
-    body('form_data').isObject().withMessage('Form data is required'),
-    body('company_id').isUUID().optional(),
-  ],
-  asyncHandler(async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+router.get('/', asyncHandler(async (req, res) => {
+  const userId    = req.user.id;
+  const companyId = req.query.company_id || req.user.company_id;
+  const userRole  = req.user.role;
+  const { status, page = 1, limit = 50, search } = req.query;
 
-    const userId = req.user.id;
-    const companyId = req.body.company_id || req.user.company_id;
-    const { form_data } = req.body;
+  let query = supabaseAdmin
+    .from('transfers')
+    .select(`
+      *,
+      user_profiles!transfers_created_by_fkey (first_name, last_name),
+      closer:user_profiles!transfers_assigned_closer_id_fkey (first_name, last_name)
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false });
 
-    logger.info('CREATE_TRANSFER', `user=${userId}, company=${companyId}`);
+  if (companyId) query = query.eq('company_id', companyId);
 
-    if (!companyId) {
-      return res.status(400).json({ error: 'Company ID is required' });
-    }
+  switch (userRole) {
+    case 'fronter':
+      query = query.eq('created_by', userId);
+      break;
+    case 'closer':
+      query = query.eq('assigned_closer_id', userId);
+      break;
+    // managers see all company transfers
+  }
 
-    const { data: transfer, error } = await supabaseAdmin
-      .from('transfers')
-      .insert({
-        company_id: companyId,
-        created_by: userId,
-        form_data,
-        status: 'pending',
-      })
-      .select()
-      .single();
+  if (status) query = query.eq('status', status);
 
-    if (error) {
-      logger.error('CREATE_TRANSFER', 'Insert failed', error);
-      return res.status(500).json({ error: error.message });
-    }
+  if (search) {
+    query = query.or(
+      `form_data->>'customer_name'.ilike.%${search}%,form_data->>'customer_phone'.ilike.%${search}%`
+    );
+  }
 
-    logger.success('CREATE_TRANSFER', `Transfer created: ${transfer.id}`);
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  query = query.range(offset, offset + parseInt(limit) - 1);
 
-    // Notify managers asynchronously
-    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-    const fronterName = authUser?.user?.email || 'A fronter';
-    notifications.onTransferCreated({ transfer, fronterName }).catch(() => {});
+  const { data, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
 
-    res.status(201).json({ transfer });
-  })
-);
+  res.json({ transfers: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
 
 // ============================================================================
-// PUT /transfers/:id - Update transfer (status, assignment)
+// GET /transfers/closers — list available closers in a company (for fronter picker)
 // ============================================================================
-router.put(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
-    const { status, assigned_to, form_data } = req.body;
+router.get('/closers', asyncHandler(async (req, res) => {
+  const companyId = req.query.company_id || req.user.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-    logger.info('UPDATE_TRANSFER', `id=${id}, user=${userId}, role=${userRole}`);
+  const { data, error } = await supabaseAdmin
+    .from('user_company_roles')
+    .select(`
+      user_id,
+      custom_roles (level, name),
+      user_profiles (first_name, last_name, email)
+    `)
+    .eq('company_id', companyId)
+    .eq('is_active', true);
 
-    // Fetch existing transfer
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('transfers')
-      .select('*')
-      .eq('id', id)
-      .single();
+  if (error) return res.status(500).json({ error: error.message });
 
-    if (fetchError || !existing) {
-      return res.status(404).json({ error: 'Transfer not found' });
-    }
+  const closers = (data || [])
+    .filter(r => r.custom_roles?.level === 'closer')
+    .map(r => ({
+      id:         r.user_id,
+      first_name: r.user_profiles?.first_name || '',
+      last_name:  r.user_profiles?.last_name  || '',
+      email:      r.user_profiles?.email      || '',
+      role_name:  r.custom_roles?.name        || 'Closer',
+    }));
 
-    // Permission check
-    const isCreator = existing.created_by === userId;
-    const isAssignee = existing.assigned_to === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'operations_manager', 'operations'].includes(userRole);
+  res.json({ closers });
+}));
 
-    if (!isCreator && !isAssignee && !isManager) {
-      return res.status(403).json({ error: 'You do not have permission to update this transfer' });
-    }
+// ============================================================================
+// POST /transfers — fronter creates + directly assigns to a closer
+// ============================================================================
+router.post('/', [
+  body('form_data').isObject().withMessage('form_data required'),
+  body('assigned_closer_id').isUUID().withMessage('assigned_closer_id (UUID) required'),
+  body('company_id').isUUID().optional(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
 
-    // Validate status transitions
-    const validTransitions = {
-      pending: ['assigned', 'cancelled'],
-      assigned: ['completed', 'cancelled', 'pending'],
-      completed: [], // Final state
-      cancelled: ['pending'], // Can be reopened
+  const userId    = req.user.id;
+  const companyId = req.body.company_id || req.user.company_id;
+  const { form_data, assigned_closer_id } = req.body;
+
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+
+  const { data: transfer, error } = await supabaseAdmin
+    .from('transfers')
+    .insert({
+      company_id:         companyId,
+      created_by:         userId,
+      form_data,
+      assigned_closer_id,
+      assigned_to:        assigned_closer_id, // keep backward compat
+      status:             'assigned',         // directly assigned, no pending queue
+    })
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Notify closer + floor managers
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const fronterName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A fronter';
+
+  notifications.onTransferCreated({ transfer, fronterName, closerUserId: assigned_closer_id }).catch(() => {});
+
+  res.status(201).json({ transfer });
+}));
+
+// ============================================================================
+// POST /transfers/:id/reject — closer rejects a transfer
+// ============================================================================
+router.post('/:id/reject', [
+  body('reason').isString().notEmpty().withMessage('Rejection reason required'),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
+
+  const { id } = req.params;
+  const userId  = req.user.id;
+  const { reason } = req.body;
+
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('transfers')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
+
+  // Only the assigned closer can reject
+  if (existing.assigned_closer_id !== userId) {
+    return res.status(403).json({ error: 'Only the assigned closer can reject this transfer' });
+  }
+
+  if (!['assigned'].includes(existing.status)) {
+    return res.status(400).json({ error: `Cannot reject a transfer with status: ${existing.status}` });
+  }
+
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('transfers')
+    .update({
+      status:            'rejected',
+      rejected_by:       userId,
+      rejection_reason:  reason,
+      rejected_at:       new Date().toISOString(),
+      rejection_count:   (existing.rejection_count || 0) + 1,
+      assigned_closer_id: null,
+      assigned_to:        null,
+      updated_at:        new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  // Notify fronter + managers
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const closerName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A closer';
+
+  notifications.onTransferRejected({ transfer: existing, closerName, reason }).catch(() => {});
+
+  res.json({ transfer: updated });
+}));
+
+// ============================================================================
+// PUT /transfers/:id — update transfer (reassign, edit with reason for managers)
+// ============================================================================
+router.put('/:id', asyncHandler(async (req, res) => {
+  const { id }     = req.params;
+  const userId     = req.user.id;
+  const userRole   = req.user.role;
+  const { status, assigned_closer_id, form_data, reason } = req.body;
+
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('transfers')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
+
+  const isCreator  = existing.created_by === userId;
+  const isManager  = MANAGER_ROLES.includes(userRole);
+
+  if (!isCreator && !isManager) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+
+  // If manager is editing form_data, reason is required
+  if (form_data && isManager && !reason) {
+    return res.status(400).json({ error: 'A reason is required when editing transfer data' });
+  }
+
+  const updates = { updated_at: new Date().toISOString() };
+  if (status) updates.status = status;
+
+  // Reassign to a different closer
+  if (assigned_closer_id) {
+    updates.assigned_closer_id = assigned_closer_id;
+    updates.assigned_to        = assigned_closer_id;
+    if (!status) updates.status = 'assigned';
+    // Reset rejection state on reassignment
+    updates.rejected_by       = null;
+    updates.rejection_reason  = null;
+    updates.rejected_at       = null;
+  }
+
+  // Edit form_data — append to audit trail
+  if (form_data) {
+    updates.form_data = form_data;
+    const historyEntry = {
+      editor_id:    userId,
+      reason:       reason || 'No reason provided',
+      edited_at:    new Date().toISOString(),
     };
+    updates.edit_history = supabaseAdmin.rpc ? undefined : existing.edit_history; // will use raw array below
+    const currentHistory = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+    updates.edit_history = [...currentHistory, historyEntry];
+  }
 
-    if (status && !validTransitions[existing.status]?.includes(status)) {
-      return res.status(400).json({
-        error: `Invalid status transition: ${existing.status} → ${status}`,
-        allowed: validTransitions[existing.status],
-      });
-    }
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('transfers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
 
-    // Build update
-    const updates = { updated_at: new Date().toISOString() };
-    if (status) updates.status = status;
-    if (assigned_to) updates.assigned_to = assigned_to;
-    if (form_data) updates.form_data = form_data;
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
 
-    // Auto-set status to 'assigned' when assigning a closer
-    if (assigned_to && !status && existing.status === 'pending') {
-      updates.status = 'assigned';
-    }
+  // Notify closer when reassigned
+  if (assigned_closer_id && assigned_closer_id !== existing.assigned_closer_id) {
+    notifications.onTransferCreated({
+      transfer: updated,
+      fronterName: 'Manager',
+      closerUserId: assigned_closer_id,
+    }).catch(() => {});
+  }
 
-    const { data: updated, error: updateError } = await supabaseAdmin
-      .from('transfers')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+  // Notify fronter when form_data edited by manager
+  if (form_data && reason) {
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const editorName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A manager';
+    notifications.onTransferEdited({ transfer: { ...updated, _editorId: userId }, editorName, reason }).catch(() => {});
+  }
 
-    if (updateError) {
-      logger.error('UPDATE_TRANSFER', 'Update failed', updateError);
-      return res.status(500).json({ error: updateError.message });
-    }
-
-    logger.success('UPDATE_TRANSFER', `Transfer updated: ${id}`);
-
-    // Notify closer when newly assigned
-    if (assigned_to && assigned_to !== existing.assigned_to) {
-      notifications.onTransferAssigned({ transfer: updated, closerUserId: assigned_to }).catch(() => {});
-    }
-
-    res.json({ transfer: updated });
-  })
-);
+  res.json({ transfer: updated });
+}));
 
 // ============================================================================
-// DELETE /transfers/:id - Delete a transfer (creator or manager only)
+// DELETE /transfers/:id
 // ============================================================================
-router.delete(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
 
-    logger.info('DELETE_TRANSFER', `id=${id}, user=${userId}, role=${userRole}`);
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('transfers')
+    .select('*')
+    .eq('id', id)
+    .single();
 
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('transfers')
-      .select('*')
-      .eq('id', id)
-      .single();
+  if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
-    if (fetchError || !existing) {
-      return res.status(404).json({ error: 'Transfer not found' });
-    }
+  const isCreator = existing.created_by === userId;
+  const isManager = MANAGER_ROLES.includes(userRole);
 
-    const isCreator = existing.created_by === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'operations_manager'].includes(userRole);
+  if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
-    if (!isCreator && !isManager) {
-      return res.status(403).json({ error: 'You do not have permission to delete this transfer' });
-    }
+  const { data: linkedSale } = await supabaseAdmin
+    .from('sales')
+    .select('id')
+    .eq('transfer_id', id)
+    .single();
 
-    // Prevent deleting transfers that are linked to a sale
-    const { data: linkedSale } = await supabaseAdmin
-      .from('sales')
-      .select('id')
-      .eq('transfer_id', id)
-      .single();
+  if (linkedSale) return res.status(409).json({ error: 'Cannot delete a transfer linked to a sale' });
 
-    if (linkedSale) {
-      return res.status(409).json({ error: 'Cannot delete a transfer that has an associated sale' });
-    }
+  const { error: delErr } = await supabaseAdmin.from('transfers').delete().eq('id', id);
+  if (delErr) return res.status(500).json({ error: delErr.message });
 
-    const { error: deleteError } = await supabaseAdmin
-      .from('transfers')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      logger.error('DELETE_TRANSFER', 'Delete failed', deleteError);
-      return res.status(500).json({ error: deleteError.message });
-    }
-
-    logger.success('DELETE_TRANSFER', `Transfer deleted: ${id}`);
-    res.json({ message: 'Transfer deleted successfully' });
-  })
-);
+  res.json({ message: 'Transfer deleted' });
+}));
 
 module.exports = router;

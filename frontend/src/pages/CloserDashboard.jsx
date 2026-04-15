@@ -4,7 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Target, Clock,
-  CheckCircle, XCircle, Plus, Hash, User, Car, Phone,
+  CheckCircle, XCircle, Plus, Hash, User, Car, Phone, Search,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -14,6 +14,8 @@ import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
+import SaleSearch from "../components/Sales/SaleSearch";
+import client from "../api/client";
 
 const statusBadge = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
 const saleBadge   = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
@@ -29,6 +31,12 @@ const CloserDashboard = () => {
   const { sales, loading: sLoading, fetchSales, createSale, updateSale } = useSales(user?.company_id);
   const notifHook = useNotifications();
   const [activeTab, setActiveTab] = useState('sales');
+
+  // Reject modal state
+  const [rejectTarget, setRejectTarget]   = useState(null);
+  const [rejectReason, setRejectReason]   = useState('');
+  const [rejecting, setRejecting]         = useState(false);
+  const [rejectMsg, setRejectMsg]         = useState('');
 
   // Modal state
   const [modalOpen, setModalOpen]       = useState(false);
@@ -80,6 +88,23 @@ const CloserDashboard = () => {
     } catch {}
   };
 
+  const handleRejectTransfer = async () => {
+    if (!rejectReason.trim()) { setRejectMsg('Reason required.'); return; }
+    setRejecting(true);
+    try {
+      await client.post(`transfers/${rejectTarget.id}/reject`, { reason: rejectReason });
+      setRejectTarget(null);
+      setRejectReason('');
+      setRejectMsg('');
+      fetchTransfers();
+      fetchStats();
+    } catch (err) {
+      setRejectMsg(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to reject');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-bg">
       <AppHeader
@@ -128,8 +153,9 @@ const CloserDashboard = () => {
         <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
-            { key: 'sales',     label: 'My Sales',   icon: DollarSign },
-            { key: 'callbacks', label: 'Callbacks',  icon: Phone      },
+            { key: 'sales',     label: 'My Sales',    icon: DollarSign },
+            { key: 'callbacks', label: 'Callbacks',   icon: Phone      },
+            { key: 'search',    label: 'Search Sales', icon: Search     },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
@@ -145,6 +171,7 @@ const CloserDashboard = () => {
         </div>
 
         {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'search'    && <SaleSearch />}
         {activeTab === 'sales' && <div>
 
         {/* Alerts */}
@@ -225,22 +252,33 @@ const CloserDashboard = () => {
                     <div className="flex items-start justify-between mb-1">
                       <div>
                         <p className="font-semibold text-text">
-                          {t.form_data?.customer_name || 'Unknown Customer'}
+                          {t.form_data?.FirstName
+                            ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
+                            : t.form_data?.customer_name || 'Unknown Customer'}
                         </p>
                         <p className="text-xs text-text-secondary mt-0.5">
-                          {t.form_data?.customer_phone || t.form_data?.customer_email || ''}
+                          {t.form_data?.Phone || t.form_data?.customer_phone || t.form_data?.customer_email || ''}
                         </p>
                       </div>
                       <Badge variant={statusBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                     </div>
                     {t.status === 'assigned' && (
-                      <button
-                        onClick={() => openSaleModal(t)}
-                        className="w-full mt-3 py-2 px-4 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
-                        style={{ background: 'var(--gradient-sidebar)' }}
-                      >
-                        <DollarSign size={14} /> Convert to Sale
-                      </button>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => openSaleModal(t)}
+                          className="flex-1 py-2 px-3 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
+                          style={{ background: 'var(--gradient-sidebar)' }}
+                        >
+                          <DollarSign size={13} /> Convert to Sale
+                        </button>
+                        <button
+                          onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
+                          className="px-3 py-2 rounded-lg font-semibold text-sm border flex items-center gap-1 transition-all hover:bg-error-50"
+                          style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}
+                        >
+                          <XCircle size={13} /> Reject
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -341,6 +379,45 @@ const CloserDashboard = () => {
         onSubmit={handleSaleSubmit}
         isLoading={saleLoading}
       />
+
+      {/* Reject Transfer Modal */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1">Reject Transfer</h3>
+            <p className="text-sm text-text-secondary mb-4">
+              Customer: <strong>
+                {rejectTarget.form_data?.FirstName
+                  ? `${rejectTarget.form_data.FirstName} ${rejectTarget.form_data.LastName || ''}`.trim()
+                  : rejectTarget.form_data?.customer_name || 'Unknown'}
+              </strong>
+            </p>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              Reason for rejection <span className="text-error-500">*</span>
+            </label>
+            <textarea
+              value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              placeholder="e.g. Customer already closed, wrong product, call dropped…"
+              rows={3} className="input mb-3"
+            />
+            {rejectMsg && <p className="text-sm text-error-600 mb-3">{rejectMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setRejectTarget(null)}
+                className="flex-1 py-2 rounded-lg border font-semibold text-sm transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Cancel
+              </button>
+              <button onClick={handleRejectTransfer} disabled={rejecting}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white transition-all disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-error-600)' }}>
+                {rejecting ? 'Rejecting…' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

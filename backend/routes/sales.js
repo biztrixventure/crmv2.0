@@ -226,11 +226,10 @@ router.post(
 
     logger.success('CREATE_SALE', `Sale created: ${sale.id} ref=${refNo}`);
 
-    // Fire notifications asynchronously (don't block response)
-    notifications.onSaleCreated({
-      sale,
-      fronterUserId: fronter_id || null,
-    }).catch(() => {});
+    // Fire notifications asynchronously
+    const { data: closerAuth } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const closerName = closerAuth?.user?.user_metadata?.first_name || closerAuth?.user?.email || 'A closer';
+    notifications.onSaleCreated({ sale, fronterUserId: fronter_id || null, closerName }).catch(() => {});
 
     res.status(201).json({ sale });
   })
@@ -335,6 +334,103 @@ router.put(
     res.json({ sale: updated });
   })
 );
+
+// ============================================================================
+// POST /sales/:id/compliance — Compliance manager edits sale with mandatory reason
+// Only compliance_manager role (in biztrixventure) can call this.
+// ============================================================================
+router.post('/:id/compliance', [
+  body('status').optional().isString(),
+  body('reason').isString().notEmpty().withMessage('Reason is required for compliance updates'),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
+
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+
+  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Only compliance managers can use this endpoint' });
+  }
+
+  const { id } = req.params;
+  const { reason, status, ...otherFields } = req.body;
+
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('sales').select('*').eq('id', id).single();
+  if (fetchErr || !existing) return res.status(404).json({ error: 'Sale not found' });
+
+  const COMPLIANCE_STATUSES = ['cancelled', 'compliance_cancelled', 'dispute', 'chargeback', 'open', 'sold', 'follow_up', 'closed_won', 'closed_lost'];
+
+  if (status && !COMPLIANCE_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status', allowed: COMPLIANCE_STATUSES });
+  }
+
+  // Build update — only allow specific fields for compliance
+  const updates = { updated_at: new Date().toISOString() };
+  if (status) updates.status = status;
+
+  // Append audit entry
+  const currentHistory = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+  updates.edit_history = [...currentHistory, {
+    editor_id: userId,
+    role:      'compliance_manager',
+    reason,
+    previous_status: existing.status,
+    new_status:      status || existing.status,
+    edited_at:       new Date().toISOString(),
+  }];
+
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('sales').update(updates).eq('id', id).select().single();
+
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  // Notify managers
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const editorName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'Compliance';
+  notifications.onComplianceUpdate({ sale: updated, editorName, reason }).catch(() => {});
+
+  res.json({ sale: updated });
+}));
+
+// ============================================================================
+// GET /sales/all-companies — compliance_manager sees sales across all companies
+// ============================================================================
+router.get('/all-companies', asyncHandler(async (req, res) => {
+  const userRole = req.user.role;
+  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { status, search, date_from, date_to, page = 1, limit = 50, company_id } = req.query;
+
+  let query = supabaseAdmin
+    .from('sales')
+    .select('*, companies(name)', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (company_id) query = query.eq('company_id', company_id);
+  if (status)     query = query.eq('status', status);
+  if (date_from)  query = query.gte('created_at', date_from);
+  if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');
+
+  if (search) {
+    query = query.or([
+      `customer_name.ilike.%${search}%`,
+      `customer_phone.ilike.%${search}%`,
+      `reference_no.ilike.%${search}%`,
+    ].join(','));
+  }
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  query = query.range(offset, offset + parseInt(limit) - 1);
+
+  const { data, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json({ sales: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
 
 // ============================================================================
 // DELETE /sales/:id
