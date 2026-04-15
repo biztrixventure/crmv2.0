@@ -24,18 +24,34 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     .order('created_at', { ascending: false })
     .limit(1);
 
-  if (!userRoles?.length) {
-    return res.status(401).json({ error: 'No active company assignment' });
-  }
-
-  const ur = userRoles[0];
-  const roleLevel = ur.custom_roles.level;
-
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
     .select('first_name, last_name')
     .eq('user_id', userId)
     .single();
+
+  // No company assignment — check if system superadmin
+  if (!userRoles?.length) {
+    const superadminEmail = process.env.SUPERADMIN_EMAIL;
+    if (superadminEmail && req.user.email === superadminEmail) {
+      const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
+      return res.json({
+        id: userId,
+        email: req.user.email,
+        role: 'superadmin',
+        role_name: 'Super Admin',
+        company_id: null,
+        company_name: null,
+        first_name: profile?.first_name,
+        last_name: profile?.last_name,
+        permissions: (allPerms || []).map(p => p.name),
+      });
+    }
+    return res.status(401).json({ error: 'No active company assignment' });
+  }
+
+  const ur = userRoles[0];
+  const roleLevel = ur.custom_roles.level;
 
   // SuperAdmin gets every permission; others get role-specific
   let userPermissions;
@@ -107,20 +123,39 @@ router.post(
         .eq("is_active", true)
         .limit(1);
 
+      // Get user profile (needed in both branches)
+      const { data: profile } = await supabaseAdmin
+        .from("user_profiles")
+        .select("*")
+        .eq("user_id", data.user.id)
+        .single();
+
+      // No company assignment — check if this is the system superadmin
       if (roleError || !userRoles || userRoles.length === 0) {
+        const superadminEmail = process.env.SUPERADMIN_EMAIL;
+        if (superadminEmail && data.user.email === superadminEmail) {
+          const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
+          return res.json({
+            token: data.session.access_token,
+            user: {
+              id: data.user.id,
+              email: data.user.email,
+              role: 'superadmin',
+              role_name: 'Super Admin',
+              company_id: null,
+              company_name: null,
+              first_name: profile?.first_name,
+              last_name: profile?.last_name,
+              permissions: (allPerms || []).map(p => p.name),
+            },
+          });
+        }
         return res.status(401).json({ error: "User not assigned to any company" });
       }
 
       const userRole = userRoles[0];
       const roleData = userRole.custom_roles;
       const companyData = userRole.companies;
-
-      // Get user profile
-      const { data: profile } = await supabaseAdmin
-        .from("user_profiles")
-        .select("*")
-        .eq("user_id", data.user.id)
-        .single();
 
       // Get user permissions
       const { data: permissions } = await supabaseAdmin

@@ -254,14 +254,22 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 // ============================================================================
 const isSuperAdmin = async (userId) => {
   try {
+    // Check company-assigned superadmin role
     const { data, error } = await supabaseAdmin
       .from('user_company_roles')
       .select('custom_roles(level)')
       .eq('user_id', userId)
       .eq('is_active', true);
 
-    if (error || !data) return false;
-    return data.some(r => r.custom_roles?.level === 'superadmin');
+    if (!error && data && data.some(r => r.custom_roles?.level === 'superadmin')) return true;
+
+    // Fallback: system superadmin has no company assignment — check by email
+    const superadminEmail = process.env.SUPERADMIN_EMAIL;
+    if (superadminEmail) {
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+      return authUser?.user?.email === superadminEmail;
+    }
+    return false;
   } catch {
     return false;
   }
