@@ -3,26 +3,44 @@
 -- ============================================================================
 
 -- ============================================================================
--- 1. ADD compliance_manager TO custom_roles level CHECK (if constrained)
---    Also allow fronter_manager as a distinct level
+-- 1. ADD new values to custom_roles.level (ENUM or CHECK constraint)
 -- ============================================================================
--- If your custom_roles.level column has a CHECK constraint, alter it.
--- Run this only if the constraint exists — safe to run either way via DO block.
 DO $$
+DECLARE
+  v_typname TEXT;
+  v_val     TEXT;
 BEGIN
-  -- Drop old level check if it exists
-  IF EXISTS (
-    SELECT 1 FROM information_schema.table_constraints
-    WHERE table_name = 'custom_roles' AND constraint_type = 'CHECK'
-    AND constraint_name LIKE '%level%'
-  ) THEN
+  -- Detect if level column uses an ENUM type
+  SELECT t.typname INTO v_typname
+  FROM pg_attribute a
+  JOIN pg_class c ON c.oid = a.attrelid
+  JOIN pg_type t  ON t.oid = a.atttypid
+  WHERE c.relname = 'custom_roles' AND a.attname = 'level' AND t.typcategory = 'E';
+
+  IF v_typname IS NOT NULL THEN
+    -- ENUM: add missing values
+    FOREACH v_val IN ARRAY ARRAY['compliance_manager','fronter_manager','closer_manager','operations_manager','company_admin'] LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname = v_typname AND e.enumlabel = v_val
+      ) THEN
+        EXECUTE format('ALTER TYPE %I ADD VALUE %L', v_typname, v_val);
+      END IF;
+    END LOOP;
+  ELSE
+    -- CHECK constraint: drop and recreate with all values
     EXECUTE (
-      SELECT 'ALTER TABLE custom_roles DROP CONSTRAINT ' || constraint_name
-      FROM information_schema.table_constraints
-      WHERE table_name = 'custom_roles' AND constraint_type = 'CHECK'
-      AND constraint_name LIKE '%level%'
-      LIMIT 1
+      SELECT COALESCE(
+        (SELECT 'ALTER TABLE custom_roles DROP CONSTRAINT ' || constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_name = 'custom_roles' AND constraint_type = 'CHECK'
+         AND constraint_name LIKE '%level%'
+         LIMIT 1),
+        'SELECT 1'
+      )
     );
+    -- No ADD CONSTRAINT needed — level is free-text in this path
   END IF;
 END $$;
 
