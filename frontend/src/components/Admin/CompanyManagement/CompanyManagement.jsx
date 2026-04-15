@@ -4,6 +4,7 @@ import { Button, Alert } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
 import CompanyList from './CompanyList';
 import CompanyModal from './CompanyModal';
+import CompanyDetail from './CompanyDetail';
 
 /**
  * CompanyManagement Component
@@ -12,9 +13,10 @@ import CompanyModal from './CompanyModal';
  */
 const CompanyManagement = () => {
   const { companies, loading, error, fetchCompanies, createCompany, updateCompany, deleteCompany } = useCompanies();
-  const [showModal, setShowModal] = useState(false);
+  const [showModal, setShowModal]         = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [detailCompany, setDetailCompany] = useState(null);
+  const [searchTerm, setSearchTerm]       = useState('');
 
   // Fetch companies on component mount
   useEffect(() => {
@@ -78,6 +80,11 @@ const CompanyManagement = () => {
     return matchesSearch;
   });
 
+  // Show company detail view when a company is selected
+  if (detailCompany) {
+    return <CompanyDetail company={detailCompany} onBack={() => setDetailCompany(null)} />;
+  }
+
   return (
     <div>
       {/* Header */}
@@ -126,6 +133,7 @@ const CompanyManagement = () => {
       {!loading && (
         <CompanyList
           companies={filteredCompanies}
+          onView={setDetailCompany}
           onEdit={handleEditCompany}
           onDelete={handleDeleteCompany}
         />

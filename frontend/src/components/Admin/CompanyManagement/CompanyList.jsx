@@ -1,12 +1,12 @@
 import React from 'react';
-import { Edit2, Trash2 } from 'lucide-react';
+import { Edit2, Trash2, Eye } from 'lucide-react';
 import { Badge, Table, Button, Card } from '../../../components/UI';
 
 /**
  * CompanyList Component
  * Displays companies in a table with actions
  */
-const CompanyList = ({ companies, onEdit, onDelete, loading = false }) => {
+const CompanyList = ({ companies, onEdit, onDelete, onView, loading = false }) => {
   if (!companies || companies.length === 0) {
     return (
       <Card className="p-8 text-center">
@@ -69,6 +69,13 @@ const CompanyList = ({ companies, onEdit, onDelete, loading = false }) => {
 
   // Define actions
   const actions = [
+    {
+      label: 'View',
+      icon: <Eye size={16} />,
+      onClick: (row) => onView(companies.find((c) => c.id === row.id)),
+      variant: 'ghost',
+      size: 'sm',
+    },
     {
       label: 'Edit',
       icon: <Edit2 size={16} />,
