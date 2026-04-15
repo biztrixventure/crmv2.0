@@ -4,6 +4,16 @@
 -- ============================================================================
 
 -- ============================================================================
+-- 0. SEED: BLP Demo Company (skip if already exists)
+-- ============================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM companies WHERE name = 'BLP Demo Co') THEN
+    INSERT INTO companies (name, is_active) VALUES ('BLP Demo Co', true);
+  END IF;
+END $$;
+
+-- ============================================================================
 -- 1. SEED: compliance_manager system-level role template
 -- ============================================================================
 INSERT INTO custom_roles (name, description, level, company_id)
