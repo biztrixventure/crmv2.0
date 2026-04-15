@@ -264,10 +264,10 @@ const isSuperAdmin = async (userId) => {
     if (!error && data && data.some(r => r.custom_roles?.level === 'superadmin')) return true;
 
     // Fallback: system superadmin has no company assignment — check by email
-    const superadminEmail = process.env.SUPERADMIN_EMAIL;
-    if (superadminEmail) {
+    const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+    if (superadminEmails.length > 0) {
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      return authUser?.user?.email === superadminEmail;
+      return superadminEmails.includes(authUser?.user?.email || '');
     }
     return false;
   } catch {

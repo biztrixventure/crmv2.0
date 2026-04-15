@@ -32,8 +32,8 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
 
   // No company assignment — check if system superadmin
   if (!userRoles?.length) {
-    const superadminEmail = process.env.SUPERADMIN_EMAIL;
-    if (superadminEmail && req.user.email === superadminEmail) {
+    const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+    if (superadminEmails.includes(req.user.email)) {
       const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
       return res.json({
         id: userId,
@@ -132,8 +132,8 @@ router.post(
 
       // No company assignment — check if this is the system superadmin
       if (roleError || !userRoles || userRoles.length === 0) {
-        const superadminEmail = process.env.SUPERADMIN_EMAIL;
-        if (superadminEmail && data.user.email === superadminEmail) {
+        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+        if (superadminEmails.includes(data.user.email)) {
           const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
           return res.json({
             token: data.session.access_token,
