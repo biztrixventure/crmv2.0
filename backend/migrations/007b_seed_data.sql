@@ -22,6 +22,8 @@ DELETE FROM custom_roles
 WHERE company_id IS NULL
   AND level = 'superadmin'
   AND id NOT IN (
-    SELECT MIN(id) FROM custom_roles
+    SELECT id FROM custom_roles
     WHERE company_id IS NULL AND level = 'superadmin'
+    ORDER BY created_at ASC
+    LIMIT 1
   );
