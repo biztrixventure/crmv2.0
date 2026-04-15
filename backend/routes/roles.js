@@ -59,10 +59,14 @@ router.get(
         `
         );
 
-      // If we have a companyId, filter by it (include system roles with null company_id too)
+      // Scope: company_id provided → only that company's roles
+      //        no company_id (superadmin) → only system-level roles (company_id IS NULL)
       if (companyId) {
-        query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+        query = query.eq('company_id', companyId);
         logger.debug('GET_ROLES', 'Added company filter', { companyId });
+      } else {
+        query = query.is('company_id', null);
+        logger.debug('GET_ROLES', 'Superadmin: returning system-level roles only');
       }
 
       const { data, error } = await query;

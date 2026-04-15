@@ -68,7 +68,7 @@ router.get('/closers', asyncHandler(async (req, res) => {
     .select(`
       user_id,
       custom_roles (level, name),
-      user_profiles (first_name, last_name, email)
+      user_profiles (first_name, last_name)
     `)
     .eq('company_id', companyId)
     .eq('is_active', true);
@@ -81,7 +81,6 @@ router.get('/closers', asyncHandler(async (req, res) => {
       id:         r.user_id,
       first_name: r.user_profiles?.first_name || '',
       last_name:  r.user_profiles?.last_name  || '',
-      email:      r.user_profiles?.email      || '',
       role_name:  r.custom_roles?.name        || 'Closer',
     }));
 

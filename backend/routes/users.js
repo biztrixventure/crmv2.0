@@ -26,6 +26,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { company_id, role_id, search } = req.query;
     const userId = req.user.id;
+    const superadmin = await isSuperAdmin(userId);
     const targetCompanyId = company_id || req.user.company_id;
 
     logger.info('GET_USERS', `Fetching users for company=${targetCompanyId}, roleId=${role_id}, search=${search}`, { userId, targetCompanyId, role_id, search });
@@ -36,9 +37,15 @@ router.get(
 
       let query = supabaseAdmin
         .from("user_company_roles")
-        .select(`id,user_id,role_id,is_active,created_at,custom_roles(id,name,level)`)
-        .eq("company_id", targetCompanyId)
+        .select(`id,user_id,role_id,is_active,created_at,company_id,custom_roles(id,name,level)`)
         .eq("is_active", true);
+
+      // SuperAdmin with no company filter sees all users; otherwise scope to company
+      if (targetCompanyId) {
+        query = query.eq("company_id", targetCompanyId);
+      } else if (!superadmin) {
+        return res.status(400).json({ error: 'company_id required' });
+      }
 
       if (role_id) {
         query = query.eq("role_id", role_id);

@@ -21,10 +21,8 @@ const UserManagement = () => {
 
   // Fetch users on component mount
   useEffect(() => {
-    if (user?.company_id) {
-      fetchUsers();
-    }
-  }, [user?.company_id]);
+    fetchUsers();
+  }, []);
 
   // Handle add user button click
   const handleAddUser = () => {
