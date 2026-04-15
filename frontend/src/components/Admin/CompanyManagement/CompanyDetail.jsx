@@ -10,7 +10,10 @@ const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_
 const TRANSFER_BADGE = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
 const LIMIT = 50;
 
-// ── small search table for transfers/sales/callbacks ─────────────────────────
+const SALE_STATUSES     = ['open','sold','cancelled','follow_up','closed_won','closed_lost','compliance_cancelled','dispute','chargeback'];
+const TRANSFER_STATUSES = ['pending','assigned','completed','cancelled','rejected'];
+const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
+
 const RecordsPanel = ({ companyId, type }) => {
   const [rows, setRows]       = useState([]);
   const [total, setTotal]     = useState(0);
@@ -19,9 +22,6 @@ const RecordsPanel = ({ companyId, type }) => {
   const [status, setStatus]   = useState('');
   const [page, setPage]       = useState(1);
 
-  const SALE_STATUSES     = ['open','sold','cancelled','follow_up','closed_won','closed_lost','compliance_cancelled','dispute','chargeback'];
-  const TRANSFER_STATUSES = ['pending','assigned','completed','cancelled','rejected'];
-  const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
   const statuses = type === 'sales' ? SALE_STATUSES : type === 'transfers' ? TRANSFER_STATUSES : CALLBACK_STATUSES;
 
   const load = useCallback(async (p = 1) => {
@@ -46,7 +46,7 @@ const RecordsPanel = ({ companyId, type }) => {
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
             placeholder="Search…" className="input pl-9 text-sm" />
         </div>
-        <select value={status} onChange={e => { setStatus(e.target.value); }} className="input text-sm w-44">
+        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-44">
           <option value="">All statuses</option>
           {statuses.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
         </select>

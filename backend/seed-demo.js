@@ -5,7 +5,6 @@
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-require('dotenv').config(); // also try local .env
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -116,6 +115,7 @@ async function run() {
 
   // ── 3. Create roles + users ────────────────────────────────────────────────
   const results = [];
+  const { data: authList } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
 
   for (const tpl of ROLES) {
     process.stdout.write(`\nRole: ${tpl.name} (${tpl.level})\n`);
@@ -137,19 +137,15 @@ async function run() {
       if (roleErr) { console.error('  Role create failed:', roleErr.message); continue; }
       roleId = role.id;
 
-      // Assign permissions
       const permRows = tpl.permissions
         .filter(p => permMap[p])
         .map(p => ({ role_id: roleId, permission_id: permMap[p] }));
-      if (permRows.length) {
-        await supabase.from('role_permissions').insert(permRows);
-      }
+      if (permRows.length) await supabase.from('role_permissions').insert(permRows);
       console.log(`  Role created: ${roleId} (${permRows.length} permissions)`);
     }
 
     // Create auth user
     let userId;
-    const { data: authList } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const existingAuth = authList?.users?.find(u => u.email === tpl.email);
 
     if (existingAuth) {
