@@ -14,9 +14,9 @@ export const ROLE_ROUTES = {
   compliance_manager:  '/compliance',
   compliancemanager:   '/compliance',
 
-  // Company-level admin
-  company_admin:       '/company',
-  companyadmin:        '/company',
+  // Company-level admin (merged → operations_manager)
+  company_admin:       '/operations',
+  companyadmin:        '/operations',
 
   // Operations Manager (was Company Manager — now has all company manager powers)
   operations_manager:  '/operations',
@@ -82,9 +82,9 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   // Compliance manager can only access /compliance
   if (normUser === 'compliancemanager') return normRequired === 'compliancemanager';
 
-  // Company Admin accesses all company routes
+  // Company Admin — merged into operations_manager, same access
   if (normUser === 'companyadmin') {
-    return ['companyadmin', 'operationsmanager', 'closermanager', 'frontermanager', 'manager', 'closer', 'fronter', 'operations'].includes(normRequired);
+    return ['companyadmin', 'operationsmanager', 'operations', 'closermanager', 'frontermanager', 'manager', 'closer', 'fronter'].includes(normRequired);
   }
 
   // Operations Manager: same as company admin for floor staff

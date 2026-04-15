@@ -22,8 +22,7 @@ router.get('/', asyncHandler(async (req, res) => {
     .from('transfers')
     .select(`
       *,
-      user_profiles!transfers_created_by_fkey (first_name, last_name),
-      closer:user_profiles!transfers_assigned_closer_id_fkey (first_name, last_name)
+      user_profiles!transfers_created_by_fkey (first_name, last_name)
     `, { count: 'exact' })
     .order('created_at', { ascending: false });
 
@@ -60,8 +59,15 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /transfers/closers — list available closers in a company (for fronter picker)
 // ============================================================================
 router.get('/closers', asyncHandler(async (req, res) => {
-  const companyId = req.query.company_id || req.user.company_id;
-  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  // Always fetch from the closer pool company (is_closer_pool = true), not the fronter's company
+  const { data: poolCo, error: poolErr } = await supabaseAdmin
+    .from('companies')
+    .select('id')
+    .eq('is_closer_pool', true)
+    .limit(1)
+    .single();
+
+  if (poolErr || !poolCo) return res.status(400).json({ error: 'No closer pool company configured' });
 
   const { data, error } = await supabaseAdmin
     .from('user_company_roles')
@@ -70,7 +76,7 @@ router.get('/closers', asyncHandler(async (req, res) => {
       custom_roles (level, name),
       user_profiles (first_name, last_name)
     `)
-    .eq('company_id', companyId)
+    .eq('company_id', poolCo.id)
     .eq('is_active', true);
 
   if (error) return res.status(500).json({ error: error.message });

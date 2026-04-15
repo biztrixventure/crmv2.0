@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Shield, Search, RefreshCw, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { Shield, Search, RefreshCw, ChevronDown, ChevronUp, FileText, Star } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
@@ -25,6 +25,7 @@ const COMPLIANCE_STATUSES = [
   'closed_won', 'closed_lost',
   'compliance_cancelled', 'dispute', 'chargeback',
 ];
+const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const ComplianceDashboard = () => {
   const { user, logout } = useAuth();
@@ -58,6 +59,16 @@ const ComplianceDashboard = () => {
   // Expanded row (audit trail)
   const [expanded, setExpanded]   = useState(null);
 
+  // Active top-level tab
+  const [mainTab, setMainTab]     = useState('sales');
+
+  // Call reviews state
+  const [reviews, setReviews]               = useState([]);
+  const [dispos, setDispos]                 = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsSubTab, setReviewsSubTab]   = useState('ratings');
+  const [reviewCompany, setReviewCompany]   = useState('');
+
   const loadSales = useCallback(async () => {
     setLoading(true);
     try {
@@ -86,8 +97,23 @@ const ComplianceDashboard = () => {
     } catch {}
   }, []);
 
+  const loadReviews = useCallback(async () => {
+    setReviewsLoading(true);
+    try {
+      const [rRes, dRes] = await Promise.all([
+        client.get('reviews',              { params: { company_id: reviewCompany || undefined, limit: 200 } }),
+        client.get('reviews/dispositions', { params: { company_id: reviewCompany || undefined, limit: 200 } }),
+      ]);
+      setReviews(rRes.data.reviews || []);
+      setDispos(dRes.data.dispositions || []);
+    } catch { /* non-critical */ } finally {
+      setReviewsLoading(false);
+    }
+  }, [reviewCompany]);
+
   useEffect(() => { loadSales(); }, [loadSales]);
   useEffect(() => { loadCompanies(); }, [loadCompanies]);
+  useEffect(() => { if (mainTab === 'reviews') loadReviews(); }, [mainTab, loadReviews]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -133,11 +159,30 @@ const ComplianceDashboard = () => {
             <h2 className="text-3xl font-bold mb-1 text-text">Compliance Dashboard</h2>
             <p className="text-text-secondary">Review and update sale records across all companies</p>
           </div>
-          <button onClick={loadSales} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary" title="Refresh">
+          <button onClick={mainTab === 'sales' ? loadSales : loadReviews}
+            className="p-2 rounded-lg transition-colors hover:bg-bg-secondary" title="Refresh">
             <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
           </button>
         </div>
 
+        {/* Main tab bar */}
+        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {[{ key: 'sales', label: 'Sales', icon: FileText }, { key: 'reviews', label: 'Call Reviews', icon: Star }].map(t => (
+            <button key={t.key} onClick={() => setMainTab(t.key)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+              style={{
+                backgroundColor: mainTab === t.key ? 'var(--color-surface)' : 'transparent',
+                color: mainTab === t.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                boxShadow: mainTab === t.key ? 'var(--shadow-sm)' : 'none',
+              }}>
+              <t.icon size={15} />
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {mainTab === 'sales' && <>
         {/* ── Search & Filters ─────────────────────────────────────────── */}
         <Card className="p-5 mb-6">
           <form onSubmit={handleSearch} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -273,6 +318,123 @@ const ComplianceDashboard = () => {
             </div>
           )}
         </Card>
+        </>}
+
+        {mainTab === 'reviews' && (
+          <div className="space-y-4">
+            {/* Company filter + sub-tabs */}
+            <div className="flex flex-wrap gap-3 items-center">
+              <select value={reviewCompany} onChange={e => setReviewCompany(e.target.value)} className="input w-56">
+                <option value="">All companies</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <div className="flex gap-1 p-1 rounded-xl"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                {[{ key: 'ratings', label: 'Call Ratings' }, { key: 'dispos', label: 'Dispositions' }].map(t => (
+                  <button key={t.key} onClick={() => setReviewsSubTab(t.key)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                    style={{
+                      backgroundColor: reviewsSubTab === t.key ? 'var(--color-surface)' : 'transparent',
+                      color: reviewsSubTab === t.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                      boxShadow: reviewsSubTab === t.key ? 'var(--shadow-sm)' : 'none',
+                    }}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={loadReviews} className="p-2 rounded-lg hover:bg-bg-secondary transition-colors">
+                <RefreshCw size={16} style={{ color: 'var(--color-text-secondary)' }} />
+              </button>
+            </div>
+
+            <Card className="overflow-hidden">
+              {reviewsLoading ? (
+                <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+              ) : reviewsSubTab === 'ratings' ? (
+                reviews.length === 0 ? (
+                  <div className="text-center py-16 text-text-secondary">No call ratings found.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                          {['Customer', 'Company', 'Closer', 'Rating', 'Notes', 'Date'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviews.map(r => (
+                          <tr key={r.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td className="px-4 py-3 font-semibold text-text">
+                              {r.transfers?.form_data?.FirstName
+                                ? `${r.transfers.form_data.FirstName} ${r.transfers.form_data.LastName || ''}`.trim()
+                                : r.transfers?.form_data?.customer_name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary">
+                              {companies.find(c => c.id === r.company_id)?.name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {r.user_profiles ? `${r.user_profiles.first_name || ''} ${r.user_profiles.last_name || ''}`.trim() : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-1 rounded-full text-xs font-bold capitalize"
+                                style={{ backgroundColor: `${RATING_COLOR[r.rating]}20`, color: RATING_COLOR[r.rating] }}>
+                                {r.rating?.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{r.notes || '—'}</td>
+                            <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : (
+                dispos.length === 0 ? (
+                  <div className="text-center py-16 text-text-secondary">No dispositions found.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                          {['Customer', 'Company', 'Closer', 'Disposition', 'Notes', 'Date'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dispos.map(d => (
+                          <tr key={d.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td className="px-4 py-3 font-semibold text-text">
+                              {d.transfers?.form_data?.FirstName
+                                ? `${d.transfers.form_data.FirstName} ${d.transfers.form_data.LastName || ''}`.trim()
+                                : d.transfers?.form_data?.customer_name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary">
+                              {companies.find(c => c.id === d.company_id)?.name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {d.user_profiles ? `${d.user_profiles.first_name || ''} ${d.user_profiles.last_name || ''}`.trim() : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-1 rounded-full text-xs font-bold capitalize bg-info-100 text-info-700">
+                                {d.disposition?.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{d.notes || '—'}</td>
+                            <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(d.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </Card>
+          </div>
+        )}
       </main>
 
       {/* ── Edit Modal ────────────────────────────────────────────────── */}

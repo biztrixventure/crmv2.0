@@ -4,7 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, Send, TrendingUp, Phone, BarChart3,
-  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight,
+  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -13,6 +13,7 @@ import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import client from "../api/client";
 
 const STATUS_COLORS = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
+const RATING_COLOR  = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const FronterManagerDashboard = () => {
   const { user, logout } = useAuth();
@@ -37,6 +38,9 @@ const FronterManagerDashboard = () => {
   // ── Closers for reassignment ─────────────────────────────────────────────
   const [closers, setClosers]         = useState([]);
 
+  // ── Reviews map: transfer_id → rating ───────────────────────────────────
+  const [reviewMap, setReviewMap]     = useState({});
+
   // ── Reassign modal ───────────────────────────────────────────────────────
   const [reassignTarget, setReassignTarget] = useState(null); // transfer being reassigned
   const [reassignCloser, setReassignCloser] = useState('');
@@ -52,16 +56,22 @@ const FronterManagerDashboard = () => {
     setStatsLoading(true);
 
     try {
-      const [tRes, statsRes, closersRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 100 } }),
-        client.get('stats',     { params: { company_id: companyId } }),
+      const [tRes, statsRes, closersRes, reviewsRes] = await Promise.all([
+        client.get('transfers',         { params: { company_id: companyId, limit: 100 } }),
+        client.get('stats',             { params: { company_id: companyId } }),
         client.get('transfers/closers', { params: { company_id: companyId } }),
+        client.get('reviews',           { params: { company_id: companyId, limit: 200 } }),
       ]);
 
       const allTransfers = tRes.data.transfers || [];
       setTransfers(allTransfers);
       setStats(statsRes.data || {});
       setClosers(closersRes.data.closers || []);
+
+      // Build transfer_id → rating map for badge display
+      const rMap = {};
+      (reviewsRes.data.reviews || []).forEach(r => { rMap[r.transfer_id] = r.rating; });
+      setReviewMap(rMap);
 
       // Build fronter leaderboard from transfers
       const map = {};
@@ -275,7 +285,14 @@ const FronterManagerDashboard = () => {
                             <p className="text-xs text-error-600 mt-0.5">Rejected: {t.rejection_reason}</p>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {reviewMap[t.id] && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-bold capitalize flex items-center gap-1"
+                              style={{ backgroundColor: `${RATING_COLOR[reviewMap[t.id]]}20`, color: RATING_COLOR[reviewMap[t.id]] }}>
+                              <Star size={10} />
+                              {reviewMap[t.id].replace(/_/g, ' ')}
+                            </span>
+                          )}
                           <Badge variant={STATUS_COLORS[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                           {t.status === 'rejected' && (
                             <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Settings, TrendingUp, Send, DollarSign, Users,
   Phone, Search, BarChart3, RefreshCw, CheckCircle,
-  XCircle, Clock, AlertCircle,
+  XCircle, Clock, AlertCircle, Star,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -17,6 +17,7 @@ import client from "../api/client";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 const SALE_BADGE     = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error' };
+const RATING_COLOR   = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const OperationsDashboard = () => {
   const { user, logout }               = useAuth();
@@ -39,7 +40,28 @@ const OperationsDashboard = () => {
   const [reassignCloser, setReassignCloser]     = useState('');
   const [reassigning, setReassigning]           = useState(false);
 
+  // Reviews state
+  const [reviews, setReviews]         = useState([]);
+  const [dispos, setDispos]           = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsSubTab, setReviewsSubTab]   = useState('ratings');
+
   const companyId = user?.company_id;
+
+  const loadReviews = useCallback(async () => {
+    if (!companyId) return;
+    setReviewsLoading(true);
+    try {
+      const [rRes, dRes] = await Promise.all([
+        client.get('reviews',              { params: { company_id: companyId, limit: 100 } }),
+        client.get('reviews/dispositions', { params: { company_id: companyId, limit: 100 } }),
+      ]);
+      setReviews(rRes.data.reviews || []);
+      setDispos(dRes.data.dispositions || []);
+    } catch { /* non-critical */ } finally {
+      setReviewsLoading(false);
+    }
+  }, [companyId]);
 
   const loadAll = useCallback(async () => {
     if (!companyId) return;
@@ -88,6 +110,7 @@ const OperationsDashboard = () => {
   }, [companyId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { if (activeTab === 'reviews') loadReviews(); }, [activeTab, loadReviews]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -110,6 +133,7 @@ const OperationsDashboard = () => {
     { key: 'transfers',   label: 'Transfers',    icon: Send       },
     { key: 'sales',       label: 'Sales',        icon: DollarSign },
     { key: 'leaderboard', label: 'Leaderboard',  icon: TrendingUp },
+    { key: 'reviews',     label: 'Reviews',      icon: Star       },
     { key: 'search',      label: 'Search Sales', icon: Search     },
     { key: 'callbacks',   label: 'Callbacks',    icon: Phone      },
   ];
@@ -366,6 +390,108 @@ const OperationsDashboard = () => {
                     </div>
                   ))}
                 </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {/* ── REVIEWS ──────────────────────────────────────────── */}
+        {activeTab === 'reviews' && (
+          <div className="space-y-4">
+            {/* Sub-tab toggle */}
+            <div className="flex gap-1 p-1 rounded-xl w-fit"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              {[{ key: 'ratings', label: 'Call Ratings' }, { key: 'dispos', label: 'Dispositions' }].map(t => (
+                <button key={t.key} onClick={() => setReviewsSubTab(t.key)}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                  style={{
+                    backgroundColor: reviewsSubTab === t.key ? 'var(--color-surface)' : 'transparent',
+                    color: reviewsSubTab === t.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                    boxShadow: reviewsSubTab === t.key ? 'var(--shadow-sm)' : 'none',
+                  }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <Card className="overflow-hidden">
+              {reviewsLoading ? (
+                <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+              ) : reviewsSubTab === 'ratings' ? (
+                reviews.length === 0 ? (
+                  <div className="text-center py-16 text-text-secondary">No call ratings yet.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                          {['Customer', 'Closer', 'Rating', 'Notes', 'Date'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviews.map(r => (
+                          <tr key={r.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td className="px-4 py-3 font-semibold text-text">
+                              {r.transfers?.form_data?.FirstName
+                                ? `${r.transfers.form_data.FirstName} ${r.transfers.form_data.LastName || ''}`.trim()
+                                : r.transfers?.form_data?.customer_name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {r.user_profiles ? `${r.user_profiles.first_name || ''} ${r.user_profiles.last_name || ''}`.trim() : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-1 rounded-full text-xs font-bold capitalize"
+                                style={{ backgroundColor: `${RATING_COLOR[r.rating]}20`, color: RATING_COLOR[r.rating] }}>
+                                {r.rating?.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{r.notes || '—'}</td>
+                            <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : (
+                dispos.length === 0 ? (
+                  <div className="text-center py-16 text-text-secondary">No dispositions yet.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                          {['Customer', 'Closer', 'Disposition', 'Notes', 'Date'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dispos.map(d => (
+                          <tr key={d.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td className="px-4 py-3 font-semibold text-text">
+                              {d.transfers?.form_data?.FirstName
+                                ? `${d.transfers.form_data.FirstName} ${d.transfers.form_data.LastName || ''}`.trim()
+                                : d.transfers?.form_data?.customer_name || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {d.user_profiles ? `${d.user_profiles.first_name || ''} ${d.user_profiles.last_name || ''}`.trim() : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-1 rounded-full text-xs font-bold capitalize bg-info-100 text-info-700">
+                                {d.disposition?.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{d.notes || '—'}</td>
+                            <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(d.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               )}
             </Card>
           </div>

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Target, Clock,
   CheckCircle, XCircle, Plus, Hash, User, Car, Phone, Search,
+  Star, MessageSquare,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -17,9 +18,12 @@ import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import SaleSearch from "../components/Sales/SaleSearch";
 import client from "../api/client";
 
-const statusBadge = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
-const saleBadge   = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
-const saleLabel   = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Won', closed_lost: 'Lost' };
+const statusBadge  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
+const saleBadge    = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
+const saleLabel    = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Won', closed_lost: 'Lost' };
+const RATINGS      = ['excellent', 'good', 'average', 'below_average', 'bad'];
+const DISPOS       = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
+const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const CloserDashboard = () => {
   const { user, logout } = useAuth();
@@ -37,6 +41,23 @@ const CloserDashboard = () => {
   const [rejectReason, setRejectReason]   = useState('');
   const [rejecting, setRejecting]         = useState(false);
   const [rejectMsg, setRejectMsg]         = useState('');
+
+  // Rate call modal
+  const [rateTarget, setRateTarget]       = useState(null);
+  const [ratingVal, setRatingVal]         = useState('good');
+  const [ratingNotes, setRatingNotes]     = useState('');
+  const [ratingSaving, setRatingSaving]   = useState(false);
+  const [ratingMsg, setRatingMsg]         = useState('');
+
+  // Set dispo modal
+  const [dispoTarget, setDispoTarget]     = useState(null);
+  const [dispoVal, setDispoVal]           = useState('sale');
+  const [dispoNotes, setDispoNotes]       = useState('');
+  const [dispoSaving, setDispoSaving]     = useState(false);
+  const [dispoMsg, setDispoMsg]           = useState('');
+
+  // Global success banners
+  const [reviewSuccess, setReviewSuccess] = useState('');
 
   // Modal state
   const [modalOpen, setModalOpen]       = useState(false);
@@ -86,6 +107,36 @@ const CloserDashboard = () => {
       await updateSale(saleId, { status });
       fetchStats();
     } catch {}
+  };
+
+  const handleRateCall = async () => {
+    setRatingSaving(true);
+    setRatingMsg('');
+    try {
+      await client.post(`reviews/transfer/${rateTarget.id}/review`, { rating: ratingVal, notes: ratingNotes || undefined });
+      setRateTarget(null);
+      setReviewSuccess('Rating saved!');
+      setTimeout(() => setReviewSuccess(''), 4000);
+    } catch (err) {
+      setRatingMsg(err.response?.data?.error || 'Failed to save rating');
+    } finally {
+      setRatingSaving(false);
+    }
+  };
+
+  const handleSetDispo = async () => {
+    setDispoSaving(true);
+    setDispoMsg('');
+    try {
+      await client.post(`reviews/transfer/${dispoTarget.id}/dispo`, { disposition: dispoVal, notes: dispoNotes || undefined });
+      setDispoTarget(null);
+      setReviewSuccess('Disposition saved!');
+      setTimeout(() => setReviewSuccess(''), 4000);
+    } catch (err) {
+      setDispoMsg(err.response?.data?.error || 'Failed to save disposition');
+    } finally {
+      setDispoSaving(false);
+    }
   };
 
   const handleRejectTransfer = async () => {
@@ -178,6 +229,10 @@ const CloserDashboard = () => {
         {saleSuccess && (
           <Alert type="success" title="Sale Created!" message={saleSuccess}
             dismissible onDismiss={() => setSaleSuccess('')} />
+        )}
+        {reviewSuccess && (
+          <Alert type="success" title="Saved!" message={reviewSuccess}
+            dismissible onDismiss={() => setReviewSuccess('')} />
         )}
         {saleError && (
           <Alert type="error" title="Sale Failed" message={saleError}
@@ -280,6 +335,22 @@ const CloserDashboard = () => {
                         </button>
                       </div>
                     )}
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => { setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
+                        className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-primary-50"
+                        style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}
+                      >
+                        <Star size={11} /> Rate Call
+                      </button>
+                      <button
+                        onClick={() => { setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
+                        className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-info-50"
+                        style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}
+                      >
+                        <MessageSquare size={11} /> Set Dispo
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -413,6 +484,98 @@ const CloserDashboard = () => {
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white transition-all disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-error-600)' }}>
                 {rejecting ? 'Rejecting…' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rate Call Modal */}
+      {rateTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
+              <Star size={18} style={{ color: '#f59e0b' }} /> Rate This Call
+            </h3>
+            <p className="text-sm text-text-secondary mb-4">
+              Customer: <strong>
+                {rateTarget.form_data?.FirstName
+                  ? `${rateTarget.form_data.FirstName} ${rateTarget.form_data.LastName || ''}`.trim()
+                  : rateTarget.form_data?.customer_name || 'Unknown'}
+              </strong>
+            </p>
+            <label className="block text-sm font-medium text-text-secondary mb-2">Rating</label>
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {RATINGS.map(r => (
+                <button key={r} onClick={() => setRatingVal(r)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all capitalize"
+                  style={{
+                    borderColor: ratingVal === r ? RATING_COLOR[r] : 'var(--color-border)',
+                    backgroundColor: ratingVal === r ? `${RATING_COLOR[r]}15` : 'transparent',
+                    color: ratingVal === r ? RATING_COLOR[r] : 'var(--color-text-secondary)',
+                  }}>
+                  {r.replace(/_/g, ' ')}
+                </button>
+              ))}
+            </div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Notes (optional)</label>
+            <textarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
+              placeholder="Any notes about this call…" rows={2} className="input mb-3" />
+            {ratingMsg && <p className="text-sm text-error-600 mb-3">{ratingMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setRateTarget(null)}
+                className="flex-1 py-2 rounded-lg border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Cancel
+              </button>
+              <button onClick={handleRateCall} disabled={ratingSaving}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {ratingSaving ? 'Saving…' : 'Save Rating'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set Dispo Modal */}
+      {dispoTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
+              <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
+            </h3>
+            <p className="text-sm text-text-secondary mb-4">
+              Customer: <strong>
+                {dispoTarget.form_data?.FirstName
+                  ? `${dispoTarget.form_data.FirstName} ${dispoTarget.form_data.LastName || ''}`.trim()
+                  : dispoTarget.form_data?.customer_name || 'Unknown'}
+              </strong>
+            </p>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Disposition</label>
+            <select value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
+              {DISPOS.map(d => (
+                <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Notes (optional)</label>
+            <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
+              placeholder="Any notes about this disposition…" rows={2} className="input mb-3" />
+            {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setDispoTarget(null)}
+                className="flex-1 py-2 rounded-lg border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Cancel
+              </button>
+              <button onClick={handleSetDispo} disabled={dispoSaving}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {dispoSaving ? 'Saving…' : 'Save Dispo'}
               </button>
             </div>
           </div>
