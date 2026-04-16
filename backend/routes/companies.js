@@ -430,14 +430,30 @@ router.delete(
 
     if (fetchErr || !company) return res.status(404).json({ error: "Company not found" });
 
-    // Orphan sales and transfers (preserve records, remove company link)
+    // 1. Preserve sales/transfers — unlink company, keep the records
     await supabaseAdmin.from("sales").update({ company_id: null }).eq("company_id", id);
     await supabaseAdmin.from("transfers").update({ company_id: null }).eq("company_id", id);
 
-    // Hard delete user assignments
-    await supabaseAdmin.from("user_company_roles").delete().eq("company_id", id);
+    // 2. Preserve review/dispo records — unlink company
+    await supabaseAdmin.from("call_reviews").update({ company_id: null }).eq("company_id", id);
+    await supabaseAdmin.from("call_dispositions").update({ company_id: null }).eq("company_id", id);
 
-    // Hard delete company
+    // 3. Get all custom role IDs belonging to this company
+    const { data: companyRoles } = await supabaseAdmin
+      .from("custom_roles").select("id").eq("company_id", id);
+    const roleIds = (companyRoles || []).map(r => r.id);
+
+    // 4. Delete user_company_roles — by company AND by any of this company's roles
+    await supabaseAdmin.from("user_company_roles").delete().eq("company_id", id);
+    if (roleIds.length > 0) {
+      await supabaseAdmin.from("user_company_roles").delete().in("role_id", roleIds);
+    }
+
+    // 5. Delete company-specific roles and sale configs
+    await supabaseAdmin.from("custom_roles").delete().eq("company_id", id);
+    await supabaseAdmin.from("sale_configs").delete().eq("company_id", id);
+
+    // 6. Hard delete company
     const { error: delErr } = await supabaseAdmin.from("companies").delete().eq("id", id);
     if (delErr) return res.status(500).json({ error: delErr.message });
 
