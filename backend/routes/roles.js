@@ -234,8 +234,8 @@ router.post(
       }
     }
 
-    // If still no company_id, return error
-    if (!targetCompanyId) {
+    // SuperAdmin can create system-level (company_id = null) roles without a company assignment
+    if (!targetCompanyId && req.user.role !== 'superadmin') {
       logger.error('CREATE_ROLE', 'No company_id could be determined', new Error('Missing company context'));
       return res.status(400).json({ error: "Company ID is required or user must have a company assignment" });
     }
@@ -246,7 +246,7 @@ router.post(
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
       logger.success('CREATE_ROLE', `Permission check: ${hasPerm}`, { userRole: req.user.role });
 
-      if (!hasPerm) {
+      if (!hasPerm && req.user.role !== 'superadmin') {
         logger.error('CREATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to create roles" });
       }
@@ -256,7 +256,7 @@ router.post(
       const canCreate = await canAssignRole(userId, targetCompanyId, level);
       logger.success('CREATE_ROLE', `Hierarchy check: ${canCreate}`);
 
-      if (!canCreate) {
+      if (!canCreate && req.user.role !== 'superadmin') {
         logger.error('CREATE_ROLE', 'Cannot create role - hierarchy violation', new Error('Role level too high'));
         return res.status(403).json({
           error: "Cannot create role with same or higher authority",
@@ -268,6 +268,35 @@ router.post(
       const role = await createRole(name, description || null, level, targetCompanyId, permissions || []);
 
       logger.success('CREATE_ROLE', `Role created successfully`, { role_id: role.id, name, level });
+
+      // Auto-assign all superadmin users to this company (if not already assigned)
+      // Superadmin should always be a member of every company
+      if (targetCompanyId) {
+        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+        if (superadminEmails.length > 0) {
+          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 1000 });
+          const saUsers = (authUsers?.users || []).filter(u => superadminEmails.includes(u.email));
+          for (const saUser of saUsers) {
+            const { data: existing } = await supabaseAdmin
+              .from('user_company_roles')
+              .select('id')
+              .eq('user_id', saUser.id)
+              .eq('company_id', targetCompanyId)
+              .eq('is_active', true)
+              .maybeSingle();
+            if (!existing) {
+              await supabaseAdmin.from('user_company_roles').insert({
+                user_id: saUser.id,
+                company_id: targetCompanyId,
+                role_id: role.id,
+                is_active: true,
+                assigned_by: userId,
+              });
+              logger.info('CREATE_ROLE', `Auto-assigned superadmin ${saUser.email} to company ${targetCompanyId}`);
+            }
+          }
+        }
+      }
 
       res.status(201).json({
         message: "Role created successfully",
@@ -356,7 +385,7 @@ router.put(
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
       logger.success('UPDATE_ROLE', `Permission check: ${hasPerm}`);
 
-      if (!hasPerm) {
+      if (!hasPerm && req.user.role !== 'superadmin') {
         logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to update roles" });
       }
@@ -464,7 +493,7 @@ router.delete(
       const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
       logger.success('DELETE_ROLE', `Permission check: ${hasPerm}`);
 
-      if (!hasPerm) {
+      if (!hasPerm && req.user.role !== 'superadmin') {
         logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
         return res.status(403).json({ error: "You don't have permission to delete roles" });
       }
@@ -598,6 +627,43 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
       );
     }
     created.push(tpl.name);
+  }
+
+  // Auto-assign all superadmin users to this company (if not already assigned)
+  const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+  if (superadminEmails.length > 0 && created.length > 0) {
+    // Use the highest-level role created (company_admin) for the assignment
+    const { data: companyAdminRole } = await supabaseAdmin
+      .from('custom_roles')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('level', 'company_admin')
+      .maybeSingle();
+
+    const assignRoleId = companyAdminRole?.id || null;
+    if (assignRoleId) {
+      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 1000 });
+      const saUsers = (authUsers?.users || []).filter(u => superadminEmails.includes(u.email));
+      for (const saUser of saUsers) {
+        const { data: existing } = await supabaseAdmin
+          .from('user_company_roles')
+          .select('id')
+          .eq('user_id', saUser.id)
+          .eq('company_id', companyId)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (!existing) {
+          await supabaseAdmin.from('user_company_roles').insert({
+            user_id: saUser.id,
+            company_id: companyId,
+            role_id: assignRoleId,
+            is_active: true,
+            assigned_by: userId,
+          });
+          logger.info('SEED_ROLES', `Auto-assigned superadmin ${saUser.email} to company ${companyId}`);
+        }
+      }
+    }
   }
 
   logger.success('SEED_ROLES', `Seeded defaults: created=${created.join(',')}, skipped=${skipped.join(',')}`);

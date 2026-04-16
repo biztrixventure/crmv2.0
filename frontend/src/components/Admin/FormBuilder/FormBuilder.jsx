@@ -11,7 +11,7 @@ import {
   GripVertical, Trash2, Plus, Save, Eye, EyeOff,
   ChevronLeft, ChevronRight, Settings, CheckSquare,
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List,
-  ToggleLeft, X, Zap,
+  ToggleLeft, X, Zap, Users, UserX,
 } from 'lucide-react';
 import client from '../../../api/client';
 
@@ -129,7 +129,7 @@ const AddCustomModal = ({ onAdd, onClose }) => {
 };
 
 // ── Field card on the canvas ──────────────────────────────────────────────────
-const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd, onRemove, onToggleRequired, onChangeSpan, onEditLabel }) => {
+const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd, onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel }) => {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelVal, setLabelVal]         = useState(field.label);
   const inputRef = useRef(null);
@@ -202,6 +202,20 @@ const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOv
           {field.is_required ? '* Required' : 'Optional'}
         </button>
 
+        {/* Fronter visibility toggle */}
+        <button
+          onClick={() => onToggleFronter(index)}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all"
+          style={{
+            backgroundColor: field.show_to_fronter !== false ? 'var(--color-info-50, #e0f2fe)' : 'var(--color-bg-secondary)',
+            color: field.show_to_fronter !== false ? 'var(--color-info-600, #0284c7)' : 'var(--color-text-tertiary)',
+          }}
+          title={field.show_to_fronter !== false ? 'Visible to fronters — click to make closer-only' : 'Closer only — click to show to fronters'}>
+          {field.show_to_fronter !== false
+            ? <><Users size={10} /> Fronters</>
+            : <><UserX size={10} /> Closer Only</>}
+        </button>
+
         {/* Column span */}
         <div className="flex items-center gap-0.5 ml-auto">
           {[1, 2, 3].map(n => (
@@ -267,15 +281,16 @@ const FormBuilder = () => {
       // Build canvas from DB
       const canvasNames = new Set(dbFields.map(f => f.name));
       const canvas = dbFields.map(f => ({
-        id:           f.id,
-        name:         f.name,
-        label:        f.label,
-        field_type:   f.field_type,
-        is_required:  f.is_required,
-        column_span:  f.column_span || 1,
-        placeholder:  f.placeholder || '',
-        options:      f.options,
-        section:      f.section || 'default',
+        id:              f.id,
+        name:            f.name,
+        label:           f.label,
+        field_type:      f.field_type,
+        is_required:     f.is_required,
+        column_span:     f.column_span || 1,
+        placeholder:     f.placeholder || '',
+        options:         f.options,
+        section:         f.section || 'default',
+        show_to_fronter: f.show_to_fronter !== false,
       }));
       setCanvasFields(canvas);
 
@@ -291,13 +306,13 @@ const FormBuilder = () => {
 
   // Add field from palette → canvas
   const handleAddFromPalette = (field) => {
-    setCanvasFields(prev => [...prev, { ...field, column_span: field.column_span || 1 }]);
+    setCanvasFields(prev => [...prev, { ...field, column_span: field.column_span || 1, show_to_fronter: true }]);
     setPalette(prev => prev.filter(f => f.name !== field.name));
   };
 
   // Add custom field
   const handleAddCustom = (field) => {
-    setCanvasFields(prev => [...prev, { ...field, column_span: 1 }]);
+    setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: true }]);
   };
 
   // Remove field from canvas → back to palette (if it's a base field)
@@ -311,6 +326,12 @@ const FormBuilder = () => {
 
   const handleToggleRequired = (index) => {
     setCanvasFields(prev => prev.map((f, i) => i === index ? { ...f, is_required: !f.is_required } : f));
+  };
+
+  const handleToggleFronter = (index) => {
+    setCanvasFields(prev => prev.map((f, i) =>
+      i === index ? { ...f, show_to_fronter: f.show_to_fronter === false } : f
+    ));
   };
 
   const handleChangeSpan = (index, span) => {
@@ -440,6 +461,8 @@ const FormBuilder = () => {
             <p className="text-text-tertiary">· 1/3, 2/3, Full = column width</p>
             <p className="text-text-tertiary">· Double-click label to rename</p>
             <p className="text-text-tertiary">· * Required fields are starred</p>
+            <p className="text-text-tertiary">· Fronters = visible to fronters</p>
+            <p className="text-text-tertiary">· Closer Only = hidden from fronters</p>
             <p className="text-text-tertiary">· Save applies globally to all users</p>
           </div>
         </div>
@@ -477,6 +500,7 @@ const FormBuilder = () => {
                   onDragEnd={handleDragEnd}
                   onRemove={handleRemove}
                   onToggleRequired={handleToggleRequired}
+                  onToggleFronter={handleToggleFronter}
                   onChangeSpan={handleChangeSpan}
                   onEditLabel={(label) => handleEditLabel(idx, label)}
                 />
@@ -493,8 +517,14 @@ const FormBuilder = () => {
           <div className="grid grid-cols-3 gap-4">
             {canvasFields.map((field, idx) => (
               <div key={idx} className={SPAN_CLASS[field.column_span || 1]}>
-                <label className="block text-sm font-medium text-text-secondary mb-1">
-                  {field.label} {field.is_required && <span className="text-error-500">*</span>}
+                <label className="block text-sm font-medium text-text-secondary mb-1 flex items-center gap-2">
+                  <span>{field.label} {field.is_required && <span className="text-error-500">*</span>}</span>
+                  {field.show_to_fronter === false && (
+                    <span className="text-xs px-1.5 py-0.5 rounded font-semibold"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Closer Only
+                    </span>
+                  )}
                 </label>
                 {field.field_type === 'textarea' ? (
                   <textarea disabled rows={3} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}

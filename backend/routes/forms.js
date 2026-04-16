@@ -40,11 +40,12 @@ router.post('/fields', superadminOnly, [
   body('options').isArray().optional(),
   body('order').isInt().optional(),
   body('section').optional().isString(),
+  body('show_to_fronter').isBoolean().optional(),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
-  const { name, label, field_type, is_required, options, order, column_span, placeholder, section } = req.body;
+  const { name, label, field_type, is_required, options, order, column_span, placeholder, section, show_to_fronter } = req.body;
 
   let finalOrder = order;
   if (finalOrder === undefined) {
@@ -57,12 +58,13 @@ router.post('/fields', superadminOnly, [
     .from('form_fields')
     .insert({
       name, label, field_type,
-      is_required:  is_required  || false,
-      options:      options      || null,
-      order:        finalOrder,
-      column_span:  column_span  || 1,
-      placeholder:  placeholder  || null,
-      section:      section      || 'default',
+      is_required:     is_required     || false,
+      options:         options         || null,
+      order:           finalOrder,
+      column_span:     column_span     || 1,
+      placeholder:     placeholder     || null,
+      section:         section         || 'default',
+      show_to_fronter: show_to_fronter !== false,
     })
     .select()
     .single();
@@ -80,18 +82,19 @@ router.post('/fields', superadminOnly, [
 // ============================================================================
 router.put('/fields/:id', superadminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { label, is_required, options, column_span, placeholder, section, order, field_type, name } = req.body;
+  const { label, is_required, options, column_span, placeholder, section, order, field_type, name, show_to_fronter } = req.body;
 
   const updates = {};
-  if (label        !== undefined) updates.label        = label;
-  if (is_required  !== undefined) updates.is_required  = is_required;
-  if (options      !== undefined) updates.options      = options;
-  if (column_span  !== undefined) updates.column_span  = column_span;
-  if (placeholder  !== undefined) updates.placeholder  = placeholder;
-  if (section      !== undefined) updates.section      = section;
-  if (order        !== undefined) updates.order        = order;
-  if (field_type   !== undefined) updates.field_type   = field_type;
-  if (name         !== undefined) updates.name         = name;
+  if (label           !== undefined) updates.label           = label;
+  if (is_required     !== undefined) updates.is_required     = is_required;
+  if (options         !== undefined) updates.options         = options;
+  if (column_span     !== undefined) updates.column_span     = column_span;
+  if (placeholder     !== undefined) updates.placeholder     = placeholder;
+  if (section         !== undefined) updates.section         = section;
+  if (order           !== undefined) updates.order           = order;
+  if (field_type      !== undefined) updates.field_type      = field_type;
+  if (name            !== undefined) updates.name            = name;
+  if (show_to_fronter !== undefined) updates.show_to_fronter = show_to_fronter;
 
   const { data, error } = await supabaseAdmin
     .from('form_fields').update(updates).eq('id', id).select().single();
@@ -117,16 +120,17 @@ router.post('/fields/bulk-save', superadminOnly, [
   if (delErr) return res.status(500).json({ error: delErr.message });
 
   const rows = fields.map((f, i) => ({
-    name:          f.name,
-    label:         f.label,
-    field_type:    ALLOWED_TYPES.includes(f.field_type) ? f.field_type : 'text',
-    is_required:   f.is_required  || false,
-    options:       f.options      || null,
-    order:         i,
-    column_span:   Math.min(Math.max(parseInt(f.column_span) || 1, 1), 3),
-    placeholder:   f.placeholder  || null,
-    section:       f.section      || 'default',
-    default_value: f.default_value || null,
+    name:            f.name,
+    label:           f.label,
+    field_type:      ALLOWED_TYPES.includes(f.field_type) ? f.field_type : 'text',
+    is_required:     f.is_required     || false,
+    options:         f.options         || null,
+    order:           i,
+    column_span:     Math.min(Math.max(parseInt(f.column_span) || 1, 1), 3),
+    placeholder:     f.placeholder     || null,
+    section:         f.section         || 'default',
+    default_value:   f.default_value   || null,
+    show_to_fronter: f.show_to_fronter !== false,
   }));
 
   const { data, error: insertErr } = await supabaseAdmin

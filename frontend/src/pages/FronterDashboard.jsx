@@ -168,28 +168,36 @@ const FronterDashboard = () => {
                 ) : (
                   <form onSubmit={handleSubmitTransfer} className="space-y-4 animate-slide-up">
 
-                    {/* Dynamic fields */}
-                    {fields.sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => (
-                      <div key={field.id}>
-                        <label className="block text-sm font-medium text-text-secondary mb-1">
-                          {field.label} {field.is_required && <span className="text-error-500">*</span>}
-                        </label>
-                        {field.field_type === 'textarea' ? (
-                          <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                            className="input" rows="3" required={field.is_required} placeholder={`Enter ${field.label.toLowerCase()}`} />
-                        ) : field.field_type === 'select' ? (
-                          <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                            className="input" required={field.is_required}>
-                            <option value="">Select {field.label}</option>
-                            {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                          </select>
-                        ) : (
-                          <input type={field.field_type === 'phone' ? 'tel' : field.field_type}
-                            value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                            className="input" required={field.is_required} placeholder={`Enter ${field.label.toLowerCase()}`} />
-                        )}
-                      </div>
-                    ))}
+                    {/* Dynamic fields — fronter-visible only */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {fields
+                      .filter(f => f.show_to_fronter !== false)
+                      .sort((a, b) => (a.order || 0) - (b.order || 0))
+                      .map(field => {
+                        const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3' }[field.column_span] || 'sm:col-span-1';
+                        return (
+                          <div key={field.id} className={spanClass}>
+                            <label className="block text-sm font-medium text-text-secondary mb-1">
+                              {field.label} {field.is_required && <span className="text-error-500">*</span>}
+                            </label>
+                            {field.field_type === 'textarea' ? (
+                              <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                className="input" rows="3" required={field.is_required} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} />
+                            ) : field.field_type === 'select' ? (
+                              <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                className="input" required={field.is_required}>
+                                <option value="">Select {field.label}</option>
+                                {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                            ) : (
+                              <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type}
+                                value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                className="input" required={field.is_required} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
 
                     {/* Closer selection */}
                     <div>

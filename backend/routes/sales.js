@@ -143,6 +143,7 @@ router.post(
     body('fronter_id').isUUID().optional({ nullable: true, checkFalsy: true }),
     body('sale_date').isISO8601().optional({ nullable: true, checkFalsy: true }),
     body('status').isIn(['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost']).optional(),
+    body('form_data').isObject().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -165,7 +166,7 @@ router.post(
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id,
-      sale_date, status,
+      sale_date, status, form_data,
     } = req.body;
 
     // If linked to a transfer, validate it
@@ -215,6 +216,7 @@ router.post(
         fronter_id: fronter_id || null,
         closer_id: userId,
         sale_date: sale_date || new Date().toISOString().split('T')[0],
+        form_data: form_data || null,
       })
       .select()
       .single();
