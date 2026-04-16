@@ -408,8 +408,10 @@ router.get(
 );
 
 // ============================================================================
-// DELETE /companies/:id — Deactivate company + all its users (SuperAdmin only)
-// Sales and transfers are kept intact.
+// DELETE /companies/:id — Hard delete company (SuperAdmin only)
+// - Nullifies company_id on sales + transfers (records preserved, orphaned)
+// - Deletes all user_company_roles for this company
+// - Deletes the company record
 // ============================================================================
 router.delete(
   "/:id",
@@ -422,28 +424,25 @@ router.delete(
 
     const { data: company, error: fetchErr } = await supabaseAdmin
       .from("companies")
-      .select("id, name, is_active")
+      .select("id, name")
       .eq("id", id)
       .single();
 
     if (fetchErr || !company) return res.status(404).json({ error: "Company not found" });
 
-    // Soft-delete: deactivate company
-    const { error: compErr } = await supabaseAdmin
-      .from("companies")
-      .update({ is_active: false })
-      .eq("id", id);
+    // Orphan sales and transfers (preserve records, remove company link)
+    await supabaseAdmin.from("sales").update({ company_id: null }).eq("company_id", id);
+    await supabaseAdmin.from("transfers").update({ company_id: null }).eq("company_id", id);
 
-    if (compErr) return res.status(500).json({ error: compErr.message });
+    // Hard delete user assignments
+    await supabaseAdmin.from("user_company_roles").delete().eq("company_id", id);
 
-    // Cascade: deactivate all user assignments for this company
-    await supabaseAdmin
-      .from("user_company_roles")
-      .update({ is_active: false })
-      .eq("company_id", id);
+    // Hard delete company
+    const { error: delErr } = await supabaseAdmin.from("companies").delete().eq("id", id);
+    if (delErr) return res.status(500).json({ error: delErr.message });
 
     res.json({
-      message: `Company "${company.name}" deactivated. All users deactivated. Sales and transfers preserved.`,
+      message: `Company "${company.name}" permanently deleted. Sales and transfers preserved.`,
     });
   })
 );

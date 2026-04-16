@@ -86,13 +86,47 @@ export const useCompanies = () => {
     }
   }, [fetchCompanies]);
 
-  // Delete company (soft-delete by setting is_active = false)
+  // Deactivate company (soft disable + cascade users)
   const deleteCompany = useCallback(async (companyId) => {
     setLoading(true);
     setError(null);
     try {
       await client.put(`companies/${companyId}`, { is_active: false });
-      setCompanies(companies.filter((c) => c.id !== companyId));
+      await fetchCompanies();
+      return true;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to deactivate company';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchCompanies]);
+
+  // Activate company
+  const activateCompany = useCallback(async (companyId) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await client.put(`companies/${companyId}`, { is_active: true });
+      await fetchCompanies();
+      return true;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to activate company';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchCompanies]);
+
+  // Hard delete company (permanent — sales/transfers orphaned, not deleted)
+  const hardDeleteCompany = useCallback(async (companyId) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await client.delete(`companies/${companyId}`);
+      setCompanies(prev => prev.filter((c) => c.id !== companyId));
       return true;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to delete company';
@@ -101,7 +135,7 @@ export const useCompanies = () => {
     } finally {
       setLoading(false);
     }
-  }, [companies]);
+  }, []);
 
   // Get company members
   const getCompanyMembers = useCallback(async (companyId) => {
@@ -130,6 +164,8 @@ export const useCompanies = () => {
     createCompany,
     updateCompany,
     deleteCompany,
+    activateCompany,
+    hardDeleteCompany,
     getCompanyMembers,
   };
 };

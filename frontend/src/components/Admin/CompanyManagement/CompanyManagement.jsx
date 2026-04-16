@@ -12,7 +12,7 @@ import CompanyDetail from './CompanyDetail';
  * Handles CRUD operations for companies
  */
 const CompanyManagement = () => {
-  const { companies, loading, error, fetchCompanies, createCompany, updateCompany, deleteCompany } = useCompanies();
+  const { companies, loading, error, fetchCompanies, createCompany, updateCompany, deleteCompany, activateCompany, hardDeleteCompany } = useCompanies();
   const [showModal, setShowModal]         = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [detailCompany, setDetailCompany] = useState(null);
@@ -35,15 +35,25 @@ const CompanyManagement = () => {
     setShowModal(true);
   };
 
-  // Handle delete company with confirmation
+  // Soft deactivate
   const handleDeleteCompany = async (companyId) => {
     try {
       await deleteCompany(companyId);
-      // Refetch to update list
-      await fetchCompanies();
-    } catch (err) {
-      // Error handled in hook
-    }
+    } catch { /* handled in hook */ }
+  };
+
+  // Re-activate
+  const handleActivateCompany = async (companyId) => {
+    try {
+      await activateCompany(companyId);
+    } catch { /* handled in hook */ }
+  };
+
+  // Hard delete (permanent)
+  const handleHardDeleteCompany = async (companyId) => {
+    try {
+      await hardDeleteCompany(companyId);
+    } catch { /* handled in hook */ }
   };
 
   // Handle modal save
@@ -135,7 +145,9 @@ const CompanyManagement = () => {
           companies={filteredCompanies}
           onView={setDetailCompany}
           onEdit={handleEditCompany}
-          onDelete={handleDeleteCompany}
+          onDeactivate={handleDeleteCompany}
+          onActivate={handleActivateCompany}
+          onHardDelete={handleHardDeleteCompany}
         />
       )}
 
