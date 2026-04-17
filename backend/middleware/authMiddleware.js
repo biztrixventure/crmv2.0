@@ -17,33 +17,33 @@ const authMiddleware = async (req, res, next) => {
     let userCompanyId = token.company_id;
 
     try {
-      // Fetch user's active company assignment with role details
-      // Don't use .single() - use normal select to avoid errors if no results
-      const { data: assignments, error } = await supabaseAdmin
-        .from('user_company_roles')
-        .select(`
-          company_id,
-          custom_roles (level)
-        `)
-        .eq('user_id', token.sub)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (!error && assignments && assignments.length > 0) {
-        const assignment = assignments[0];
-        userCompanyId = assignment.company_id;
-        userRole = assignment.custom_roles?.level || token.role;
-        logger.info('AUTH_MIDDLEWARE', `Resolved role for user ${token.sub}: ${userRole} in company ${userCompanyId}`);
-      } else if (error) {
-        logger.warn('AUTH_MIDDLEWARE', `Database query error: ${error.message}`);
+      // SUPERADMIN check FIRST — env-level superadmins are system-wide.
+      // They may have rows in user_company_roles from auto-assign; ignore them.
+      const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+      if (superadminEmails.includes(token.email)) {
+        userRole = 'superadmin';
+        userCompanyId = null;
+        logger.info('AUTH_MIDDLEWARE', `System superadmin identified: ${token.email}`);
       } else {
-        // No company assignment — check SUPERADMIN_EMAIL env for system-level superadmin
-        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-        if (superadminEmails.includes(token.email)) {
-          userRole = 'superadmin';
-          userCompanyId = null;
-          logger.info('AUTH_MIDDLEWARE', `System superadmin identified: ${token.email}`);
+        // Regular users — resolve role from active company assignment
+        const { data: assignments, error } = await supabaseAdmin
+          .from('user_company_roles')
+          .select(`
+            company_id,
+            custom_roles (level)
+          `)
+          .eq('user_id', token.sub)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (!error && assignments && assignments.length > 0) {
+          const assignment = assignments[0];
+          userCompanyId = assignment.company_id;
+          userRole = assignment.custom_roles?.level || token.role;
+          logger.info('AUTH_MIDDLEWARE', `Resolved role for user ${token.sub}: ${userRole} in company ${userCompanyId}`);
+        } else if (error) {
+          logger.warn('AUTH_MIDDLEWARE', `Database query error: ${error.message}`);
         } else {
           logger.warn('AUTH_MIDDLEWARE', `No active company assignments found for user ${token.sub}`);
         }
