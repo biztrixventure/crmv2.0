@@ -46,10 +46,11 @@ router.get('/search', asyncHandler(async (req, res) => {
     `client_name.ilike.%${q}%`,
   ].join(',');
 
-  const { data, error, count } = await supabaseAdmin
+  let searchQuery = supabaseAdmin
     .from('sales')
-    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at', { count: 'exact' })
-    .eq('company_id', companyId)
+    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at', { count: 'exact' });
+  if (companyId) searchQuery = searchQuery.eq('company_id', companyId);
+  const { data, error, count } = await searchQuery
     .or(filter)
     .order('created_at', { ascending: false })
     .limit(30);
