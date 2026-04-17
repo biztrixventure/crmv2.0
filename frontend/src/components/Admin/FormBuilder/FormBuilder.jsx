@@ -15,7 +15,7 @@ import {
   Settings, CheckSquare,
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List,
   X, Zap, Users, UserX, Tag, Briefcase, Link2,
-  ChevronRight, Layers, ListChecks, LayoutGrid,
+  ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
@@ -67,14 +67,15 @@ const FB_SIDEBAR = [
   {
     section: 'FORM',
     items: [
-      { id: 'layout',  label: 'Form Layout', icon: LayoutGrid  },
+      { id: 'layout',  label: 'Form Layout',      icon: LayoutGrid  },
     ],
   },
   {
     section: 'SALE CONFIG',
     items: [
-      { id: 'clients', label: 'Clients',     icon: Tag         },
-      { id: 'plans',   label: 'Plans',       icon: ListChecks  },
+      { id: 'clients', label: 'Clients',           icon: Tag         },
+      { id: 'plans',   label: 'Plans',             icon: ListChecks  },
+      { id: 'mapping', label: 'Client → Plans',    icon: ArrowRight  },
     ],
   },
 ];
@@ -179,8 +180,8 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
             <h2 className="text-2xl font-bold text-text">{label}s</h2>
             <p className="text-sm text-text-secondary">
               {isClient
-                ? 'Clients shown in the sale form. Selecting a client filters available plans.'
-                : 'Plans available in the sale form. Link plans to clients via Form Layout → "Map Plans".'}
+                ? 'Clients shown in the sale form. After adding clients, go to "Client → Plans" to assign which plans each client shows.'
+                : 'Plans available in the sale form. After adding plans, go to "Client → Plans" to map them to clients.'}
             </p>
           </div>
         </div>
@@ -267,7 +268,7 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
 
       {isClient && (
         <p className="text-xs text-text-tertiary mt-3 px-1">
-          After adding clients, go to <strong>Form Layout</strong> → add a Plan field → click <strong>"Map Plans"</strong> to assign plans per client.
+          After adding clients and plans, go to <strong>Client → Plans</strong> in the sidebar to configure which plans appear for each client.
         </p>
       )}
     </div>
@@ -275,7 +276,208 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Client→Plan mapping modal
+// Mapping Panel — client × plan matrix (full-page, replaces modal approach)
+// ─────────────────────────────────────────────────────────────────────────────
+const MappingPanel = ({ clients, plans, configLoading }) => {
+  const [mapping,   setMapping]   = useState({});
+  const [fieldId,   setFieldId]   = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [savedMsg,  setSavedMsg]  = useState('');
+
+  const loadMapping = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res     = await client.get('forms/fields');
+      const pField  = (res.data.fields || []).find(f => f.field_type === 'sale_plan');
+      if (pField) {
+        setFieldId(pField.id);
+        const m = {};
+        (pField.options || []).forEach(o => { m[o.client] = new Set(o.plans || []); });
+        setMapping(m);
+      } else {
+        setFieldId(null);
+      }
+    } catch { /* non-critical */ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadMapping(); }, [loadMapping]);
+
+  const toggle = (clientVal, planVal) =>
+    setMapping(prev => {
+      const s = new Set(prev[clientVal] || []);
+      s.has(planVal) ? s.delete(planVal) : s.add(planVal);
+      return { ...prev, [clientVal]: s };
+    });
+
+  const selectAll = (clientVal) =>
+    setMapping(prev => ({ ...prev, [clientVal]: new Set(plans.map(p => p.value)) }));
+
+  const clearAll = (clientVal) =>
+    setMapping(prev => ({ ...prev, [clientVal]: new Set() }));
+
+  const handleSave = async () => {
+    if (!fieldId) return;
+    setSaving(true);
+    try {
+      const options = clients
+        .map(c => ({ client: c.value, plans: [...(mapping[c.value] || [])] }))
+        .filter(m => m.plans.length > 0);
+      await client.put(`forms/fields/${fieldId}`, { options });
+      setSavedMsg('Mapping saved!');
+      setTimeout(() => setSavedMsg(''), 3000);
+    } catch (err) {
+      setSavedMsg(err.response?.data?.error || 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  const isLoading = loading || configLoading;
+
+  return (
+    <div className="max-w-3xl animate-fade-in">
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3 mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
+            <ArrowRight size={20} style={{ color: '#6366f1' }} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-text">Client → Plan Mapping</h2>
+            <p className="text-sm text-text-secondary mt-0.5">
+              Choose which plans are available when each client is selected in the form.
+            </p>
+          </div>
+        </div>
+        {fieldId && (
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <Save size={15} /> {saving ? 'Saving…' : 'Save Mapping'}
+          </button>
+        )}
+      </div>
+
+      {savedMsg && (
+        <div className="mb-5 p-3 rounded-xl text-sm font-medium"
+          style={{
+            backgroundColor: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-50)' : 'var(--color-success-50)',
+            color: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-700)' : 'var(--color-success-700)',
+            border: '1px solid currentColor',
+          }}>
+          {savedMsg}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+        </div>
+      ) : !fieldId ? (
+        <div className="rounded-2xl p-10 text-center"
+          style={{ backgroundColor: 'var(--color-surface)', border: '2px dashed var(--color-border)' }}>
+          <Briefcase size={36} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)' }} />
+          <p className="font-semibold text-text mb-1">No Plan field on the form yet</p>
+          <p className="text-sm text-text-secondary">
+            Go to <strong>Form Layout</strong> → drag the <strong>Plan</strong> field onto the canvas → Save Layout.
+            Then come back here to configure the mapping.
+          </p>
+        </div>
+      ) : clients.length === 0 ? (
+        <div className="rounded-2xl p-10 text-center"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <Tag size={36} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)' }} />
+          <p className="font-semibold text-text mb-1">No clients yet</p>
+          <p className="text-sm text-text-secondary">Add clients in the <strong>Clients</strong> section first.</p>
+        </div>
+      ) : plans.length === 0 ? (
+        <div className="rounded-2xl p-10 text-center"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <ListChecks size={36} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)' }} />
+          <p className="font-semibold text-text mb-1">No plans yet</p>
+          <p className="text-sm text-text-secondary">Add plans in the <strong>Plans</strong> section first.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {clients.map(c => {
+            const selectedSet = mapping[c.value] || new Set();
+            const selectedCount = selectedSet.size;
+            return (
+              <div key={c.id} className="rounded-2xl overflow-hidden"
+                style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+
+                {/* Client header */}
+                <div className="flex items-center justify-between px-5 py-3.5"
+                  style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                      style={{ background: 'var(--gradient-sidebar)' }}>
+                      <Tag size={14} className="text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-text">{c.value}</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {selectedCount} of {plans.length} plan{plans.length !== 1 ? 's' : ''} selected
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => selectAll(c.value)}
+                      className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors hover:bg-primary-100"
+                      style={{ color: 'var(--color-primary-600)' }}>
+                      All
+                    </button>
+                    <button onClick={() => clearAll(c.value)}
+                      className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors hover:bg-error-100"
+                      style={{ color: 'var(--color-error-600)' }}>
+                      None
+                    </button>
+                  </div>
+                </div>
+
+                {/* Plan checkboxes */}
+                <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {plans.map(p => {
+                    const on = selectedSet.has(p.value);
+                    return (
+                      <label key={p.id}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all select-none"
+                        style={{
+                          backgroundColor: on ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)',
+                          border: `1.5px solid ${on ? 'var(--color-primary-400, #818cf8)' : 'var(--color-border)'}`,
+                          color: on ? 'var(--color-primary-700)' : 'var(--color-text)',
+                        }}>
+                        <div className="flex-shrink-0 w-4 h-4 rounded flex items-center justify-center transition-all"
+                          style={{
+                            backgroundColor: on ? 'var(--color-primary-600)' : 'transparent',
+                            border: `1.5px solid ${on ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)'}`,
+                          }}>
+                          {on && <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                            <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>}
+                        </div>
+                        <input type="checkbox" checked={on} onChange={() => toggle(c.value, p.value)} className="hidden" />
+                        <span className="text-sm font-medium truncate">{p.value}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Save hint */}
+          <p className="text-xs text-center pt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+            Changes only apply in the form when you click <strong>Save Mapping</strong>.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client→Plan mapping modal (used from Form Layout canvas)
 // ─────────────────────────────────────────────────────────────────────────────
 const ClientPlanMappingModal = ({ clients, plans, currentMapping, onSave, onClose }) => {
   const init = () => {
@@ -935,6 +1137,12 @@ const FormBuilder = () => {
               type="plan" items={plans} loading={configLoading}
               onAdd={handleAdd} onDelete={handleDelete}
               saving={saving} deleting={deleting}
+            />
+          )}
+          {activeSection === 'mapping' && (
+            <MappingPanel
+              clients={clients} plans={plans}
+              configLoading={configLoading}
             />
           )}
         </div>
