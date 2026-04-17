@@ -1,0 +1,21 @@
+-- ============================================================================
+-- 013_cleanup_superadmin_roles.sql
+-- Remove system-level superadmin users from user_company_roles.
+-- These users are identified by the SUPERADMIN_EMAIL env variable.
+--
+-- The server startup (syncSuperadminMetadata) handles this automatically
+-- by setting app_metadata.role='superadmin' on the Supabase auth user, and
+-- the authMiddleware checks that flag first — so running this migration is
+-- optional but cleans up the stale rows so superadmins no longer appear
+-- in company member lists.
+--
+-- HOW TO RUN:
+-- 1. Find the superadmin's UUID from Supabase Auth dashboard (Auth → Users)
+-- 2. Replace <superadmin-uuid> below with the actual UUID
+-- 3. Run in Supabase SQL editor
+--
+-- DELETE FROM user_company_roles
+-- WHERE user_id = '<superadmin-uuid>';
+--
+-- If you have multiple superadmins, add one DELETE per UUID.
+-- ============================================================================

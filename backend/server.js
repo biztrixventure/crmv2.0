@@ -22,6 +22,28 @@ const pushRoutes          = require('./routes/push');
 const reviewsRoutes       = require('./routes/reviews');
 const numberListsRoutes   = require('./routes/numberLists');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
+const { supabaseAdmin: _saForSync } = require('./config/database');
+
+// On startup: stamp app_metadata.role='superadmin' for SUPERADMIN_EMAIL users.
+// Once set, the Supabase JWT carries it — no env-var dependency per-request.
+async function syncSuperadminMetadata() {
+  const emails = (process.env.SUPERADMIN_EMAIL || '')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (!emails.length) return;
+  try {
+    const { data } = await _saForSync.auth.admin.listUsers({ perPage: 1000 });
+    for (const u of (data?.users || [])) {
+      if (emails.includes((u.email || '').toLowerCase()) && u.app_metadata?.role !== 'superadmin') {
+        await _saForSync.auth.admin.updateUserById(u.id, {
+          app_metadata: { ...u.app_metadata, role: 'superadmin' },
+        });
+        console.log(`[SUPERADMIN] Stamped app_metadata.role=superadmin for ${u.email}`);
+      }
+    }
+  } catch (err) {
+    console.error('[SUPERADMIN] Metadata sync failed:', err.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -132,6 +154,7 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   startCallbackScheduler();
+  syncSuperadminMetadata(); // Stamp JWT metadata for superadmins — no-op if already done
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Supabase URL: ${process.env.VITE_SUPABASE_URL}`);

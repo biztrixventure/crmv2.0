@@ -16,10 +16,9 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
-  // SUPERADMIN check FIRST — env-level superadmins are system-wide,
-  // even if they were auto-assigned to a company they must stay superadmin.
-  const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-  if (superadminEmails.includes(req.user.email)) {
+  // SUPERADMIN check FIRST — authMiddleware already resolved role for token-based requests.
+  // Trust it: if middleware set role=superadmin, honor it here too.
+  if (req.user.role === 'superadmin') {
     const [{ data: allPerms }, { data: profile }] = await Promise.all([
       supabaseAdmin.from('permissions').select('name'),
       supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
@@ -112,9 +111,11 @@ router.post(
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      // SUPERADMIN check FIRST — env-level superadmins bypass company role lookup
-      const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-      if (superadminEmails.includes(data.user.email)) {
+      // SUPERADMIN check FIRST — env-level superadmins bypass company role lookup.
+      // Case-insensitive + check app_metadata.role (set by startup sync).
+      const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      const loginEmail = (data.user.email || '').toLowerCase();
+      if (data.user.app_metadata?.role === 'superadmin' || superadminEmails.includes(loginEmail)) {
         const [{ data: allPerms }, { data: saProfile }] = await Promise.all([
           supabaseAdmin.from('permissions').select('name'),
           supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', data.user.id).single(),

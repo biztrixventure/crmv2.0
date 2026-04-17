@@ -392,9 +392,22 @@ router.get(
       const emailMap = {};
       authUsers?.users?.forEach((u) => { emailMap[u.id] = u.email; });
 
+      // Exclude system superadmins from member lists — they are env-level,
+      // not real company members even if a stale user_company_roles row exists.
+      const saEmails = new Set(
+        (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+      );
+      const superadminIds = new Set(
+        (authUsers?.users || [])
+          .filter(u => u.app_metadata?.role === 'superadmin' || saEmails.has((u.email || '').toLowerCase()))
+          .map(u => u.id)
+      );
+
+      const visibleMembers = (data || []).filter(m => !superadminIds.has(m.user_id));
+
       res.json({
-        total: (data || []).length,
-        members: (data || []).map((m) => ({
+        total: visibleMembers.length,
+        members: visibleMembers.map((m) => ({
           id: m.id,
           user_id: m.user_id,
           email: emailMap[m.user_id] || "N/A",
