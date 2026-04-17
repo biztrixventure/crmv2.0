@@ -10,6 +10,7 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useFormFields } from "../hooks/useFormFields";
 import { useNotifications } from "../hooks/useNotifications";
 import { useClosers } from "../hooks/useClosers";
+import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 
 const FronterDashboard = () => {
@@ -21,6 +22,7 @@ const FronterDashboard = () => {
   const { transfers, loading: transfersLoading, fetchTransfers, createTransfer } = useTransfers(user?.company_id);
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
   const { closers, loading: closersLoading, fetchClosers } = useClosers(user?.company_id);
+  const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -34,6 +36,7 @@ const FronterDashboard = () => {
     fetchTransfers();
     fetchFields();
     fetchClosers();
+    fetchConfigs();
   }, []);
 
   const handleLogout = () => { logout(); navigate("/login"); };
@@ -176,6 +179,18 @@ const FronterDashboard = () => {
                       .sort((a, b) => (a.order || 0) - (b.order || 0))
                       .map(field => {
                         const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3' }[field.column_span] || 'sm:col-span-1';
+
+                        // Cascading plan options based on selected client
+                        let planOptions = salePlans;
+                        if (field.field_type === 'sale_plan') {
+                          const clientField = fields.find(f => f.field_type === 'sale_client');
+                          const selectedClient = clientField ? (formData[clientField.name] || '') : '';
+                          if (selectedClient && Array.isArray(field.options) && field.options.length > 0) {
+                            const mapping = field.options.find(m => m.client === selectedClient);
+                            if (mapping) planOptions = salePlans.filter(p => mapping.plans.includes(p.value));
+                          }
+                        }
+
                         return (
                           <div key={field.id} className={spanClass}>
                             <label className="block text-sm font-medium text-text-secondary mb-1">
@@ -189,6 +204,18 @@ const FronterDashboard = () => {
                                 className="input" required={field.is_required}>
                                 <option value="">Select {field.label}</option>
                                 {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                            ) : field.field_type === 'sale_client' ? (
+                              <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                className="input" required={field.is_required}>
+                                <option value="">Select client…</option>
+                                {saleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+                              </select>
+                            ) : field.field_type === 'sale_plan' ? (
+                              <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                className="input" required={field.is_required}>
+                                <option value="">Select plan…</option>
+                                {planOptions.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                               </select>
                             ) : (
                               <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type}

@@ -5,7 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 
 const router = express.Router();
 
-const ALLOWED_TYPES = ['text', 'email', 'number', 'textarea', 'select', 'date', 'phone', 'tel', 'zip', 'checkbox'];
+const ALLOWED_TYPES = ['text', 'email', 'number', 'textarea', 'select', 'date', 'phone', 'tel', 'zip', 'checkbox', 'sale_client', 'sale_plan'];
 
 const superadminOnly = (req, res, next) => {
   if (req.user.role !== 'superadmin') {

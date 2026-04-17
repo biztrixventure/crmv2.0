@@ -1,63 +1,167 @@
 /**
  * FormBuilder — SuperAdmin drag-drop 3-column form layout editor.
  *
- * Left panel:  palette of available fields (base + custom)
- * Right panel: 3-column grid canvas; drag to reorder, resize column span, toggle required
+ * Left panel:  palette (base fields + sales fields)
+ * Right panel: 3-column grid canvas; drag to reorder, resize span, toggle required
  *
- * On save → POST /forms/fields/bulk-save (replaces entire global form layout).
+ * Special field types:
+ *   sale_client — live dropdown from Sale Configs → Clients
+ *   sale_plan   — live dropdown from Sale Configs → Plans, cascades by Client
+ *                 admin configures Client→Plan mapping here (stored in field.options)
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  GripVertical, Trash2, Plus, Save, Eye, EyeOff,
-  ChevronLeft, ChevronRight, Settings, CheckSquare,
+  GripVertical, Plus, Save, Eye, EyeOff,
+  Settings, CheckSquare,
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List,
-  ToggleLeft, X, Zap, Users, UserX,
+  X, Zap, Users, UserX, Tag, Briefcase, Link2, ChevronDown,
 } from 'lucide-react';
 import client from '../../../api/client';
+import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
 
-// ── Base fields for Extended Warranty ────────────────────────────────────────
+// ── Base fields ───────────────────────────────────────────────────────────────
 const BASE_FIELDS = [
-  { name: 'FirstName',   label: 'First Name',  field_type: 'text',   is_required: true  },
-  { name: 'LastName',    label: 'Last Name',   field_type: 'text',   is_required: true  },
-  { name: 'Phone',       label: 'Phone',       field_type: 'tel',    is_required: true  },
-  { name: 'Email',       label: 'Email',       field_type: 'email',  is_required: false },
-  { name: 'Address',     label: 'Address',     field_type: 'text',   is_required: false },
-  { name: 'City',        label: 'City',        field_type: 'text',   is_required: false },
-  { name: 'State',       label: 'State',       field_type: 'text',   is_required: false },
-  { name: 'Zip',         label: 'Zip Code',    field_type: 'zip',    is_required: false },
-  { name: 'BirthDate',   label: 'Birth Date',  field_type: 'date',   is_required: false },
-  { name: 'Gender',      label: 'Gender',      field_type: 'select', is_required: false, options: ['Male', 'Female', 'Other'] },
-  { name: 'CarYear',     label: 'Car Year',    field_type: 'number', is_required: false },
-  { name: 'CarMake',     label: 'Car Make',    field_type: 'text',   is_required: false },
-  { name: 'CarModel',    label: 'Car Model',   field_type: 'text',   is_required: false },
+  { name: 'FirstName', label: 'First Name',  field_type: 'text',   is_required: true  },
+  { name: 'LastName',  label: 'Last Name',   field_type: 'text',   is_required: true  },
+  { name: 'Phone',     label: 'Phone',       field_type: 'tel',    is_required: true  },
+  { name: 'Email',     label: 'Email',       field_type: 'email',  is_required: false },
+  { name: 'Address',   label: 'Address',     field_type: 'text',   is_required: false },
+  { name: 'City',      label: 'City',        field_type: 'text',   is_required: false },
+  { name: 'State',     label: 'State',       field_type: 'text',   is_required: false },
+  { name: 'Zip',       label: 'Zip Code',    field_type: 'zip',    is_required: false },
+  { name: 'BirthDate', label: 'Birth Date',  field_type: 'date',   is_required: false },
+  { name: 'Gender',    label: 'Gender',      field_type: 'select', is_required: false, options: ['Male', 'Female', 'Other'] },
+  { name: 'CarYear',   label: 'Car Year',    field_type: 'number', is_required: false },
+  { name: 'CarMake',   label: 'Car Make',    field_type: 'text',   is_required: false },
+  { name: 'CarModel',  label: 'Car Model',   field_type: 'text',   is_required: false },
+];
+
+// ── Special sale-config fields (always re-addable, live data) ─────────────────
+const SALE_FIELDS = [
+  { name: 'SaleClient', label: 'Client',  field_type: 'sale_client', is_required: false },
+  { name: 'SalePlan',   label: 'Plan',    field_type: 'sale_plan',   is_required: false },
 ];
 
 const TYPE_ICONS = {
-  text:     Type,
-  email:    Mail,
-  number:   Hash,
-  tel:      Phone,
-  phone:    Phone,
-  zip:      Hash,
-  date:     Calendar,
-  textarea: AlignLeft,
-  select:   List,
-  checkbox: CheckSquare,
+  text: Type, email: Mail, number: Hash, tel: Phone, phone: Phone,
+  zip: Hash, date: Calendar, textarea: AlignLeft, select: List,
+  checkbox: CheckSquare, sale_client: Tag, sale_plan: Briefcase,
 };
 
 const TYPE_LABELS = {
   text: 'Text', email: 'Email', number: 'Number', tel: 'Phone',
   phone: 'Phone', zip: 'Zip', date: 'Date', textarea: 'Textarea',
   select: 'Select', checkbox: 'Checkbox',
+  sale_client: 'Client', sale_plan: 'Plan',
 };
 
 const SPAN_LABEL = { 1: '1/3', 2: '2/3', 3: 'Full' };
-const SPAN_CLASS = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
+const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
 
-// ── Small helper: field type icon ─────────────────────────────────────────────
 const FieldIcon = ({ type, size = 14 }) => {
   const Icon = TYPE_ICONS[type] || Type;
   return <Icon size={size} />;
+};
+
+// ── Client→Plan mapping modal ─────────────────────────────────────────────────
+const ClientPlanMappingModal = ({ clients, plans, currentMapping, onSave, onClose }) => {
+  // currentMapping: [{ client: "Name", plans: ["Plan A", ...] }, ...]
+  const init = () => {
+    const map = {};
+    (currentMapping || []).forEach(m => { map[m.client] = new Set(m.plans); });
+    return map;
+  };
+  const [checked, setChecked] = useState(init);
+
+  const toggle = (clientVal, planVal) => {
+    setChecked(prev => {
+      const set = new Set(prev[clientVal] || []);
+      set.has(planVal) ? set.delete(planVal) : set.add(planVal);
+      return { ...prev, [clientVal]: set };
+    });
+  };
+
+  const handleSave = () => {
+    const mapping = clients
+      .map(c => ({ client: c.value, plans: [...(checked[c.value] || [])] }))
+      .filter(m => m.plans.length > 0);
+    onSave(mapping);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="w-full max-w-lg mx-4 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]"
+        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div>
+            <h3 className="text-base font-bold text-text flex items-center gap-2"><Link2 size={16} /> Client → Plan Mapping</h3>
+            <p className="text-xs text-text-secondary mt-0.5">Select which plans are available for each client</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-bg-secondary"><X size={18} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {clients.length === 0 && (
+            <p className="text-sm text-text-secondary text-center py-4">No clients configured yet. Add clients in Sale Config first.</p>
+          )}
+          {plans.length === 0 && (
+            <p className="text-sm text-text-secondary text-center py-4">No plans configured yet. Add plans in Sale Config first.</p>
+          )}
+          {clients.map(c => (
+            <div key={c.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <p className="text-sm font-bold text-text mb-2 flex items-center gap-1.5">
+                <Tag size={13} style={{ color: 'var(--color-primary-500)' }} />
+                {c.value}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {plans.map(p => {
+                  const isChecked = (checked[c.value] || new Set()).has(p.value);
+                  return (
+                    <label key={p.id}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all text-sm"
+                      style={{
+                        backgroundColor: isChecked ? 'var(--color-primary-50)' : 'var(--color-surface)',
+                        border: `1px solid ${isChecked ? 'var(--color-primary-300)' : 'var(--color-border)'}`,
+                        color: isChecked ? 'var(--color-primary-700)' : 'var(--color-text)',
+                      }}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggle(c.value, p.value)}
+                        className="w-3.5 h-3.5 accent-primary-600"
+                      />
+                      <span className="font-medium truncate">{p.value}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {plans.length === 0 && (
+                <p className="text-xs text-text-tertiary">No plans to assign.</p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 px-6 py-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <button onClick={onClose}
+            className="flex-1 py-2 rounded-xl border text-sm font-semibold"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            Cancel
+          </button>
+          <button onClick={handleSave}
+            className="flex-1 py-2 rounded-xl text-sm font-bold text-white"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            Save Mapping
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // ── Custom field creation modal ───────────────────────────────────────────────
@@ -98,7 +202,9 @@ const AddCustomModal = ({ onAdd, onClose }) => {
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1">Field Type</label>
             <select value={form.field_type} onChange={e => setForm({...form, field_type: e.target.value})} className="input text-sm">
-              {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {Object.entries(TYPE_LABELS)
+                .filter(([v]) => !v.startsWith('sale_'))
+                .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
           <div>
@@ -129,10 +235,13 @@ const AddCustomModal = ({ onAdd, onClose }) => {
 };
 
 // ── Field card on the canvas ──────────────────────────────────────────────────
-const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd, onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel }) => {
+const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd, onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel, onConfigureMapping, saleClientsCount, salePlansCount }) => {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelVal, setLabelVal]         = useState(field.label);
   const inputRef = useRef(null);
+
+  const isSaleField = field.field_type === 'sale_client' || field.field_type === 'sale_plan';
+  const mappingCount = field.field_type === 'sale_plan' && Array.isArray(field.options) ? field.options.length : 0;
 
   const commitLabel = () => {
     setEditingLabel(false);
@@ -150,17 +259,19 @@ const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOv
       onDragEnd={onDragEnd}
       className={`rounded-xl border-2 transition-all duration-150 select-none ${SPAN_CLASS[field.column_span || 1]}`}
       style={{
-        borderColor:       isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : 'var(--color-border)',
-        backgroundColor:   isDragOver ? 'var(--color-primary-50)'  : 'var(--color-surface)',
-        opacity:           isDragging ? 0.35 : 1,
-        cursor:            'grab',
-        boxShadow:         isDragOver ? '0 0 0 3px var(--color-primary-200)' : 'none',
+        borderColor:     isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : isSaleField ? 'var(--color-primary-200)' : 'var(--color-border)',
+        backgroundColor: isDragOver ? 'var(--color-primary-50)'  : isSaleField ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
+        opacity:         isDragging ? 0.35 : 1,
+        cursor:          'grab',
+        boxShadow:       isDragOver ? '0 0 0 3px var(--color-primary-200)' : 'none',
       }}
     >
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+      <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 min-w-0 overflow-hidden">
         <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
-        <FieldIcon type={field.field_type} />
+        <span style={{ flexShrink: 0, color: isSaleField ? 'var(--color-primary-500)' : 'var(--color-text-secondary)' }}>
+          <FieldIcon type={field.field_type} />
+        </span>
         {editingLabel ? (
           <input
             ref={inputRef}
@@ -168,12 +279,12 @@ const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOv
             onChange={e => setLabelVal(e.target.value)}
             onBlur={commitLabel}
             onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditingLabel(false); }}
-            className="flex-1 text-sm font-semibold bg-transparent border-b border-primary-400 outline-none text-text"
+            className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-b border-primary-400 outline-none text-text"
           />
         ) : (
           <span
             onDoubleClick={() => { setLabelVal(field.label); setEditingLabel(true); }}
-            className="flex-1 text-sm font-semibold text-text truncate cursor-text"
+            className="flex-1 min-w-0 text-sm font-semibold text-text truncate cursor-text"
             title="Double-click to rename">
             {field.label}
           </span>
@@ -181,60 +292,83 @@ const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOv
         <button
           onClick={() => onRemove(index)}
           className="p-0.5 rounded transition-colors hover:bg-error-100 flex-shrink-0"
-          title="Remove from form">
+          title="Remove">
           <X size={13} style={{ color: 'var(--color-error-500)' }} />
         </button>
       </div>
 
+      {/* Sale field badge */}
+      {isSaleField && (
+        <div className="px-3 pb-1">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold"
+            style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+            <Zap size={9} />
+            Live from Sale Config
+          </span>
+          {field.field_type === 'sale_plan' && (
+            <span className="ml-1.5 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold"
+              style={{ backgroundColor: mappingCount > 0 ? 'var(--color-success-50)' : 'var(--color-warning-50)', color: mappingCount > 0 ? 'var(--color-success-700)' : 'var(--color-warning-700)' }}>
+              <Link2 size={9} />
+              {mappingCount > 0 ? `${mappingCount} client${mappingCount > 1 ? 's' : ''} mapped` : 'No mapping (shows all)'}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Footer controls */}
-      <div className="flex items-center gap-2 px-3 pb-2.5 pt-1"
+      <div className="flex items-center flex-wrap gap-1.5 px-3 pb-2.5 pt-1.5"
         style={{ borderTop: '1px solid var(--color-border)' }}>
+
         {/* Required toggle */}
         <button
           onClick={() => onToggleRequired(index)}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all ${
-            field.is_required ? 'text-error-600' : 'text-text-tertiary'
-          }`}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0"
           style={{
             backgroundColor: field.is_required ? 'var(--color-error-50)' : 'var(--color-bg-secondary)',
-          }}
-          title="Toggle required">
-          {field.is_required ? '* Required' : 'Optional'}
+            color: field.is_required ? 'var(--color-error-600)' : 'var(--color-text-tertiary)',
+          }}>
+          {field.is_required ? '* Req' : 'Opt'}
         </button>
 
-        {/* Fronter visibility toggle */}
+        {/* Fronter visibility */}
         <button
           onClick={() => onToggleFronter(index)}
-          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all"
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0"
           style={{
             backgroundColor: field.show_to_fronter !== false ? 'var(--color-info-50, #e0f2fe)' : 'var(--color-bg-secondary)',
             color: field.show_to_fronter !== false ? 'var(--color-info-600, #0284c7)' : 'var(--color-text-tertiary)',
-          }}
-          title={field.show_to_fronter !== false ? 'Visible to fronters — click to make closer-only' : 'Closer only — click to show to fronters'}>
+          }}>
           {field.show_to_fronter !== false
-            ? <><Users size={10} /> Fronters</>
-            : <><UserX size={10} /> Closer Only</>}
+            ? <><Users size={9} /> Fronters</>
+            : <><UserX size={9} /> Closer</>}
         </button>
 
-        {/* Column span */}
-        <div className="flex items-center gap-0.5 ml-auto">
+        {/* Configure mapping (sale_plan only) */}
+        {field.field_type === 'sale_plan' && (
+          <button
+            onClick={() => onConfigureMapping(index)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0 hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+            <Link2 size={9} /> Map Plans
+          </button>
+        )}
+
+        {/* Span buttons — pushed right */}
+        <div className="flex items-center gap-0.5 ml-auto flex-shrink-0">
           {[1, 2, 3].map(n => (
-            <button
-              key={n}
-              onClick={() => onChangeSpan(index, n)}
+            <button key={n} onClick={() => onChangeSpan(index, n)}
               className="px-1.5 py-0.5 rounded text-xs font-bold transition-all"
               style={{
                 backgroundColor: (field.column_span || 1) === n ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
                 color:            (field.column_span || 1) === n ? 'white' : 'var(--color-text-secondary)',
-              }}
-              title={`Span ${n} column${n > 1 ? 's' : ''}`}>
+              }}>
               {SPAN_LABEL[n]}
             </button>
           ))}
         </div>
 
         {/* Type badge */}
-        <span className="text-xs font-mono px-1.5 py-0.5 rounded"
+        <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0"
           style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
           {TYPE_LABELS[field.field_type] || field.field_type}
         </span>
@@ -244,41 +378,51 @@ const FieldCard = ({ field, index, isDragging, isDragOver, onDragStart, onDragOv
 };
 
 // ── Palette field pill ────────────────────────────────────────────────────────
-const PaletteField = ({ field, onAdd }) => (
+const PaletteField = ({ field, onAdd, isSale = false }) => (
   <button
     onClick={() => onAdd(field)}
-    draggable={false}
     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all hover:shadow-md hover:scale-[1.02]"
-    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
-    title={`Add ${field.label}`}>
-    <FieldIcon type={field.field_type} />
-    <span className="text-sm font-semibold text-text flex-1 truncate">{field.label}</span>
-    <Plus size={13} style={{ color: 'var(--color-primary-500)' }} />
+    style={{
+      borderColor: isSale ? 'var(--color-primary-200)' : 'var(--color-border)',
+      backgroundColor: isSale ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
+    }}>
+    <span style={{ color: isSale ? 'var(--color-primary-500)' : 'var(--color-text-secondary)', flexShrink: 0 }}>
+      <FieldIcon type={field.field_type} />
+    </span>
+    <div className="flex-1 min-w-0">
+      <p className="text-sm font-semibold text-text truncate">{field.label}</p>
+      {isSale && <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>
+        {field.field_type === 'sale_client' ? 'From Sale Config clients' : 'From Sale Config plans'}
+      </p>}
+    </div>
+    <Plus size={13} style={{ color: 'var(--color-primary-500)', flexShrink: 0 }} />
   </button>
 );
 
 // ── Main FormBuilder ──────────────────────────────────────────────────────────
 const FormBuilder = () => {
-  const [canvasFields, setCanvasFields] = useState([]);  // fields placed on grid
-  const [palette, setPalette]           = useState([]);  // available to add
+  const [canvasFields, setCanvasFields] = useState([]);
+  const [palette, setPalette]           = useState([]);
   const [loading, setLoading]           = useState(true);
   const [saving, setSaving]             = useState(false);
   const [savedMsg, setSavedMsg]         = useState('');
   const [showPreview, setShowPreview]   = useState(false);
   const [showCustom, setShowCustom]     = useState(false);
+  const [mappingField, setMappingField] = useState(null); // index of sale_plan field being configured
 
-  // Drag state
+  const { clients: saleClients, plans: salePlans, fetchConfigs, loading: configsLoading } = useSaleConfigs();
+
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 
-  // Load current fields from DB
+  useEffect(() => { fetchConfigs(); }, [fetchConfigs]);
+
   const loadFields = useCallback(async () => {
     setLoading(true);
     try {
       const res = await client.get('forms/fields');
       const dbFields = (res.data.fields || []).sort((a, b) => a.order - b.order);
 
-      // Build canvas from DB
       const canvasNames = new Set(dbFields.map(f => f.name));
       const canvas = dbFields.map(f => ({
         id:              f.id,
@@ -304,18 +448,22 @@ const FormBuilder = () => {
 
   useEffect(() => { loadFields(); }, [loadFields]);
 
-  // Add field from palette → canvas
   const handleAddFromPalette = (field) => {
     setCanvasFields(prev => [...prev, { ...field, column_span: field.column_span || 1, show_to_fronter: true }]);
     setPalette(prev => prev.filter(f => f.name !== field.name));
   };
 
-  // Add custom field
+  // Sale fields are always re-addable (multiple clients/plans allowed? No — prevent dupes)
+  const handleAddSaleField = (field) => {
+    const alreadyOnCanvas = canvasFields.some(f => f.field_type === field.field_type);
+    if (alreadyOnCanvas) return; // already added
+    setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: true, options: null }]);
+  };
+
   const handleAddCustom = (field) => {
     setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: true }]);
   };
 
-  // Remove field from canvas → back to palette (if it's a base field)
   const handleRemove = (index) => {
     const removed = canvasFields[index];
     setCanvasFields(prev => prev.filter((_, i) => i !== index));
@@ -342,7 +490,12 @@ const FormBuilder = () => {
     setCanvasFields(prev => prev.map((f, i) => i === index ? { ...f, label: newLabel } : f));
   };
 
-  // ── Drag handlers ────────────────────────────────────────────────────────
+  // Save client→plan mapping into the sale_plan field's options
+  const handleSaveMapping = (index, mapping) => {
+    setCanvasFields(prev => prev.map((f, i) => i === index ? { ...f, options: mapping } : f));
+  };
+
+  // ── Drag handlers ─────────────────────────────────────────────────────────
   const handleDragStart = (e, index) => {
     dragIndex.current = index;
     e.dataTransfer.effectAllowed = 'move';
@@ -358,7 +511,6 @@ const FormBuilder = () => {
     e.preventDefault();
     const fromIndex = dragIndex.current;
     if (fromIndex === null || fromIndex === dropIndex) return;
-
     setCanvasFields(prev => {
       const arr = [...prev];
       const [moved] = arr.splice(fromIndex, 1);
@@ -374,14 +526,13 @@ const FormBuilder = () => {
     setDragOverIdx(null);
   };
 
-  // ── Save to DB ───────────────────────────────────────────────────────────
+  // ── Save to DB ────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (canvasFields.length === 0) return;
     setSaving(true);
     try {
       const res = await client.post('forms/fields/bulk-save', { fields: canvasFields });
       setSavedMsg(`Saved — ${res.data.saved} field${res.data.saved !== 1 ? 's' : ''} applied globally.`);
-      // Reload to get real IDs from DB
       await loadFields();
       setTimeout(() => setSavedMsg(''), 5000);
     } catch (err) {
@@ -390,6 +541,10 @@ const FormBuilder = () => {
       setSaving(false);
     }
   };
+
+  // ── Sale fields already on canvas (to gray them out in palette) ───────────
+  const saleClientOnCanvas = canvasFields.some(f => f.field_type === 'sale_client');
+  const salePlanOnCanvas   = canvasFields.some(f => f.field_type === 'sale_plan');
 
   if (loading) {
     return <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>;
@@ -421,9 +576,11 @@ const FormBuilder = () => {
 
       {savedMsg && (
         <div className="p-3 rounded-xl text-sm font-medium"
-          style={{ backgroundColor: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-50)' : 'var(--color-success-50)',
+          style={{
+            backgroundColor: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-50)' : 'var(--color-success-50)',
             color: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-700)' : 'var(--color-success-700)',
-            border: '1px solid currentColor' }}>
+            border: '1px solid currentColor',
+          }}>
           {savedMsg}
         </div>
       )}
@@ -434,9 +591,36 @@ const FormBuilder = () => {
         {/* ── Palette ─────────────────────────────────── */}
         <div className="lg:col-span-1 space-y-3">
           <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">Available Fields</p>
+
+            {/* Sales Fields section */}
+            <div className="mb-4">
+              <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Briefcase size={11} /> Sales Fields
+              </p>
+              <div className="space-y-1.5">
+                {SALE_FIELDS.map(f => {
+                  const onCanvas = f.field_type === 'sale_client' ? saleClientOnCanvas : salePlanOnCanvas;
+                  return (
+                    <div key={f.name} className={onCanvas ? 'opacity-40 pointer-events-none' : ''}>
+                      <PaletteField field={f} onAdd={handleAddSaleField} isSale />
+                    </div>
+                  );
+                })}
+              </div>
+              {(saleClientOnCanvas || salePlanOnCanvas) && (
+                <p className="text-xs text-text-tertiary mt-1.5 px-1">
+                  {saleClientOnCanvas && salePlanOnCanvas ? 'Both' : saleClientOnCanvas ? 'Client' : 'Plan'} already on form
+                </p>
+              )}
+            </div>
+
+            <div className="mb-3" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+              <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Contact / Lead Fields</p>
+            </div>
+
+            {/* Base fields */}
             {palette.length === 0 ? (
-              <p className="text-xs text-text-tertiary text-center py-3">All base fields placed</p>
+              <p className="text-xs text-text-tertiary text-center py-2">All fields placed</p>
             ) : (
               <div className="space-y-1.5">
                 {palette.map(f => (
@@ -444,6 +628,7 @@ const FormBuilder = () => {
                 ))}
               </div>
             )}
+
             <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
               <button onClick={() => setShowCustom(true)}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border-2 border-dashed text-sm font-semibold transition-all hover:border-primary-500"
@@ -460,10 +645,10 @@ const FormBuilder = () => {
             <p className="text-text-tertiary">· Drag cards to reorder</p>
             <p className="text-text-tertiary">· 1/3, 2/3, Full = column width</p>
             <p className="text-text-tertiary">· Double-click label to rename</p>
-            <p className="text-text-tertiary">· * Required fields are starred</p>
+            <p className="text-text-tertiary">· Client field cascades Plan dropdown</p>
+            <p className="text-text-tertiary">· Click "Map Plans" to configure</p>
             <p className="text-text-tertiary">· Fronters = visible to fronters</p>
-            <p className="text-text-tertiary">· Closer Only = hidden from fronters</p>
-            <p className="text-text-tertiary">· Save applies globally to all users</p>
+            <p className="text-text-tertiary">· Save applies globally</p>
           </div>
         </div>
 
@@ -482,7 +667,6 @@ const FormBuilder = () => {
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
               onDragOver={e => e.preventDefault()}
               onDrop={e => {
-                // Drop on empty canvas area → append
                 if (dragOverIdx === null && dragIndex.current !== null) {
                   handleDrop(e, canvasFields.length - 1);
                 }
@@ -503,6 +687,9 @@ const FormBuilder = () => {
                   onToggleFronter={handleToggleFronter}
                   onChangeSpan={handleChangeSpan}
                   onEditLabel={(label) => handleEditLabel(idx, label)}
+                  onConfigureMapping={(i) => setMappingField(i)}
+                  saleClientsCount={saleClients.length}
+                  salePlansCount={salePlans.length}
                 />
               ))}
             </div>
@@ -517,26 +704,34 @@ const FormBuilder = () => {
           <div className="grid grid-cols-3 gap-4">
             {canvasFields.map((field, idx) => (
               <div key={idx} className={SPAN_CLASS[field.column_span || 1]}>
-                <label className="block text-sm font-medium text-text-secondary mb-1 flex items-center gap-2">
+                <label className="block text-sm font-medium text-text-secondary mb-1">
                   <span>{field.label} {field.is_required && <span className="text-error-500">*</span>}</span>
                   {field.show_to_fronter === false && (
-                    <span className="text-xs px-1.5 py-0.5 rounded font-semibold"
+                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-semibold"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                       Closer Only
                     </span>
                   )}
                 </label>
                 {field.field_type === 'textarea' ? (
-                  <textarea disabled rows={3} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                    className="input opacity-70" />
+                  <textarea disabled rows={3} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input opacity-70" />
+                ) : field.field_type === 'sale_client' ? (
+                  <select disabled className="input opacity-70">
+                    <option>Select client… ({saleClients.length} configured)</option>
+                    {saleClients.map(c => <option key={c.id}>{c.value}</option>)}
+                  </select>
+                ) : field.field_type === 'sale_plan' ? (
+                  <select disabled className="input opacity-70">
+                    <option>Select plan… ({salePlans.length} configured)</option>
+                    {salePlans.map(p => <option key={p.id}>{p.value}</option>)}
+                  </select>
                 ) : field.field_type === 'select' ? (
                   <select disabled className="input opacity-70">
                     <option>Select {field.label}</option>
                     {(field.options || []).map(o => <option key={o}>{o}</option>)}
                   </select>
                 ) : (
-                  <input
-                    disabled
+                  <input disabled
                     type={field.field_type === 'tel' || field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type}
                     placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
                     className="input opacity-70"
@@ -548,7 +743,18 @@ const FormBuilder = () => {
         </div>
       )}
 
+      {/* Modals */}
       {showCustom && <AddCustomModal onAdd={handleAddCustom} onClose={() => setShowCustom(false)} />}
+
+      {mappingField !== null && canvasFields[mappingField] && (
+        <ClientPlanMappingModal
+          clients={saleClients}
+          plans={salePlans}
+          currentMapping={canvasFields[mappingField].options}
+          onSave={(mapping) => handleSaveMapping(mappingField, mapping)}
+          onClose={() => setMappingField(null)}
+        />
+      )}
     </div>
   );
 };

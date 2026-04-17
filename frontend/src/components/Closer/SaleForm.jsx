@@ -148,20 +148,47 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     const val = formData[field.name] || '';
     const onChange = e => setDynField(field.name, e.target.value);
     const ph = field.placeholder || `Enter ${field.label.toLowerCase()}`;
+    const errClass = errors[field.name] ? 'border-red-400' : '';
 
     if (field.field_type === 'textarea') {
       return (
         <textarea value={val} onChange={onChange} rows={3}
           required={field.is_required} placeholder={ph}
-          className={`input resize-none ${errors[field.name] ? 'border-red-400' : ''}`} />
+          className={`input resize-none ${errClass}`} />
       );
     }
     if (field.field_type === 'select') {
       return (
         <select value={val} onChange={onChange} required={field.is_required}
-          className={`input ${errors[field.name] ? 'border-red-400' : ''}`}>
+          className={`input ${errClass}`}>
           <option value="">Select {field.label}</option>
           {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    }
+    if (field.field_type === 'sale_client') {
+      return (
+        <select value={val} onChange={onChange} required={field.is_required}
+          className={`input ${errClass}`}>
+          <option value="">Select client…</option>
+          {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+        </select>
+      );
+    }
+    if (field.field_type === 'sale_plan') {
+      // Cascade: filter plans by selected client if mapping is configured
+      const clientField = fields.find(f => f.field_type === 'sale_client');
+      const selectedClient = clientField ? (formData[clientField.name] || '') : '';
+      let planOptions = plans;
+      if (selectedClient && Array.isArray(field.options) && field.options.length > 0) {
+        const mapping = field.options.find(m => m.client === selectedClient);
+        if (mapping) planOptions = plans.filter(p => mapping.plans.includes(p.value));
+      }
+      return (
+        <select value={val} onChange={onChange} required={field.is_required}
+          className={`input ${errClass}`}>
+          <option value="">Select plan…</option>
+          {planOptions.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
         </select>
       );
     }
@@ -172,7 +199,7 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     return (
       <input type={inputType} value={val} onChange={onChange}
         required={field.is_required} placeholder={ph}
-        className={`input ${errors[field.name] ? 'border-red-400' : ''}`} />
+        className={`input ${errClass}`} />
     );
   };
 
