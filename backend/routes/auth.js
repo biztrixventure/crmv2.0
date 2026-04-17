@@ -16,44 +16,49 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
-  const { data: userRoles } = await supabaseAdmin
-    .from('user_company_roles')
-    .select('role_id, company_id, custom_roles(id, name, level), companies(name)')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
-    .limit(1);
+  // SUPERADMIN check FIRST — env-level superadmins are system-wide,
+  // even if they were auto-assigned to a company they must stay superadmin.
+  const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+  if (superadminEmails.includes(req.user.email)) {
+    const [{ data: allPerms }, { data: profile }] = await Promise.all([
+      supabaseAdmin.from('permissions').select('name'),
+      supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
+    ]);
+    return res.json({
+      id: userId,
+      email: req.user.email,
+      role: 'superadmin',
+      role_name: 'Super Admin',
+      company_id: null,
+      company_name: null,
+      first_name: profile?.first_name,
+      last_name: profile?.last_name,
+      permissions: (allPerms || []).map(p => p.name),
+    });
+  }
 
-  const { data: profile } = await supabaseAdmin
-    .from('user_profiles')
-    .select('first_name, last_name')
-    .eq('user_id', userId)
-    .single();
+  const [{ data: userRoles }, { data: profile }] = await Promise.all([
+    supabaseAdmin
+      .from('user_company_roles')
+      .select('role_id, company_id, custom_roles(id, name, level), companies(name)')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1),
+    supabaseAdmin
+      .from('user_profiles')
+      .select('first_name, last_name')
+      .eq('user_id', userId)
+      .single(),
+  ]);
 
-  // No company assignment — check if system superadmin
   if (!userRoles?.length) {
-    const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-    if (superadminEmails.includes(req.user.email)) {
-      const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
-      return res.json({
-        id: userId,
-        email: req.user.email,
-        role: 'superadmin',
-        role_name: 'Super Admin',
-        company_id: null,
-        company_name: null,
-        first_name: profile?.first_name,
-        last_name: profile?.last_name,
-        permissions: (allPerms || []).map(p => p.name),
-      });
-    }
     return res.status(401).json({ error: 'No active company assignment' });
   }
 
   const ur = userRoles[0];
   const roleLevel = ur.custom_roles.level;
 
-  // SuperAdmin gets every permission; others get role-specific
   let userPermissions;
   if (roleLevel === 'superadmin') {
     const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
@@ -107,6 +112,29 @@ router.post(
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
+      // SUPERADMIN check FIRST — env-level superadmins bypass company role lookup
+      const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+      if (superadminEmails.includes(data.user.email)) {
+        const [{ data: allPerms }, { data: saProfile }] = await Promise.all([
+          supabaseAdmin.from('permissions').select('name'),
+          supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', data.user.id).single(),
+        ]);
+        return res.json({
+          token: data.session.access_token,
+          user: {
+            id: data.user.id,
+            email: data.user.email,
+            role: 'superadmin',
+            role_name: 'Super Admin',
+            company_id: null,
+            company_name: null,
+            first_name: saProfile?.first_name,
+            last_name: saProfile?.last_name,
+            permissions: (allPerms || []).map(p => p.name),
+          },
+        });
+      }
+
       // Get user's role and company info
       const { data: userRoles, error: roleError } = await supabaseAdmin
         .from("user_company_roles")
@@ -130,26 +158,7 @@ router.post(
         .eq("user_id", data.user.id)
         .single();
 
-      // No company assignment — check if this is the system superadmin
       if (roleError || !userRoles || userRoles.length === 0) {
-        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-        if (superadminEmails.includes(data.user.email)) {
-          const { data: allPerms } = await supabaseAdmin.from('permissions').select('name');
-          return res.json({
-            token: data.session.access_token,
-            user: {
-              id: data.user.id,
-              email: data.user.email,
-              role: 'superadmin',
-              role_name: 'Super Admin',
-              company_id: null,
-              company_name: null,
-              first_name: profile?.first_name,
-              last_name: profile?.last_name,
-              permissions: (allPerms || []).map(p => p.name),
-            },
-          });
-        }
         return res.status(401).json({ error: "User not assigned to any company" });
       }
 
