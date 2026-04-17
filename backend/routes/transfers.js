@@ -56,27 +56,37 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
-// GET /transfers/closers — list available closers in a company (for fronter picker)
+// GET /transfers/closers — list available closers for a fronter company
+// Uses company_links: finds all closer companies linked to the fronter's company,
+// then returns closers from all of them (with company_name for display).
 // ============================================================================
 router.get('/closers', asyncHandler(async (req, res) => {
-  // Always fetch from the closer pool company (is_closer_pool = true), not the fronter's company
-  const { data: poolCo, error: poolErr } = await supabaseAdmin
-    .from('companies')
-    .select('id')
-    .eq('is_closer_pool', true)
-    .limit(1)
-    .single();
+  const companyId = req.query.company_id || req.user.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-  if (poolErr || !poolCo) return res.status(400).json({ error: 'No closer pool company configured' });
+  // Get all linked closer companies for this fronter company
+  const { data: links, error: linkErr } = await supabaseAdmin
+    .from('company_links')
+    .select('closer_company_id, companies!company_links_closer_company_id_fkey(id, name)')
+    .eq('fronter_company_id', companyId);
 
+  if (linkErr) return res.status(500).json({ error: linkErr.message });
+  if (!links || links.length === 0) return res.json({ closers: [] });
+
+  const closerCompanyIds = links.map(l => l.closer_company_id);
+  const companyNameMap   = {};
+  links.forEach(l => { companyNameMap[l.closer_company_id] = l.companies?.name || ''; });
+
+  // Get active closers from all linked closer companies
   const { data, error } = await supabaseAdmin
     .from('user_company_roles')
     .select(`
       user_id,
+      company_id,
       custom_roles (level, name),
       user_profiles (first_name, last_name)
     `)
-    .eq('company_id', poolCo.id)
+    .in('company_id', closerCompanyIds)
     .eq('is_active', true);
 
   if (error) return res.status(500).json({ error: error.message });
@@ -84,10 +94,11 @@ router.get('/closers', asyncHandler(async (req, res) => {
   const closers = (data || [])
     .filter(r => r.custom_roles?.level === 'closer')
     .map(r => ({
-      id:         r.user_id,
-      first_name: r.user_profiles?.first_name || '',
-      last_name:  r.user_profiles?.last_name  || '',
-      role_name:  r.custom_roles?.name        || 'Closer',
+      id:           r.user_id,
+      first_name:   r.user_profiles?.first_name || '',
+      last_name:    r.user_profiles?.last_name  || '',
+      role_name:    r.custom_roles?.name        || 'Closer',
+      company_name: companyNameMap[r.company_id] || '',
     }));
 
   res.json({ closers });

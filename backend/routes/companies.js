@@ -21,7 +21,7 @@ router.get(
       if (req.user.role === "superadmin") {
         const { data, error } = await supabaseAdmin
           .from("companies")
-          .select("id, name, logo_url, is_active, created_at")
+          .select("id, name, logo_url, is_active, company_type, created_at")
           .order("name");
 
         if (error) {
@@ -56,7 +56,7 @@ router.get(
         // SuperAdmin sees all active companies
         const { data, error } = await supabaseAdmin
           .from('companies')
-          .select('id, name, is_active')
+          .select('id, name, is_active, company_type')
           .eq('is_active', true)
           .order('name');
 
@@ -81,7 +81,7 @@ router.get(
 
       const { data, error } = await supabaseAdmin
         .from('companies')
-        .select('id, name, is_active')
+        .select('id, name, is_active, company_type')
         .eq('id', userCompanyId)
         .eq('is_active', true)
         .single();
@@ -121,6 +121,7 @@ router.post(
         throw new Error('Invalid URL format');
       }
     }).optional(),
+    body("company_type").isIn(['fronter', 'closer']).optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -128,7 +129,7 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { name, logo_url } = req.body;
+    const { name, logo_url, company_type } = req.body;
     const userId = req.user.id;
 
     try {
@@ -144,6 +145,7 @@ router.post(
           logo_url: logo_url || null,
           created_by: userId,
           is_active: true,
+          company_type: company_type || 'fronter',
         })
         .select()
         .single();
@@ -174,7 +176,7 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("companies")
-        .select("id, name, logo_url, is_active, created_at")
+        .select("id, name, logo_url, is_active, company_type, created_at")
         .eq("id", id)
         .single();
 
@@ -217,6 +219,7 @@ router.put(
       }
     }).optional(),
     body("is_active").isBoolean().optional(),
+    body("company_type").isIn(['fronter', 'closer']).optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -225,7 +228,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { name, logo_url, is_active } = req.body;
+    const { name, logo_url, is_active, company_type } = req.body;
     const userId = req.user.id;
 
     try {
@@ -239,6 +242,7 @@ router.put(
       if (name) updateData.name = name;
       if (logo_url !== undefined) updateData.logo_url = logo_url;
       if (is_active !== undefined) updateData.is_active = is_active;
+      if (company_type !== undefined) updateData.company_type = company_type;
 
       const { data, error } = await supabaseAdmin
         .from("companies")
@@ -406,6 +410,92 @@ router.get(
     }
   })
 );
+
+// ============================================================================
+// GET /companies/:id/links — Get companies linked to this one
+// Returns linked closer companies (if this is fronter) or linked fronter companies (if closer)
+// ============================================================================
+router.get('/:id/links', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Access: superadmin or member of this company
+  if (req.user.role !== 'superadmin') {
+    const userCompanies = await getUserCompanies(req.user.id);
+    if (!userCompanies.some(c => c.id === id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
+  const { data: company } = await supabaseAdmin
+    .from('companies').select('company_type').eq('id', id).single();
+
+  let links = [];
+  if (company?.company_type === 'fronter') {
+    const { data } = await supabaseAdmin
+      .from('company_links')
+      .select('id, closer_company_id, created_at, companies!company_links_closer_company_id_fkey(id, name, company_type)')
+      .eq('fronter_company_id', id);
+    links = (data || []).map(l => ({ link_id: l.id, ...l.companies, created_at: l.created_at }));
+  } else {
+    const { data } = await supabaseAdmin
+      .from('company_links')
+      .select('id, fronter_company_id, created_at, companies!company_links_fronter_company_id_fkey(id, name, company_type)')
+      .eq('closer_company_id', id);
+    links = (data || []).map(l => ({ link_id: l.id, ...l.companies, created_at: l.created_at }));
+  }
+
+  res.json({ links });
+}));
+
+// ============================================================================
+// POST /companies/:id/links — Link a closer company to this fronter company (SuperAdmin only)
+// Body: { closer_company_id: UUID }
+// ============================================================================
+router.post('/:id/links', [body('closer_company_id').isUUID()], asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'SuperAdmin only' });
+
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'closer_company_id required' });
+
+  const { id: fronterCompanyId } = req.params;
+  const { closer_company_id } = req.body;
+
+  // Validate types
+  const { data: companies } = await supabaseAdmin
+    .from('companies').select('id, company_type').in('id', [fronterCompanyId, closer_company_id]);
+  const fronter = companies?.find(c => c.id === fronterCompanyId);
+  const closer  = companies?.find(c => c.id === closer_company_id);
+
+  if (!fronter || !closer) return res.status(404).json({ error: 'Company not found' });
+  if (fronter.company_type !== 'fronter') return res.status(400).json({ error: 'Source company must be type fronter' });
+  if (closer.company_type  !== 'closer')  return res.status(400).json({ error: 'Target company must be type closer' });
+
+  const { data, error } = await supabaseAdmin
+    .from('company_links')
+    .insert({ fronter_company_id: fronterCompanyId, closer_company_id, created_by: req.user.id })
+    .select().single();
+
+  if (error) {
+    if (error.message.includes('unique') || error.message.includes('duplicate')) {
+      return res.status(400).json({ error: 'These companies are already linked' });
+    }
+    return res.status(400).json({ error: error.message });
+  }
+
+  res.status(201).json({ link: data });
+}));
+
+// ============================================================================
+// DELETE /companies/:id/links/:linkId — Remove a company link (SuperAdmin only)
+// ============================================================================
+router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'SuperAdmin only' });
+
+  const { linkId } = req.params;
+  const { error } = await supabaseAdmin.from('company_links').delete().eq('id', linkId);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ message: 'Link removed' });
+}));
 
 // ============================================================================
 // DELETE /companies/:id — Hard delete company (SuperAdmin only)

@@ -5,10 +5,11 @@ import { useNavigate } from "react-router-dom";
 import {
   Settings, TrendingUp, Send, DollarSign, Users,
   Phone, Search, BarChart3, RefreshCw, CheckCircle,
-  XCircle, Clock, AlertCircle, Star,
+  XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2,
 } from "lucide-react";
-import { Card, Badge } from "../components/UI";
+import { Card, Badge, Button } from "../components/UI";
 import { AppHeader } from "../components/Layout";
+import CreateUserModal from "../components/Admin/UserManagement/CreateUserModal";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
@@ -45,6 +46,12 @@ const OperationsDashboard = () => {
   const [dispos, setDispos]           = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [reviewsSubTab, setReviewsSubTab]   = useState('ratings');
+
+  // Team state
+  const [teamMembers, setTeamMembers]   = useState([]);
+  const [teamLoading, setTeamLoading]   = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [teamActionErr, setTeamActionErr] = useState('');
 
   const companyId = user?.company_id;
 
@@ -109,8 +116,39 @@ const OperationsDashboard = () => {
     }
   }, [companyId]);
 
+  const loadTeam = useCallback(() => {
+    if (!companyId) return;
+    setTeamLoading(true);
+    client.get('users', { params: { company_id: companyId } })
+      .then(r => setTeamMembers(r.data.users || []))
+      .catch(() => {})
+      .finally(() => setTeamLoading(false));
+  }, [companyId]);
+
+  const toggleTeamMember = async (u) => {
+    setTeamActionErr('');
+    try {
+      await client.put(`users/${u.id}`, { is_active: !u.is_active });
+      loadTeam();
+    } catch (err) {
+      setTeamActionErr(err.response?.data?.error || 'Action failed');
+    }
+  };
+
+  const deleteTeamMember = async (id) => {
+    if (!window.confirm('Permanently delete this member?')) return;
+    setTeamActionErr('');
+    try {
+      await client.delete(`users/${id}`);
+      loadTeam();
+    } catch (err) {
+      setTeamActionErr(err.response?.data?.error || 'Delete failed');
+    }
+  };
+
   useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => { if (activeTab === 'reviews') loadReviews(); }, [activeTab, loadReviews]);
+  useEffect(() => { if (activeTab === 'team') loadTeam(); }, [activeTab, loadTeam]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -130,6 +168,7 @@ const OperationsDashboard = () => {
 
   const TABS = [
     { key: 'overview',    label: 'Overview',     icon: BarChart3  },
+    { key: 'team',        label: 'Team',         icon: Users      },
     { key: 'transfers',   label: 'Transfers',    icon: Send       },
     { key: 'sales',       label: 'Sales',        icon: DollarSign },
     { key: 'leaderboard', label: 'Leaderboard',  icon: TrendingUp },
@@ -262,6 +301,78 @@ const OperationsDashboard = () => {
                 ))}
               </Card>
             </div>
+          </div>
+        )}
+
+        {/* ── TEAM ──────────────────────────────────────────────── */}
+        {activeTab === 'team' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-text-secondary">{teamMembers.length} member{teamMembers.length !== 1 ? 's' : ''}</p>
+              <Button variant="primary" size="sm" onClick={() => setShowAddMember(true)} className="flex items-center gap-1.5">
+                <PlusCircle size={15} /> Add Member
+              </Button>
+            </div>
+
+            {teamActionErr && <p className="text-sm text-error-600">{teamActionErr}</p>}
+
+            {teamLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : teamMembers.length === 0 ? (
+              <Card className="p-10 text-center">
+                <Users size={40} className="mx-auto mb-3 text-text-tertiary" />
+                <p className="text-text-secondary text-sm mb-4">No team members yet.</p>
+                <Button variant="primary" size="sm" onClick={() => setShowAddMember(true)}>Add First Member</Button>
+              </Card>
+            ) : (
+              <Card className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        {['Name','Email','Role','Level','Status','Actions'].map(h => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamMembers.map(u => (
+                        <tr key={u.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td className="px-3 py-2.5 font-semibold text-text">{[u.first_name,u.last_name].filter(Boolean).join(' ')||'—'}</td>
+                          <td className="px-3 py-2.5 text-xs text-text-secondary">{u.email||'—'}</td>
+                          <td className="px-3 py-2.5 text-xs text-text-secondary">{u.role||'—'}</td>
+                          <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{u.role_level?.replace(/_/g,' ')||'—'}</td>
+                          <td className="px-3 py-2.5">
+                            <Badge variant={u.is_active?'success':'secondary'} size="sm">{u.is_active?'Active':'Inactive'}</Badge>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => toggleTeamMember(u)} title={u.is_active?'Deactivate':'Activate'}
+                                className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                                {u.is_active
+                                  ? <XCircle size={15} className="text-warning-500" />
+                                  : <CheckCircle size={15} className="text-success-500" />}
+                              </button>
+                              <button onClick={() => deleteTeamMember(u.id)} title="Delete"
+                                className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
+                                <Trash2 size={15} className="text-error-500" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+
+            <CreateUserModal
+              isOpen={showAddMember}
+              onClose={() => setShowAddMember(false)}
+              companyId={companyId}
+              onCreated={() => loadTeam()}
+            />
           </div>
         )}
 

@@ -208,7 +208,7 @@ const FronterDashboard = () => {
                         <option value="">— Select a closer —</option>
                         {closers.map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.first_name} {c.last_name}{c.email ? ` (${c.email})` : ''}
+                            {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ''}
                           </option>
                         ))}
                       </select>

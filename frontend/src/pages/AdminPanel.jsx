@@ -5,8 +5,6 @@ import { useNavigate } from "react-router-dom";
 import { Card, Badge } from "../components/UI";
 import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
-import { UserManagement } from "../components/Admin/UserManagement";
-import RoleManagement from "../components/Admin/RoleManagement/RoleManagement";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
@@ -14,9 +12,9 @@ import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
 import {
-  BarChart3, Users, Shield, Building2, FileText, TrendingUp, ArrowUpRight,
-  Activity, Plus, Edit2, Trash2, GripVertical, DollarSign, Target,
-  CheckCircle, UserPlus, Layers, Search, Tag, ListChecks, X,
+  BarChart3, Users, Shield, Building2, FileText,
+  Activity, Plus, DollarSign, Target,
+  CheckCircle, Layers, Search, Tag, ListChecks, X,
 } from "lucide-react";
 
 // FormFieldManagement replaced by FormBuilder (drag-drop 3-col) — see FormBuilder.jsx
@@ -178,12 +176,10 @@ const AdminPanel = () => {
   };
 
   const navItems = [
-    { id: "dashboard",    label: "Dashboard"      },
-    { id: "users",        label: "Users"           },
-    { id: "roles",        label: "Roles"           },
-    { id: "companies",    label: "Companies"       },
-    { id: "forms",        label: "Form Builder"    },
-    { id: "sale-configs", label: "Sale Config"     },
+    { id: "dashboard",    label: "Dashboard"   },
+    { id: "companies",    label: "Companies"   },
+    { id: "forms",        label: "Form Builder" },
+    { id: "sale-configs", label: "Sale Config"  },
     ...(hasPermission('search_sales') ? [{ id: "sale-search", label: "Sale Search" }] : []),
   ];
 
@@ -200,12 +196,10 @@ const AdminPanel = () => {
   ];
 
   const quickActions = [
-    { id: 'users',     label: 'Manage Users',     desc: 'Create, edit, deactivate users',    icon: UserPlus,  accent: '#6366f1' },
-    { id: 'roles',     label: 'Configure Roles',  desc: 'Permissions and role hierarchy',    icon: Shield,    accent: '#f59e0b' },
-    { id: 'companies', label: 'Companies',         desc: 'Add and configure companies',       icon: Building2, accent: '#10b981' },
-    { id: 'forms',        label: 'Form Builder',    desc: 'Customize transfer intake fields',  icon: FileText,   accent: '#8b5cf6' },
-    { id: 'sale-configs', label: 'Sale Config',    desc: 'Manage Plans and Client options',    icon: ListChecks, accent: '#f59e0b' },
-    { id: 'sale-search',  label: 'Sale Search',    desc: 'Search all sale records',            icon: Search,     accent: '#6366f1' },
+    { id: 'companies',    label: 'Companies',       desc: 'Create and manage companies, members and roles', icon: Building2,  accent: '#10b981' },
+    { id: 'forms',        label: 'Form Builder',    desc: 'Customize transfer intake fields',               icon: FileText,   accent: '#8b5cf6' },
+    { id: 'sale-configs', label: 'Sale Config',     desc: 'Manage Plans and Client options',                icon: ListChecks, accent: '#f59e0b' },
+    { id: 'sale-search',  label: 'Sale Search',     desc: 'Search all sale records',                        icon: Search,     accent: '#6366f1' },
   ];
 
   return (
@@ -367,8 +361,6 @@ const AdminPanel = () => {
               </div>
             )}
 
-            {activeTab === "users"        && <UserManagement />}
-            {activeTab === "roles"        && <RoleManagement />}
             {activeTab === "companies"    && <CompanyManagement />}
             {activeTab === "forms"        && <FormBuilder />}
             {activeTab === "sale-configs" && <SaleConfigManager />}

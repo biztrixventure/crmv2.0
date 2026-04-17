@@ -40,11 +40,18 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
                   </div>
                 </td>
 
-                {/* Status */}
+                {/* Status + type */}
                 <td className="px-4 py-3">
-                  <Badge variant={company.is_active ? 'success' : 'secondary'} size="sm">
-                    {company.is_active ? 'Active' : 'Inactive'}
-                  </Badge>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant={company.is_active ? 'success' : 'secondary'} size="sm">
+                      {company.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                    {company.company_type && (
+                      <Badge variant={company.company_type === 'fronter' ? 'success' : 'primary'} size="sm">
+                        {company.company_type === 'fronter' ? 'Fronter' : 'Closer'}
+                      </Badge>
+                    )}
+                  </div>
                 </td>
 
                 {/* Created */}

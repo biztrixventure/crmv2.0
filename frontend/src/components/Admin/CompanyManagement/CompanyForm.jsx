@@ -9,6 +9,7 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
   const [formData, setFormData] = useState({
     name: '',
     logo_url: '',
+    company_type: 'fronter',
   });
   const [errors, setErrors] = useState({});
 
@@ -18,6 +19,7 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
       setFormData({
         name: company.name || '',
         logo_url: company.logo_url || '',
+        company_type: company.company_type || 'fronter',
       });
     }
   }, [company]);
@@ -104,6 +106,27 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
           placeholder="https://example.com/logo.png"
           className="input"
         />
+      </FormField>
+
+      {/* Company Type */}
+      <FormField label="Company Type" hint="Fronter companies create leads; Closer companies close deals.">
+        <div className="flex gap-3">
+          {[{ value: 'fronter', label: 'Fronter Company' }, { value: 'closer', label: 'Closer Company' }].map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setFormData(p => ({ ...p, company_type: opt.value }))}
+              className="flex-1 py-2.5 px-4 rounded-xl border-2 text-sm font-semibold transition-all"
+              style={{
+                borderColor: formData.company_type === opt.value ? 'var(--color-primary-500)' : 'var(--color-border)',
+                background:  formData.company_type === opt.value ? 'var(--color-primary-50)' : 'transparent',
+                color:       formData.company_type === opt.value ? 'var(--color-primary-700)' : 'var(--color-text-secondary)',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </FormField>
 
       {/* Submit Button */}
