@@ -60,17 +60,13 @@ const CompanyManagement = () => {
   const handleSaveCompany = async (formData) => {
     try {
       if (selectedCompany) {
-        // Update existing company
         await updateCompany(selectedCompany.id, {
           name: formData.name,
           logo_url: formData.logo_url,
+          company_type: formData.company_type,
         });
       } else {
-        // Create new company
-        await createCompany(
-          formData.name,
-          formData.logo_url
-        );
+        await createCompany(formData.name, formData.logo_url, formData.company_type);
       }
       setShowModal(false);
       setSelectedCompany(null);

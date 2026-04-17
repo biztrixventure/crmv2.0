@@ -49,13 +49,14 @@ export const useCompanies = () => {
   }, []);
 
   // Create new company
-  const createCompany = useCallback(async (name, logoUrl) => {
+  const createCompany = useCallback(async (name, logoUrl, companyType = 'fronter') => {
     setLoading(true);
     setError(null);
     try {
       const response = await client.post('companies', {
         name,
         logo_url: logoUrl || null,
+        company_type: companyType,
       });
       setCompanies([...companies, response.data.company]);
       return response.data.company;

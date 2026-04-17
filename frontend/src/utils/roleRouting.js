@@ -76,8 +76,8 @@ export const hasRoleAccess = (userRole, requiredRole) => {
 
   if (normUser === normRequired) return true;
 
-  // SuperAdmin accesses everything
-  if (['superadmin', 'readonlyadmin'].includes(normUser)) return true;
+  // SuperAdmin only accesses admin routes — never render role dashboards for them
+  if (normUser === 'superadmin' || normUser === 'readonlyadmin') return normRequired === 'admin';
 
   // Compliance manager can only access /compliance
   if (normUser === 'compliancemanager') return normRequired === 'compliancemanager';
