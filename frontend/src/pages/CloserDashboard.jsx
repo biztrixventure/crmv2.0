@@ -26,7 +26,7 @@ const DISPOS       = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up'
 const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const CloserDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -170,6 +170,7 @@ const CloserDashboard = () => {
         userEmail={user?.email}
         userRole={user?.role_name || user?.role}
         onLogout={handleLogout}
+        user={user} onUpdateUser={updateUser}
         notifications={notifHook.notifications}
         unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead}

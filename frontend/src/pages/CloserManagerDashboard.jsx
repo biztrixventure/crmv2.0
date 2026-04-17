@@ -20,7 +20,7 @@ const saleLabel = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follo
 const xferBadge = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
 
 const CloserManagerDashboard = () => {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
@@ -83,6 +83,7 @@ const CloserManagerDashboard = () => {
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Award className="text-white" size={24} /></div>}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
+        user={user} onUpdateUser={updateUser}
         notifications={notifHook.notifications}
         unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead}

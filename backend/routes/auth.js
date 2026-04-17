@@ -250,6 +250,59 @@ router.post(
 );
 
 // ============================================================================
+// PUT /auth/me/profile — Update own first_name / last_name
+// ============================================================================
+router.put('/me/profile', authMiddleware, [
+  body('first_name').trim().isLength({ min: 1 }).optional(),
+  body('last_name').trim().isLength({ min: 1 }).optional(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
+
+  const { first_name, last_name } = req.body;
+  const userId = req.user.id;
+
+  const updates = {};
+  if (first_name !== undefined) updates.first_name = first_name;
+  if (last_name  !== undefined) updates.last_name  = last_name;
+
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  // Upsert profile row (in case it doesn't exist yet)
+  const { error } = await supabaseAdmin
+    .from('user_profiles')
+    .upsert({ user_id: userId, ...updates }, { onConflict: 'user_id' });
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: 'Profile updated', first_name, last_name });
+}));
+
+// ============================================================================
+// PUT /auth/me/password — Change own password (requires current_password)
+// ============================================================================
+router.put('/me/password', authMiddleware, [
+  body('current_password').isLength({ min: 6 }),
+  body('new_password').isLength({ min: 8 }),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
+
+  const { current_password, new_password } = req.body;
+  const email = req.user.email;
+
+  // Verify current password by attempting sign-in
+  const { error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password: current_password });
+  if (signInErr) return res.status(400).json({ error: 'Current password is incorrect' });
+
+  // Update password
+  const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(req.user.id, { password: new_password });
+  if (updateErr) return res.status(400).json({ error: updateErr.message });
+
+  res.json({ message: 'Password updated successfully' });
+}));
+
+// ============================================================================
 // POST /auth/logout - Logout (frontend handles token removal)
 // ============================================================================
 router.post("/logout", (req, res) => {

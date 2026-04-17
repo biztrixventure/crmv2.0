@@ -16,7 +16,7 @@ const STATUS_COLORS = { pending: 'warning', assigned: 'info', completed: 'succes
 const RATING_COLOR  = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const FronterManagerDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
@@ -134,6 +134,7 @@ const FronterManagerDashboard = () => {
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center"><Users className="text-white" size={24} /></div>}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email} userRole={user?.role_name || user?.role} onLogout={handleLogout}
+        user={user} onUpdateUser={updateUser}
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
