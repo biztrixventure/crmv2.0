@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone, TrendingUp } from "lucide-react";
+import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone, TrendingUp, Hash } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -12,6 +12,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useClosers } from "../hooks/useClosers";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
+import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 
 const FronterDashboard = () => {
   const { user, logout, updateUser } = useAuth();
@@ -69,6 +70,7 @@ const FronterDashboard = () => {
   const TABS = [
     { key: 'transfers', label: 'My Transfers', icon: Send  },
     { key: 'callbacks', label: 'Callbacks',    icon: Phone },
+    { key: 'numbers',   label: 'My Numbers',   icon: Hash  },
   ];
 
   return (
@@ -110,6 +112,7 @@ const FronterDashboard = () => {
         </div>
 
         {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'numbers'   && <AssignedNumbersList user={user} />}
 
         {activeTab === 'transfers' && <div>
           {/* Stats — 4 cards */}

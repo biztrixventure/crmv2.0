@@ -4,12 +4,13 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, Send, TrendingUp, Phone, BarChart3,
-  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star,
+  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
-import CallbacksPage from "../components/Callbacks/CallbacksPage";
+import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
+import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import client from "../api/client";
 
 const STATUS_COLORS = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -121,10 +122,11 @@ const FronterManagerDashboard = () => {
   const completed = transfers.filter(t => t.status === 'completed');
 
   const TABS = [
-    { key: 'overview',   label: 'Overview',      icon: BarChart3  },
-    { key: 'transfers',  label: 'All Transfers',  icon: Send       },
-    { key: 'leaderboard',label: 'Leaderboard',    icon: TrendingUp },
-    { key: 'callbacks',  label: 'Callbacks',      icon: Phone      },
+    { key: 'overview',    label: 'Overview',      icon: BarChart3  },
+    { key: 'transfers',   label: 'All Transfers', icon: Send       },
+    { key: 'leaderboard', label: 'Leaderboard',   icon: TrendingUp },
+    { key: 'callbacks',   label: 'Team Callbacks', icon: Phone     },
+    { key: 'numbers',     label: 'Number Lists',  icon: Hash       },
   ];
 
   return (
@@ -352,7 +354,10 @@ const FronterManagerDashboard = () => {
         )}
 
         {/* ── CALLBACKS TAB ─────────────────────────────────────────────── */}
-        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
+
+        {/* ── NUMBERS TAB ──────────────────────────────────────────────── */}
+        {activeTab === 'numbers' && <NumberUploadManager user={user} />}
       </main>
 
       {/* Reassign Modal */}

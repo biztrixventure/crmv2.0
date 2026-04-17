@@ -20,6 +20,7 @@ const saleConfigsRoutes   = require('./routes/sale-configs');
 const callbacksRoutes     = require('./routes/callbacks');
 const pushRoutes          = require('./routes/push');
 const reviewsRoutes       = require('./routes/reviews');
+const numberListsRoutes   = require('./routes/numberLists');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 
 const app = express();
@@ -83,6 +84,7 @@ app.use('/api/push',        authMiddleware, pushRoutes);
 app.use('/api/stats',       authMiddleware, statsRoutes);
 app.use('/api/notifications', authMiddleware, notificationsRoutes);
 app.use('/api/reviews',      authMiddleware, reviewsRoutes);
+app.use('/api/number-lists', authMiddleware, numberListsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

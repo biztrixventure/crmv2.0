@@ -5,14 +5,15 @@ import { useNavigate } from "react-router-dom";
 import {
   Settings, TrendingUp, Send, DollarSign, Users,
   Phone, Search, BarChart3, RefreshCw, CheckCircle,
-  XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2,
+  XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2, Hash,
 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import CreateUserModal from "../components/Admin/UserManagement/CreateUserModal";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
-import CallbacksPage from "../components/Callbacks/CallbacksPage";
+import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
+import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
 import client from "../api/client";
 
@@ -167,14 +168,15 @@ const OperationsDashboard = () => {
   const rejectedTransfers = transfers.filter(t => t.status === 'rejected');
 
   const TABS = [
-    { key: 'overview',    label: 'Overview',     icon: BarChart3  },
-    { key: 'team',        label: 'Team',         icon: Users      },
-    { key: 'transfers',   label: 'Transfers',    icon: Send       },
-    { key: 'sales',       label: 'Sales',        icon: DollarSign },
-    { key: 'leaderboard', label: 'Leaderboard',  icon: TrendingUp },
-    { key: 'reviews',     label: 'Reviews',      icon: Star       },
-    { key: 'search',      label: 'Search Sales', icon: Search     },
-    { key: 'callbacks',   label: 'Callbacks',    icon: Phone      },
+    { key: 'overview',    label: 'Overview',        icon: BarChart3  },
+    { key: 'team',        label: 'Team',            icon: Users      },
+    { key: 'transfers',   label: 'Transfers',       icon: Send       },
+    { key: 'sales',       label: 'Sales',           icon: DollarSign },
+    { key: 'leaderboard', label: 'Leaderboard',     icon: TrendingUp },
+    { key: 'reviews',     label: 'Reviews',         icon: Star       },
+    { key: 'search',      label: 'Search Sales',    icon: Search     },
+    { key: 'callbacks',   label: 'Team Callbacks',  icon: Phone      },
+    { key: 'numbers',     label: 'Number Lists',    icon: Hash       },
   ];
 
   return (
@@ -610,7 +612,8 @@ const OperationsDashboard = () => {
         )}
 
         {activeTab === 'search'    && <SaleSearch />}
-        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
+        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
+        {activeTab === 'numbers'   && <NumberUploadManager user={user} />}
       </main>
 
       {/* Reassign Modal */}

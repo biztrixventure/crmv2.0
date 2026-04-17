@@ -8,130 +8,13 @@ import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
-import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
 import {
   BarChart3, Users, Shield, Building2, FileText,
-  Activity, Plus, DollarSign, Target,
-  CheckCircle, Layers, Search, Tag, ListChecks, X,
+  Activity, DollarSign, Target,
+  CheckCircle, Layers, Search,
 } from "lucide-react";
-
-// FormFieldManagement replaced by FormBuilder (drag-drop 3-col) — see FormBuilder.jsx
-
-// ============================================================================
-// SaleConfigManager — manage Plans and Client options
-// ============================================================================
-const SaleConfigManager = () => {
-  const { user } = useAuth();
-  const { plans, clients, loading, fetchConfigs, addConfig, deleteConfig } = useSaleConfigs(user?.company_id);
-  const [newPlan,   setNewPlan]   = useState('');
-  const [newClient, setNewClient] = useState('');
-  const [saving, setSaving]  = useState(false);
-  const [deleting, setDeleting] = useState(null);
-
-  useEffect(() => { fetchConfigs(); }, [fetchConfigs]);
-
-  const handleAdd = async (type, value, setter) => {
-    if (!value.trim()) return;
-    setSaving(true);
-    try {
-      await addConfig(type, value.trim());
-      setter('');
-    } catch (err) {
-      alert(err.response?.data?.error || err.message);
-    } finally { setSaving(false); }
-  };
-
-  const handleDelete = async (id, type) => {
-    setDeleting(id);
-    try { await deleteConfig(id, type); }
-    catch (err) { alert(err.response?.data?.error || err.message); }
-    finally { setDeleting(null); }
-  };
-
-  const ConfigList = ({ items, type, newVal, setNewVal }) => (
-    <div className="rounded-2xl border overflow-hidden"
-      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-        <div className="flex items-center gap-2">
-          {type === 'plan' ? <ListChecks size={17} style={{ color: 'var(--color-primary-600)' }} />
-                           : <Tag size={17} style={{ color: '#f59e0b' }} />}
-          <h3 className="font-bold text-text text-sm">
-            {type === 'plan' ? 'Plans' : 'Client Options'}
-          </h3>
-          <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
-            style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
-            {items.length}
-          </span>
-        </div>
-      </div>
-      {/* Items */}
-      <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" />
-          </div>
-        ) : items.length === 0 ? (
-          <p className="text-center py-6 text-sm text-text-secondary">No {type}s yet. Add one below.</p>
-        ) : items.map(item => (
-          <div key={item.id} className="flex items-center justify-between px-5 py-3 group hover:bg-bg-secondary transition-colors">
-            <span className="text-sm font-medium text-text">{item.value}</span>
-            <div className="flex items-center gap-2">
-              {item.company_id === null && (
-                <span className="text-xs text-text-tertiary">global</span>
-              )}
-              <button
-                onClick={() => handleDelete(item.id, type)}
-                disabled={deleting === item.id}
-                className="w-7 h-7 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-red-100"
-                title="Delete">
-                {deleting === item.id
-                  ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
-                  : <X size={13} style={{ color: '#ef4444' }} />}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-      {/* Add new */}
-      <div className="px-4 py-3 flex gap-2"
-        style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-        <input
-          type="text" value={newVal} onChange={e => setNewVal(e.target.value)}
-          placeholder={`Add ${type}…`}
-          className="input flex-1 text-sm h-9"
-          onKeyDown={e => e.key === 'Enter' && handleAdd(type, newVal, setNewVal)}
-        />
-        <button
-          onClick={() => handleAdd(type, newVal, setNewVal)}
-          disabled={saving || !newVal.trim()}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50"
-          style={{ background: 'var(--gradient-sidebar)' }}>
-          <Plus size={14} />
-          Add
-        </button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="animate-fade-in">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">Sale Configuration</h2>
-        <p className="text-text-secondary text-sm mt-0.5">
-          Manage Plans and Client options available in the sale form. Deleting an option does not affect existing sale records.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ConfigList items={plans}   type="plan"   newVal={newPlan}   setNewVal={setNewPlan}   />
-        <ConfigList items={clients} type="client" newVal={newClient} setNewVal={setNewClient} />
-      </div>
-    </div>
-  );
-};
 
 // ============================================================================
 // SaleSearchPanel — permission-gated sale record search
@@ -176,10 +59,9 @@ const AdminPanel = () => {
   };
 
   const navItems = [
-    { id: "dashboard",    label: "Dashboard"   },
-    { id: "companies",    label: "Companies"   },
-    { id: "forms",        label: "Form Builder" },
-    { id: "sale-configs", label: "Sale Config"  },
+    { id: "dashboard",   label: "Dashboard"    },
+    { id: "companies",   label: "Companies"    },
+    { id: "forms",       label: "Form Builder" },
     ...(hasPermission('search_sales') ? [{ id: "sale-search", label: "Sale Search" }] : []),
   ];
 
@@ -196,10 +78,9 @@ const AdminPanel = () => {
   ];
 
   const quickActions = [
-    { id: 'companies',    label: 'Companies',       desc: 'Create and manage companies, members and roles', icon: Building2,  accent: '#10b981' },
-    { id: 'forms',        label: 'Form Builder',    desc: 'Customize transfer intake fields',               icon: FileText,   accent: '#8b5cf6' },
-    { id: 'sale-configs', label: 'Sale Config',     desc: 'Manage Plans and Client options',                icon: ListChecks, accent: '#f59e0b' },
-    { id: 'sale-search',  label: 'Sale Search',     desc: 'Search all sale records',                        icon: Search,     accent: '#6366f1' },
+    { id: 'companies',   label: 'Companies',    desc: 'Create and manage companies, members and roles',     icon: Building2,  accent: '#10b981' },
+    { id: 'forms',       label: 'Form Builder', desc: 'Customize transfer form fields & sale configuration', icon: FileText,   accent: '#8b5cf6' },
+    { id: 'sale-search', label: 'Sale Search',  desc: 'Search all sale records',                            icon: Search,     accent: '#6366f1' },
   ];
 
   return (
@@ -218,6 +99,9 @@ const AdminPanel = () => {
         <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />
 
         <main className="flex-1 overflow-auto bg-bg">
+          {activeTab === 'forms' ? (
+            <FormBuilder />
+          ) : (
           <div className="p-6 lg:p-8 max-w-7xl">
 
             {/* ── Dashboard ── */}
@@ -361,11 +245,10 @@ const AdminPanel = () => {
               </div>
             )}
 
-            {activeTab === "companies"    && <CompanyManagement />}
-            {activeTab === "forms"        && <FormBuilder />}
-            {activeTab === "sale-configs" && <SaleConfigManager />}
-            {activeTab === "sale-search"  && <SaleSearchPanel />}
+            {activeTab === "companies"  && <CompanyManagement />}
+            {activeTab === "sale-search" && <SaleSearchPanel />}
           </div>
+          )}
         </main>
       </div>
     </div>

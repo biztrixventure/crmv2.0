@@ -5,7 +5,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
-  Clock, CheckCircle, Hash, Car, User, ArrowRight, Search,
+  Clock, CheckCircle, Hash, Car, User, ArrowRight, Search, Phone,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -13,6 +13,7 @@ import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
+import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import client from "../api/client";
 
 const saleBadge = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
@@ -156,6 +157,7 @@ const CloserManagerDashboard = () => {
             { key: 'sales',     label: 'All Sales',     icon: DollarSign },
             { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
             { key: 'team',      label: 'Team Stats',    icon: BarChart3 },
+            { key: 'callbacks', label: 'Team Callbacks', icon: Phone },
             ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -393,6 +395,8 @@ const CloserManagerDashboard = () => {
             <SaleSearch companyId={user?.company_id} user={user} />
           </Card>
         )}
+
+        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
       </main>
     </div>
   );

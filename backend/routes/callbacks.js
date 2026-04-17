@@ -37,7 +37,23 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  res.json({ callbacks: data || [] });
+  const callbacks = data || [];
+
+  // Enrich with user display name (managers see whose callback it is)
+  if (isManager && callbacks.length > 0) {
+    const userIds = [...new Set(callbacks.map(c => c.user_id))];
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id, first_name, last_name')
+      .in('user_id', userIds);
+    const profileMap = {};
+    (profiles || []).forEach(p => {
+      profileMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+    });
+    callbacks.forEach(c => { c.user_name = profileMap[c.user_id] || 'Unknown'; });
+  }
+
+  res.json({ callbacks });
 }));
 
 // ============================================================================
