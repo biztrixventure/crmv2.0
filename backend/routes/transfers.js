@@ -20,10 +20,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   let query = supabaseAdmin
     .from('transfers')
-    .select(`
-      *,
-      user_profiles!transfers_created_by_fkey (first_name, last_name)
-    `, { count: 'exact' })
+    .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
 
   if (companyId) query = query.eq('company_id', companyId);
@@ -35,7 +32,6 @@ router.get('/', asyncHandler(async (req, res) => {
     case 'closer':
       query = query.eq('assigned_closer_id', userId);
       break;
-    // managers see all company transfers
   }
 
   if (status) query = query.eq('status', status);
@@ -52,7 +48,23 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  res.json({ transfers: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  // Enrich with creator names via separate query (no FK in schema cache)
+  const creatorIds = [...new Set((data || []).map(t => t.created_by).filter(Boolean))];
+  let profileMap = {};
+  if (creatorIds.length > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, first_name, last_name')
+      .in('id', creatorIds);
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+  }
+
+  const transfers = (data || []).map(t => ({
+    ...t,
+    user_profiles: profileMap[t.created_by] || null,
+  }));
+
+  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
 // ============================================================================
@@ -92,15 +104,10 @@ router.get('/closers', asyncHandler(async (req, res) => {
   const companyNameMap = {};
   (companies || []).forEach(c => { companyNameMap[c.id] = c.name; });
 
-  // Step 3: get active users in those companies
+  // Step 3: get active users in those companies (no user_profiles join — no FK in schema cache)
   const { data, error } = await supabaseAdmin
     .from('user_company_roles')
-    .select(`
-      user_id,
-      company_id,
-      custom_roles (level, name),
-      user_profiles (first_name, last_name)
-    `)
+    .select('user_id, company_id, custom_roles (level, name)')
     .in('company_id', closerCompanyIds)
     .eq('is_active', true);
 
@@ -112,15 +119,26 @@ router.get('/closers', asyncHandler(async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
+  // Step 4: fetch profiles separately
+  const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))];
+  let profileMap = {};
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, first_name, last_name')
+      .in('id', userIds);
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+  }
+
   // Accept any role whose level contains 'closer' (case-insensitive)
   const closers = (data || [])
     .filter(r => (r.custom_roles?.level || '').toLowerCase().includes('closer'))
     .map(r => ({
       id:           r.user_id,
-      first_name:   r.user_profiles?.first_name || '',
-      last_name:    r.user_profiles?.last_name  || '',
-      role_name:    r.custom_roles?.name        || 'Closer',
-      company_name: companyNameMap[r.company_id] || '',
+      first_name:   profileMap[r.user_id]?.first_name || '',
+      last_name:    profileMap[r.user_id]?.last_name  || '',
+      role_name:    r.custom_roles?.name              || 'Closer',
+      company_name: companyNameMap[r.company_id]      || '',
     }));
 
   logger.info('[closers] final closers count=%d', closers.length);
