@@ -4,7 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, Send, TrendingUp, Phone, BarChart3,
-  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle,
+  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle, FileText,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -153,8 +153,15 @@ const FronterManagerDashboard = () => {
   const assigned  = transfers.filter(t => t.status === 'assigned');
   const completed = transfers.filter(t => t.status === 'completed');
 
+  // Personal transfers (created by this manager acting as a fronter)
+  const myTransfers   = transfers.filter(t => t.created_by === user?.id);
+  const myCompleted   = myTransfers.filter(t => t.status === 'completed').length;
+  const myAssigned    = myTransfers.filter(t => t.status === 'assigned').length;
+  const myConversion  = myTransfers.length > 0 ? Math.round((myCompleted / myTransfers.length) * 100) : 0;
+
   const TABS = [
     { key: 'overview',        label: 'Overview',         icon: BarChart3  },
+    { key: 'my_transfers',    label: 'My Transfers',     icon: Send       },
     { key: 'transfers',       label: 'All Transfers',    icon: Send       },
     { key: 'leaderboard',     label: 'Leaderboard',      icon: TrendingUp },
     { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
@@ -225,6 +232,123 @@ const FronterManagerDashboard = () => {
             style={{ backgroundColor: reassignMsg.includes('Failed') ? 'var(--color-error-50)' : 'var(--color-success-50)',
               color: reassignMsg.includes('Failed') ? 'var(--color-error-700)' : 'var(--color-success-700)' }}>
             {reassignMsg}
+          </div>
+        )}
+
+        {/* ── MY TRANSFERS TAB ──────────────────────────────────────────── */}
+        {activeTab === 'my_transfers' && (
+          <div className="space-y-6">
+            {/* Personal Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Total Leads</p>
+                    <p className="text-3xl font-bold text-text">{myTransfers.length}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-info-100 dark:bg-info-900"><FileText size={20} className="text-info-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Assigned</p>
+                    <p className="text-3xl font-bold text-success-600">{myAssigned}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-success-100 dark:bg-success-900"><Send size={20} className="text-success-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Won / Sales</p>
+                    <p className="text-3xl font-bold text-primary-600">{myCompleted}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-primary-100 dark:bg-primary-900"><CheckCircle size={20} className="text-primary-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Conversion</p>
+                    <p className="text-3xl font-bold text-warning-600">{myConversion}%</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-warning-100 dark:bg-warning-900"><TrendingUp size={20} className="text-warning-600" /></div>
+                </div>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Create New Lead card */}
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-text flex items-center gap-2"><PlusCircle size={20} /> Create New Lead</h3>
+                  <button
+                    onClick={() => setShowTransferModal(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105"
+                    style={{ background: 'var(--gradient-sidebar)' }}
+                  >
+                    <PlusCircle size={15} /> New Lead
+                  </button>
+                </div>
+                <div className="text-center py-8">
+                  <FileText size={48} className="mx-auto mb-4 text-text-tertiary" />
+                  <p className="text-text-secondary">Click "New Lead" to transfer a call to a closer.</p>
+                </div>
+              </Card>
+
+              {/* My Leads list */}
+              <Card className="p-6">
+                <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><FileText size={20} /> My Leads</h3>
+                {tLoading ? (
+                  <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+                ) : myTransfers.length === 0 ? (
+                  <p className="text-text-secondary text-center py-8">No leads yet. Create your first lead!</p>
+                ) : (
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                    {myTransfers.map(t => {
+                      const closerName = t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() : null;
+                      const name = t.form_data?.FirstName
+                        ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
+                        : t.form_data?.customer_name || 'Lead';
+                      return (
+                        <div key={t.id} className="p-4 rounded-xl border transition-all duration-150 hover:shadow-md"
+                          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                          <div className="flex items-start justify-between mb-1">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-text truncate">{name}</p>
+                              <p className="text-xs text-text-secondary mt-0.5">
+                                {t.form_data?.Phone || t.form_data?.customer_phone || ''}
+                                {closerName && <> · <strong>{closerName}</strong></>}
+                              </p>
+                              {t.status === 'rejected' && t.rejection_reason && (
+                                <p className="text-xs text-error-600 mt-0.5">Rejected: {t.rejection_reason}</p>
+                              )}
+                            </div>
+                            <Badge variant={STATUS_COLORS[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                          </div>
+                          <div className="flex items-center justify-between mt-2">
+                            <div>
+                              {t.status === 'assigned' && (
+                                <span className="text-xs text-info-600 font-medium flex items-center gap-1">
+                                  <Send size={10} /> Assigned to closer
+                                </span>
+                              )}
+                              {t.status === 'completed' && (
+                                <span className="text-xs text-success-600 font-medium flex items-center gap-1">
+                                  <CheckCircle size={10} /> Converted to sale
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            </div>
           </div>
         )}
 

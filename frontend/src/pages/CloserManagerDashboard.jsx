@@ -28,13 +28,13 @@ const CloserManagerDashboard = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
-  const { sales, loading: salesLoading, fetchSales, createSale } = useSales(user?.company_id);
+  const { sales, loading: salesLoading, fetchSales, createSale, updateSale } = useSales(user?.company_id);
   const { transfers, loading: xferLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
   const notifHook = useNotifications();
 
   const [closers, setClosers] = useState([]);
   const [assigning, setAssigning] = useState(null);
-  const [activeTab, setActiveTab] = useState('sales');
+  const [activeTab, setActiveTab] = useState('my_sales');
 
   // Sale creation (closer capability)
   const [saleModalOpen, setSaleModalOpen]     = useState(false);
@@ -122,6 +122,12 @@ const CloserManagerDashboard = () => {
 
   const pendingTransfers  = transfers.filter(t => t.status === 'pending');
   const assignedTransfers = transfers.filter(t => t.status === 'assigned');
+
+  // Personal view — this manager acting as a closer
+  const myTransfers  = transfers.filter(t => t.assigned_closer_id === user?.id);
+  const mySales      = sales.filter(s => s.closer_id === user?.id || s.created_by === user?.id);
+  const mySold       = mySales.filter(s => s.status === 'sold' || s.status === 'closed_won').length;
+  const myConversion = mySales.length > 0 ? Math.round((mySold / mySales.length) * 100) : 0;
 
   // Per-closer breakdown from sales
   const closerStats = closers.map(c => {
@@ -226,6 +232,7 @@ const CloserManagerDashboard = () => {
           <div className="flex gap-1 p-1 rounded-xl w-fit"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {[
+              { key: 'my_sales',  label: 'My Sales',      icon: DollarSign },
               { key: 'sales',     label: 'All Sales',     icon: DollarSign },
               { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
               { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
@@ -247,6 +254,180 @@ const CloserManagerDashboard = () => {
           </div>
           <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
         </div>
+
+        {/* === Tab: My Sales (closer_manager acting as closer) === */}
+        {activeTab === 'my_sales' && (
+          <div className="space-y-6">
+            {/* Personal Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <Card className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">My Sales</p>
+                    <p className="text-3xl font-bold text-text">{mySales.length}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-success-100 dark:bg-success-900"><DollarSign size={22} className="text-success-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Sold</p>
+                    <p className="text-3xl font-bold text-success-600">{mySold}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-success-100 dark:bg-success-900"><CheckCircle size={22} className="text-success-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Conversion</p>
+                    <p className="text-3xl font-bold text-info-600">{myConversion}%</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-info-100 dark:bg-info-900"><Target size={22} className="text-info-600" /></div>
+                </div>
+              </Card>
+              <Card className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Assigned</p>
+                    <p className="text-3xl font-bold text-warning-600">{myTransfers.filter(t => t.status === 'assigned').length}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-warning-100 dark:bg-warning-900"><Clock size={22} className="text-warning-600" /></div>
+                </div>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* My Assigned Transfers */}
+              <Card className="p-6">
+                <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
+                  <Clock size={20} /> Assigned Transfers
+                </h3>
+                {xferLoading ? (
+                  <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+                ) : myTransfers.length === 0 ? (
+                  <p className="text-text-secondary text-center py-8">No transfers assigned to you yet.</p>
+                ) : (
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                    {myTransfers.map(t => (
+                      <div key={t.id} className="p-4 rounded-xl border transition-all duration-150 hover:shadow-md"
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        <div className="flex items-start justify-between mb-1">
+                          <div>
+                            <p className="font-semibold text-text">
+                              {t.form_data?.FirstName
+                                ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
+                                : t.form_data?.customer_name || 'Unknown Customer'}
+                            </p>
+                            <p className="text-xs text-text-secondary mt-0.5">
+                              {t.form_data?.Phone || t.form_data?.customer_phone || ''}
+                            </p>
+                          </div>
+                          <Badge variant={xferBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                        </div>
+                        <p className="text-xs text-text-tertiary mb-2">{new Date(t.created_at).toLocaleDateString()}</p>
+                        {t.status === 'assigned' && (
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={() => openSaleModal(t)}
+                              className="flex-1 py-2 px-3 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
+                              style={{ background: 'var(--gradient-sidebar)' }}
+                            >
+                              <DollarSign size={13} /> Convert to Sale
+                            </button>
+                            <button
+                              onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
+                              className="px-3 py-2 rounded-lg font-semibold text-sm border flex items-center gap-1 transition-all hover:bg-error-50"
+                              style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}
+                            >
+                              <XCircle size={13} /> Reject
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* My Sales list */}
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-text flex items-center gap-2"><DollarSign size={20} /> My Sales</h3>
+                  <button
+                    onClick={() => openSaleModal(null)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105"
+                    style={{ background: 'var(--gradient-sidebar)' }}
+                  >
+                    <PlusCircle size={15} /> New Sale
+                  </button>
+                </div>
+                {salesLoading ? (
+                  <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+                ) : mySales.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-text-secondary mb-3">No sales yet.</p>
+                    <button onClick={() => openSaleModal(null)}
+                      className="py-2 px-4 rounded-lg text-sm font-semibold text-white"
+                      style={{ background: 'var(--gradient-sidebar)' }}>
+                      Create your first sale
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                    {mySales.map(s => (
+                      <div key={s.id} className="p-4 rounded-xl border transition-all duration-150 hover:shadow-md"
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        <div className="flex items-start justify-between mb-1">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <User size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+                              <p className="font-semibold text-text truncate">{s.customer_name || 'Sale'}</p>
+                            </div>
+                            {s.reference_no && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <Hash size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+                                <p className="text-xs font-mono text-text-tertiary">{s.reference_no}</p>
+                              </div>
+                            )}
+                            <p className="text-xs text-text-tertiary mt-1">{new Date(s.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 ml-2">
+                            <Badge variant={saleBadge[s.status] || 'secondary'} size="sm">
+                              {saleLabel[s.status] || s.status}
+                            </Badge>
+                            {s.monthly_payment && (
+                              <span className="text-xs font-semibold text-success-600">${s.monthly_payment}/mo</span>
+                            )}
+                          </div>
+                        </div>
+                        {s.status === 'open' && (
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => updateSale(s.id, { status: 'sold' }).then(() => fetchSales({ date_from, date_to }))}
+                              className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
+                              style={{ backgroundColor: '#16a34a' }}
+                            >
+                              <CheckCircle size={12} /> Mark Sold
+                            </button>
+                            <button
+                              onClick={() => updateSale(s.id, { status: 'cancelled' }).then(() => fetchSales({ date_from, date_to }))}
+                              className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-red-600 flex items-center justify-center gap-1 border transition-all hover:bg-red-50"
+                              style={{ borderColor: '#ef4444' }}
+                            >
+                              <XCircle size={12} /> Cancel
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
+          </div>
+        )}
 
         {/* === Tab: All Sales === */}
         {activeTab === 'sales' && (
