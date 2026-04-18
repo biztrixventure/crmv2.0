@@ -48,15 +48,15 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Enrich with creator names via separate query (no FK in schema cache)
+  // Enrich with creator names via separate query (user_profiles.user_id = auth user id)
   const creatorIds = [...new Set((data || []).map(t => t.created_by).filter(Boolean))];
   let profileMap = {};
   if (creatorIds.length > 0) {
     const { data: profiles } = await supabaseAdmin
       .from('user_profiles')
-      .select('id, first_name, last_name')
-      .in('id', creatorIds);
-    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+      .select('user_id, first_name, last_name')
+      .in('user_id', creatorIds);
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
   const transfers = (data || []).map(t => ({
@@ -119,15 +119,15 @@ router.get('/closers', asyncHandler(async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Step 4: fetch profiles separately
+  // Step 4: fetch profiles separately (user_profiles.user_id = auth user id, not user_profiles.id)
   const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))];
   let profileMap = {};
   if (userIds.length > 0) {
     const { data: profiles } = await supabaseAdmin
       .from('user_profiles')
-      .select('id, first_name, last_name')
-      .in('id', userIds);
-    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+      .select('user_id, first_name, last_name')
+      .in('user_id', userIds);
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
   // Accept any role whose level contains 'closer' (case-insensitive)
