@@ -62,6 +62,10 @@ router.get('/', asyncHandler(async (req, res) => {
 // ============================================================================
 router.get('/closers', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
+
+  logger.info('[closers] companyId=%s userCompanyId=%s queryCompanyId=%s role=%s userId=%s',
+    companyId, req.user.company_id, req.query.company_id, req.user.role, req.user.id);
+
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
   // Step 1: get linked closer company IDs (no FK join — avoids constraint-name issues)
@@ -70,10 +74,14 @@ router.get('/closers', asyncHandler(async (req, res) => {
     .select('closer_company_id')
     .eq('fronter_company_id', companyId);
 
+  logger.info('[closers] company_links query for fronter_company_id=%s → rows=%d err=%s',
+    companyId, links?.length ?? 0, linkErr?.message ?? 'none');
+
   if (linkErr) return res.status(500).json({ error: linkErr.message });
-  if (!links || links.length === 0) return res.json({ closers: [] });
+  if (!links || links.length === 0) return res.json({ closers: [], _debug: { companyId, links: [] } });
 
   const closerCompanyIds = links.map(l => l.closer_company_id);
+  logger.info('[closers] closerCompanyIds=%j', closerCompanyIds);
 
   // Step 2: fetch company names separately
   const { data: companies } = await supabaseAdmin
@@ -96,6 +104,12 @@ router.get('/closers', asyncHandler(async (req, res) => {
     .in('company_id', closerCompanyIds)
     .eq('is_active', true);
 
+  logger.info('[closers] user_company_roles rows=%d err=%s', data?.length ?? 0, error?.message ?? 'none');
+  if (data) {
+    data.forEach(r => logger.info('[closers] user=%s company=%s role_level=%s role_name=%s',
+      r.user_id, r.company_id, r.custom_roles?.level, r.custom_roles?.name));
+  }
+
   if (error) return res.status(500).json({ error: error.message });
 
   // Accept any role whose level contains 'closer' (case-insensitive)
@@ -109,7 +123,8 @@ router.get('/closers', asyncHandler(async (req, res) => {
       company_name: companyNameMap[r.company_id] || '',
     }));
 
-  res.json({ closers });
+  logger.info('[closers] final closers count=%d', closers.length);
+  res.json({ closers, _debug: { companyId, closerCompanyIds, rawCount: data?.length ?? 0 } });
 }));
 
 // ============================================================================
