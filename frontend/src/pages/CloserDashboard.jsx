@@ -16,6 +16,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import SaleSearch from "../components/Sales/SaleSearch";
+import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import client from "../api/client";
 
 const statusBadge  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
@@ -205,9 +206,10 @@ const CloserDashboard = () => {
         <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
-            { key: 'sales',     label: 'My Sales',    icon: DollarSign },
-            { key: 'callbacks', label: 'Callbacks',   icon: Phone      },
-            { key: 'search',    label: 'Search Sales', icon: Search     },
+            { key: 'sales',           label: 'My Sales',        icon: DollarSign },
+            { key: 'callbacks',       label: 'Callbacks',       icon: Phone      },
+            { key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash       },
+            { key: 'search',          label: 'Search Sales',    icon: Search     },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
@@ -222,8 +224,9 @@ const CloserDashboard = () => {
           ))}
         </div>
 
-        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
-        {activeTab === 'search'    && <SaleSearch />}
+        {activeTab === 'callbacks'       && <CallbacksPage user={user} />}
+        {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
+        {activeTab === 'search'          && <SaleSearch />}
         {activeTab === 'sales' && <div>
 
         {/* Alerts */}

@@ -251,7 +251,7 @@ const CompanyDashboard = () => {
               { label: 'Total Transfers', value: stats.totalTransfers || 0,  icon: Send,        color: 'info'    },
               { label: 'Total Sales',     value: stats.totalSales     || 0,  icon: DollarSign,  color: 'success' },
               { label: 'Conversion %',    value: `${stats.conversionRate || 0}%`, icon: TrendingUp, color: 'primary' },
-              { label: 'Active Users',    value: stats.activeUsers    || 0,  icon: Users,       color: 'warning' },
+              { label: 'Active Users',    value: stats.totalUsers     || 0,  icon: Users,       color: 'warning' },
             ].map(s => (
               <Card key={s.label} className="p-5">
                 <div className="flex items-start justify-between">

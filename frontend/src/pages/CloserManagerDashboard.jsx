@@ -14,6 +14,7 @@ import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
+import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import client from "../api/client";
 
 const saleBadge = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
@@ -156,8 +157,9 @@ const CloserManagerDashboard = () => {
           {[
             { key: 'sales',     label: 'All Sales',     icon: DollarSign },
             { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
-            { key: 'team',      label: 'Team Stats',    icon: BarChart3 },
-            { key: 'callbacks', label: 'Team Callbacks', icon: Phone },
+            { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
+            { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Hash      },
+            { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone     },
             ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -396,7 +398,8 @@ const CloserManagerDashboard = () => {
           </Card>
         )}
 
-        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
+        {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
+        {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
       </main>
     </div>
   );

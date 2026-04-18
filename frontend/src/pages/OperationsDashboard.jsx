@@ -15,6 +15,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
+import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import client from "../api/client";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -173,10 +174,11 @@ const OperationsDashboard = () => {
     { key: 'transfers',   label: 'Transfers',       icon: Send       },
     { key: 'sales',       label: 'Sales',           icon: DollarSign },
     { key: 'leaderboard', label: 'Leaderboard',     icon: TrendingUp },
-    { key: 'reviews',     label: 'Reviews',         icon: Star       },
-    { key: 'search',      label: 'Search Sales',    icon: Search     },
-    { key: 'callbacks',   label: 'Team Callbacks',  icon: Phone      },
-    { key: 'numbers',     label: 'Number Lists',    icon: Hash       },
+    { key: 'reviews',         label: 'Reviews',          icon: Star       },
+    { key: 'search',          label: 'Search Sales',     icon: Search     },
+    { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
+    { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone      },
+    { key: 'numbers',         label: 'Number Lists',     icon: Hash       },
   ];
 
   return (
@@ -611,9 +613,10 @@ const OperationsDashboard = () => {
           </div>
         )}
 
-        {activeTab === 'search'    && <SaleSearch />}
-        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
-        {activeTab === 'numbers'   && <NumberUploadManager user={user} />}
+        {activeTab === 'search'          && <SaleSearch />}
+        {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
+        {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
+        {activeTab === 'numbers'         && <NumberUploadManager user={user} />}
       </main>
 
       {/* Reassign Modal */}

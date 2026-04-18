@@ -13,6 +13,7 @@ import { useClosers } from "../hooks/useClosers";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
+import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 
 const FronterDashboard = () => {
   const { user, logout, updateUser } = useAuth();
@@ -68,9 +69,10 @@ const FronterDashboard = () => {
     : 0;
 
   const TABS = [
-    { key: 'transfers', label: 'My Transfers', icon: Send  },
-    { key: 'callbacks', label: 'Callbacks',    icon: Phone },
-    { key: 'numbers',   label: 'My Numbers',   icon: Hash  },
+    { key: 'transfers',        label: 'My Transfers',    icon: Send  },
+    { key: 'callbacks',        label: 'Callbacks',       icon: Phone },
+    { key: 'tracked_numbers',  label: 'Tracked Numbers', icon: Users },
+    { key: 'numbers',          label: 'My Numbers',      icon: Hash  },
   ];
 
   return (
@@ -111,8 +113,9 @@ const FronterDashboard = () => {
           ))}
         </div>
 
-        {activeTab === 'callbacks' && <CallbacksPage user={user} />}
-        {activeTab === 'numbers'   && <AssignedNumbersList user={user} />}
+        {activeTab === 'callbacks'       && <CallbacksPage user={user} />}
+        {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
+        {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
 
         {activeTab === 'transfers' && <div>
           {/* Stats — 4 cards */}
