@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign,
   Calendar, BarChart3, Search, RefreshCw, Settings,
-  PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink,
+  PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
@@ -331,6 +331,7 @@ const RolesPanel = ({ companyId }) => {
   const [roles, setRoles]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [editRole, setEditRole]     = useState(null);
   const [seeding, setSeeding]       = useState(false);
   const [actionErr, setActionErr]   = useState('');
 
@@ -361,6 +362,12 @@ const RolesPanel = ({ companyId }) => {
     await client.post('roles', { ...formData, company_id: companyId });
     load();
     setShowCreate(false);
+  };
+
+  const handleEditRole = async (formData) => {
+    await client.put(`roles/${editRole.id}`, { description: formData.description, permissions: formData.permissions });
+    load();
+    setEditRole(null);
   };
 
   const deleteRole = async (id) => {
@@ -415,9 +422,14 @@ const RolesPanel = ({ companyId }) => {
                     </Badge>
                   </div>
                 </div>
-                <button onClick={() => deleteRole(r.id)} className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors ml-2 flex-shrink-0">
-                  <Trash2 size={14} className="text-error-500" />
-                </button>
+                <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                  <button onClick={() => setEditRole(r)} className="p-1 rounded hover:bg-bg-secondary transition-colors" title="Edit role">
+                    <Edit2 size={14} style={{ color: 'var(--color-primary-500)' }} />
+                  </button>
+                  <button onClick={() => deleteRole(r.id)} className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors" title="Delete role">
+                    <Trash2 size={14} className="text-error-500" />
+                  </button>
+                </div>
               </div>
               {r.description && <p className="text-xs text-text-secondary mb-2">{r.description}</p>}
               <p className="text-xs text-text-tertiary">{(r.permissions||[]).length} permissions</p>
@@ -431,6 +443,14 @@ const RolesPanel = ({ companyId }) => {
           role={null}
           onClose={() => setShowCreate(false)}
           onSave={handleCreateRole}
+        />
+      )}
+
+      {editRole && (
+        <RoleModal
+          role={editRole}
+          onClose={() => setEditRole(null)}
+          onSave={handleEditRole}
         />
       )}
     </div>
