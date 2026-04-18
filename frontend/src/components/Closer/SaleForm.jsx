@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, DollarSign, Users, Calendar, Hash, Tag, FileText } from 'lucide-react';
+import { User, DollarSign, Users, Calendar, Hash, Tag, FileText, AlignLeft } from 'lucide-react';
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
@@ -125,21 +125,23 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     if (!validate()) return;
 
     const mapped = mapToSaleColumns(formData);
+    const dynField = (type) => fields.find(f => f.field_type === type);
+    const dynVal   = (type) => { const f = dynField(type); return f ? (formData[f.name] || '') : ''; };
 
     onSubmit({
       ...mapped,
-      form_data:       formData,
-      transfer_id:     transfer?.id   || undefined,
-      company_id:      user?.company_id,
-      plan:            form.plan             || null,
-      down_payment:    form.down_payment     ? parseFloat(form.down_payment)    : null,
-      monthly_payment: form.monthly_payment  ? parseFloat(form.monthly_payment) : null,
-      payment_due_note: form.payment_due_note || null,
-      reference_no:    form.reference_no     || null,
-      client_name:     form.client_name      || null,
-      fronter_id:      form.fronter_id       || null,
-      sale_date:       form.sale_date,
-      status:          form.status,
+      form_data:        formData,
+      transfer_id:      transfer?.id || undefined,
+      company_id:       user?.company_id,
+      plan:             dynVal('sale_plan')             || form.plan             || null,
+      down_payment:     parseFloat(dynVal('sale_down_payment')    || form.down_payment)    || null,
+      monthly_payment:  parseFloat(dynVal('sale_monthly_payment') || form.monthly_payment) || null,
+      payment_due_note: dynVal('sale_payment_due_note') || form.payment_due_note || null,
+      reference_no:     dynVal('sale_reference_no')     || form.reference_no     || null,
+      client_name:      dynVal('sale_client')           || form.client_name      || null,
+      fronter_id:       dynVal('sale_fronter')          || form.fronter_id       || null,
+      sale_date:        dynVal('sale_date')             || form.sale_date,
+      status:           dynVal('sale_status')           || form.status,
     });
   };
 
@@ -192,6 +194,88 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
         </select>
       );
     }
+    if (field.field_type === 'sale_down_payment' || field.field_type === 'sale_monthly_payment') {
+      return (
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <span className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>$</span>
+          </div>
+          <input type="number" step="0.01" min="0" value={val}
+            onChange={onChange} placeholder="0.00"
+            className={`input pl-7 ${errClass}`} />
+        </div>
+      );
+    }
+    if (field.field_type === 'sale_payment_due_note') {
+      return (
+        <input type="text" value={val} onChange={onChange}
+          placeholder="Monthly payments will be on 3rd of each month"
+          className={`input ${errClass}`} />
+      );
+    }
+    if (field.field_type === 'sale_reference_no') {
+      return (
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Hash size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+          </div>
+          <input type="text" value={val} onChange={onChange}
+            placeholder="MBH4220SBN"
+            className={`input pl-9 uppercase font-mono tracking-wider ${errClass}`} />
+        </div>
+      );
+    }
+    if (field.field_type === 'sale_fronter') {
+      return (
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Users size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+          </div>
+          <select value={val} onChange={onChange} className={`input pl-9 ${errClass}`}>
+            <option value="">Select fronter…</option>
+            {fronters.map(f => (
+              <option key={f.user_id} value={f.user_id}>{f.first_name} {f.last_name}</option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    if (field.field_type === 'sale_date') {
+      return (
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Calendar size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+          </div>
+          <input type="date"
+            value={val || new Date().toISOString().split('T')[0]}
+            onChange={onChange} className={`input pl-9 ${errClass}`} />
+        </div>
+      );
+    }
+    if (field.field_type === 'sale_status') {
+      const activeStatus = val || 'sold';
+      return (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {STATUSES.map(s => (
+            <button key={s.value} type="button"
+              onClick={() => setDynField(field.name, s.value)}
+              className="relative py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all duration-150"
+              style={{
+                borderColor:     activeStatus === s.value ? s.color : 'var(--color-border)',
+                backgroundColor: activeStatus === s.value ? s.color + '18' : 'var(--color-surface)',
+                color:           activeStatus === s.value ? s.color : 'var(--color-text-secondary)',
+                transform:       activeStatus === s.value ? 'scale(1.03)' : 'scale(1)',
+              }}>
+              {activeStatus === s.value && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
+                  style={{ backgroundColor: s.color }} />
+              )}
+              {s.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
     const inputType =
       field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
       : field.field_type === 'zip' ? 'text'
@@ -203,11 +287,8 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     );
   };
 
-  // sale_plan and sale_client are rendered in their dedicated hardcoded sections below
-  const SKIP_TYPES = new Set(['sale_plan', 'sale_client']);
-  const sortedFields = [...fields]
-    .filter(f => !SKIP_TYPES.has(f.field_type))
-    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  const hasDyn = (type) => fields.some(f => f.field_type === type);
+  const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-1">
@@ -251,73 +332,75 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
         </Section>
       ) : null}
 
-      {/* ── DEAL DETAILS ─────────────────────────────────────────────── */}
-      <Section icon={DollarSign} title="Deal Details">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Plan">
-            <select value={form.plan} onChange={e => setField('plan', e.target.value)} className="input">
-              <option value="">Select plan…</option>
-              {plans.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
-            </select>
-          </Field>
-          <Field label="Reference No" hint="Auto-generated if left blank">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Hash size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-              </div>
-              <input value={form.reference_no} onChange={e => setField('reference_no', e.target.value)}
-                placeholder="MBH4220SBN" className="input pl-9 uppercase font-mono tracking-wider" />
-            </div>
-          </Field>
-          <Field label="Down Payment">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <span className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>$</span>
-              </div>
-              <input type="number" step="0.01" min="0" value={form.down_payment}
-                onChange={e => setField('down_payment', e.target.value)}
-                placeholder="108.00" className="input pl-7" />
-            </div>
-          </Field>
-          <Field label="Monthly Payment">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <span className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>$</span>
-              </div>
-              <input type="number" step="0.01" min="0" value={form.monthly_payment}
-                onChange={e => setField('monthly_payment', e.target.value)}
-                placeholder="108.00" className="input pl-7" />
-            </div>
-          </Field>
-          <Field label="Payment Due Note" className="sm:col-span-2"
-            hint='e.g. "Monthly payments will be on 3rd of each month"'>
-            <input value={form.payment_due_note} onChange={e => setField('payment_due_note', e.target.value)}
-              placeholder="Monthly payments will be on 3rd of May." className="input" />
-          </Field>
-        </div>
-      </Section>
+      {/* ── DEAL DETAILS — show hardcoded fields only when not in dynamic form ── */}
+      {(!hasDyn('sale_reference_no') || !hasDyn('sale_down_payment') || !hasDyn('sale_monthly_payment') || !hasDyn('sale_payment_due_note')) && (
+        <Section icon={DollarSign} title="Deal Details">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {!hasDyn('sale_reference_no') && (
+              <Field label="Reference No" hint="Auto-generated if left blank">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Hash size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+                  </div>
+                  <input value={form.reference_no} onChange={e => setField('reference_no', e.target.value)}
+                    placeholder="MBH4220SBN" className="input pl-9 uppercase font-mono tracking-wider" />
+                </div>
+              </Field>
+            )}
+            {!hasDyn('sale_down_payment') && (
+              <Field label="Down Payment">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>$</span>
+                  </div>
+                  <input type="number" step="0.01" min="0" value={form.down_payment}
+                    onChange={e => setField('down_payment', e.target.value)}
+                    placeholder="108.00" className="input pl-7" />
+                </div>
+              </Field>
+            )}
+            {!hasDyn('sale_monthly_payment') && (
+              <Field label="Monthly Payment">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>$</span>
+                  </div>
+                  <input type="number" step="0.01" min="0" value={form.monthly_payment}
+                    onChange={e => setField('monthly_payment', e.target.value)}
+                    placeholder="108.00" className="input pl-7" />
+                </div>
+              </Field>
+            )}
+            {!hasDyn('sale_payment_due_note') && (
+              <Field label="Payment Due Note" className="sm:col-span-2"
+                hint='e.g. "Monthly payments will be on 3rd of each month"'>
+                <input value={form.payment_due_note} onChange={e => setField('payment_due_note', e.target.value)}
+                  placeholder="Monthly payments will be on 3rd of May." className="input" />
+              </Field>
+            )}
+          </div>
+        </Section>
+      )}
 
-      {/* ── PEOPLE & ADMIN ───────────────────────────────────────────── */}
+      {/* ── PEOPLE & ADMIN — show hardcoded fields only when not in dynamic form ── */}
       <Section icon={Users} title="People & Administrative">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Fronter dropdown */}
-          <Field label="Fronter" hint="Who handled this lead initially">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Users size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+          {!hasDyn('sale_fronter') && (
+            <Field label="Fronter" hint="Who handled this lead initially">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Users size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+                </div>
+                <select value={form.fronter_id} onChange={e => setField('fronter_id', e.target.value)} className="input pl-9">
+                  <option value="">Select fronter…</option>
+                  {fronters.map(f => (
+                    <option key={f.user_id} value={f.user_id}>{f.first_name} {f.last_name}</option>
+                  ))}
+                </select>
               </div>
-              <select value={form.fronter_id} onChange={e => setField('fronter_id', e.target.value)} className="input pl-9">
-                <option value="">Select fronter…</option>
-                {fronters.map(f => (
-                  <option key={f.user_id} value={f.user_id}>
-                    {f.first_name} {f.last_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </Field>
+            </Field>
+          )}
 
-          {/* Closer — locked to logged-in user */}
           <Field label="Closer" hint="Auto-filled — you">
             <div
               className="input flex items-center gap-2"
@@ -333,61 +416,40 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
             </div>
           </Field>
 
-          {/* Client dropdown */}
-          <Field label="Client" hint="Internal client reference">
-            {clients.length > 0 ? (
+          {!hasDyn('sale_date') && (
+            <Field label="Sale Date">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Tag size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+                  <Calendar size={16} style={{ color: 'var(--color-text-tertiary)' }} />
                 </div>
-                <select value={form.client_name} onChange={e => setField('client_name', e.target.value)} className="input pl-9">
-                  <option value="">Select client…</option>
-                  {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
-                </select>
+                <input type="date" value={form.sale_date} onChange={e => setField('sale_date', e.target.value)}
+                  className="input pl-9" />
               </div>
-            ) : (
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Tag size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-                </div>
-                <input value={form.client_name} onChange={e => setField('client_name', e.target.value)}
-                  placeholder="Jim" className="input pl-9" />
-              </div>
-            )}
-          </Field>
+            </Field>
+          )}
 
-          {/* Sale date */}
-          <Field label="Sale Date">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Calendar size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+          {!hasDyn('sale_status') && (
+            <Field label="Status" className="sm:col-span-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {STATUSES.map(s => (
+                  <button key={s.value} type="button" onClick={() => setField('status', s.value)}
+                    className="relative py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all duration-150"
+                    style={{
+                      borderColor:     form.status === s.value ? s.color : 'var(--color-border)',
+                      backgroundColor: form.status === s.value ? s.color + '18' : 'var(--color-surface)',
+                      color:           form.status === s.value ? s.color : 'var(--color-text-secondary)',
+                      transform:       form.status === s.value ? 'scale(1.03)' : 'scale(1)',
+                    }}>
+                    {form.status === s.value && (
+                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
+                        style={{ backgroundColor: s.color }} />
+                    )}
+                    {s.label}
+                  </button>
+                ))}
               </div>
-              <input type="date" value={form.sale_date} onChange={e => setField('sale_date', e.target.value)}
-                className="input pl-9" />
-            </div>
-          </Field>
-
-          {/* Status */}
-          <Field label="Status" className="sm:col-span-2">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {STATUSES.map(s => (
-                <button key={s.value} type="button" onClick={() => setField('status', s.value)}
-                  className="relative py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all duration-150"
-                  style={{
-                    borderColor:       form.status === s.value ? s.color : 'var(--color-border)',
-                    backgroundColor:   form.status === s.value ? s.color + '18' : 'var(--color-surface)',
-                    color:             form.status === s.value ? s.color : 'var(--color-text-secondary)',
-                    transform:         form.status === s.value ? 'scale(1.03)' : 'scale(1)',
-                  }}>
-                  {form.status === s.value && (
-                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-                      style={{ backgroundColor: s.color }} />
-                  )}
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </Field>
+            </Field>
+          )}
         </div>
       </Section>
 

@@ -5,7 +5,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
-  Clock, CheckCircle, XCircle, Hash, Car, User, ArrowRight, Search, Phone,
+  Clock, CheckCircle, XCircle, Hash, Car, User, ArrowRight, Search, Phone, PlusCircle,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -163,13 +163,22 @@ const CloserManagerDashboard = () => {
             <h2 className="text-3xl font-bold mb-1 text-text">Team Management</h2>
             <p className="text-text-secondary">Closer team at <strong>{user?.company_name}</strong></p>
           </div>
-          {pendingTransfers.length > 0 && (
-            <div className="flex items-center gap-2 py-2 px-4 rounded-xl font-semibold text-sm"
-              style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#b45309', border: '1px solid rgba(245,158,11,0.3)' }}>
-              <Clock size={16} />
-              {pendingTransfers.length} transfer{pendingTransfers.length > 1 ? 's' : ''} need assignment
-            </div>
-          )}
+          <div className="flex items-center gap-3 flex-wrap">
+            {pendingTransfers.length > 0 && (
+              <div className="flex items-center gap-2 py-2 px-4 rounded-xl font-semibold text-sm"
+                style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#b45309', border: '1px solid rgba(245,158,11,0.3)' }}>
+                <Clock size={16} />
+                {pendingTransfers.length} transfer{pendingTransfers.length > 1 ? 's' : ''} need assignment
+              </div>
+            )}
+            <button
+              onClick={() => openSaleModal(null)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all hover:scale-105"
+              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}
+            >
+              <PlusCircle size={16} /> New Sale
+            </button>
+          </div>
         </div>
 
         {/* Stats Grid */}

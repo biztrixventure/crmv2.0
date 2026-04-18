@@ -13,7 +13,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   GripVertical, Plus, Save, Eye, EyeOff,
   Settings, CheckSquare,
-  Type, Hash, Mail, Phone, Calendar, AlignLeft, List,
+  Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
   X, Zap, Users, UserX, Tag, Briefcase, Link2,
   ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight,
 } from 'lucide-react';
@@ -42,15 +42,31 @@ const SALE_FIELDS = [
   { name: 'SalePlan',   label: 'Plan',   field_type: 'sale_plan',   is_required: false },
 ];
 
+const CLOSER_DEAL_FIELDS = [
+  { name: 'SaleDownPayment',    label: 'Down Payment',     field_type: 'sale_down_payment',    is_required: false },
+  { name: 'SaleMonthlyPayment', label: 'Monthly Payment',  field_type: 'sale_monthly_payment', is_required: false },
+  { name: 'SalePaymentDue',     label: 'Payment Due Note', field_type: 'sale_payment_due_note', is_required: false },
+  { name: 'SaleReferenceNo',    label: 'Reference No',     field_type: 'sale_reference_no',    is_required: false },
+  { name: 'SaleFronter',        label: 'Fronter',          field_type: 'sale_fronter',         is_required: false },
+  { name: 'SaleDate',           label: 'Sale Date',        field_type: 'sale_date',            is_required: false },
+  { name: 'SaleStatus',         label: 'Sale Status',      field_type: 'sale_status',          is_required: false },
+];
+
 const TYPE_ICONS = {
   text: Type, email: Mail, number: Hash, tel: Phone, phone: Phone,
   zip: Hash, date: Calendar, textarea: AlignLeft, select: List,
   checkbox: CheckSquare, sale_client: Tag, sale_plan: Briefcase,
+  sale_down_payment: DollarSign, sale_monthly_payment: DollarSign,
+  sale_payment_due_note: AlignLeft, sale_reference_no: Hash,
+  sale_fronter: Users, sale_date: Calendar, sale_status: CheckSquare,
 };
 const TYPE_LABELS = {
   text: 'Text', email: 'Email', number: 'Number', tel: 'Phone',
   phone: 'Phone', zip: 'Zip', date: 'Date', textarea: 'Textarea',
   select: 'Select', checkbox: 'Checkbox', sale_client: 'Client', sale_plan: 'Plan',
+  sale_down_payment: 'Down Payment', sale_monthly_payment: 'Monthly Payment',
+  sale_payment_due_note: 'Payment Due Note', sale_reference_no: 'Reference No',
+  sale_fronter: 'Fronter', sale_date: 'Sale Date', sale_status: 'Sale Status',
 };
 const SPAN_LABEL = { 1: '1/3', 2: '2/3', 3: 'Full' };
 const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
@@ -647,6 +663,7 @@ const FieldCard = ({
   const [labelVal, setLabelVal]         = useState(field.label);
   const inputRef = useRef(null);
   const isSale   = field.field_type === 'sale_client' || field.field_type === 'sale_plan';
+  const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_status'].includes(field.field_type);
   const mappingCount = field.field_type === 'sale_plan' && Array.isArray(field.options) ? field.options.length : 0;
 
   const commitLabel = () => {
@@ -664,8 +681,8 @@ const FieldCard = ({
       onDragEnd={onDragEnd}
       className={`rounded-xl border-2 transition-all duration-150 select-none ${SPAN_CLASS[field.column_span || 1]}`}
       style={{
-        borderColor:     isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : isSale ? 'var(--color-primary-200)' : 'var(--color-border)',
-        backgroundColor: isDragOver ? 'var(--color-primary-50)' : isSale ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
+        borderColor:     isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : isCloserDeal ? 'rgba(245,158,11,0.35)' : isSale ? 'var(--color-primary-200)' : 'var(--color-border)',
+        backgroundColor: isDragOver ? 'var(--color-primary-50)' : isCloserDeal ? 'rgba(245,158,11,0.06)' : isSale ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
         opacity:         isDragging ? 0.35 : 1,
         cursor:          'grab',
         boxShadow:       isDragOver ? '0 0 0 3px var(--color-primary-200)' : 'none',
@@ -674,7 +691,7 @@ const FieldCard = ({
       {/* Top bar */}
       <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 min-w-0 overflow-hidden">
         <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
-        <span style={{ flexShrink: 0, color: isSale ? 'var(--color-primary-500)' : 'var(--color-text-secondary)' }}>
+        <span style={{ flexShrink: 0, color: isCloserDeal ? '#d97706' : isSale ? 'var(--color-primary-500)' : 'var(--color-text-secondary)' }}>
           <FieldIcon type={field.field_type} />
         </span>
         {editingLabel ? (
@@ -697,6 +714,16 @@ const FieldCard = ({
           <X size={13} style={{ color: 'var(--color-error-500)' }} />
         </button>
       </div>
+
+      {/* Closer deal field badge */}
+      {isCloserDeal && (
+        <div className="px-3 pb-1">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold"
+            style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
+            <UserX size={9} /> Closer Only · Deal Field
+          </span>
+        </div>
+      )}
 
       {/* Sale field badges */}
       {isSale && (
@@ -731,15 +758,22 @@ const FieldCard = ({
           {field.is_required ? '* Req' : 'Opt'}
         </button>
 
-        {/* Visibility */}
-        <button onClick={() => onToggleFronter(index)}
-          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0"
-          style={{
-            backgroundColor: field.show_to_fronter !== false ? 'var(--color-info-50, #e0f2fe)' : 'var(--color-bg-secondary)',
-            color: field.show_to_fronter !== false ? 'var(--color-info-600, #0284c7)' : 'var(--color-text-tertiary)',
-          }}>
-          {field.show_to_fronter !== false ? <><Users size={9} /> All</> : <><UserX size={9} /> Closer</>}
-        </button>
+        {/* Visibility — locked for closer deal fields */}
+        {isCloserDeal ? (
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
+            style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#b45309' }}>
+            <UserX size={9} /> Closer Only
+          </span>
+        ) : (
+          <button onClick={() => onToggleFronter(index)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0"
+            style={{
+              backgroundColor: field.show_to_fronter !== false ? 'var(--color-info-50, #e0f2fe)' : 'var(--color-bg-secondary)',
+              color: field.show_to_fronter !== false ? 'var(--color-info-600, #0284c7)' : 'var(--color-text-tertiary)',
+            }}>
+            {field.show_to_fronter !== false ? <><Users size={9} /> All</> : <><UserX size={9} /> Closer</>}
+          </button>
+        )}
 
         {/* Map Plans button */}
         {field.field_type === 'sale_plan' && (
@@ -842,6 +876,11 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: true, options: null }]);
   };
 
+  const addCloserDealField = (field) => {
+    if (canvasFields.some(f => f.field_type === field.field_type)) return;
+    setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: false, options: null }]);
+  };
+
   const addCustom = (field) => {
     setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: true }]);
   };
@@ -892,6 +931,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
 
   const clientOnCanvas = canvasFields.some(f => f.field_type === 'sale_client');
   const planOnCanvas   = canvasFields.some(f => f.field_type === 'sale_plan');
+  const closerDealOnCanvas = (type) => canvasFields.some(f => f.field_type === type);
 
   if (loading) return (
     <div className="flex justify-center py-16">
@@ -958,6 +998,35 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   {clientOnCanvas && planOnCanvas ? 'Both added' : clientOnCanvas ? 'Client added' : 'Plan added'}
                 </p>
               )}
+            </div>
+
+            {/* Closer Deal Fields */}
+            <p className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 pt-3 flex items-center gap-1.5"
+              style={{ borderTop: '1px solid var(--color-border)' }}>
+              <DollarSign size={11} /> Closer Deal Fields
+            </p>
+            <div className="space-y-1.5 mb-4">
+              {CLOSER_DEAL_FIELDS.map(f => {
+                const onCanvas = closerDealOnCanvas(f.field_type);
+                return (
+                  <div key={f.name} className={onCanvas ? 'opacity-40 pointer-events-none' : ''}>
+                    <button
+                      onClick={() => addCloserDealField(f)}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all hover:shadow-md hover:scale-[1.02]"
+                      style={{
+                        borderColor:     'rgba(245,158,11,0.3)',
+                        backgroundColor: 'rgba(245,158,11,0.04)',
+                      }}>
+                      <span style={{ color: '#d97706', flexShrink: 0 }}><FieldIcon type={f.field_type} /></span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-text truncate">{f.label}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>Closer only</p>
+                      </div>
+                      <Plus size={13} style={{ color: '#d97706', flexShrink: 0 }} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Base Fields */}
@@ -1061,9 +1130,22 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                     <option>Select {field.label}</option>
                     {(field.options || []).map(o => <option key={o}>{o}</option>)}
                   </select>
+                ) : field.field_type === 'sale_down_payment' || field.field_type === 'sale_monthly_payment' ? (
+                  <input disabled type="number" placeholder="0.00" className="input opacity-70" />
+                ) : field.field_type === 'sale_reference_no' ? (
+                  <input disabled type="text" placeholder="MBH4220SBN" className="input opacity-70 font-mono uppercase" />
+                ) : field.field_type === 'sale_fronter' ? (
+                  <select disabled className="input opacity-70"><option>Select fronter…</option></select>
+                ) : field.field_type === 'sale_status' ? (
+                  <div className="flex gap-2 flex-wrap">
+                    {['SOLD','PENDING','CANCELLED','FOLLOW UP'].map(s => (
+                      <span key={s} className="px-3 py-1.5 rounded-xl border-2 text-xs font-bold opacity-70"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>{s}</span>
+                    ))}
+                  </div>
                 ) : (
                   <input disabled
-                    type={field.field_type === 'tel' || field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type}
+                    type={field.field_type === 'tel' || field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' || field.field_type === 'sale_payment_due_note' ? 'text' : field.field_type === 'sale_date' ? 'date' : field.field_type}
                     placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
                     className="input opacity-70"
                   />
