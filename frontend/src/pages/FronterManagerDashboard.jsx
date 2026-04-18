@@ -163,6 +163,7 @@ const FronterManagerDashboard = () => {
   ];
 
   return (
+    <>
     <div className="min-h-screen bg-bg">
       <AppHeader
         title="Fronter Manager"
@@ -442,7 +443,6 @@ const FronterManagerDashboard = () => {
         </div>
       )}
     </div>
-
       <TransferFormModal
         isOpen={showTransferModal}
         onClose={() => setShowTransferModal(false)}
@@ -456,6 +456,7 @@ const FronterManagerDashboard = () => {
         onSubmit={handleCreateTransfer}
         isLoading={transferSubmitting}
       />
+    </>
   );
 };
 
