@@ -134,7 +134,9 @@ router.get(
           first_name: u.first_name,
           last_name: u.last_name,
           role: u.custom_roles.name,
+          role_id: u.role_id,
           role_level: u.custom_roles.level,
+          company_id: u.company_id,
           is_active: u.is_active,
           created_at: u.created_at,
         })),
@@ -731,6 +733,106 @@ router.post(
       logger.error('SEND_INVITE', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });
     }
+  })
+);
+
+// ============================================================================
+// GET /users/:id/overrides — Get a user's permission overrides + role base perms
+// ============================================================================
+router.get('/:id/overrides', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: assignment } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, company_id, role_id')
+    .eq('id', id)
+    .single();
+
+  if (!assignment) return res.status(404).json({ error: 'User assignment not found' });
+
+  const hasPerm = await hasPermission(req.user.id, assignment.company_id, 'edit_user');
+  if (req.user.role !== 'superadmin' && !hasPerm) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+
+  const [{ data: rolePerms }, { data: overrides }] = await Promise.all([
+    supabaseAdmin
+      .from('role_permissions')
+      .select('permissions(name)')
+      .eq('role_id', assignment.role_id),
+    supabaseAdmin
+      .from('user_permission_overrides')
+      .select('override_type, permissions(id, name)')
+      .eq('user_id', assignment.user_id)
+      .eq('company_id', assignment.company_id),
+  ]);
+
+  res.json({
+    role_permissions: (rolePerms || []).map(rp => rp.permissions?.name).filter(Boolean),
+    overrides: (overrides || []).map(o => ({
+      permission_id: o.permissions?.id,
+      permission_name: o.permissions?.name,
+      type: o.override_type,
+    })),
+  });
+}));
+
+// ============================================================================
+// PUT /users/:id/overrides — Replace all permission overrides for a user
+// Body: { overrides: [{ permission_name: string, type: 'grant'|'revoke' }] }
+// ============================================================================
+router.put('/:id/overrides',
+  [body('overrides').isArray()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+
+    const { id } = req.params;
+    const { overrides } = req.body;
+
+    const { data: assignment } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, company_id')
+      .eq('id', id)
+      .single();
+
+    if (!assignment) return res.status(404).json({ error: 'User assignment not found' });
+
+    const hasPerm = await hasPermission(req.user.id, assignment.company_id, 'edit_user');
+    if (req.user.role !== 'superadmin' && !hasPerm) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    // Clear existing overrides for this user+company
+    await supabaseAdmin
+      .from('user_permission_overrides')
+      .delete()
+      .eq('user_id', assignment.user_id)
+      .eq('company_id', assignment.company_id);
+
+    if (!overrides?.length) return res.json({ message: 'Overrides cleared', count: 0 });
+
+    // Resolve permission names to IDs
+    const permNames = [...new Set(overrides.map(o => o.permission_name))];
+    const { data: perms } = await supabaseAdmin.from('permissions').select('id, name').in('name', permNames);
+    const permMap = Object.fromEntries((perms || []).map(p => [p.name, p.id]));
+
+    const insertRows = overrides
+      .filter(o => permMap[o.permission_name] && ['grant', 'revoke'].includes(o.type))
+      .map(o => ({
+        user_id: assignment.user_id,
+        company_id: assignment.company_id,
+        permission_id: permMap[o.permission_name],
+        override_type: o.type,
+        set_by: req.user.id,
+      }));
+
+    if (insertRows.length) {
+      await supabaseAdmin.from('user_permission_overrides').insert(insertRows);
+    }
+
+    logger.info('USER_OVERRIDES', `Saved ${insertRows.length} overrides for user ${assignment.user_id}`);
+    res.json({ message: 'Overrides saved', count: insertRows.length });
   })
 );
 

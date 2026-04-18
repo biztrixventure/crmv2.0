@@ -269,35 +269,6 @@ router.post(
 
       logger.success('CREATE_ROLE', `Role created successfully`, { role_id: role.id, name, level });
 
-      // Auto-assign all superadmin users to this company (if not already assigned)
-      // Superadmin should always be a member of every company
-      if (targetCompanyId) {
-        const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-        if (superadminEmails.length > 0) {
-          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 1000 });
-          const saUsers = (authUsers?.users || []).filter(u => superadminEmails.includes(u.email));
-          for (const saUser of saUsers) {
-            const { data: existing } = await supabaseAdmin
-              .from('user_company_roles')
-              .select('id')
-              .eq('user_id', saUser.id)
-              .eq('company_id', targetCompanyId)
-              .eq('is_active', true)
-              .maybeSingle();
-            if (!existing) {
-              await supabaseAdmin.from('user_company_roles').insert({
-                user_id: saUser.id,
-                company_id: targetCompanyId,
-                role_id: role.id,
-                is_active: true,
-                assigned_by: userId,
-              });
-              logger.info('CREATE_ROLE', `Auto-assigned superadmin ${saUser.email} to company ${targetCompanyId}`);
-            }
-          }
-        }
-      }
-
       res.status(201).json({
         message: "Role created successfully",
         role: {
@@ -627,43 +598,6 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
       );
     }
     created.push(tpl.name);
-  }
-
-  // Auto-assign all superadmin users to this company (if not already assigned)
-  const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-  if (superadminEmails.length > 0 && created.length > 0) {
-    // Use the highest-level role created (company_admin) for the assignment
-    const { data: companyAdminRole } = await supabaseAdmin
-      .from('custom_roles')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('level', 'company_admin')
-      .maybeSingle();
-
-    const assignRoleId = companyAdminRole?.id || null;
-    if (assignRoleId) {
-      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 1000 });
-      const saUsers = (authUsers?.users || []).filter(u => superadminEmails.includes(u.email));
-      for (const saUser of saUsers) {
-        const { data: existing } = await supabaseAdmin
-          .from('user_company_roles')
-          .select('id')
-          .eq('user_id', saUser.id)
-          .eq('company_id', companyId)
-          .eq('is_active', true)
-          .maybeSingle();
-        if (!existing) {
-          await supabaseAdmin.from('user_company_roles').insert({
-            user_id: saUser.id,
-            company_id: companyId,
-            role_id: assignRoleId,
-            is_active: true,
-            assigned_by: userId,
-          });
-          logger.info('SEED_ROLES', `Auto-assigned superadmin ${saUser.email} to company ${companyId}`);
-        }
-      }
-    }
   }
 
   logger.success('SEED_ROLES', `Seeded defaults: created=${created.join(',')}, skipped=${skipped.join(',')}`);

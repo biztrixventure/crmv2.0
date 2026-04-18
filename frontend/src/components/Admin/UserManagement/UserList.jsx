@@ -76,7 +76,8 @@ const UserList = ({ users, onEdit, onDelete }) => {
     {
       label: 'Edit',
       icon: <Edit2 size={16} />,
-      onClick: (row) => onEdit(row),
+      // Pass original user object (not display row) so role_id/company_id are available
+      onClick: (row) => onEdit(users.find(u => u.id === row.id) || row),
       variant: 'ghost',
       size: 'sm',
     },

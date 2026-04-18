@@ -68,6 +68,19 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
       .select('permissions(name)')
       .eq('role_id', ur.role_id);
     userPermissions = (perms || []).map(p => p.permissions.name);
+
+    // Apply per-user permission overrides (grant extra / revoke existing)
+    const { data: overrides } = await supabaseAdmin
+      .from('user_permission_overrides')
+      .select('override_type, permissions(name)')
+      .eq('user_id', userId)
+      .eq('company_id', ur.company_id);
+    for (const ov of (overrides || [])) {
+      const name = ov.permissions?.name;
+      if (!name) continue;
+      if (ov.override_type === 'grant' && !userPermissions.includes(name)) userPermissions.push(name);
+      if (ov.override_type === 'revoke') userPermissions = userPermissions.filter(p => p !== name);
+    }
   }
 
   res.json({
