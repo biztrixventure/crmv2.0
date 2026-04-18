@@ -4,12 +4,17 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, Send, TrendingUp, Phone, BarChart3,
-  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash,
+  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
+import { useTransfers } from "../hooks/useTransfers";
+import { useFormFields } from "../hooks/useFormFields";
+import { useClosers } from "../hooks/useClosers";
+import { useSaleConfigs } from "../hooks/useSaleConfigs";
+import TransferFormModal from "../components/Transfers/TransferFormModal";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -45,12 +50,24 @@ const FronterManagerDashboard = () => {
   const [reviewMap, setReviewMap]     = useState({});
 
   // ── Reassign modal ───────────────────────────────────────────────────────
-  const [reassignTarget, setReassignTarget] = useState(null); // transfer being reassigned
+  const [reassignTarget, setReassignTarget] = useState(null);
   const [reassignCloser, setReassignCloser] = useState('');
   const [reassigning, setReassigning]       = useState(false);
   const [reassignMsg, setReassignMsg]       = useState('');
 
+  // ── Create transfer (fronter capability) ────────────────────────────────
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
+
   const companyId = user?.company_id;
+
+  // Hooks for transfer creation form
+  const { createTransfer }                              = useTransfers(companyId);
+  const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
+  const { closers: linkedClosers, loading: closersLoading, fetchClosers } = useClosers(companyId);
+  const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(companyId);
+
+  useEffect(() => { fetchFields(); fetchClosers(); fetchConfigs(); }, []);
   const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
   const { date_from, date_to }    = dateRange;
 
@@ -105,6 +122,16 @@ const FronterManagerDashboard = () => {
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
+  const handleCreateTransfer = async (payload) => {
+    setTransferSubmitting(true);
+    try {
+      await createTransfer(payload);
+      loadAll();
+    } finally {
+      setTransferSubmitting(false);
+    }
+  };
+
   const handleReassign = async () => {
     if (!reassignCloser || !reassignTarget) return;
     setReassigning(true);
@@ -149,14 +176,23 @@ const FronterManagerDashboard = () => {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-6 animate-fade-in flex items-center justify-between">
+        <div className="mb-6 animate-fade-in flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-3xl font-bold mb-1 text-text">Welcome, {user?.first_name || user?.email}!</h2>
             <p className="text-text-secondary"><strong>{user?.role_name || 'Fronter Manager'}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
-          <button onClick={loadAll} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary" title="Refresh">
-            <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTransferModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all hover:scale-105"
+              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}
+            >
+              <PlusCircle size={16} /> New Lead
+            </button>
+            <button onClick={loadAll} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary" title="Refresh">
+              <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
+            </button>
+          </div>
         </div>
 
         {/* Tab bar */}
@@ -406,6 +442,20 @@ const FronterManagerDashboard = () => {
         </div>
       )}
     </div>
+
+      <TransferFormModal
+        isOpen={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        user={user}
+        fields={fields}
+        fieldsLoading={fieldsLoading}
+        closers={linkedClosers}
+        closersLoading={closersLoading}
+        saleClients={saleClients}
+        salePlans={salePlans}
+        onSubmit={handleCreateTransfer}
+        isLoading={transferSubmitting}
+      />
   );
 };
 

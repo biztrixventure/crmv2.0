@@ -5,10 +5,11 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
-  Clock, CheckCircle, Hash, Car, User, ArrowRight, Search, Phone,
+  Clock, CheckCircle, XCircle, Hash, Car, User, ArrowRight, Search, Phone,
 } from "lucide-react";
-import { Card, Badge } from "../components/UI";
+import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
+import SaleModal from "../components/Closer/SaleModal";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useSales } from "../hooks/useSales";
@@ -27,13 +28,26 @@ const CloserManagerDashboard = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
-  const { sales, loading: salesLoading, fetchSales } = useSales(user?.company_id);
+  const { sales, loading: salesLoading, fetchSales, createSale } = useSales(user?.company_id);
   const { transfers, loading: xferLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
   const notifHook = useNotifications();
 
   const [closers, setClosers] = useState([]);
   const [assigning, setAssigning] = useState(null);
-  const [activeTab, setActiveTab] = useState('sales'); // 'sales' | 'transfers' | 'team'
+  const [activeTab, setActiveTab] = useState('sales');
+
+  // Sale creation (closer capability)
+  const [saleModalOpen, setSaleModalOpen]     = useState(false);
+  const [saleTransfer, setSaleTransfer]       = useState(null);
+  const [saleLoading, setSaleLoading]         = useState(false);
+  const [saleError, setSaleError]             = useState('');
+  const [saleSuccess, setSaleSuccess]         = useState('');
+
+  // Reject transfer (closer capability)
+  const [rejectTarget, setRejectTarget]       = useState(null);
+  const [rejectReason, setRejectReason]       = useState('');
+  const [rejecting, setRejecting]             = useState(false);
+  const [rejectMsg, setRejectMsg]             = useState('');
 
   const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
   const { date_from, date_to }    = dateRange;
@@ -54,6 +68,47 @@ const CloserManagerDashboard = () => {
   }, [user?.company_id]);
 
   const handleLogout = () => { logout(); navigate("/login"); };
+
+  const openSaleModal = (transfer) => {
+    setSaleTransfer(transfer);
+    setSaleError('');
+    setSaleModalOpen(true);
+  };
+
+  const handleSaleSubmit = async (formData) => {
+    setSaleLoading(true);
+    setSaleError('');
+    try {
+      await createSale(formData);
+      setSaleModalOpen(false);
+      setSaleSuccess(`Sale created! Ref: ${formData.reference_no || 'Generated'}`);
+      fetchTransfers({ date_from, date_to });
+      setTimeout(() => setSaleSuccess(''), 5000);
+    } catch (err) {
+      const msg = err.response?.data?.errors
+        ? err.response.data.errors.map(e => e.msg).join(', ')
+        : err.response?.data?.error || err.message || 'Failed to create sale';
+      setSaleError(msg);
+    } finally {
+      setSaleLoading(false);
+    }
+  };
+
+  const handleRejectTransfer = async () => {
+    if (!rejectReason.trim()) { setRejectMsg('Reason required.'); return; }
+    setRejecting(true);
+    try {
+      await client.post(`transfers/${rejectTarget.id}/reject`, { reason: rejectReason });
+      setRejectTarget(null);
+      setRejectReason('');
+      setRejectMsg('');
+      fetchTransfers({ date_from, date_to });
+    } catch (err) {
+      setRejectMsg(err.response?.data?.error || 'Failed to reject');
+    } finally {
+      setRejecting(false);
+    }
+  };
 
   const handleAssign = async (transferId, closerId) => {
     if (!closerId) return;
@@ -96,6 +151,11 @@ const CloserManagerDashboard = () => {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {saleSuccess && (
+          <Alert type="success" title="Sale Created!" message={saleSuccess}
+            dismissible onDismiss={() => setSaleSuccess('')} className="mb-4" />
+        )}
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
@@ -287,21 +347,42 @@ const CloserManagerDashboard = () => {
                 <p className="text-text-secondary text-center py-8">No active assignments.</p>
               ) : (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                  {assignedTransfers.map(t => (
-                    <div key={t.id} className="p-4 rounded-xl border transition-all hover:shadow-md"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-semibold text-text">{t.form_data?.customer_name || 'Transfer'}</p>
-                          <p className="text-xs text-text-secondary mt-0.5">
-                            {t.form_data?.customer_phone || t.form_data?.customer_email || ''}
-                          </p>
+                  {assignedTransfers.map(t => {
+                    const isMyTransfer = t.assigned_closer_id === user?.id;
+                    return (
+                      <div key={t.id} className="p-4 rounded-xl border transition-all hover:shadow-md"
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-semibold text-text">{t.form_data?.customer_name || 'Transfer'}</p>
+                            <p className="text-xs text-text-secondary mt-0.5">
+                              {t.form_data?.customer_phone || t.form_data?.customer_email || ''}
+                            </p>
+                          </div>
+                          <Badge variant={xferBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                         </div>
-                        <Badge variant={xferBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                        <p className="text-xs text-text-tertiary mb-2">{new Date(t.created_at).toLocaleDateString()}</p>
+                        {isMyTransfer && (
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={() => openSaleModal(t)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                              style={{ background: 'var(--gradient-sidebar)' }}
+                            >
+                              <DollarSign size={12} /> Convert to Sale
+                            </button>
+                            <button
+                              onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                              style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}
+                            >
+                              <XCircle size={12} /> Reject
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-xs text-text-tertiary mt-2">{new Date(t.created_at).toLocaleDateString()}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -405,6 +486,56 @@ const CloserManagerDashboard = () => {
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
       </main>
+
+      {/* Sale conversion modal */}
+      <SaleModal
+        isOpen={saleModalOpen}
+        onClose={() => setSaleModalOpen(false)}
+        user={user}
+        transfer={saleTransfer}
+        onSubmit={handleSaleSubmit}
+        isLoading={saleLoading}
+      />
+      {saleError && saleModalOpen && (
+        <div className="fixed bottom-4 right-4 z-[60] max-w-sm p-4 rounded-xl shadow-xl text-sm text-error-700"
+          style={{ backgroundColor: 'var(--color-error-50)', border: '1px solid var(--color-error-200)' }}>
+          {saleError}
+        </div>
+      )}
+
+      {/* Reject transfer modal */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onClick={e => { if (e.target === e.currentTarget) setRejectTarget(null); }}>
+          <div className="w-full max-w-md rounded-2xl p-6"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-4">Reject Transfer</h3>
+            <p className="text-sm text-text-secondary mb-3">
+              Rejecting: <strong>{rejectTarget.form_data?.customer_name || 'Transfer'}</strong>
+            </p>
+            <textarea
+              className="input w-full resize-none mb-3" rows={3}
+              placeholder="Reason for rejection…"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+            />
+            {rejectMsg && <p className="text-xs text-error-600 mb-2">{rejectMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setRejectTarget(null)}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold border"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                Cancel
+              </button>
+              <button onClick={handleRejectTransfer} disabled={rejecting}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{ background: 'var(--color-error-600)', opacity: rejecting ? 0.6 : 1 }}>
+                {rejecting ? 'Rejecting…' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
