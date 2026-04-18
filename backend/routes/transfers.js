@@ -7,7 +7,7 @@ const notifications = require('../utils/notificationService');
 
 const router = express.Router();
 
-const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'operations_manager', 'closer_manager'];
+const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'];
 
 // ============================================================================
 // GET /transfers

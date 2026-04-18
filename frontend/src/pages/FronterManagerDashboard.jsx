@@ -3,7 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
-  Users, Send, TrendingUp, Phone, BarChart3,
+  Users, Send, TrendingUp, Phone, BarChart3, DollarSign, Search,
   RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle, FileText,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
@@ -15,6 +15,7 @@ import { useFormFields } from "../hooks/useFormFields";
 import { useClosers } from "../hooks/useClosers";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import TransferFormModal from "../components/Transfers/TransferFormModal";
+import SaleSearch from "../components/Sales/SaleSearch";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -35,13 +36,12 @@ const FronterManagerDashboard = () => {
   const [transfers, setTransfers]     = useState([]);
   const [tLoading, setTLoading]       = useState(false);
 
+  // ── Sales state ──────────────────────────────────────────────────────────
+  const [sales, setSales]             = useState([]);
+
   // ── Fronter leaderboard ──────────────────────────────────────────────────
   const [fronters, setFronters]       = useState([]);
   const [lbLoading, setLbLoading]     = useState(false);
-
-  // ── Stats ────────────────────────────────────────────────────────────────
-  const [stats, setStats]             = useState({});
-  const [statsLoading, setStatsLoading] = useState(false);
 
   // ── Closers for reassignment ─────────────────────────────────────────────
   const [closers, setClosers]         = useState([]);
@@ -75,19 +75,19 @@ const FronterManagerDashboard = () => {
     if (!companyId) return;
     setTLoading(true);
     setLbLoading(true);
-    setStatsLoading(true);
 
     try {
-      const [tRes, statsRes, closersRes, reviewsRes] = await Promise.allSettled([
-        client.get('transfers',         { params: { company_id: companyId, limit: 100, date_from, date_to } }),
-        client.get('stats',             { params: { company_id: companyId } }),
+      const [tRes, sRes, closersRes, reviewsRes] = await Promise.allSettled([
+        client.get('transfers',         { params: { company_id: companyId, limit: 200, date_from, date_to } }),
+        client.get('sales',             { params: { company_id: companyId, limit: 200, date_from, date_to } }),
         client.get('transfers/closers', { params: { company_id: companyId } }),
         client.get('reviews',           { params: { company_id: companyId, limit: 200 } }),
       ]);
 
       const allTransfers = tRes.status === 'fulfilled' ? (tRes.value.data.transfers || []) : [];
+      const allSales     = sRes.status === 'fulfilled' ? (sRes.value.data.sales     || []) : [];
       setTransfers(allTransfers);
-      if (statsRes.status === 'fulfilled')   setStats(statsRes.value.data || {});
+      setSales(allSales);
       if (closersRes.status === 'fulfilled') setClosers(closersRes.value.data.closers || []);
 
       const rMap = {};
@@ -114,7 +114,6 @@ const FronterManagerDashboard = () => {
     } catch { /* non-critical */ } finally {
       setTLoading(false);
       setLbLoading(false);
-      setStatsLoading(false);
     }
   }, [companyId, date_from, date_to]);
 
@@ -153,6 +152,12 @@ const FronterManagerDashboard = () => {
   const assigned  = transfers.filter(t => t.status === 'assigned');
   const completed = transfers.filter(t => t.status === 'completed');
 
+  const totalSales    = sales.length;
+  const soldSales     = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
+  const convRate      = transfers.length > 0 ? Math.round((soldSales / transfers.length) * 100) : 0;
+
+  const SALE_BADGE = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', compliance_cancelled: 'error', dispute: 'warning', chargeback: 'error' };
+
   // Personal transfers (created by this manager acting as a fronter)
   const myTransfers   = transfers.filter(t => t.created_by === user?.id);
   const myCompleted   = myTransfers.filter(t => t.status === 'completed').length;
@@ -163,10 +168,12 @@ const FronterManagerDashboard = () => {
     { key: 'overview',        label: 'Overview',         icon: BarChart3  },
     { key: 'my_transfers',    label: 'My Transfers',     icon: Send       },
     ...(hasPermission('view_team_transfers') ? [{ key: 'transfers', label: 'All Transfers', icon: Send }] : []),
+    ...(hasPermission('view_team_sales')     ? [{ key: 'sales',     label: 'Team Sales',    icon: DollarSign }] : []),
     { key: 'leaderboard',     label: 'Leaderboard',      icon: TrendingUp },
     { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
     { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone      },
     { key: 'numbers',         label: 'Number Lists',     icon: Hash       },
+    ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
   ];
 
   return (
@@ -360,19 +367,21 @@ const FronterManagerDashboard = () => {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Stats row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {[
-                { label: 'Total Transfers',  value: transfers.length,    icon: Send,        color: 'info'    },
-                { label: 'Assigned',         value: assigned.length,     icon: ChevronRight,color: 'primary' },
-                { label: 'Completed/Won',    value: completed.length,    icon: CheckCircle, color: 'success' },
-                { label: 'Rejected',         value: rejected.length,     icon: XCircle,     color: 'error'   },
+                { label: 'Transfers',     value: transfers.length, icon: Send,        color: 'info'    },
+                { label: 'Assigned',      value: assigned.length,  icon: ChevronRight,color: 'primary' },
+                { label: 'Completed',     value: completed.length, icon: CheckCircle, color: 'success' },
+                { label: 'Rejected',      value: rejected.length,  icon: XCircle,     color: 'error'   },
+                { label: 'Total Sales',   value: totalSales,       icon: DollarSign,  color: 'success' },
+                { label: 'Conversion',    value: `${convRate}%`,   icon: TrendingUp,  color: 'warning' },
               ].map(s => (
                 <Card key={s.label} className="p-5">
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm text-text-secondary mb-1">{s.label}</p>
                       <p className={`text-3xl font-bold text-${s.color}-600`}>
-                        {statsLoading ? '—' : s.value}
+                        {tLoading ? '—' : s.value}
                       </p>
                     </div>
                     <div className={`p-3 rounded-xl bg-${s.color}-100 dark:bg-${s.color}-900`}>
@@ -526,6 +535,48 @@ const FronterManagerDashboard = () => {
             )}
           </Card>
         )}
+
+        {/* ── SALES TAB ─────────────────────────────────────────────────── */}
+        {activeTab === 'sales' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold text-text mb-4 flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
+            {tLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : sales.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No sales yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {['Customer', 'Phone', 'Reference', 'Vehicle', 'Plan', 'Monthly', 'Status', 'Date'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sales.map(s => (
+                      <tr key={s.id} className="hover:bg-bg-secondary transition-colors"
+                        style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td className="px-4 py-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                        <td className="px-4 py-3 text-text-secondary">{s.customer_phone || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-text-secondary">{s.reference_no || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-text-secondary">{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-text-secondary">{s.plan || '—'}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}` : '—'}</td>
+                        <td className="px-4 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
+                        <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* ── SEARCH TAB ────────────────────────────────────────────────── */}
+        {activeTab === 'search' && <SaleSearch companyId={companyId} />}
 
         {/* ── CALLBACKS TAB ─────────────────────────────────────────────── */}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}

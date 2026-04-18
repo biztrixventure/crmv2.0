@@ -526,6 +526,7 @@ const BLP_DEFAULTS = [
     level: 'manager',
     permissions: ['create_transfer', 'view_own_transfers', 'view_team_transfers',
                   'assign_transfer', 'update_transfer', 'delete_transfer',
+                  'view_team_sales', 'view_financial_data',
                   'create_user', 'view_reports',
                   'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
   },

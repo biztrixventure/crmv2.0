@@ -619,7 +619,7 @@ const OperationsDashboard = () => {
           </div>
         )}
 
-        {activeTab === 'search'          && <SaleSearch />}
+        {activeTab === 'search'          && <SaleSearch companyId={companyId} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
         {activeTab === 'numbers'         && <NumberUploadManager user={user} />}

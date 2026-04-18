@@ -260,7 +260,7 @@ router.get(
 
     // Permission: creator, closer, or manager
     const isOwner = sale.created_by === userId || sale.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
     if (!isOwner && !isManager) return res.status(403).json({ error: 'Access denied' });
 
     res.json({ sale });
@@ -284,7 +284,7 @@ router.put(
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
     const isCreator = existing.created_by === userId || existing.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
     const {
@@ -454,7 +454,7 @@ router.delete(
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
     const isCreator = existing.created_by === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager'].includes(userRole);
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
     const { error: deleteError } = await supabaseAdmin.from('sales').delete().eq('id', id);

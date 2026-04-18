@@ -107,7 +107,7 @@ router.get(
       }
 
       // Team stats for managers
-      if (['manager', 'operations_manager', 'closer_manager', 'company_admin'].includes(userRole)) {
+      if (['manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'company_admin'].includes(userRole)) {
         const { count: teamCount } = await supabaseAdmin
           .from('user_company_roles')
           .select('id', { count: 'exact' })
