@@ -203,7 +203,11 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     );
   };
 
-  const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
+  // sale_plan and sale_client are rendered in their dedicated hardcoded sections below
+  const SKIP_TYPES = new Set(['sale_plan', 'sale_client']);
+  const sortedFields = [...fields]
+    .filter(f => !SKIP_TYPES.has(f.field_type))
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-1">

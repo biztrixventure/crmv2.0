@@ -8,6 +8,7 @@ import {
   XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2, Hash,
 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
+import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import CreateUserModal from "../components/Admin/UserManagement/CreateUserModal";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -56,6 +57,8 @@ const OperationsDashboard = () => {
   const [teamActionErr, setTeamActionErr] = useState('');
 
   const companyId = user?.company_id;
+  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const { date_from, date_to }    = dateRange;
 
   const loadReviews = useCallback(async () => {
     if (!companyId) return;
@@ -78,8 +81,8 @@ const OperationsDashboard = () => {
     fetchStats();
     try {
       const [tRes, sRes, closersRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 200 } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 200 } }),
+        client.get('transfers', { params: { company_id: companyId, limit: 200, date_from, date_to } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 200, date_from, date_to } }),
         client.get('transfers/closers', { params: { company_id: companyId } }),
       ]);
 
@@ -116,7 +119,7 @@ const OperationsDashboard = () => {
     } catch { /* non-critical */ } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, date_from, date_to]);
 
   const loadTeam = useCallback(() => {
     if (!companyId) return;
@@ -206,24 +209,27 @@ const OperationsDashboard = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex flex-wrap gap-1 mb-6 p-1 rounded-xl w-fit"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {TABS.map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
-              style={{
-                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                color:            activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow:        activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              <tab.icon size={15} />
-              {tab.label}
-              {tab.key === 'transfers' && rejectedTransfers.length > 0 && (
-                <span className="ml-1 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center text-white"
-                  style={{ backgroundColor: 'var(--color-error-500)' }}>{rejectedTransfers.length}</span>
-              )}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+          <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {TABS.map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+                style={{
+                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                  color:            activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow:        activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                <tab.icon size={15} />
+                {tab.label}
+                {tab.key === 'transfers' && rejectedTransfers.length > 0 && (
+                  <span className="ml-1 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center text-white"
+                    style={{ backgroundColor: 'var(--color-error-500)' }}>{rejectedTransfers.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
         </div>
 
         {/* ── OVERVIEW ──────────────────────────────────────────── */}

@@ -8,6 +8,7 @@ import {
   Star, MessageSquare,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
+import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
@@ -67,11 +68,12 @@ const CloserDashboard = () => {
   const [saleError, setSaleError]       = useState('');
   const [saleSuccess, setSaleSuccess]   = useState('');
 
-  useEffect(() => {
-    fetchStats();
-    fetchTransfers();
-    fetchSales();
-  }, []);
+  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const { date_from, date_to }    = dateRange;
+
+  useEffect(() => { fetchStats(); }, []);
+  useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
+  useEffect(() => { fetchSales({ date_from, date_to }); },    [fetchSales, date_from, date_to]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -91,7 +93,7 @@ const CloserDashboard = () => {
       setModalOpen(false);
       setSaleSuccess(`Sale created! Ref: ${formData.reference_no || 'Generated'}`);
       fetchStats();
-      fetchTransfers();
+      fetchTransfers({ date_from, date_to });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       const msg = err.response?.data?.errors
@@ -148,7 +150,7 @@ const CloserDashboard = () => {
       setRejectTarget(null);
       setRejectReason('');
       setRejectMsg('');
-      fetchTransfers();
+      fetchTransfers({ date_from, date_to });
       fetchStats();
     } catch (err) {
       setRejectMsg(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to reject');
@@ -203,25 +205,28 @@ const CloserDashboard = () => {
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {[
-            { key: 'sales',           label: 'My Sales',        icon: DollarSign },
-            { key: 'callbacks',       label: 'Callbacks',       icon: Phone      },
-            { key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash       },
-            { key: 'search',          label: 'Search Sales',    icon: Search     },
-          ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
-              style={{
-                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              <tab.icon size={15} />
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+          <div className="flex gap-1 p-1 rounded-xl w-fit"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[
+              { key: 'sales',           label: 'My Sales',        icon: DollarSign },
+              { key: 'callbacks',       label: 'Callbacks',       icon: Phone      },
+              { key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash       },
+              { key: 'search',          label: 'Search Sales',    icon: Search     },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+                style={{
+                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                  color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                <tab.icon size={15} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
         </div>
 
         {activeTab === 'callbacks'       && <CallbacksPage user={user} />}

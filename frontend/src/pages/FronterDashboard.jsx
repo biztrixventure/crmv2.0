@@ -4,6 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone, TrendingUp, Hash } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
+import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
@@ -32,14 +33,11 @@ const FronterDashboard = () => {
   const [selectedCloser, setSelectedCloser] = useState('');
   const [submitting, setSubmitting]         = useState(false);
   const [submitError, setSubmitError]       = useState('');
+  const [dateRange, setDateRange]           = useState(() => getPresetRange('30d'));
+  const { date_from, date_to }              = dateRange;
 
-  useEffect(() => {
-    fetchStats();
-    fetchTransfers();
-    fetchFields();
-    fetchClosers();
-    fetchConfigs();
-  }, []);
+  useEffect(() => { fetchStats(); fetchFields(); fetchClosers(); fetchConfigs(); }, []);
+  useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
 
   const handleLogout = () => { logout(); navigate("/login"); };
 
@@ -54,7 +52,7 @@ const FronterDashboard = () => {
       setFormData({});
       setSelectedCloser('');
       fetchStats();
-      fetchTransfers();
+      fetchTransfers({ date_from, date_to });
     } catch (err) {
       setSubmitError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to submit');
     }
@@ -97,20 +95,23 @@ const FronterDashboard = () => {
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {TABS.map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
-              style={{
-                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                color:            activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow:        activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              <tab.icon size={15} />
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+          <div className="flex gap-1 p-1 rounded-xl w-fit"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {TABS.map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+                style={{
+                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                  color:            activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow:        activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                <tab.icon size={15} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
         </div>
 
         {activeTab === 'callbacks'       && <CallbacksPage user={user} />}

@@ -8,6 +8,7 @@ import {
   Clock, CheckCircle, Hash, Car, User, ArrowRight, Search, Phone,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
+import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useSales } from "../hooks/useSales";
@@ -34,12 +35,12 @@ const CloserManagerDashboard = () => {
   const [assigning, setAssigning] = useState(null);
   const [activeTab, setActiveTab] = useState('sales'); // 'sales' | 'transfers' | 'team'
 
-  useEffect(() => {
-    fetchStats();
-    fetchSales();
-    fetchTransfers();
-    fetchClosers();
-  }, []);
+  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const { date_from, date_to }    = dateRange;
+
+  useEffect(() => { fetchStats(); fetchClosers(); }, []);
+  useEffect(() => { fetchSales({ date_from, date_to }); },     [fetchSales, date_from, date_to]);
+  useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
 
   const fetchClosers = useCallback(async () => {
     try {
@@ -152,27 +153,30 @@ const CloserManagerDashboard = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {[
-            { key: 'sales',     label: 'All Sales',     icon: DollarSign },
-            { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
-            { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
-            { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Hash      },
-            { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone     },
-            ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
-          ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
-              style={{
-                backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              <tab.icon size={15} />
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+          <div className="flex gap-1 p-1 rounded-xl w-fit"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[
+              { key: 'sales',     label: 'All Sales',     icon: DollarSign },
+              { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
+              { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
+              { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Hash      },
+              { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone     },
+              ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+                style={{
+                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
+                  color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                <tab.icon size={15} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
         </div>
 
         {/* === Tab: All Sales === */}

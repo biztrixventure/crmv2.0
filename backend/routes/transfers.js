@@ -16,7 +16,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
   const userRole  = req.user.role;
-  const { status, page = 1, limit = 50, search } = req.query;
+  const { status, page = 1, limit = 50, search, date_from, date_to } = req.query;
 
   let query = supabaseAdmin
     .from('transfers')
@@ -53,7 +53,9 @@ router.get('/', asyncHandler(async (req, res) => {
     // fronter_manager, operations_manager, superadmin, company_admin — see all transfers for company
   }
 
-  if (status) query = query.eq('status', status);
+  if (status)    query = query.eq('status', status);
+  if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
+  if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
 
   if (search) {
     query = query.or(
