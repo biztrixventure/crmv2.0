@@ -28,7 +28,7 @@ const DISPOS       = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up'
 const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const CloserDashboard = () => {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -194,6 +194,7 @@ const CloserDashboard = () => {
               <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>
             </p>
           </div>
+          {hasPermission('create_sale') && (
           <button
             onClick={() => openSaleModal(null)}
             className="flex items-center gap-2 py-3 px-6 rounded-xl font-bold text-white transition-all duration-200 hover:scale-105"
@@ -202,6 +203,7 @@ const CloserDashboard = () => {
             <Plus size={20} />
             New Sale
           </button>
+          )}
         </div>
 
         {/* Tab bar */}
@@ -328,6 +330,7 @@ const CloserDashboard = () => {
                     </div>
                     {t.status === 'assigned' && (
                       <div className="flex gap-2 mt-3">
+                        {hasPermission('create_sale') && (
                         <button
                           onClick={() => openSaleModal(t)}
                           className="flex-1 py-2 px-3 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
@@ -335,6 +338,8 @@ const CloserDashboard = () => {
                         >
                           <DollarSign size={13} /> Convert to Sale
                         </button>
+                        )}
+                        {hasPermission('reject_transfer') && (
                         <button
                           onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
                           className="px-3 py-2 rounded-lg font-semibold text-sm border flex items-center gap-1 transition-all hover:bg-error-50"
@@ -342,6 +347,7 @@ const CloserDashboard = () => {
                         >
                           <XCircle size={13} /> Reject
                         </button>
+                        )}
                       </div>
                     )}
                     <div className="flex gap-2 mt-2">
@@ -378,6 +384,7 @@ const CloserDashboard = () => {
             ) : sales.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-text-secondary mb-3">No sales yet.</p>
+                {hasPermission('create_sale') && (
                 <button
                   onClick={() => openSaleModal(null)}
                   className="py-2 px-4 rounded-lg text-sm font-semibold text-white"
@@ -385,6 +392,7 @@ const CloserDashboard = () => {
                 >
                   Create your first sale
                 </button>
+                )}
               </div>
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1">

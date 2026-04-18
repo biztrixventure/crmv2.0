@@ -24,7 +24,7 @@ const STATUS_COLORS = { pending: 'warning', assigned: 'info', completed: 'succes
 const RATING_COLOR  = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const FronterManagerDashboard = () => {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
@@ -162,7 +162,7 @@ const FronterManagerDashboard = () => {
   const TABS = [
     { key: 'overview',        label: 'Overview',         icon: BarChart3  },
     { key: 'my_transfers',    label: 'My Transfers',     icon: Send       },
-    { key: 'transfers',       label: 'All Transfers',    icon: Send       },
+    ...(hasPermission('view_team_transfers') ? [{ key: 'transfers', label: 'All Transfers', icon: Send }] : []),
     { key: 'leaderboard',     label: 'Leaderboard',      icon: TrendingUp },
     { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
     { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone      },
@@ -190,6 +190,7 @@ const FronterManagerDashboard = () => {
             <p className="text-text-secondary"><strong>{user?.role_name || 'Fronter Manager'}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
           <div className="flex items-center gap-2">
+            {hasPermission('create_transfer') && (
             <button
               onClick={() => setShowTransferModal(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all hover:scale-105"
@@ -197,6 +198,7 @@ const FronterManagerDashboard = () => {
             >
               <PlusCircle size={16} /> New Lead
             </button>
+            )}
             <button onClick={loadAll} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary" title="Refresh">
               <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
             </button>
@@ -280,6 +282,7 @@ const FronterManagerDashboard = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Create New Lead card */}
+              {hasPermission('create_transfer') && (
               <Card className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xl font-bold text-text flex items-center gap-2"><PlusCircle size={20} /> Create New Lead</h3>
@@ -296,6 +299,7 @@ const FronterManagerDashboard = () => {
                   <p className="text-text-secondary">Click "New Lead" to transfer a call to a closer.</p>
                 </div>
               </Card>
+              )}
 
               {/* My Leads list */}
               <Card className="p-6">

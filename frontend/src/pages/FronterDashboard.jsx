@@ -17,7 +17,7 @@ import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 
 const FronterDashboard = () => {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState('transfers');
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -163,7 +163,7 @@ const FronterDashboard = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Create New Lead */}
-            <Card className="p-6">
+            {hasPermission('create_transfer') && <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-text flex items-center gap-2"><PlusCircle size={20} /> Create New Lead</h3>
                 {!showCreateForm && (
@@ -270,7 +270,7 @@ const FronterDashboard = () => {
                   <p className="text-text-secondary">Click "New Lead" to transfer a call to a closer.</p>
                 </div>
               )}
-            </Card>
+            </Card>}
 
             {/* My Leads / Transfers */}
             <Card className="p-6">

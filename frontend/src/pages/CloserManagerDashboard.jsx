@@ -177,6 +177,7 @@ const CloserManagerDashboard = () => {
                 {pendingTransfers.length} transfer{pendingTransfers.length > 1 ? 's' : ''} need assignment
               </div>
             )}
+            {hasPermission('create_sale') && (
             <button
               onClick={() => openSaleModal(null)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white transition-all hover:scale-105"
@@ -184,6 +185,7 @@ const CloserManagerDashboard = () => {
             >
               <PlusCircle size={16} /> New Sale
             </button>
+            )}
           </div>
         </div>
 
@@ -233,7 +235,7 @@ const CloserManagerDashboard = () => {
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {[
               { key: 'my_sales',  label: 'My Sales',      icon: DollarSign },
-              { key: 'sales',     label: 'All Sales',     icon: DollarSign },
+              ...(hasPermission('view_team_sales') ? [{ key: 'sales', label: 'All Sales', icon: DollarSign }] : []),
               { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
               { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
               { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Hash      },
@@ -329,6 +331,7 @@ const CloserManagerDashboard = () => {
                         <p className="text-xs text-text-tertiary mb-2">{new Date(t.created_at).toLocaleDateString()}</p>
                         {t.status === 'assigned' && (
                           <div className="flex gap-2 mt-2">
+                            {hasPermission('create_sale') && (
                             <button
                               onClick={() => openSaleModal(t)}
                               className="flex-1 py-2 px-3 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
@@ -336,6 +339,8 @@ const CloserManagerDashboard = () => {
                             >
                               <DollarSign size={13} /> Convert to Sale
                             </button>
+                            )}
+                            {hasPermission('reject_transfer') && (
                             <button
                               onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
                               className="px-3 py-2 rounded-lg font-semibold text-sm border flex items-center gap-1 transition-all hover:bg-error-50"
@@ -343,6 +348,7 @@ const CloserManagerDashboard = () => {
                             >
                               <XCircle size={13} /> Reject
                             </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -355,6 +361,7 @@ const CloserManagerDashboard = () => {
               <Card className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xl font-bold text-text flex items-center gap-2"><DollarSign size={20} /> My Sales</h3>
+                  {hasPermission('create_sale') && (
                   <button
                     onClick={() => openSaleModal(null)}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105"
@@ -362,17 +369,20 @@ const CloserManagerDashboard = () => {
                   >
                     <PlusCircle size={15} /> New Sale
                   </button>
+                  )}
                 </div>
                 {salesLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : mySales.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-text-secondary mb-3">No sales yet.</p>
+                    {hasPermission('create_sale') && (
                     <button onClick={() => openSaleModal(null)}
                       className="py-2 px-4 rounded-lg text-sm font-semibold text-white"
                       style={{ background: 'var(--gradient-sidebar)' }}>
                       Create your first sale
                     </button>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
@@ -468,7 +478,7 @@ const CloserManagerDashboard = () => {
                         <Badge variant={saleBadge[s.status] || 'secondary'} size="sm">
                           {saleLabel[s.status] || s.status}
                         </Badge>
-                        {s.monthly_payment && (
+                        {s.monthly_payment && hasPermission('view_financial_data') && (
                           <span className="text-xs font-semibold text-success-600">${s.monthly_payment}/mo</span>
                         )}
                       </div>
@@ -554,6 +564,7 @@ const CloserManagerDashboard = () => {
                         <p className="text-xs text-text-tertiary mb-2">{new Date(t.created_at).toLocaleDateString()}</p>
                         {isMyTransfer && (
                           <div className="flex gap-2 mt-2">
+                            {hasPermission('create_sale') && (
                             <button
                               onClick={() => openSaleModal(t)}
                               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
@@ -561,6 +572,8 @@ const CloserManagerDashboard = () => {
                             >
                               <DollarSign size={12} /> Convert to Sale
                             </button>
+                            )}
+                            {hasPermission('reject_transfer') && (
                             <button
                               onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
                               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold"
@@ -568,6 +581,7 @@ const CloserManagerDashboard = () => {
                             >
                               <XCircle size={12} /> Reject
                             </button>
+                            )}
                           </div>
                         )}
                       </div>

@@ -517,6 +517,7 @@ const BLP_DEFAULTS = [
     description: 'Converts assigned transfers to sales',
     level: 'closer',
     permissions: ['create_sale', 'view_own_sales', 'update_sale', 'view_own_transfers',
+                  'reject_transfer', 'view_financial_data',
                   'view_callbacks', 'manage_callbacks', 'view_notifications'],
   },
   {
@@ -533,8 +534,8 @@ const BLP_DEFAULTS = [
     description: 'Manages closer team, tracks all sales, can search records',
     level: 'closer_manager',
     permissions: ['create_sale', 'view_own_sales', 'view_team_sales', 'update_sale',
-                  'assign_transfer', 'view_team_transfers',
-                  'view_reports', 'search_sales', 'create_user',
+                  'assign_transfer', 'view_team_transfers', 'reject_transfer', 'reassign_transfer',
+                  'view_reports', 'search_sales', 'create_user', 'view_financial_data',
                   'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
   },
   {
@@ -542,7 +543,7 @@ const BLP_DEFAULTS = [
     description: 'Oversees ops, runs reports, searches all sale records',
     level: 'operations_manager',
     permissions: ['view_team_transfers', 'view_team_sales', 'update_sale', 'update_transfer',
-                  'view_reports', 'search_sales',
+                  'view_reports', 'search_sales', 'view_financial_data',
                   'view_callbacks', 'view_team_callbacks', 'view_notifications'],
   },
   {
@@ -551,8 +552,9 @@ const BLP_DEFAULTS = [
     level: 'company_admin',
     permissions: ['create_user', 'edit_user', 'delete_user', 'manage_roles',
                   'create_transfer', 'view_team_transfers', 'assign_transfer', 'update_transfer', 'delete_transfer',
+                  'reject_transfer', 'reassign_transfer',
                   'create_sale', 'view_team_sales', 'update_sale', 'delete_sale',
-                  'view_reports', 'manage_forms', 'view_company_members', 'search_sales',
+                  'view_reports', 'manage_forms', 'view_company_members', 'search_sales', 'view_financial_data',
                   'view_callbacks', 'manage_callbacks', 'view_team_callbacks', 'view_notifications'],
   },
 ];

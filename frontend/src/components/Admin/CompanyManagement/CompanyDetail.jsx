@@ -8,6 +8,7 @@ import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
 import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
+import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -198,6 +199,7 @@ const MembersPanel = ({ companyId }) => {
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [editUser, setEditUser]     = useState(null);
   const [actionErr, setActionErr]   = useState('');
   const [confirm, setConfirm]       = useState(null); // { id, name, action: 'delete'|'deactivate' }
 
@@ -219,6 +221,11 @@ const MembersPanel = ({ companyId }) => {
     } catch (err) {
       setActionErr(err.response?.data?.error || 'Action failed');
     }
+  };
+
+  const handleSaveUser = async (formData) => {
+    await client.put(`users/${editUser.id}`, formData);
+    load();
   };
 
   const deleteUser = async (id) => {
@@ -278,6 +285,13 @@ const MembersPanel = ({ companyId }) => {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => setEditUser(u)}
+                          title="Edit user"
+                          className="p-1 rounded hover:bg-bg-secondary transition-colors"
+                        >
+                          <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
+                        </button>
+                        <button
                           onClick={() => toggleActive(u)}
                           title={u.is_active ? 'Deactivate' : 'Activate'}
                           className="p-1 rounded hover:bg-bg-secondary transition-colors"
@@ -309,6 +323,14 @@ const MembersPanel = ({ companyId }) => {
         companyId={companyId}
         onCreated={() => load()}
       />
+
+      {editUser && (
+        <UserModal
+          user={editUser}
+          onClose={() => setEditUser(null)}
+          onSave={handleSaveUser}
+        />
+      )}
 
       {/* Delete confirm modal */}
       {confirm && (
