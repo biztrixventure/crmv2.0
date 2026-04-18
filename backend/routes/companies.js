@@ -444,17 +444,27 @@ router.get('/:id/links', asyncHandler(async (req, res) => {
 
   let links = [];
   if (company?.company_type === 'fronter') {
-    const { data } = await supabaseAdmin
+    const { data: rawLinks } = await supabaseAdmin
       .from('company_links')
-      .select('id, closer_company_id, created_at, companies!company_links_closer_company_id_fkey(id, name, company_type)')
+      .select('id, closer_company_id, created_at')
       .eq('fronter_company_id', id);
-    links = (data || []).map(l => ({ link_id: l.id, ...l.companies, created_at: l.created_at }));
+    if (rawLinks?.length) {
+      const cids = rawLinks.map(l => l.closer_company_id);
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, company_type').in('id', cids);
+      const coMap = Object.fromEntries((cos || []).map(c => [c.id, c]));
+      links = rawLinks.map(l => ({ link_id: l.id, created_at: l.created_at, ...coMap[l.closer_company_id] }));
+    }
   } else {
-    const { data } = await supabaseAdmin
+    const { data: rawLinks } = await supabaseAdmin
       .from('company_links')
-      .select('id, fronter_company_id, created_at, companies!company_links_fronter_company_id_fkey(id, name, company_type)')
+      .select('id, fronter_company_id, created_at')
       .eq('closer_company_id', id);
-    links = (data || []).map(l => ({ link_id: l.id, ...l.companies, created_at: l.created_at }));
+    if (rawLinks?.length) {
+      const cids = rawLinks.map(l => l.fronter_company_id);
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, company_type').in('id', cids);
+      const coMap = Object.fromEntries((cos || []).map(c => [c.id, c]));
+      links = rawLinks.map(l => ({ link_id: l.id, created_at: l.created_at, ...coMap[l.fronter_company_id] }));
+    }
   }
 
   res.json({ links });

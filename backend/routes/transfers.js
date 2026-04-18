@@ -64,20 +64,27 @@ router.get('/closers', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-  // Get all linked closer companies for this fronter company
+  // Step 1: get linked closer company IDs (no FK join — avoids constraint-name issues)
   const { data: links, error: linkErr } = await supabaseAdmin
     .from('company_links')
-    .select('closer_company_id, companies!company_links_closer_company_id_fkey(id, name)')
+    .select('closer_company_id')
     .eq('fronter_company_id', companyId);
 
   if (linkErr) return res.status(500).json({ error: linkErr.message });
   if (!links || links.length === 0) return res.json({ closers: [] });
 
   const closerCompanyIds = links.map(l => l.closer_company_id);
-  const companyNameMap   = {};
-  links.forEach(l => { companyNameMap[l.closer_company_id] = l.companies?.name || ''; });
 
-  // Get active closers from all linked closer companies
+  // Step 2: fetch company names separately
+  const { data: companies } = await supabaseAdmin
+    .from('companies')
+    .select('id, name')
+    .in('id', closerCompanyIds);
+
+  const companyNameMap = {};
+  (companies || []).forEach(c => { companyNameMap[c.id] = c.name; });
+
+  // Step 3: get active users in those companies
   const { data, error } = await supabaseAdmin
     .from('user_company_roles')
     .select(`
@@ -91,8 +98,9 @@ router.get('/closers', asyncHandler(async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
+  // Accept any role whose level contains 'closer' (case-insensitive)
   const closers = (data || [])
-    .filter(r => r.custom_roles?.level === 'closer')
+    .filter(r => (r.custom_roles?.level || '').toLowerCase().includes('closer'))
     .map(r => ({
       id:           r.user_id,
       first_name:   r.user_profiles?.first_name || '',
