@@ -23,15 +23,34 @@ router.get('/', asyncHandler(async (req, res) => {
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  if (companyId) query = query.eq('company_id', companyId);
+  // Transfers are stored under the fronter's company_id.
+  // Closers/closer_managers are in a different (closer) company — don't filter by company_id for them.
+  const isCloserSide = userRole === 'closer' || userRole === 'closer_manager';
+  if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
 
   switch (userRole) {
     case 'fronter':
       query = query.eq('created_by', userId);
       break;
     case 'closer':
+      // Only see transfers assigned to this closer
       query = query.eq('assigned_closer_id', userId);
       break;
+    case 'closer_manager': {
+      // See transfers assigned to any closer in their company
+      const { data: companyUsers } = await supabaseAdmin
+        .from('user_company_roles')
+        .select('user_id')
+        .eq('company_id', companyId)
+        .eq('is_active', true);
+      const closerIds = (companyUsers || []).map(u => u.user_id);
+      if (closerIds.length === 0) {
+        return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+      }
+      query = query.in('assigned_closer_id', closerIds);
+      break;
+    }
+    // fronter_manager, operations_manager, superadmin, company_admin — see all transfers for company
   }
 
   if (status) query = query.eq('status', status);

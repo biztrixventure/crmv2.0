@@ -58,21 +58,22 @@ const FronterManagerDashboard = () => {
     setStatsLoading(true);
 
     try {
-      const [tRes, statsRes, closersRes, reviewsRes] = await Promise.all([
+      const [tRes, statsRes, closersRes, reviewsRes] = await Promise.allSettled([
         client.get('transfers',         { params: { company_id: companyId, limit: 100 } }),
         client.get('stats',             { params: { company_id: companyId } }),
         client.get('transfers/closers', { params: { company_id: companyId } }),
         client.get('reviews',           { params: { company_id: companyId, limit: 200 } }),
       ]);
 
-      const allTransfers = tRes.data.transfers || [];
+      const allTransfers = tRes.status === 'fulfilled' ? (tRes.value.data.transfers || []) : [];
       setTransfers(allTransfers);
-      setStats(statsRes.data || {});
-      setClosers(closersRes.data.closers || []);
+      if (statsRes.status === 'fulfilled')   setStats(statsRes.value.data || {});
+      if (closersRes.status === 'fulfilled') setClosers(closersRes.value.data.closers || []);
 
-      // Build transfer_id → rating map for badge display
       const rMap = {};
-      (reviewsRes.data.reviews || []).forEach(r => { rMap[r.transfer_id] = r.rating; });
+      if (reviewsRes.status === 'fulfilled') {
+        (reviewsRes.value.data.reviews || []).forEach(r => { rMap[r.transfer_id] = r.rating; });
+      }
       setReviewMap(rMap);
 
       // Build fronter leaderboard from transfers
