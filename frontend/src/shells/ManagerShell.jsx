@@ -24,7 +24,7 @@ import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
 import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
-import { FormBuilder } from "../components/Admin/FormBuilder";
+import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
 import client from "../api/client";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
