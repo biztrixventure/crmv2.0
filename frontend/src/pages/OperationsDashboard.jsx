@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Settings, TrendingUp, Send, DollarSign, Users,
   Phone, Search, BarChart3, RefreshCw, CheckCircle,
-  XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2, Hash,
+  XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2, Hash, Shield, FileText,
 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -17,6 +17,7 @@ import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -24,13 +25,21 @@ const SALE_BADGE     = { open: 'info', sold: 'success', cancelled: 'error', foll
 const RATING_COLOR   = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
 
 const OperationsDashboard = () => {
-  const { user, logout, updateUser }   = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme }         = useTheme();
   const navigate                       = useNavigate();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const notifHook                      = useNotifications();
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  const crossNavItems = [
+    ...(hasPermission('manage_roles')
+      ? [{ key: 'roles', label: 'Roles', icon: Shield   }] : []),
+    ...(hasPermission('manage_forms')
+      ? [{ key: 'forms', label: 'Forms', icon: FileText }] : []),
+  ];
 
   const [transfers, setTransfers]   = useState([]);
   const [sales, setSales]           = useState([]);
@@ -172,16 +181,16 @@ const OperationsDashboard = () => {
   const rejectedTransfers = transfers.filter(t => t.status === 'rejected');
 
   const TABS = [
-    { key: 'overview',    label: 'Overview',        icon: BarChart3  },
-    { key: 'team',        label: 'Team',            icon: Users      },
-    { key: 'transfers',   label: 'Transfers',       icon: Send       },
-    { key: 'sales',       label: 'Sales',           icon: DollarSign },
-    { key: 'leaderboard', label: 'Leaderboard',     icon: TrendingUp },
-    { key: 'reviews',         label: 'Reviews',          icon: Star       },
-    { key: 'search',          label: 'Search Sales',     icon: Search     },
-    { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
-    { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone      },
-    { key: 'numbers',         label: 'Number Lists',     icon: Hash       },
+    { key: 'overview',   label: 'Overview',    icon: BarChart3  },
+    ...(hasPermission('view_company_members')                                    ? [{ key: 'team',            label: 'Team',            icon: Users      }] : []),
+    ...(hasPermission('view_team_transfers')                                     ? [{ key: 'transfers',       label: 'Transfers',       icon: Send       }] : []),
+    ...(hasPermission('view_team_sales')                                         ? [{ key: 'sales',           label: 'Sales',           icon: DollarSign }] : []),
+    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats')? [{ key: 'leaderboard',     label: 'Leaderboard',     icon: TrendingUp }] : []),
+    ...(hasPermission('view_call_reviews')                                       ? [{ key: 'reviews',         label: 'Reviews',         icon: Star       }] : []),
+    ...(hasPermission('search_sales')                                            ? [{ key: 'search',          label: 'Search Sales',    icon: Search     }] : []),
+    ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Phone      }] : []),
+    ...(hasPermission('view_team_callbacks')                                     ? [{ key: 'callbacks',       label: 'Team Callbacks',  icon: Phone      }] : []),
+    ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'numbers',         label: 'Number Lists',    icon: Hash       }] : []),
   ];
 
   return (
@@ -195,9 +204,11 @@ const OperationsDashboard = () => {
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <div className="mb-6 animate-fade-in flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold mb-1 text-text">Welcome, {user?.first_name || user?.email}!</h2>
@@ -274,11 +285,13 @@ const OperationsDashboard = () => {
                         </p>
                         <p className="text-xs text-error-600">{t.rejection_reason || 'No reason'}</p>
                       </div>
+                      {hasPermission('reassign_transfer') && (
                       <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
                         className="px-3 py-1.5 text-sm font-bold rounded-lg text-white"
                         style={{ background: 'var(--gradient-sidebar)' }}>
                         Reassign
                       </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -320,9 +333,11 @@ const OperationsDashboard = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-text-secondary">{teamMembers.length} member{teamMembers.length !== 1 ? 's' : ''}</p>
+              {hasPermission('create_user') && (
               <Button variant="primary" size="sm" onClick={() => setShowAddMember(true)} className="flex items-center gap-1.5">
                 <PlusCircle size={15} /> Add Member
               </Button>
+              )}
             </div>
 
             {teamActionErr && <p className="text-sm text-error-600">{teamActionErr}</p>}
@@ -358,16 +373,20 @@ const OperationsDashboard = () => {
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-2">
+                              {hasPermission('edit_user') && (
                               <button onClick={() => toggleTeamMember(u)} title={u.is_active?'Deactivate':'Activate'}
                                 className="p-1 rounded hover:bg-bg-secondary transition-colors">
                                 {u.is_active
                                   ? <XCircle size={15} className="text-warning-500" />
                                   : <CheckCircle size={15} className="text-success-500" />}
                               </button>
+                              )}
+                              {hasPermission('delete_user') && (
                               <button onClick={() => deleteTeamMember(u.id)} title="Delete"
                                 className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
                                 <Trash2 size={15} className="text-error-500" />
                               </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -419,7 +438,7 @@ const OperationsDashboard = () => {
                         <td className="px-4 py-3 text-xs text-error-600">{t.rejection_reason || '—'}</td>
                         <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</td>
                         <td className="px-4 py-3">
-                          {(t.status === 'rejected' || t.status === 'pending') && (
+                          {(t.status === 'rejected' || t.status === 'pending') && hasPermission('reassign_transfer') && (
                             <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
                               className="px-2 py-1 rounded text-xs font-bold text-white"
                               style={{ background: 'var(--gradient-sidebar)' }}>
@@ -463,7 +482,7 @@ const OperationsDashboard = () => {
                         <td className="px-4 py-3 font-mono text-xs text-text-secondary">{s.reference_no || '—'}</td>
                         <td className="px-4 py-3 text-xs text-text-secondary">{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
                         <td className="px-4 py-3 text-xs text-text-secondary">{s.plan || '—'}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}` : '—'}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment && hasPermission('view_financial_data') ? `$${s.monthly_payment}` : '—'}</td>
                         <td className="px-4 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
                         <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
                       </tr>

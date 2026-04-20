@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
   Clock, CheckCircle, XCircle, Hash, Car, User, ArrowRight, Search, Phone, PlusCircle,
+  Shield, FileText, Star,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -17,6 +18,7 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
 
 const saleBadge = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
@@ -35,6 +37,20 @@ const CloserManagerDashboard = () => {
   const [closers, setClosers] = useState([]);
   const [assigning, setAssigning] = useState(null);
   const [activeTab, setActiveTab] = useState('my_sales');
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  const crossNavItems = [
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user')
+      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+    ...(hasPermission('manage_roles')
+      ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
+    ...(hasPermission('manage_forms')
+      ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
+    ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
+      ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+    ...(hasPermission('view_fronter_stats') || hasPermission('view_company_reports')
+      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+  ];
 
   // Sale creation (closer capability)
   const [saleModalOpen, setSaleModalOpen]     = useState(false);
@@ -154,9 +170,11 @@ const CloserManagerDashboard = () => {
         onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification}
         onClearNotifications={notifHook.clearAll}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
 
         {saleSuccess && (
           <Alert type="success" title="Sale Created!" message={saleSuccess}
@@ -237,9 +255,9 @@ const CloserManagerDashboard = () => {
               { key: 'my_sales',  label: 'My Sales',      icon: DollarSign },
               ...(hasPermission('view_team_sales') ? [{ key: 'sales', label: 'All Sales', icon: DollarSign }] : []),
               { key: 'transfers', label: `Transfers${pendingTransfers.length > 0 ? ` (${pendingTransfers.length})` : ''}`, icon: ArrowRight },
-              { key: 'team',            label: 'Team Stats',       icon: BarChart3 },
-              { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Hash      },
-              { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone     },
+              ...(hasPermission('view_closer_stats')      ? [{ key: 'team',            label: 'Team Stats',      icon: BarChart3 }] : []),
+              ...(hasPermission('manage_callback_numbers') ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash      }] : []),
+              ...(hasPermission('view_team_callbacks')    ? [{ key: 'callbacks',       label: 'Team Callbacks',  icon: Phone     }] : []),
               ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
             ].map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -412,7 +430,7 @@ const CloserManagerDashboard = () => {
                             )}
                           </div>
                         </div>
-                        {s.status === 'open' && (
+                        {s.status === 'open' && hasPermission('update_sale') && (
                           <div className="flex gap-2 mt-3">
                             <button
                               onClick={() => updateSale(s.id, { status: 'sold' }).then(() => fetchSales({ date_from, date_to }))}
@@ -519,6 +537,8 @@ const CloserManagerDashboard = () => {
                         </div>
                         <Badge variant="warning" size="sm">Pending</Badge>
                       </div>
+                      {hasPermission('assign_transfer') && (
+                      <>
                       <label className="text-xs font-medium text-text-secondary mb-1 block">Assign to Closer:</label>
                       <select className="input text-sm" defaultValue=""
                         onChange={e => handleAssign(t.id, e.target.value)}
@@ -530,6 +550,8 @@ const CloserManagerDashboard = () => {
                           </option>
                         ))}
                       </select>
+                      </>
+                      )}
                     </div>
                   ))}
                 </div>

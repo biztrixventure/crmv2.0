@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign,
   Calendar, BarChart3, Search, RefreshCw, Settings,
@@ -196,6 +197,7 @@ const OverviewPanel = ({ companyId }) => {
 
 // ── MembersPanel ──────────────────────────────────────────────────────────────
 const MembersPanel = ({ companyId }) => {
+  const { hasPermission } = useAuth();
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -243,9 +245,11 @@ const MembersPanel = ({ companyId }) => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-text-secondary">{users.length} member{users.length !== 1 ? 's' : ''}</p>
+        {hasPermission('create_user') && (
         <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
           <PlusCircle size={15} /> Add Member
         </Button>
+        )}
       </div>
 
       {actionErr && <p className="text-sm text-error-600">{actionErr}</p>}
@@ -284,6 +288,7 @@ const MembersPanel = ({ companyId }) => {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
+                        {hasPermission('edit_user') && (
                         <button
                           onClick={() => setEditUser(u)}
                           title="Edit user"
@@ -291,6 +296,8 @@ const MembersPanel = ({ companyId }) => {
                         >
                           <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
                         </button>
+                        )}
+                        {hasPermission('edit_user') && (
                         <button
                           onClick={() => toggleActive(u)}
                           title={u.is_active ? 'Deactivate' : 'Activate'}
@@ -300,6 +307,8 @@ const MembersPanel = ({ companyId }) => {
                             ? <XCircle size={15} className="text-warning-500" />
                             : <CheckCircle size={15} className="text-success-500" />}
                         </button>
+                        )}
+                        {hasPermission('delete_user') && (
                         <button
                           onClick={() => setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email })}
                           title="Delete"
@@ -307,6 +316,7 @@ const MembersPanel = ({ companyId }) => {
                         >
                           <Trash2 size={15} className="text-error-500" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -350,6 +360,7 @@ const MembersPanel = ({ companyId }) => {
 
 // ── RolesPanel ─────────────────────────────────────────────────────────────────
 const RolesPanel = ({ companyId }) => {
+  const { hasPermission } = useAuth();
   const [roles, setRoles]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -411,6 +422,7 @@ const RolesPanel = ({ companyId }) => {
     <div className="space-y-4">
       <div className="flex items-center gap-3 justify-between flex-wrap">
         <p className="text-sm text-text-secondary">{roles.length} role{roles.length !== 1 ? 's' : ''}</p>
+        {hasPermission('manage_roles') && (
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={seedDefaults} loading={seeding} disabled={seeding}>
             Seed Defaults
@@ -419,6 +431,7 @@ const RolesPanel = ({ companyId }) => {
             <PlusCircle size={15} /> Add Role
           </Button>
         </div>
+        )}
       </div>
 
       {actionErr && <p className="text-sm text-error-600">{actionErr}</p>}
@@ -444,6 +457,7 @@ const RolesPanel = ({ companyId }) => {
                     </Badge>
                   </div>
                 </div>
+                {hasPermission('manage_roles') && (
                 <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                   <button onClick={() => setEditRole(r)} className="p-1 rounded hover:bg-bg-secondary transition-colors" title="Edit role">
                     <Edit2 size={14} style={{ color: 'var(--color-primary-500)' }} />
@@ -452,6 +466,7 @@ const RolesPanel = ({ companyId }) => {
                     <Trash2 size={14} className="text-error-500" />
                   </button>
                 </div>
+                )}
               </div>
               {r.description && <p className="text-xs text-text-secondary mb-2">{r.description}</p>}
               <p className="text-xs text-text-tertiary">{(r.permissions||[]).length} permissions</p>
@@ -481,6 +496,7 @@ const RolesPanel = ({ companyId }) => {
 
 // ── SettingsPanel ─────────────────────────────────────────────────────────────
 const SettingsPanel = ({ company, onCompanyUpdated }) => {
+  const { hasPermission } = useAuth();
   const [name, setName]               = useState(company.name || '');
   const [companyType, setCompanyType] = useState(company.company_type || 'fronter');
   const [saving, setSaving]           = useState(false);
@@ -591,9 +607,11 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
           {saveErr && <p className="text-sm text-error-600">{saveErr}</p>}
           {saveOk  && <p className="text-sm text-success-600">Settings saved.</p>}
 
+          {hasPermission('edit_company') && (
           <div className="pt-2">
             <Button type="submit" variant="primary" loading={saving} disabled={saving}>Save Settings</Button>
           </div>
+          )}
         </form>
       </Card>
 
@@ -667,20 +685,21 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
 };
 
 // ── main CompanyDetail ────────────────────────────────────────────────────────
-const TABS = [
-  { key: 'overview',   label: 'Overview',  icon: BarChart3  },
-  { key: 'members',    label: 'Members',   icon: Users      },
-  { key: 'roles',      label: 'Roles',     icon: Shield     },
-  { key: 'settings',   label: 'Settings',  icon: Settings   },
-  { key: 'transfers',  label: 'Transfers', icon: Send       },
-  { key: 'sales',      label: 'Sales',     icon: DollarSign },
-  { key: 'callbacks',  label: 'Callbacks', icon: Calendar   },
-];
-
 const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
+  const { hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [refresh, setRefresh]     = useState(0);
   const [company, setCompany]     = useState(initialCompany);
+
+  const TABS = [
+    { key: 'overview',   label: 'Overview',  icon: BarChart3  },
+    ...(hasPermission('view_company_members') ? [{ key: 'members',   label: 'Members',   icon: Users      }] : []),
+    ...(hasPermission('manage_roles')         ? [{ key: 'roles',     label: 'Roles',     icon: Shield     }] : []),
+    ...(hasPermission('edit_company')         ? [{ key: 'settings',  label: 'Settings',  icon: Settings   }] : []),
+    { key: 'transfers',  label: 'Transfers', icon: Send       },
+    { key: 'sales',      label: 'Sales',     icon: DollarSign },
+    { key: 'callbacks',  label: 'Callbacks', icon: Calendar   },
+  ];
 
   const handleCompanyUpdated = (updated) => {
     setCompany(updated);

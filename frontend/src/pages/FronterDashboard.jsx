@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
-import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone, TrendingUp, Hash } from "lucide-react";
+import { Users, Send, CheckCircle, PlusCircle, FileText, Clock, Phone, TrendingUp, Hash, Shield, Star, BarChart3 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
@@ -15,6 +15,7 @@ import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 
 const FronterDashboard = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
@@ -27,6 +28,21 @@ const FronterDashboard = () => {
   const { closers, loading: closersLoading, fetchClosers } = useClosers(user?.company_id);
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
+
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  const crossNavItems = [
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user')
+      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+    ...(hasPermission('manage_roles')
+      ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
+    ...(hasPermission('manage_forms')
+      ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
+    ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
+      ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')
+      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+  ];
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData]             = useState({});
@@ -67,10 +83,10 @@ const FronterDashboard = () => {
     : 0;
 
   const TABS = [
-    { key: 'transfers',        label: 'My Transfers',    icon: Send  },
-    { key: 'callbacks',        label: 'Callbacks',       icon: Phone },
-    { key: 'tracked_numbers',  label: 'Tracked Numbers', icon: Users },
-    { key: 'numbers',          label: 'My Numbers',      icon: Hash  },
+    { key: 'transfers',       label: 'My Transfers',    icon: Send  },
+    ...(hasPermission('view_callbacks')           ? [{ key: 'callbacks',       label: 'Callbacks',       icon: Phone }] : []),
+    ...(hasPermission('manage_callback_numbers')  ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Users }] : []),
+    { key: 'numbers',         label: 'My Numbers',      icon: Hash  },
   ];
 
   return (
@@ -84,9 +100,11 @@ const FronterDashboard = () => {
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <div className="mb-6 animate-fade-in">
           <h2 className="text-3xl font-bold mb-1 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
           <p className="text-text-secondary">

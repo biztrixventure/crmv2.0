@@ -4,7 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, Send, TrendingUp, Phone, BarChart3, DollarSign, Search,
-  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle, FileText,
+  RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronRight, Star, Hash, PlusCircle, FileText, Shield,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -19,6 +19,7 @@ import SaleSearch from "../components/Sales/SaleSearch";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
 
 const STATUS_COLORS = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -31,6 +32,18 @@ const FronterManagerDashboard = () => {
   const notifHook = useNotifications();
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  const crossNavItems = [
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user')
+      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+    ...(hasPermission('manage_roles')
+      ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
+    ...(hasPermission('manage_forms')
+      ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
+    ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
+      ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+  ];
 
   // ── Transfers state ──────────────────────────────────────────────────────
   const [transfers, setTransfers]     = useState([]);
@@ -167,13 +180,13 @@ const FronterManagerDashboard = () => {
   const TABS = [
     { key: 'overview',        label: 'Overview',         icon: BarChart3  },
     { key: 'my_transfers',    label: 'My Transfers',     icon: Send       },
-    ...(hasPermission('view_team_transfers') ? [{ key: 'transfers', label: 'All Transfers', icon: Send }] : []),
-    ...(hasPermission('view_team_sales')     ? [{ key: 'sales',     label: 'Team Sales',    icon: DollarSign }] : []),
-    { key: 'leaderboard',     label: 'Leaderboard',      icon: TrendingUp },
-    { key: 'tracked_numbers', label: 'Tracked Numbers',  icon: Phone      },
-    { key: 'callbacks',       label: 'Team Callbacks',   icon: Phone      },
-    { key: 'numbers',         label: 'Number Lists',     icon: Hash       },
-    ...(hasPermission('search_sales') ? [{ key: 'search', label: 'Sale Search', icon: Search }] : []),
+    ...(hasPermission('view_team_transfers')    ? [{ key: 'transfers',     label: 'All Transfers',   icon: Send       }] : []),
+    ...(hasPermission('view_team_sales')        ? [{ key: 'sales',         label: 'Team Sales',      icon: DollarSign }] : []),
+    ...(hasPermission('view_fronter_stats')     ? [{ key: 'leaderboard',   label: 'Leaderboard',     icon: TrendingUp }] : []),
+    ...(hasPermission('manage_callback_numbers')? [{ key: 'tracked_numbers',label:'Tracked Numbers', icon: Phone      }] : []),
+    ...(hasPermission('view_team_callbacks')    ? [{ key: 'callbacks',     label: 'Team Callbacks',  icon: Phone      }] : []),
+    ...(hasPermission('manage_callback_numbers')? [{ key: 'numbers',       label: 'Number Lists',    icon: Hash       }] : []),
+    ...(hasPermission('search_sales')           ? [{ key: 'search',        label: 'Sale Search',     icon: Search     }] : []),
   ];
 
   return (
@@ -188,9 +201,11 @@ const FronterManagerDashboard = () => {
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <div className="mb-6 animate-fade-in flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-3xl font-bold mb-1 text-text">Welcome, {user?.first_name || user?.email}!</h2>
@@ -406,11 +421,13 @@ const FronterManagerDashboard = () => {
                         <p className="font-semibold text-text">{t.form_data?.customer_name || 'Customer'}</p>
                         <p className="text-xs text-error-600 mt-0.5">Rejection reason: {t.rejection_reason || 'No reason given'}</p>
                       </div>
+                      {hasPermission('reassign_transfer') && (
                       <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition-all hover:scale-105"
                         style={{ background: 'var(--gradient-sidebar)' }}>
                         Reassign
                       </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -480,7 +497,7 @@ const FronterManagerDashboard = () => {
                             </span>
                           )}
                           <Badge variant={STATUS_COLORS[t.status] || 'secondary'} size="sm">{t.status}</Badge>
-                          {t.status === 'rejected' && (
+                          {t.status === 'rejected' && hasPermission('reassign_transfer') && (
                             <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
                               className="px-2 py-1 rounded text-xs font-bold text-white"
                               style={{ background: 'var(--gradient-sidebar)' }}>
@@ -563,7 +580,7 @@ const FronterManagerDashboard = () => {
                         <td className="px-4 py-3 font-mono text-xs text-text-secondary">{s.reference_no || '—'}</td>
                         <td className="px-4 py-3 text-xs text-text-secondary">{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
                         <td className="px-4 py-3 text-xs text-text-secondary">{s.plan || '—'}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}` : '—'}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment && hasPermission('view_financial_data') ? `$${s.monthly_payment}` : '—'}</td>
                         <td className="px-4 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
                         <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
                       </tr>

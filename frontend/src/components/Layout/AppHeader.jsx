@@ -15,6 +15,10 @@ const AppHeader = ({
   onUpdateUser = () => {},
   onLogout = () => {},
   actions = [],
+  // Cross-role navigation
+  navItems = [],
+  activeNav = 'dashboard',
+  onNavChange = () => {},
   // Notifications
   notifications = [],
   unreadCount = 0,
@@ -96,6 +100,51 @@ const AppHeader = ({
           </Button>
         </div>
       </header>
+
+      {/* Cross-role nav bar — only renders when cross-role items exist */}
+      {navItems.length > 0 && (
+        <nav
+          className="px-4 sm:px-6 lg:px-8 flex items-center gap-1 h-11 sticky top-16 z-40"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            borderBottom: '1px solid var(--color-border)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div className="max-w-7xl w-full mx-auto flex items-center gap-1">
+            {/* My Dashboard — always first */}
+            <button
+              onClick={() => onNavChange('dashboard')}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+              style={{
+                backgroundColor: activeNav === 'dashboard' ? 'var(--color-primary-50)' : 'transparent',
+                color: activeNav === 'dashboard' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+              }}
+            >
+              My Dashboard
+            </button>
+
+            {/* Divider */}
+            <div className="w-px h-5 mx-1 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+
+            {/* Cross-role items */}
+            {navItems.map(item => (
+              <button
+                key={item.key}
+                onClick={() => onNavChange(item.key)}
+                className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+                style={{
+                  backgroundColor: activeNav === item.key ? 'var(--color-primary-50)' : 'transparent',
+                  color: activeNav === item.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                }}
+              >
+                {item.icon && <item.icon size={14} />}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {/* Profile modal — rendered outside header flow */}
       {user && (

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Target, Clock,
   CheckCircle, XCircle, Plus, Hash, User, Car, Phone, Search,
-  Star, MessageSquare,
+  Star, MessageSquare, Users, Shield, FileText, BarChart3,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -18,6 +18,7 @@ import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
 
 const statusBadge  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
@@ -37,6 +38,20 @@ const CloserDashboard = () => {
   const { sales, loading: sLoading, fetchSales, createSale, updateSale } = useSales(user?.company_id);
   const notifHook = useNotifications();
   const [activeTab, setActiveTab] = useState('sales');
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  const crossNavItems = [
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user')
+      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+    ...(hasPermission('manage_roles')
+      ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
+    ...(hasPermission('manage_forms')
+      ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
+    ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
+      ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')
+      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+  ];
 
   // Reject modal state
   const [rejectTarget, setRejectTarget]   = useState(null);
@@ -180,9 +195,11 @@ const CloserDashboard = () => {
         onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification}
         onClearNotifications={notifHook.clearAll}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
 
         {/* Welcome + Quick Create Sale */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
@@ -212,9 +229,9 @@ const CloserDashboard = () => {
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {[
               { key: 'sales',           label: 'My Sales',        icon: DollarSign },
-              { key: 'callbacks',       label: 'Callbacks',       icon: Phone      },
-              { key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash       },
-              { key: 'search',          label: 'Search Sales',    icon: Search     },
+              ...(hasPermission('view_callbacks')           ? [{ key: 'callbacks',       label: 'Callbacks',       icon: Phone  }] : []),
+              ...(hasPermission('manage_callback_numbers')  ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash   }] : []),
+              ...(hasPermission('search_sales')             ? [{ key: 'search',          label: 'Search Sales',    icon: Search }] : []),
             ].map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
@@ -351,6 +368,7 @@ const CloserDashboard = () => {
                       </div>
                     )}
                     <div className="flex gap-2 mt-2">
+                      {hasPermission('submit_call_review') && (
                       <button
                         onClick={() => { setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
                         className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-primary-50"
@@ -358,6 +376,8 @@ const CloserDashboard = () => {
                       >
                         <Star size={11} /> Rate Call
                       </button>
+                      )}
+                      {hasPermission('submit_call_dispo') && (
                       <button
                         onClick={() => { setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
                         className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-info-50"
@@ -365,6 +385,7 @@ const CloserDashboard = () => {
                       >
                         <MessageSquare size={11} /> Set Dispo
                       </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -424,14 +445,14 @@ const CloserDashboard = () => {
                         <Badge variant={saleBadge[s.status] || 'secondary'} size="sm">
                           {saleLabel[s.status] || s.status}
                         </Badge>
-                        {s.monthly_payment && (
+                        {s.monthly_payment && hasPermission('view_financial_data') && (
                           <span className="text-xs font-semibold text-success-600">
                             ${s.monthly_payment}/mo
                           </span>
                         )}
                       </div>
                     </div>
-                    {s.status === 'open' && (
+                    {s.status === 'open' && hasPermission('update_sale') && (
                       <div className="flex gap-2 mt-3">
                         <button
                           onClick={() => handleUpdateSale(s.id, 'sold')}

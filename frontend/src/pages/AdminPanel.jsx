@@ -61,8 +61,8 @@ const AdminPanel = () => {
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
     { id: "companies",   label: "Companies"    },
-    { id: "forms",       label: "Form Builder" },
-    ...(hasPermission('search_sales') ? [{ id: "sale-search", label: "Sale Search" }] : []),
+    ...(hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
+    ...(hasPermission('search_sales')  ? [{ id: "sale-search", label: "Sale Search"  }] : []),
   ];
 
   // ── Stat metric cards ──
