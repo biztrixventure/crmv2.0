@@ -9,15 +9,12 @@ import ResetPassword from "./pages/ResetPassword";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
-const AdminPanel             = lazy(() => import("./pages/AdminPanel"));
-const CompanyDashboard       = lazy(() => import("./pages/CompanyDashboard"));
-const CloserDashboard        = lazy(() => import("./pages/CloserDashboard"));
-const FronterDashboard       = lazy(() => import("./pages/FronterDashboard"));
-const OperationsDashboard    = lazy(() => import("./pages/OperationsDashboard"));
-const CloserManagerDashboard = lazy(() => import("./pages/CloserManagerDashboard"));
-const FronterManagerDashboard = lazy(() => import("./pages/FronterManagerDashboard"));
-const ComplianceDashboard    = lazy(() => import("./pages/ComplianceDashboard"));
-const NotFound               = lazy(() => import("./pages/NotFound"));
+const AdminPanel          = lazy(() => import("./pages/AdminPanel"));
+const StaffShell          = lazy(() => import("./shells/StaffShell"));
+const ManagerShell        = lazy(() => import("./shells/ManagerShell"));
+const ComplianceShell     = lazy(() => import("./shells/ComplianceShell"));
+const CompanyDashboard = lazy(() => import("./pages/CompanyDashboard"));
+const NotFound         = lazy(() => import("./pages/NotFound"));
 
 const PageSpinner = () => (
   <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
@@ -74,37 +71,23 @@ const AppContent = () => {
 
           {/* Compliance Manager */}
           <Route path="/compliance/*" element={
-            <ProtectedRoute requiredRole="compliance_manager"><ComplianceDashboard /></ProtectedRoute>
+            <ProtectedRoute requiredRole="compliance_manager"><ComplianceShell /></ProtectedRoute>
           } />
 
-          {/* Company Admin */}
+          {/* Staff Shell — closer / fronter / operations staff */}
+          <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
+          <Route path="/fronter/*" element={<ProtectedRoute requiredRole="fronter"><StaffShell /></ProtectedRoute>} />
+          <Route path="/staff/*"   element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
+
+          {/* Manager Shell — all manager roles */}
+          <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
+          <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
+          <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
+          <Route path="/operations/*"      element={<ProtectedRoute requiredRole="operations_manager"><ManagerShell /></ProtectedRoute>} />
+
+          {/* Company Admin — still on legacy dashboard until migrated */}
           <Route path="/company/*" element={
             <ProtectedRoute requiredRole="company_admin"><CompanyDashboard /></ProtectedRoute>
-          } />
-
-          {/* Operations Manager (merged with Company Manager) */}
-          <Route path="/operations/*" element={
-            <ProtectedRoute requiredRole="operations_manager"><OperationsDashboard /></ProtectedRoute>
-          } />
-
-          {/* Fronter Manager */}
-          <Route path="/fronter-manager/*" element={
-            <ProtectedRoute requiredRole="fronter_manager"><FronterManagerDashboard /></ProtectedRoute>
-          } />
-
-          {/* Closer Manager */}
-          <Route path="/closer-manager/*" element={
-            <ProtectedRoute requiredRole="closer_manager"><CloserManagerDashboard /></ProtectedRoute>
-          } />
-
-          {/* Closer */}
-          <Route path="/closer/*" element={
-            <ProtectedRoute requiredRole="closer"><CloserDashboard /></ProtectedRoute>
-          } />
-
-          {/* Fronter */}
-          <Route path="/fronter/*" element={
-            <ProtectedRoute requiredRole="fronter"><FronterDashboard /></ProtectedRoute>
           } />
 
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />

@@ -14,25 +14,25 @@ export const ROLE_ROUTES = {
   compliance_manager:  '/compliance',
   compliancemanager:   '/compliance',
 
-  // Company-level admin (merged → operations_manager)
+  // Company-level admin → ManagerShell
   company_admin:       '/operations',
   companyadmin:        '/operations',
 
-  // Operations Manager (was Company Manager — now has all company manager powers)
+  // Operations Manager → ManagerShell
   operations_manager:  '/operations',
   operationsmanager:   '/operations',
   operations:          '/operations',
 
-  // Fronter Manager
+  // Fronter Manager → ManagerShell
   manager:             '/fronter-manager',
   fronter_manager:     '/fronter-manager',
   frontermanager:      '/fronter-manager',
 
-  // Closer Manager
+  // Closer Manager → ManagerShell
   closer_manager:      '/closer-manager',
   closermanager:       '/closer-manager',
 
-  // Floor staff
+  // Floor staff → StaffShell
   closer:  '/closer',
   fronter: '/fronter',
 };

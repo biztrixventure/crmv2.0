@@ -283,9 +283,15 @@ router.put(
       .from('sales').select('*').eq('id', id).single();
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
-    const isCreator = existing.created_by === userId || existing.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
+    const isCreator  = existing.created_by === userId || existing.closer_id === userId;
+    const isManager  = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
+    const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+
+    // Block edits to sales under compliance review (except by compliance/superadmin)
+    if (existing.status === 'pending_review' && !isCompliance) {
+      return res.status(403).json({ error: 'This sale is under compliance review and cannot be edited' });
+    }
 
     const {
       status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
@@ -339,6 +345,161 @@ router.put(
     res.json({ sale: updated });
   })
 );
+
+// ============================================================================
+// POST /sales/:id/submit-review — Closer submits sale for compliance review
+// ============================================================================
+router.post('/:id/submit-review', asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  const { data: sale, error } = await supabaseAdmin
+    .from('sales').select('*').eq('id', id).single();
+  if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
+
+  const isOwner = sale.created_by === userId || sale.closer_id === userId;
+  if (!isOwner) return res.status(403).json({ error: 'Only the sale owner can submit for review' });
+
+  if (!['open', 'needs_revision'].includes(sale.status)) {
+    return res.status(400).json({ error: `Cannot submit a sale with status "${sale.status}" for review` });
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('sales')
+    .update({
+      status: 'pending_review',
+      submitted_for_review_at: now,
+      submitted_by: userId,
+      compliance_note: null,
+      updated_at: now,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const submitterName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A closer';
+  notifications.onSaleSubmittedForReview({ sale: updated, submitterName }).catch(() => {});
+
+  logger.success('SUBMIT_REVIEW', `Sale ${id} submitted for review by ${userId}`);
+  res.json({ sale: updated });
+}));
+
+// ============================================================================
+// POST /sales/:id/compliance-approve — Compliance approves sale → closed_won
+// ============================================================================
+router.post('/:id/compliance-approve', asyncHandler(async (req, res) => {
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { id }   = req.params;
+
+  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Only compliance managers can approve sales' });
+  }
+
+  const { data: sale, error } = await supabaseAdmin
+    .from('sales').select('*').eq('id', id).single();
+  if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
+
+  if (sale.status !== 'pending_review') {
+    return res.status(400).json({ error: `Sale must be in "pending_review" status to approve (current: ${sale.status})` });
+  }
+
+  const now = new Date().toISOString();
+  const currentHistory = Array.isArray(sale.edit_history) ? sale.edit_history : [];
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('sales')
+    .update({
+      status: 'closed_won',
+      compliance_reviewed_by: userId,
+      compliance_reviewed_at: now,
+      compliance_note: null,
+      updated_at: now,
+      edit_history: [...currentHistory, {
+        editor_id: userId,
+        role: 'compliance_manager',
+        action: 'approved',
+        previous_status: 'pending_review',
+        new_status: 'closed_won',
+        edited_at: now,
+      }],
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const reviewerName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'Compliance';
+  notifications.onSaleApproved({ sale: updated, reviewerName }).catch(() => {});
+
+  logger.success('COMPLIANCE_APPROVE', `Sale ${id} approved by ${userId}`);
+  res.json({ sale: updated });
+}));
+
+// ============================================================================
+// POST /sales/:id/compliance-return — Compliance returns sale to closer with note
+// ============================================================================
+router.post('/:id/compliance-return', [
+  body('note').isString().trim().notEmpty().withMessage('A note explaining what needs to change is required'),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
+
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { id }   = req.params;
+  const { note } = req.body;
+
+  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Only compliance managers can return sales' });
+  }
+
+  const { data: sale, error } = await supabaseAdmin
+    .from('sales').select('*').eq('id', id).single();
+  if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
+
+  if (sale.status !== 'pending_review') {
+    return res.status(400).json({ error: `Sale must be in "pending_review" status to return (current: ${sale.status})` });
+  }
+
+  const now = new Date().toISOString();
+  const currentHistory = Array.isArray(sale.edit_history) ? sale.edit_history : [];
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('sales')
+    .update({
+      status: 'needs_revision',
+      compliance_note: note,
+      compliance_reviewed_by: userId,
+      compliance_reviewed_at: now,
+      updated_at: now,
+      edit_history: [...currentHistory, {
+        editor_id: userId,
+        role: 'compliance_manager',
+        action: 'returned',
+        previous_status: 'pending_review',
+        new_status: 'needs_revision',
+        note,
+        edited_at: now,
+      }],
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const reviewerName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'Compliance';
+  notifications.onSaleReturned({ sale: updated, reviewerName, note }).catch(() => {});
+
+  logger.success('COMPLIANCE_RETURN', `Sale ${id} returned by ${userId} with note`);
+  res.json({ sale: updated });
+}));
 
 // ============================================================================
 // POST /sales/:id/compliance — Compliance manager edits sale with mandatory reason
@@ -400,22 +561,27 @@ router.post('/:id/compliance', [
 }));
 
 // ============================================================================
-// GET /sales/all-companies — compliance_manager sees sales across all companies
+// GET /sales/compliance — compliance_manager sees sales for their own company
 // ============================================================================
-router.get('/all-companies', asyncHandler(async (req, res) => {
+router.get('/compliance', asyncHandler(async (req, res) => {
+  const userId   = req.user.id;
   const userRole = req.user.role;
+  const companyId = req.user.company_id;
+
   if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
     return res.status(403).json({ error: 'Access denied' });
   }
 
-  const { status, search, date_from, date_to, page = 1, limit = 50, company_id } = req.query;
+  const { status, search, date_from, date_to, page = 1, limit = 50 } = req.query;
 
   let query = supabaseAdmin
     .from('sales')
-    .select('*, companies(name)', { count: 'exact' })
+    .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  if (company_id) query = query.eq('company_id', company_id);
+  // Superadmin can pass company_id param; compliance_manager is locked to own company
+  const effectiveCompanyId = userRole === 'superadmin' ? (req.query.company_id || companyId) : companyId;
+  if (effectiveCompanyId) query = query.eq('company_id', effectiveCompanyId);
   if (status)     query = query.eq('status', status);
   if (date_from)  query = query.gte('created_at', date_from);
   if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');

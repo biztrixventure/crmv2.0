@@ -228,6 +228,100 @@ async function onSaleUpdated({ sale, updaterName }) {
 }
 
 /**
+ * Closer submitted sale for compliance review.
+ * Notify: all compliance_managers in the company.
+ */
+async function onSaleSubmittedForReview({ sale, submitterName }) {
+  const customerName = sale.customer_name || 'Customer';
+  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
+  const companyId    = sale.company_id;
+
+  const complianceIds = await getUserIdsByLevel(companyId, ['compliance_manager']);
+  await notifyUsers(complianceIds, {
+    companyId,
+    type:    'sale_pending_review',
+    title:   'Sale awaiting compliance review',
+    message: `${submitterName} submitted ${customerName} (Ref: ${refNo}) for review.`,
+    data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+  });
+}
+
+/**
+ * Compliance approved a sale → closed_won.
+ * Notify: closer (submitter) + closer_manager + operations_manager + company_admin.
+ */
+async function onSaleApproved({ sale, reviewerName }) {
+  const customerName = sale.customer_name || 'Customer';
+  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
+  const companyId    = sale.company_id;
+
+  // Notify the closer who owns the sale
+  const closerId = sale.closer_id || sale.submitted_by;
+  if (closerId) {
+    await createNotification({
+      userId: closerId, companyId,
+      type:    'sale_approved',
+      title:   'Sale approved by compliance!',
+      message: `${customerName} (Ref: ${refNo}) was approved by ${reviewerName}.`,
+      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    });
+    sendPushToUser(closerId, {
+      title: 'Sale approved!',
+      body:  `${customerName} — Ref: ${refNo} approved by compliance`,
+      tag:   'sale_approved',
+      data:  { sale_id: sale.id },
+    }).catch(() => {});
+  }
+
+  // Notify managers
+  const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
+  await notifyUsers(managerIds, {
+    companyId,
+    type:    'sale_approved',
+    title:   `Sale confirmed — ${customerName}`,
+    message: `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.`,
+    data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+  });
+}
+
+/**
+ * Compliance returned a sale to closer with note.
+ * Notify: closer + their manager.
+ */
+async function onSaleReturned({ sale, reviewerName, note }) {
+  const customerName = sale.customer_name || 'Customer';
+  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
+  const companyId    = sale.company_id;
+
+  const closerId = sale.closer_id || sale.submitted_by;
+  if (closerId) {
+    await createNotification({
+      userId: closerId, companyId,
+      type:    'sale_needs_revision',
+      title:   'Sale returned — changes required',
+      message: `${reviewerName} returned ${customerName} (Ref: ${refNo}). Note: ${note}`,
+      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName, note },
+    });
+    sendPushToUser(closerId, {
+      title: 'Sale needs revision',
+      body:  `${customerName}: ${note}`,
+      tag:   'sale_needs_revision',
+      data:  { sale_id: sale.id },
+    }).catch(() => {});
+  }
+
+  // Notify closer's manager
+  const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager']);
+  await notifyUsers(managerIds, {
+    companyId,
+    type:    'sale_needs_revision',
+    title:   `Sale returned for revision — ${customerName}`,
+    message: `${reviewerName} returned ${customerName} (Ref: ${refNo}) to closer. Note: ${note}`,
+    data:    { sale_id: sale.id, reference_no: refNo, note },
+  });
+}
+
+/**
  * Compliance manager updated a sale.
  */
 async function onComplianceUpdate({ sale, editorName, reason }) {
@@ -249,6 +343,9 @@ module.exports = {
   onSaleCreated,
   onSaleUpdated,
   onComplianceUpdate,
+  onSaleSubmittedForReview,
+  onSaleApproved,
+  onSaleReturned,
   notifyManagers,
   notifyFloorManagers,
   getUserIdsByLevel,
