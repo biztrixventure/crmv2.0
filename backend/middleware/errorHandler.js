@@ -2,11 +2,16 @@
 const logger = require('../utils/logger');
 
 const errorHandler = (err, req, res, next) => {
+  const safeBody = { ...req.body };
+  if (safeBody.password)     safeBody.password     = '[redacted]';
+  if (safeBody.new_password) safeBody.new_password = '[redacted]';
+  if (safeBody.old_password) safeBody.old_password = '[redacted]';
+
   const errorContext = {
     method: req.method,
     path: req.path,
     query: req.query,
-    body: req.body,
+    body: safeBody,
     message: err.message,
     code: err.code,
     status: err.status,
@@ -18,13 +23,10 @@ const errorHandler = (err, req, res, next) => {
   console.error('ERROR CONTEXT:', JSON.stringify(errorContext, null, 2));
   console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  // Supabase errors
+  // Supabase errors — never forward raw Supabase messages to client
   if (err.message?.includes('Supabase') || err.status) {
     logger.error('SUPABASE', `Status ${err.status || 500}`, err);
-    return res.status(err.status || 500).json({
-      error: err.message,
-      code: err.code,
-    });
+    return res.status(err.status || 500).json({ error: 'Service error' });
   }
 
   // Validation errors

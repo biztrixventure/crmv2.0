@@ -68,7 +68,7 @@ const authMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error.message);
-    return res.status(401).json({ error: 'Unauthorized', details: error.message });
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 };
 
@@ -80,11 +80,7 @@ const requireRole = (allowedRoles) => {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({
-        error: 'Forbidden - insufficient permissions',
-        required_roles: allowedRoles,
-        user_role: req.user.role,
-      });
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     next();

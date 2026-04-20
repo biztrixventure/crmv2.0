@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin, supabaseClient } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authMiddleware } = require('../middleware/authMiddleware');
+const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -371,6 +371,8 @@ router.post(
 // ============================================================================
 router.post(
   "/invite",
+  authMiddleware,
+  requireRole(['superadmin', 'company_admin']),
   [
     body("email").isEmail().normalizeEmail(),
     body("company_id").isUUID(),

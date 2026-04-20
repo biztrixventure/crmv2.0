@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config({ path: '.env.local' });
 
 // Import middleware
@@ -53,6 +55,9 @@ const PORT = process.env.PORT || 3001;
 // MIDDLEWARE
 // ============================================================================
 
+// Security headers
+app.use(helmet());
+
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -63,6 +68,12 @@ const corsOptions = {
   credentials: true,
 };
 app.use(cors(corsOptions));
+
+// Rate limiting
+app.use('/api/auth/login',           rateLimit({ windowMs: 15 * 60 * 1000, max: 10,  message: { error: 'Too many login attempts, try again later' } }));
+app.use('/api/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 5,   message: { error: 'Too many requests, try again later' } }));
+app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 20,  message: { error: 'Too many invite requests' } }));
+app.use('/api/',                     rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: { error: 'Too many requests' } }));
 
 // Request logging middleware
 app.use((req, res, next) => {
