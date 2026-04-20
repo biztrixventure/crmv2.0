@@ -33,6 +33,7 @@ const AppHeader = ({
 
   return (
     <>
+      <div className="sticky top-0 z-50">
       <header className={`header h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between ${className}`} {...props}>
         {/* Left: Logo & Title */}
         <div className="flex items-center gap-4">
@@ -104,7 +105,7 @@ const AppHeader = ({
       {/* Cross-role nav bar — only renders when cross-role items exist */}
       {navItems.length > 0 && (
         <nav
-          className="px-4 sm:px-6 lg:px-8 flex items-center gap-1 h-11 sticky top-16 z-40"
+          className="px-4 sm:px-6 lg:px-8 flex items-center gap-1 h-11"
           style={{
             backgroundColor: 'var(--color-surface)',
             borderBottom: '1px solid var(--color-border)',
@@ -145,6 +146,7 @@ const AppHeader = ({
           </div>
         </nav>
       )}
+      </div>
 
       {/* Profile modal — rendered outside header flow */}
       {user && (
