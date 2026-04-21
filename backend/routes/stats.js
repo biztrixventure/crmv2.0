@@ -25,15 +25,24 @@ router.get(
         .from('transfers')
         .select('id, status', { count: 'exact' });
 
-      if (companyId) {
-        transferQuery = transferQuery.eq('company_id', companyId);
-      }
-
-      // Role-based filtering
-      if (userRole === 'fronter') {
-        transferQuery = transferQuery.eq('created_by', userId);
-      } else if (userRole === 'closer') {
-        transferQuery = transferQuery.eq('assigned_to', userId);
+      // Closer-side roles (closer company): query by assigned_closer_id, not company_id
+      const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
+      if (isCloserSide && companyId) {
+        // Fetch user IDs in their (closer) company, filter transfers by those assigned_closer_ids
+        const { data: coUsers } = await supabaseAdmin
+          .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+        const coUserIds = (coUsers || []).map(u => u.user_id);
+        if (userRole === 'closer') {
+          transferQuery = transferQuery.eq('assigned_to', userId);
+        } else if (coUserIds.length > 0) {
+          transferQuery = transferQuery.in('assigned_closer_id', coUserIds);
+        } else {
+          // No users in company — zero result shortcut
+          transferQuery = transferQuery.eq('id', '00000000-0000-0000-0000-000000000000');
+        }
+      } else {
+        if (companyId) transferQuery = transferQuery.eq('company_id', companyId);
+        if (userRole === 'fronter') transferQuery = transferQuery.eq('created_by', userId);
       }
       // Managers and admins see all company transfers
 

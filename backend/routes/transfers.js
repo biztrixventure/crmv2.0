@@ -24,8 +24,8 @@ router.get('/', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: false });
 
   // Transfers are stored under the fronter's company_id.
-  // Closers/closer_managers are in a different (closer) company — don't filter by company_id for them.
-  const isCloserSide = userRole === 'closer' || userRole === 'closer_manager';
+  // Closer-side roles are in a different (closer) company — don't filter by company_id for them.
+  const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
   if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
 
   switch (userRole) {
@@ -36,8 +36,9 @@ router.get('/', asyncHandler(async (req, res) => {
       // Only see transfers assigned to this closer
       query = query.eq('assigned_closer_id', userId);
       break;
-    case 'closer_manager': {
-      // See transfers assigned to any closer in their company
+    case 'closer_manager':
+    case 'compliance_manager': {
+      // See transfers assigned to any user in their (closer) company
       const { data: companyUsers } = await supabaseAdmin
         .from('user_company_roles')
         .select('user_id')
