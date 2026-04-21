@@ -26,9 +26,7 @@ const ReportsPanel = ({ companyId }) => {
       const fm = {};
       allT.forEach(t => {
         const k    = t.created_by;
-        const name = t.user_profiles
-          ? `${t.user_profiles.first_name || ''} ${t.user_profiles.last_name || ''}`.trim() || 'Unknown'
-          : 'Unknown';
+        const name = t.fronter_name || 'Unknown';
         if (!fm[k]) fm[k] = { id: k, name, total: 0, completed: 0, rejected: 0 };
         fm[k].total++;
         if (t.status === 'completed') fm[k].completed++;
@@ -40,7 +38,7 @@ const ReportsPanel = ({ companyId }) => {
       allS.forEach(s => {
         const k = s.closer_id;
         if (!k) return;
-        if (!cm[k]) cm[k] = { id: k, name: k.slice(0, 8), total: 0, won: 0 };
+        if (!cm[k]) cm[k] = { id: k, name: s.closer_name || k.slice(0, 8), total: 0, won: 0 };
         cm[k].total++;
         if (['sold', 'closed_won'].includes(s.status)) cm[k].won++;
       });

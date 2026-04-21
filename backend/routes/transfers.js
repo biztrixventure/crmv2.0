@@ -80,10 +80,13 @@ router.get('/', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
-  const transfers = (data || []).map(t => ({
-    ...t,
-    user_profiles: profileMap[t.created_by] || null,
-  }));
+  const transfers = (data || []).map(t => {
+    const profile = profileMap[t.created_by];
+    const fronter_name = profile
+      ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
+      : null;
+    return { ...t, user_profiles: profile || null, fronter_name: fronter_name || 'Unknown' };
+  });
 
   res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));

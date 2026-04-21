@@ -195,7 +195,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "manager", "operations_manager", "closer_manager", "operations"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "fronter_manager", "manager", "operations_manager", "closer_manager", "compliance_manager", "operations"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],
@@ -500,11 +500,54 @@ router.delete(
 
 // ============================================================================
 // POST /roles/seed-defaults?company_id=... — Create BLP default roles
-// Creates 6 standard sales-floor roles with correct permissions.
+// Seeds roles based on company_type: 'fronter' or 'closer'.
+// Fronter companies get: Fronter, Fronter Manager, Operations Manager, Company Admin
+// Closer companies get:  Closer, Closer Manager, Compliance Manager, Operations Manager, Company Admin
 // Skips any role whose name already exists for the company.
 // SuperAdmin only.
 // ============================================================================
-const BLP_DEFAULTS = [
+const COMPANY_ADMIN_ROLE = {
+  name: 'Company Admin',
+  description: 'Full company access — manages users, roles, forms and all data',
+  level: 'company_admin',
+  permissions: [
+    'create_user', 'edit_user', 'delete_user', 'manage_roles', 'manage_forms',
+    'view_company_members',
+    'create_transfer', 'view_own_transfers', 'view_team_transfers', 'view_all_company_transfers',
+    'assign_transfer', 'reassign_transfer', 'edit_transfer_reason', 'delete_transfer',
+    'reject_transfer',
+    'create_sale', 'view_own_sales', 'view_team_sales', 'view_all_company_sales',
+    'update_sale', 'delete_sale', 'submit_for_review',
+    'view_financial_data', 'search_sales', 'manage_compliance',
+    'manage_callbacks', 'view_callbacks', 'view_team_callbacks',
+    'manage_callback_numbers', 'view_team_callback_numbers',
+    'submit_call_review', 'submit_call_dispo',
+    'view_call_reviews', 'view_all_call_reviews',
+    'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
+    'view_notifications',
+  ],
+};
+
+const OPS_MANAGER_ROLE = {
+  name: 'Operations Manager',
+  description: 'Full oversight — analytics, reports, leaderboards, user management',
+  level: 'operations_manager',
+  permissions: [
+    'view_own_transfers', 'view_team_transfers', 'view_all_company_transfers',
+    'assign_transfer', 'reassign_transfer', 'edit_transfer_reason',
+    'view_team_sales', 'view_all_company_sales', 'view_financial_data', 'search_sales',
+    'view_callbacks', 'view_team_callbacks', 'manage_callback_numbers', 'view_team_callback_numbers',
+    'submit_call_review', 'submit_call_dispo',
+    'view_call_reviews', 'view_all_call_reviews',
+    'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
+    'view_company_members', 'create_user', 'edit_user', 'delete_user',
+    'manage_roles', 'manage_forms',
+    'view_notifications',
+  ],
+};
+
+// Fronter company: lead generation side — no sales workflow, no compliance
+const FRONTER_DEFAULTS = [
   {
     name: 'Fronter',
     description: 'Creates transfers/leads, manages own pipeline and callbacks',
@@ -513,18 +556,6 @@ const BLP_DEFAULTS = [
       'create_transfer', 'view_own_transfers',
       'manage_callbacks', 'view_callbacks', 'manage_callback_numbers',
       'view_own_sales',
-      'submit_call_review', 'submit_call_dispo',
-      'view_notifications',
-    ],
-  },
-  {
-    name: 'Closer',
-    description: 'Receives transfers, converts to sales, schedules callbacks',
-    level: 'closer',
-    permissions: [
-      'view_own_transfers', 'reject_transfer',
-      'create_sale', 'view_own_sales', 'update_sale', 'submit_for_review',
-      'manage_callbacks', 'view_callbacks',
       'submit_call_review', 'submit_call_dispo',
       'view_notifications',
     ],
@@ -541,6 +572,24 @@ const BLP_DEFAULTS = [
       'submit_call_review', 'submit_call_dispo', 'view_call_reviews',
       'view_fronter_stats', 'view_company_reports',
       'view_company_members', 'create_user', 'edit_user',
+      'view_notifications',
+    ],
+  },
+  OPS_MANAGER_ROLE,
+  COMPANY_ADMIN_ROLE,
+];
+
+// Closer company: sales conversion side — receives transfers, closes deals, compliance review
+const CLOSER_DEFAULTS = [
+  {
+    name: 'Closer',
+    description: 'Receives transfers, converts to sales, schedules callbacks',
+    level: 'closer',
+    permissions: [
+      'view_own_transfers', 'reject_transfer',
+      'create_sale', 'view_own_sales', 'update_sale', 'submit_for_review',
+      'manage_callbacks', 'view_callbacks',
+      'submit_call_review', 'submit_call_dispo',
       'view_notifications',
     ],
   },
@@ -563,23 +612,6 @@ const BLP_DEFAULTS = [
     ],
   },
   {
-    name: 'Operations Manager',
-    description: 'Full oversight — analytics, reports, leaderboards, user management',
-    level: 'operations_manager',
-    permissions: [
-      'view_own_transfers', 'view_team_transfers', 'view_all_company_transfers',
-      'assign_transfer', 'reassign_transfer', 'edit_transfer_reason',
-      'view_team_sales', 'view_all_company_sales', 'view_financial_data', 'search_sales',
-      'view_callbacks', 'view_team_callbacks', 'manage_callback_numbers', 'view_team_callback_numbers',
-      'submit_call_review', 'submit_call_dispo',
-      'view_call_reviews', 'view_all_call_reviews',
-      'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
-      'view_company_members', 'create_user', 'edit_user', 'delete_user',
-      'manage_roles', 'manage_forms',
-      'view_notifications',
-    ],
-  },
-  {
     name: 'Compliance Manager',
     description: 'Reviews submitted sales — can approve, return, or reject back to closers',
     level: 'compliance_manager',
@@ -591,27 +623,8 @@ const BLP_DEFAULTS = [
       'view_notifications',
     ],
   },
-  {
-    name: 'Company Admin',
-    description: 'Full company access — manages users, roles, forms and all data',
-    level: 'company_admin',
-    permissions: [
-      'create_user', 'edit_user', 'delete_user', 'manage_roles', 'manage_forms',
-      'view_company_members',
-      'create_transfer', 'view_own_transfers', 'view_team_transfers', 'view_all_company_transfers',
-      'assign_transfer', 'reassign_transfer', 'edit_transfer_reason', 'delete_transfer',
-      'reject_transfer',
-      'create_sale', 'view_own_sales', 'view_team_sales', 'view_all_company_sales',
-      'update_sale', 'delete_sale', 'submit_for_review',
-      'view_financial_data', 'search_sales', 'manage_compliance',
-      'manage_callbacks', 'view_callbacks', 'view_team_callbacks',
-      'manage_callback_numbers', 'view_team_callback_numbers',
-      'submit_call_review', 'submit_call_dispo',
-      'view_call_reviews', 'view_all_call_reviews',
-      'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
-      'view_notifications',
-    ],
-  },
+  OPS_MANAGER_ROLE,
+  COMPANY_ADMIN_ROLE,
 ];
 
 router.post('/seed-defaults', asyncHandler(async (req, res) => {
@@ -622,6 +635,20 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
 
   const superadmin = await isSuperAdmin(userId);
   if (!superadmin) return res.status(403).json({ error: 'SuperAdmin only' });
+
+  // Fetch company_type to select correct role set
+  const { data: company, error: companyErr } = await supabaseAdmin
+    .from('companies')
+    .select('company_type')
+    .eq('id', companyId)
+    .single();
+
+  if (companyErr || !company) {
+    return res.status(404).json({ error: 'Company not found' });
+  }
+
+  const defaults = company.company_type === 'closer' ? CLOSER_DEFAULTS : FRONTER_DEFAULTS;
+  logger.info('SEED_ROLES', `Seeding ${company.company_type} defaults`, { companyId, count: defaults.length });
 
   // Fetch all permission IDs once
   const { data: allPerms } = await supabaseAdmin.from('permissions').select('id, name');
@@ -637,7 +664,7 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
   const created = [];
   const skipped = [];
 
-  for (const tpl of BLP_DEFAULTS) {
+  for (const tpl of defaults) {
     if (existingNames.has(tpl.name)) { skipped.push(tpl.name); continue; }
 
     const { data: role, error: roleErr } = await supabaseAdmin
@@ -658,7 +685,7 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
   }
 
   logger.success('SEED_ROLES', `Seeded defaults: created=${created.join(',')}, skipped=${skipped.join(',')}`);
-  res.json({ message: 'Default roles seeded', created, skipped });
+  res.json({ message: 'Default roles seeded', created, skipped, company_type: company.company_type });
 }));
 
 module.exports = router;

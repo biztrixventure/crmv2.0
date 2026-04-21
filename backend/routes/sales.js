@@ -107,8 +107,27 @@ router.get(
       return res.status(500).json({ error: error.message });
     }
 
+    // Enrich with closer names
+    const closerIds = [...new Set((data || []).map(s => s.closer_id).filter(Boolean))];
+    let closerProfileMap = {};
+    if (closerIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from('user_profiles')
+        .select('user_id, first_name, last_name')
+        .in('user_id', closerIds);
+      (profiles || []).forEach(p => { closerProfileMap[p.user_id] = p; });
+    }
+
+    const enriched = (data || []).map(s => {
+      const profile = closerProfileMap[s.closer_id];
+      const closer_name = profile
+        ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
+        : null;
+      return { ...s, closer_name: closer_name || 'Unknown' };
+    });
+
     res.json({
-      sales: data || [],
+      sales: enriched,
       total: count || 0,
       page: parseInt(page),
       limit: parseInt(limit),
