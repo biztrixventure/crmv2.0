@@ -56,7 +56,25 @@ const PORT = process.env.PORT || 3001;
 // ============================================================================
 
 // Security headers
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", "data:", "blob:"],
+      fontSrc:     ["'self'", "data:"],
+      connectSrc:  [
+        "'self'",
+        "https://*.supabase.co",
+        "wss://*.supabase.co",
+        process.env.CORS_ORIGIN || "http://localhost:5173",
+      ],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+    },
+  },
+}));
 
 // Body parser
 app.use(express.json());

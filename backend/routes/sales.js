@@ -280,6 +280,72 @@ router.post(
 );
 
 // ============================================================================
+// GET /sales/compliance — compliance_manager sees sales for their own company
+// NOTE: must be defined BEFORE /:id to prevent 'compliance' being caught as an id
+// ============================================================================
+router.get('/compliance', asyncHandler(async (req, res) => {
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const companyId = req.user.company_id;
+
+  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { status, search, date_from, date_to, page = 1, limit = 50 } = req.query;
+
+  let query = supabaseAdmin
+    .from('sales')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  // Superadmin can pass company_id param; compliance_manager is locked to own company
+  const effectiveCompanyId = userRole === 'superadmin' ? (req.query.company_id || companyId) : companyId;
+
+  // Expand scope to include linked companies for compliance manager.
+  // Compliance managers live in closer companies; also include sales from
+  // any fronter companies linked to their closer company (bidirectional visibility).
+  let scopeIds = effectiveCompanyId ? [effectiveCompanyId] : [];
+  if (effectiveCompanyId && userRole === 'compliance_manager') {
+    const [fronterLinks, closerLinks] = await Promise.all([
+      supabaseAdmin.from('company_links').select('fronter_company_id').eq('closer_company_id', effectiveCompanyId),
+      supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', effectiveCompanyId),
+    ]);
+    const linked = [
+      ...((fronterLinks.data || []).map(l => l.fronter_company_id)),
+      ...((closerLinks.data  || []).map(l => l.closer_company_id)),
+    ].filter(Boolean);
+    if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
+  }
+
+  if (scopeIds.length > 1) {
+    query = query.in('company_id', scopeIds);
+  } else if (scopeIds.length === 1) {
+    query = query.eq('company_id', scopeIds[0]);
+  }
+
+  if (status)     query = query.eq('status', status);
+  if (date_from)  query = query.gte('created_at', date_from);
+  if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');
+
+  if (search) {
+    query = query.or([
+      `customer_name.ilike.%${search}%`,
+      `customer_phone.ilike.%${search}%`,
+      `reference_no.ilike.%${search}%`,
+    ].join(','));
+  }
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  query = query.range(offset, offset + parseInt(limit) - 1);
+
+  const { data, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json({ sales: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
+
+// ============================================================================
 // GET /sales/:id - Get a single sale
 // ============================================================================
 router.get(
@@ -597,71 +663,6 @@ router.post('/:id/compliance', [
   notifications.onComplianceUpdate({ sale: updated, editorName, reason }).catch(() => {});
 
   res.json({ sale: updated });
-}));
-
-// ============================================================================
-// GET /sales/compliance — compliance_manager sees sales for their own company
-// ============================================================================
-router.get('/compliance', asyncHandler(async (req, res) => {
-  const userId   = req.user.id;
-  const userRole = req.user.role;
-  const companyId = req.user.company_id;
-
-  if (userRole !== 'compliance_manager' && userRole !== 'superadmin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  const { status, search, date_from, date_to, page = 1, limit = 50 } = req.query;
-
-  let query = supabaseAdmin
-    .from('sales')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
-
-  // Superadmin can pass company_id param; compliance_manager is locked to own company
-  const effectiveCompanyId = userRole === 'superadmin' ? (req.query.company_id || companyId) : companyId;
-
-  // Expand scope to include linked companies for compliance manager.
-  // Compliance managers live in closer companies; also include sales from
-  // any fronter companies linked to their closer company (bidirectional visibility).
-  let scopeIds = effectiveCompanyId ? [effectiveCompanyId] : [];
-  if (effectiveCompanyId && userRole === 'compliance_manager') {
-    const [fronterLinks, closerLinks] = await Promise.all([
-      supabaseAdmin.from('company_links').select('fronter_company_id').eq('closer_company_id', effectiveCompanyId),
-      supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', effectiveCompanyId),
-    ]);
-    const linked = [
-      ...((fronterLinks.data || []).map(l => l.fronter_company_id)),
-      ...((closerLinks.data  || []).map(l => l.closer_company_id)),
-    ].filter(Boolean);
-    if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
-  }
-
-  if (scopeIds.length > 1) {
-    query = query.in('company_id', scopeIds);
-  } else if (scopeIds.length === 1) {
-    query = query.eq('company_id', scopeIds[0]);
-  }
-
-  if (status)     query = query.eq('status', status);
-  if (date_from)  query = query.gte('created_at', date_from);
-  if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');
-
-  if (search) {
-    query = query.or([
-      `customer_name.ilike.%${search}%`,
-      `customer_phone.ilike.%${search}%`,
-      `reference_no.ilike.%${search}%`,
-    ].join(','));
-  }
-
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  query = query.range(offset, offset + parseInt(limit) - 1);
-
-  const { data, error, count } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-
-  res.json({ sales: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
 // ============================================================================
