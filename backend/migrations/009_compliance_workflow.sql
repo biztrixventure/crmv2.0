@@ -5,7 +5,9 @@
 
 -- 1. Add new sale status values
 DO $$
-DECLARE v_typname TEXT;
+DECLARE
+  v_typname TEXT;
+  v_val     TEXT;
 BEGIN
   SELECT t.typname INTO v_typname
   FROM pg_attribute a

@@ -25,6 +25,8 @@ import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
 import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
+import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
+import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
@@ -86,6 +88,10 @@ const ManagerShell = () => {
   const [reassignCloser, setReassignCloser]     = useState('');
   const [reassigning, setReassigning]           = useState(false);
   const [reassignMsg, setReassignMsg]           = useState('');
+
+  // ── Detail drawers ────────────────────────────────────────────────────────
+  const [detailTransfer, setDetailTransfer] = useState(null);
+  const [detailSale, setDetailSale]         = useState(null);
 
   // ── My Sales (for closer_manager who also sells) ──────────────────────────
   const [saleModalOpen, setSaleModalOpen] = useState(false);
@@ -257,7 +263,8 @@ const ManagerShell = () => {
                 </h3>
                 <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                   {pendingTransfers.slice(0, 10).map(t => (
-                    <div key={t.id} className="flex items-center justify-between p-3 rounded-xl border"
+                    <div key={t.id} onClick={() => setDetailTransfer(t)}
+                      className="flex items-center justify-between p-3 rounded-xl border cursor-pointer hover:shadow-md transition-all"
                       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
                       <div>
                         <p className="font-semibold text-text text-sm">
@@ -267,7 +274,7 @@ const ManagerShell = () => {
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant={XFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
-                        <button onClick={() => { setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
+                        <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
                           style={{ background: 'var(--gradient-sidebar)' }}>
                           Reassign
@@ -346,7 +353,8 @@ const ManagerShell = () => {
                     </thead>
                     <tbody>
                       {transfers.slice(0, 50).map(t => (
-                        <tr key={t.id} className="border-b border-border hover:bg-bg-secondary transition-colors">
+                        <tr key={t.id} onClick={() => setDetailTransfer(t)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
                           <td className="py-3 px-3 font-semibold text-text">
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
@@ -356,7 +364,7 @@ const ManagerShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-3">
                             {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
-                              <button onClick={() => { setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
+                              <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
                                 style={{ background: 'var(--gradient-sidebar)' }}>
                                 Reassign
@@ -390,7 +398,8 @@ const ManagerShell = () => {
                     </thead>
                     <tbody>
                       {sales.slice(0, 50).map(s => (
-                        <tr key={s.id} className="border-b border-border hover:bg-bg-secondary transition-colors">
+                        <tr key={s.id} onClick={() => setDetailSale(s)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
                           <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
                           <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
                           <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
@@ -427,7 +436,8 @@ const ManagerShell = () => {
                 : (
                   <div className="space-y-3">
                     {sales.filter(s => s.closer_id === user?.id).slice(0, 20).map(s => (
-                      <div key={s.id} className="p-4 rounded-xl border hover:shadow-md transition-all"
+                      <div key={s.id} onClick={() => setDetailSale(s)}
+                        className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
                         <div className="flex items-start justify-between">
                           <div>
@@ -443,12 +453,12 @@ const ManagerShell = () => {
                         </div>
                         {hasPermission('update_sale') && s.status === 'open' && (
                           <div className="flex gap-2 mt-3">
-                            <button onClick={() => updateSale(s.id, { status: 'sold' }).then(() => fetchSales({ date_from, date_to }))}
+                            <button onClick={e => { e.stopPropagation(); updateSale(s.id, { status: 'sold' }).then(() => fetchSales({ date_from, date_to })); }}
                               className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white"
                               style={{ backgroundColor: '#16a34a' }}>
                               <CheckCircle size={12} className="inline mr-1" /> Mark Sold
                             </button>
-                            <button onClick={() => updateSale(s.id, { status: 'cancelled' }).then(() => fetchSales({ date_from, date_to }))}
+                            <button onClick={e => { e.stopPropagation(); updateSale(s.id, { status: 'cancelled' }).then(() => fetchSales({ date_from, date_to })); }}
                               className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-red-600 border"
                               style={{ borderColor: '#ef4444' }}>
                               <XCircle size={12} className="inline mr-1" /> Cancel
@@ -515,6 +525,9 @@ const ManagerShell = () => {
 
       <SaleModal isOpen={saleModalOpen} onClose={() => setSaleModalOpen(false)}
         user={user} transfer={saleTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
+
+      <TransferDetailDrawer transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
+      <SaleDetailDrawer     sale={detailSale}         onClose={() => setDetailSale(null)} />
     </div>
   );
 };

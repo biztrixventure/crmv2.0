@@ -23,6 +23,8 @@ import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
+import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
+import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -105,6 +107,10 @@ const StaffShell = () => {
   const [dispoMsg, setDispoMsg]       = useState('');
 
   const [reviewSuccess, setReviewSuccess] = useState('');
+
+  // Detail drawers
+  const [detailTransfer, setDetailTransfer] = useState(null);
+  const [detailSale, setDetailSale]         = useState(null);
 
   // Submit for review state
   const [submitting, setSubmitting]     = useState(null); // sale id being submitted
@@ -350,7 +356,8 @@ const StaffShell = () => {
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {transfers.slice(0, 15).map(t => (
-                      <div key={t.id} className="p-4 rounded-xl border transition-all hover:shadow-md"
+                      <div key={t.id} onClick={() => setDetailTransfer(t)}
+                        className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
                         <div className="flex items-start justify-between mb-1">
                           <div>
@@ -367,14 +374,14 @@ const StaffShell = () => {
                         {t.status === 'assigned' && (
                           <div className="flex gap-2 mt-3">
                             {hasPermission('create_sale') && (
-                              <button onClick={() => openSaleModal(t)}
+                              <button onClick={e => { e.stopPropagation(); openSaleModal(t); }}
                                 className="flex-1 py-2 px-3 rounded-lg font-semibold text-sm text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all"
                                 style={{ background: 'var(--gradient-sidebar)' }}>
                                 <DollarSign size={13} /> Convert to Sale
                               </button>
                             )}
                             {hasPermission('reject_transfer') && (
-                              <button onClick={() => { setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
+                              <button onClick={e => { e.stopPropagation(); setRejectTarget(t); setRejectReason(''); setRejectMsg(''); }}
                                 className="px-3 py-2 rounded-lg font-semibold text-sm border flex items-center gap-1 hover:bg-error-50 transition-all"
                                 style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
                                 <XCircle size={13} /> Reject
@@ -384,14 +391,14 @@ const StaffShell = () => {
                         )}
                         <div className="flex gap-2 mt-2">
                           {hasPermission('submit_call_review') && (
-                            <button onClick={() => { setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
+                            <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
                               className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 hover:bg-primary-50 transition-all"
                               style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
                               <Star size={11} /> Rate Call
                             </button>
                           )}
                           {hasPermission('submit_call_dispo') && (
-                            <button onClick={() => { setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
+                            <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
                               className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 hover:bg-info-50 transition-all"
                               style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
                               <MessageSquare size={11} /> Set Dispo
@@ -425,7 +432,8 @@ const StaffShell = () => {
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {sales.slice(0, 15).map(s => (
-                      <div key={s.id} className="p-4 rounded-xl border transition-all hover:shadow-md"
+                      <div key={s.id} onClick={() => setDetailSale(s)}
+                        className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
 
                         {/* Compliance note banner for needs_revision */}
@@ -468,7 +476,7 @@ const StaffShell = () => {
                           <div className="flex gap-2 mt-3">
                             {hasPermission('submit_for_review') && (
                               <button
-                                onClick={() => handleSubmitForReview(s.id)}
+                                onClick={e => { e.stopPropagation(); handleSubmitForReview(s.id); }}
                                 disabled={submitting === s.id}
                                 className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all disabled:opacity-50"
                                 style={{ background: 'var(--gradient-sidebar)' }}>
@@ -490,7 +498,7 @@ const StaffShell = () => {
 
                         {s.status === 'needs_revision' && (
                           <button
-                            onClick={() => handleSubmitForReview(s.id)}
+                            onClick={e => { e.stopPropagation(); handleSubmitForReview(s.id); }}
                             disabled={submitting === s.id}
                             className="w-full mt-3 py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
                             style={{ backgroundColor: 'var(--color-error-600)', color: '#fff' }}>
@@ -627,7 +635,8 @@ const StaffShell = () => {
                 ) : (
                   <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
                     {transfers.map(t => (
-                      <div key={t.id} className="p-4 rounded-xl border hover:shadow-md transition-all"
+                      <div key={t.id} onClick={() => setDetailTransfer(t)}
+                        className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
                         <div className="flex items-start justify-between mb-1">
                           <div className="flex-1 min-w-0">
@@ -742,6 +751,9 @@ const StaffShell = () => {
           </div>
         </div>
       )}
+
+      <TransferDetailDrawer transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
+      <SaleDetailDrawer     sale={detailSale}         onClose={() => setDetailSale(null)} />
     </div>
   );
 };
