@@ -146,7 +146,7 @@ BEGIN
   LOOP
     -- For each system-level role template (company_id IS NULL)
     FOR v_role_id IN
-      SELECT id FROM custom_roles WHERE level = v_level
+      SELECT id FROM custom_roles WHERE level::text = v_level
     LOOP
       -- Skip if role already has permissions (don't overwrite manual config)
       IF NOT EXISTS (SELECT 1 FROM role_permissions WHERE role_id = v_role_id) THEN
