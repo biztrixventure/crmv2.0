@@ -363,9 +363,9 @@ router.get(
 
     if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
 
-    // Permission: creator, closer, or manager
+    // Permission: creator, closer, manager, or compliance
     const isOwner = sale.created_by === userId || sale.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
     if (!isOwner && !isManager) return res.status(403).json({ error: 'Access denied' });
 
     res.json({ sale });
