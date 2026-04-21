@@ -74,6 +74,22 @@ router.get(
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
+    // Resolve which company IDs to include.
+    // For users in a fronter company, also pull in linked closer company sales
+    // so fronter managers can see outcomes of their transfers.
+    let scopeIds = companyId ? [companyId] : [];
+    if (companyId && userRole !== 'closer') {
+      const { data: company } = await supabaseAdmin
+        .from('companies').select('company_type').eq('id', companyId).single();
+      if (company?.company_type === 'fronter') {
+        const { data: links } = await supabaseAdmin
+          .from('company_links').select('closer_company_id').eq('fronter_company_id', companyId);
+        const linked = (links || []).map(l => l.closer_company_id).filter(Boolean);
+        if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
+        logger.info('GET_SALES', `Fronter company — including ${linked.length} linked closer companies`);
+      }
+    }
+
     let query = supabaseAdmin
       .from('sales')
       .select(`
@@ -87,7 +103,11 @@ router.get(
       `, { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    if (companyId) query = query.eq('company_id', companyId);
+    if (scopeIds.length > 1) {
+      query = query.in('company_id', scopeIds);
+    } else if (scopeIds.length === 1) {
+      query = query.eq('company_id', scopeIds[0]);
+    }
 
     if (userRole === 'closer') {
       query = query.eq('closer_id', userId);
@@ -600,7 +620,29 @@ router.get('/compliance', asyncHandler(async (req, res) => {
 
   // Superadmin can pass company_id param; compliance_manager is locked to own company
   const effectiveCompanyId = userRole === 'superadmin' ? (req.query.company_id || companyId) : companyId;
-  if (effectiveCompanyId) query = query.eq('company_id', effectiveCompanyId);
+
+  // Expand scope to include linked companies for compliance manager.
+  // Compliance managers live in closer companies; also include sales from
+  // any fronter companies linked to their closer company (bidirectional visibility).
+  let scopeIds = effectiveCompanyId ? [effectiveCompanyId] : [];
+  if (effectiveCompanyId && userRole === 'compliance_manager') {
+    const [fronterLinks, closerLinks] = await Promise.all([
+      supabaseAdmin.from('company_links').select('fronter_company_id').eq('closer_company_id', effectiveCompanyId),
+      supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', effectiveCompanyId),
+    ]);
+    const linked = [
+      ...((fronterLinks.data || []).map(l => l.fronter_company_id)),
+      ...((closerLinks.data  || []).map(l => l.closer_company_id)),
+    ].filter(Boolean);
+    if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
+  }
+
+  if (scopeIds.length > 1) {
+    query = query.in('company_id', scopeIds);
+  } else if (scopeIds.length === 1) {
+    query = query.eq('company_id', scopeIds[0]);
+  }
+
   if (status)     query = query.eq('status', status);
   if (date_from)  query = query.gte('created_at', date_from);
   if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');

@@ -44,13 +44,23 @@ router.get(
       stats.assignedTransfers = (transfers || []).filter(t => t.status === 'assigned').length;
       stats.completedTransfers = (transfers || []).filter(t => t.status === 'completed').length;
 
-      // Sales stats
+      // Sales stats — expand scope for fronter company users to include linked closer companies
       let salesQuery = supabaseAdmin
         .from('sales')
         .select('id, status', { count: 'exact' });
 
       if (companyId) {
-        salesQuery = salesQuery.eq('company_id', companyId);
+        let saleScopeIds = [companyId];
+        if (userRole !== 'closer') {
+          const { data: co } = await supabaseAdmin.from('companies').select('company_type').eq('id', companyId).single();
+          if (co?.company_type === 'fronter') {
+            const { data: lnks } = await supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', companyId);
+            const linked = (lnks || []).map(l => l.closer_company_id).filter(Boolean);
+            if (linked.length > 0) saleScopeIds = [...saleScopeIds, ...linked];
+          }
+        }
+        if (saleScopeIds.length > 1) salesQuery = salesQuery.in('company_id', saleScopeIds);
+        else salesQuery = salesQuery.eq('company_id', saleScopeIds[0]);
       }
 
       if (userRole === 'closer') {
