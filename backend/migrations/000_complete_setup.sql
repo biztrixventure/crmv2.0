@@ -36,8 +36,10 @@ DO $$ BEGIN
     'closer',
     'fronter',
     'manager',
-    'operations_manager',
+    'fronter_manager',
     'closer_manager',
+    'operations_manager',
+    'compliance_manager',
     'operations'
   );
 EXCEPTION WHEN duplicate_object THEN null;
