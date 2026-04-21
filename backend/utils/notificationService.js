@@ -18,16 +18,18 @@ const { sendPushToUser, sendPushToUsers } = require('./pushService');
 
 // Roles notified for company-wide manager events
 const MANAGER_LEVELS = [
-  'manager',           // fronter manager
+  'manager',
+  'fronter_manager',
   'closer_manager',
   'operations_manager',
+  'compliance_manager',
   'company_admin',
   'readonly_admin',
   'superadmin',
 ];
 
-// Roles that are "floor managers" (fronter manager + ops manager)
-const FLOOR_MANAGER_LEVELS = ['manager', 'operations_manager'];
+// Roles that are "floor managers" — receive per-event (transfer/sale) notifications
+const FLOOR_MANAGER_LEVELS = ['manager', 'fronter_manager', 'closer_manager', 'operations_manager'];
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -148,15 +150,35 @@ async function onTransferRejected({ transfer, closerName, reason }) {
     }).catch(() => {});
   }
 
-  // Notify fronter manager + closer manager
-  const managerIds = await getUserIdsByLevel(companyId, ['manager', 'closer_manager', 'operations_manager']);
-  await notifyUsers(managerIds, {
+  // Notify fronter company managers
+  const fronterMgrIds = await getUserIdsByLevel(companyId, ['manager', 'fronter_manager', 'operations_manager']);
+  await notifyUsers(fronterMgrIds, {
     companyId,
     type: 'transfer_rejected',
     title: 'Transfer rejected by closer',
     message: `${closerName} rejected the transfer for ${customerName}.`,
     data: { transfer_id: transfer.id, customer_name: customerName, reason },
   });
+
+  // Also notify managers in the closer's company (different company from transfer)
+  if (transfer.assigned_closer_id) {
+    const { data: closerRole } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('company_id')
+      .eq('user_id', transfer.assigned_closer_id)
+      .eq('is_active', true)
+      .single();
+    if (closerRole?.company_id && closerRole.company_id !== companyId) {
+      const closerMgrIds = await getUserIdsByLevel(closerRole.company_id, ['closer_manager', 'operations_manager', 'company_admin']);
+      await notifyUsers(closerMgrIds, {
+        companyId: closerRole.company_id,
+        type: 'transfer_rejected',
+        title: 'Transfer rejected',
+        message: `${closerName} rejected the transfer for ${customerName}.`,
+        data: { transfer_id: transfer.id, customer_name: customerName, reason },
+      });
+    }
+  }
 }
 
 /**
@@ -187,15 +209,23 @@ async function onSaleCreated({ sale, fronterUserId, closerName }) {
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
 
-  if (fronterUserId) {
+  // Auto-resolve fronter from linked transfer if not explicitly provided
+  let resolvedFronterUserId = fronterUserId || sale.fronter_id || null;
+  if (!resolvedFronterUserId && sale.transfer_id) {
+    const { data: tf } = await supabaseAdmin.from('transfers').select('created_by').eq('id', sale.transfer_id).single();
+    resolvedFronterUserId = tf?.created_by || null;
+  }
+  const fronterUserId_ = resolvedFronterUserId;
+
+  if (fronterUserId_) {
     await createNotification({
-      userId: fronterUserId, companyId,
+      userId: fronterUserId_, companyId,
       type: 'sale_created',
       title: 'Your lead became a sale!',
       message: `${customerName} (Ref: ${refNo}) was closed by ${closerName || 'a closer'}.`,
       data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
     });
-    sendPushToUser(fronterUserId, {
+    sendPushToUser(fronterUserId_, {
       title: 'Sale closed!',
       body:  `${customerName} — Ref: ${refNo}`,
       tag:   'sale_created',
@@ -203,13 +233,26 @@ async function onSaleCreated({ sale, fronterUserId, closerName }) {
     }).catch(() => {});
   }
 
-  // Notify floor managers
+  // Notify floor managers in closer's company
   await notifyFloorManagers(companyId, {
     type: 'sale_created',
     title: 'New sale closed',
     message: `${closerName || 'A closer'} closed ${customerName} — Ref: ${refNo}.`,
     data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
   });
+
+  // Also notify floor managers in the fronter's company (via transfer link)
+  if (sale.transfer_id) {
+    const { data: tf } = await supabaseAdmin.from('transfers').select('company_id').eq('id', sale.transfer_id).single();
+    if (tf?.company_id && tf.company_id !== companyId) {
+      await notifyFloorManagers(tf.company_id, {
+        type: 'sale_created',
+        title: 'Transfer converted to sale',
+        message: `${closerName || 'A closer'} closed ${customerName} — Ref: ${refNo}.`,
+        data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      });
+    }
+  }
 }
 
 /**
