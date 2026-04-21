@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
-  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw,
+  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -112,6 +112,13 @@ const StaffShell = () => {
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
 
+  // Schedule callback from sale
+  const [callbackSale, setCallbackSale]     = useState(null);
+  const [callbackAt, setCallbackAt]         = useState('');
+  const [callbackNotes, setCallbackNotes]   = useState('');
+  const [callbackSaving, setCallbackSaving] = useState(false);
+  const [callbackMsg, setCallbackMsg]       = useState('');
+
   // Submit for review state
   const [submitting, setSubmitting]     = useState(null); // sale id being submitted
   const [submitMsg, setSubmitMsg]       = useState('');
@@ -214,6 +221,32 @@ const StaffShell = () => {
       setDispoMsg(err.response?.data?.error || 'Failed to save disposition');
     } finally {
       setDispoSaving(false);
+    }
+  };
+
+  const handleScheduleCallback = async () => {
+    if (!callbackAt) { setCallbackMsg('Select a date and time.'); return; }
+    setCallbackSaving(true);
+    setCallbackMsg('');
+    try {
+      await client.post('callbacks', {
+        customer_name:  callbackSale.customer_name || 'Unknown',
+        customer_phone: callbackSale.customer_phone || '',
+        callback_at:    new Date(callbackAt).toISOString(),
+        notes:          callbackNotes || undefined,
+        source:         'sale',
+        source_id:      callbackSale.id,
+        company_id:     user?.company_id,
+      });
+      setCallbackSale(null);
+      setCallbackAt('');
+      setCallbackNotes('');
+      setReviewSuccess('Callback scheduled!');
+      setTimeout(() => setReviewSuccess(''), 4000);
+    } catch (err) {
+      setCallbackMsg(err.response?.data?.error || 'Failed to schedule callback');
+    } finally {
+      setCallbackSaving(false);
     }
   };
 
@@ -507,6 +540,16 @@ const StaffShell = () => {
                               : <><RefreshCw size={11} /> Resubmit for Review</>}
                           </button>
                         )}
+
+                        {/* Schedule callback from sale */}
+                        {hasPermission('manage_callbacks') && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setCallbackSale(s); setCallbackAt(''); setCallbackNotes(''); setCallbackMsg(''); }}
+                            className="w-full mt-2 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-info-50"
+                            style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
+                            <CalendarPlus size={11} /> Schedule Callback
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -746,6 +789,52 @@ const StaffShell = () => {
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
                 {dispoSaving ? 'Saving…' : 'Save Dispo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Callback from Sale modal */}
+      {callbackSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-sm mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
+              <CalendarPlus size={18} style={{ color: 'var(--color-info-600)' }} /> Schedule Callback
+            </h3>
+            <p className="text-sm text-text-secondary mb-4">
+              Customer: <strong>{callbackSale.customer_name || 'Unknown'}</strong>
+              {callbackSale.customer_phone && <span className="ml-2 text-xs text-text-tertiary">{callbackSale.customer_phone}</span>}
+            </p>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              Date &amp; Time <span className="text-error-500">*</span>
+            </label>
+            <input
+              type="datetime-local"
+              value={callbackAt}
+              onChange={e => setCallbackAt(e.target.value)}
+              min={new Date().toISOString().slice(0, 16)}
+              className="input mb-3"
+            />
+            <label className="block text-sm font-medium text-text-secondary mb-1">Notes</label>
+            <textarea
+              value={callbackNotes}
+              onChange={e => setCallbackNotes(e.target.value)}
+              placeholder="Optional notes…"
+              rows={2}
+              className="input mb-3"
+            />
+            {callbackMsg && <p className="text-sm text-error-600 mb-3">{callbackMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setCallbackSale(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Cancel
+              </button>
+              <button onClick={handleScheduleCallback} disabled={callbackSaving}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {callbackSaving ? 'Saving…' : 'Schedule'}
               </button>
             </div>
           </div>
