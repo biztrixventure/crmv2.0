@@ -22,6 +22,7 @@ const Table = ({
   onSort = null,
   sortKey = null,
   sortOrder = 'asc',
+  onRowClick = null,
   className = '',
   ...props
 }) => {
@@ -73,7 +74,9 @@ const Table = ({
         </thead>
         <tbody>
           {data.map((row, rowIdx) => (
-            <tr key={rowIdx}>
+            <tr key={rowIdx}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className={onRowClick ? 'cursor-pointer' : ''}>
               {columns.map((column) => (
                 <td key={`${rowIdx}-${column.key}`}>
                   {column.render ? column.render(row) : row[column.key]}
@@ -85,7 +88,7 @@ const Table = ({
                     {rowActions.map((action, idx) => (
                       <button
                         key={idx}
-                        onClick={() => action.onClick(row)}
+                        onClick={(e) => { e.stopPropagation(); action.onClick(row); }}
                         className="p-1.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors"
                         title={action.label}
                       >

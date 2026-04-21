@@ -66,6 +66,10 @@ const RoleList = ({ roles, onEdit, onDelete }) => {
         data={tableData}
         rowActions={rowActions}
         emptyMessage="No roles found"
+        onRowClick={(row) => {
+          const original = roles.find(r => r.id === row.id);
+          onEdit(original || row);
+        }}
       />
     </Card>
   );

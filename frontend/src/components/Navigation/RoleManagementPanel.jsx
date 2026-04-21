@@ -94,7 +94,8 @@ const RoleManagementPanel = ({ companyId }) => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {roles.map(r => (
-            <Card key={r.id} className="p-4">
+            <Card key={r.id} onClick={() => setEditRole(r)}
+              className="p-4 cursor-pointer hover:shadow-md transition-all hover:-translate-y-0.5">
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-text truncate">{r.name}</p>
@@ -105,18 +106,24 @@ const RoleManagementPanel = ({ companyId }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                  <button onClick={() => setEditRole(r)} title="Edit"
+                  <button onClick={e => { e.stopPropagation(); setEditRole(r); }} title="Edit"
                     className="p-1 rounded hover:bg-bg-secondary transition-colors">
                     <Edit2 size={14} style={{ color: 'var(--color-primary-500)' }} />
                   </button>
-                  <button onClick={() => deleteRole(r.id)} title="Delete"
+                  <button onClick={e => { e.stopPropagation(); deleteRole(r.id); }} title="Delete"
                     className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
                     <Trash2 size={14} className="text-error-500" />
                   </button>
                 </div>
               </div>
               {r.description && <p className="text-xs text-text-secondary mb-2">{r.description}</p>}
-              <p className="text-xs text-text-tertiary">{(r.permissions || []).length} permissions</p>
+              <div className="flex items-center justify-between mt-3 pt-2"
+                style={{ borderTop: '1px solid var(--color-border)' }}>
+                <p className="text-xs text-text-tertiary">{(r.permissions || []).length} permissions</p>
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>
+                  View &amp; Edit →
+                </span>
+              </div>
             </Card>
           ))}
         </div>

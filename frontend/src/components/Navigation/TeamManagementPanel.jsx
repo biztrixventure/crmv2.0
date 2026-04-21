@@ -93,7 +93,9 @@ const TeamManagementPanel = ({ companyId }) => {
               </thead>
               <tbody>
                 {members.map(u => (
-                  <tr key={u.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <tr key={u.id} onClick={() => setEditUser(u)}
+                    className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td className="px-4 py-3 font-semibold text-text">
                       {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
                     </td>
@@ -111,11 +113,11 @@ const TeamManagementPanel = ({ companyId }) => {
                       <div className="flex items-center gap-2">
                         {hasPermission('edit_user') && (
                           <>
-                            <button onClick={() => setEditUser(u)} title="Edit"
+                            <button onClick={e => { e.stopPropagation(); setEditUser(u); }} title="Edit"
                               className="p-1 rounded hover:bg-bg-secondary transition-colors">
                               <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
                             </button>
-                            <button onClick={() => toggleActive(u)} title={u.is_active ? 'Deactivate' : 'Activate'}
+                            <button onClick={e => { e.stopPropagation(); toggleActive(u); }} title={u.is_active ? 'Deactivate' : 'Activate'}
                               className="p-1 rounded hover:bg-bg-secondary transition-colors">
                               {u.is_active
                                 ? <XCircle size={15} className="text-warning-500" />
@@ -125,7 +127,7 @@ const TeamManagementPanel = ({ companyId }) => {
                         )}
                         {hasPermission('delete_user') && (
                           <button
-                            onClick={() => setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email })}
+                            onClick={e => { e.stopPropagation(); setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email }); }}
                             title="Delete"
                             className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
                             <Trash2 size={15} className="text-error-500" />

@@ -99,6 +99,7 @@ const UserList = ({ users, onEdit, onDelete }) => {
         rowActions={actions}
         sortable
         hover
+        onRowClick={(row) => onEdit(users.find(u => u.id === row.id) || row)}
       />
     </Card>
   );
