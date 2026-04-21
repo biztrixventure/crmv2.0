@@ -57,6 +57,29 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /callbacks/:id — get single callback by id
+// ============================================================================
+router.get('/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  const superadmin = await isSuperAdmin(userId);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+
+  const condition = isManager ? { id } : { id, user_id: userId };
+
+  const { data, error } = await supabaseAdmin
+    .from('callbacks')
+    .select('*')
+    .match(condition)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Callback not found or no access' });
+
+  res.json({ callback: data });
+}));
+
+// ============================================================================
 // POST /callbacks — create a callback
 // ============================================================================
 router.post('/',

@@ -174,7 +174,7 @@ router.get('/closers', asyncHandler(async (req, res) => {
 // ============================================================================
 router.post('/', [
   body('form_data').isObject().withMessage('form_data required'),
-  body('assigned_closer_id').isUUID().withMessage('assigned_closer_id (UUID) required'),
+  body('assigned_closer_id').optional({ nullable: true }).isUUID().withMessage('assigned_closer_id must be a UUID'),
   body('company_id').isUUID().optional(),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
@@ -186,26 +186,28 @@ router.post('/', [
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
+  const hasCloser = !!assigned_closer_id;
+
   const { data: transfer, error } = await supabaseAdmin
     .from('transfers')
     .insert({
       company_id:         companyId,
       created_by:         userId,
       form_data,
-      assigned_closer_id,
-      assigned_to:        assigned_closer_id, // keep backward compat
-      status:             'assigned',         // directly assigned, no pending queue
+      assigned_closer_id: hasCloser ? assigned_closer_id : null,
+      assigned_to:        hasCloser ? assigned_closer_id : null,
+      status:             hasCloser ? 'assigned' : 'pending',
     })
     .select()
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Notify closer + floor managers
-  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-  const fronterName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A fronter';
-
-  notifications.onTransferCreated({ transfer, fronterName, closerUserId: assigned_closer_id }).catch(() => {});
+  if (hasCloser) {
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const fronterName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A fronter';
+    notifications.onTransferCreated({ transfer, fronterName, closerUserId: assigned_closer_id }).catch(() => {});
+  }
 
   res.status(201).json({ transfer });
 }));

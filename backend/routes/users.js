@@ -234,7 +234,7 @@ router.post(
     body("email").isEmail().normalizeEmail(),
     body("first_name").trim().isLength({ min: 1 }),
     body("last_name").trim().isLength({ min: 1 }),
-    body("role_id").isUUID(),
+    body("role_id").optional({ nullable: true }).isUUID().withMessage('role_id must be a valid UUID'),
     body("company_id").isUUID().optional(),
     body("password").optional().isLength({ min: 8 }),
     body("require_verification").optional().isBoolean(),
@@ -297,35 +297,36 @@ router.post(
         logger.success('CREATE_USER', 'Company assignment validated');
       }
 
-      // Verify role exists and user can assign it
-      logger.debug('CREATE_USER', 'Verifying role exists', { role_id });
-      const { data: role, error: roleError } = await supabaseAdmin
-        .from("custom_roles")
-        .select("level")
-        .eq("id", role_id)
-        .single();
+      // Verify role exists and user can assign it (only if role_id provided)
+      if (role_id) {
+        logger.debug('CREATE_USER', 'Verifying role exists', { role_id });
+        const { data: role, error: roleError } = await supabaseAdmin
+          .from("custom_roles")
+          .select("level")
+          .eq("id", role_id)
+          .single();
 
-      if (roleError || !role) {
-        logger.error('CREATE_USER', 'Role not found', roleError || new Error('No role data'));
-        return res.status(400).json({ error: "Role not found" });
-      }
+        if (roleError || !role) {
+          logger.error('CREATE_USER', 'Role not found', roleError || new Error('No role data'));
+          return res.status(400).json({ error: "Role not found" });
+        }
 
-      logger.success('CREATE_USER', `Role verified`, { role_id, level: role.level });
+        logger.success('CREATE_USER', `Role verified`, { role_id, level: role.level });
 
-      // Check role hierarchy (skip for SuperAdmin - they can assign any role)
-      logger.debug('CREATE_USER', 'Checking role hierarchy', { userId, userCompanyId, targetRoleLevel: role.level, isSuperAdmin: req.user.role === 'superadmin' });
+        logger.debug('CREATE_USER', 'Checking role hierarchy', { userId, userCompanyId, targetRoleLevel: role.level, isSuperAdmin: req.user.role === 'superadmin' });
 
-      let canAssign = req.user.role === 'superadmin'; // SuperAdmin can assign any role
-      if (!canAssign) {
-        canAssign = await canAssignRole(userId, userCompanyId, role.level);
-      }
-      logger.success('CREATE_USER', `Hierarchy check: ${canAssign}`);
+        let canAssign = req.user.role === 'superadmin';
+        if (!canAssign) {
+          canAssign = await canAssignRole(userId, userCompanyId, role.level);
+        }
+        logger.success('CREATE_USER', `Hierarchy check: ${canAssign}`);
 
-      if (!canAssign) {
-        logger.error('CREATE_USER', 'Cannot assign role due to hierarchy', new Error('Role level too high'));
-        return res.status(403).json({
-          error: "Cannot assign role with same or higher authority than yours",
-        });
+        if (!canAssign) {
+          logger.error('CREATE_USER', 'Cannot assign role due to hierarchy', new Error('Role level too high'));
+          return res.status(403).json({
+            error: "Cannot assign role with same or higher authority than yours",
+          });
+        }
       }
 
       // Create user in Supabase Auth
@@ -372,26 +373,30 @@ router.post(
 
       logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
 
-      // Assign user to company with role
-      logger.debug('CREATE_USER', 'Assigning user to company', { user_id: authUser.user.id, company_id: userCompanyId, role_id });
-      const { data: assignment, error: assignError } = await supabaseAdmin
-        .from("user_company_roles")
-        .insert({
-          user_id: authUser.user.id,
-          company_id: userCompanyId,
-          role_id,
-          assigned_by: userId,
-          is_active: true,
-        })
-        .select()
-        .single();
+      // Assign user to company with role (only if role_id provided)
+      if (role_id && userCompanyId) {
+        logger.debug('CREATE_USER', 'Assigning user to company', { user_id: authUser.user.id, company_id: userCompanyId, role_id });
+        const { data: assignment, error: assignError } = await supabaseAdmin
+          .from("user_company_roles")
+          .insert({
+            user_id: authUser.user.id,
+            company_id: userCompanyId,
+            role_id,
+            assigned_by: userId,
+            is_active: true,
+          })
+          .select()
+          .single();
 
-      if (assignError) {
-        logger.error('CREATE_USER', 'Failed to assign user to company', assignError);
-        return res.status(400).json({ error: assignError.message });
+        if (assignError) {
+          logger.error('CREATE_USER', 'Failed to assign user to company', assignError);
+          return res.status(400).json({ error: assignError.message });
+        }
+
+        logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id, password_source: passwordSource });
+      } else {
+        logger.success('CREATE_USER', `User created without company assignment`, { user_id: authUser.user.id, password_source: passwordSource });
       }
-
-      logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id, password_source: passwordSource });
 
       res.status(201).json({
         message: needsVerification

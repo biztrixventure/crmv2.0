@@ -122,14 +122,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   let query = supabaseAdmin
     .from('call_reviews')
-    .select(`
-      id, rating, notes, created_at,
-      transfer_id,
-      company_id,
-      closer_id,
-      user_profiles!call_reviews_closer_id_fkey (first_name, last_name),
-      transfers!call_reviews_transfer_id_fkey (form_data, status, company_id)
-    `, { count: 'exact' })
+    .select('id, rating, notes, created_at, transfer_id, company_id, closer_id', { count: 'exact' })
     .order('created_at', { ascending: false });
 
   if (targetCompany) query = query.eq('company_id', targetCompany);
@@ -143,7 +136,27 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  res.json({ reviews: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  const reviews     = data || [];
+  const closerIds   = [...new Set(reviews.map(r => r.closer_id).filter(Boolean))];
+  const transferIds = [...new Set(reviews.map(r => r.transfer_id).filter(Boolean))];
+
+  const [profileResult, transferResult] = await Promise.all([
+    closerIds.length   > 0 ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', closerIds)   : { data: [] },
+    transferIds.length > 0 ? supabaseAdmin.from('transfers').select('id, form_data, status, company_id').in('id', transferIds) : { data: [] },
+  ]);
+
+  const profileMap  = {};
+  (profileResult.data  || []).forEach(p => { profileMap[p.user_id] = p; });
+  const transferMap = {};
+  (transferResult.data || []).forEach(t => { transferMap[t.id]     = t; });
+
+  const enriched = reviews.map(r => ({
+    ...r,
+    user_profiles: profileMap[r.closer_id]    || null,
+    transfers:     transferMap[r.transfer_id] || null,
+  }));
+
+  res.json({ reviews: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
 // ============================================================================
@@ -162,12 +175,7 @@ router.get('/dispositions', asyncHandler(async (req, res) => {
 
   let query = supabaseAdmin
     .from('call_dispositions')
-    .select(`
-      id, disposition, notes, created_at,
-      transfer_id, company_id, closer_id,
-      user_profiles!call_dispositions_closer_id_fkey (first_name, last_name),
-      transfers!call_dispositions_transfer_id_fkey (form_data, status)
-    `, { count: 'exact' })
+    .select('id, disposition, notes, created_at, transfer_id, company_id, closer_id', { count: 'exact' })
     .order('created_at', { ascending: false });
 
   if (targetCompany) query = query.eq('company_id', targetCompany);
@@ -179,7 +187,27 @@ router.get('/dispositions', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  res.json({ dispositions: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  const dispos      = data || [];
+  const closerIds   = [...new Set(dispos.map(d => d.closer_id).filter(Boolean))];
+  const transferIds = [...new Set(dispos.map(d => d.transfer_id).filter(Boolean))];
+
+  const [profileResult, transferResult] = await Promise.all([
+    closerIds.length   > 0 ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', closerIds)   : { data: [] },
+    transferIds.length > 0 ? supabaseAdmin.from('transfers').select('id, form_data, status').in('id', transferIds)                   : { data: [] },
+  ]);
+
+  const profileMap  = {};
+  (profileResult.data  || []).forEach(p => { profileMap[p.user_id] = p; });
+  const transferMap = {};
+  (transferResult.data || []).forEach(t => { transferMap[t.id]     = t; });
+
+  const enriched = dispos.map(d => ({
+    ...d,
+    user_profiles: profileMap[d.closer_id]    || null,
+    transfers:     transferMap[d.transfer_id] || null,
+  }));
+
+  res.json({ dispositions: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
 module.exports = router;

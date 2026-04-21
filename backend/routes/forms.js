@@ -20,6 +20,19 @@ const superadminOnly = (req, res, next) => {
 };
 
 // ============================================================================
+// GET /forms  (alias → same as /forms/fields)
+// ============================================================================
+router.get('/', asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('form_fields')
+    .select('*')
+    .order('order');
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ total: data.length, fields: data || [] });
+}));
+
+// ============================================================================
 // GET /forms/fields
 // ============================================================================
 router.get('/fields', asyncHandler(async (req, res) => {
