@@ -47,8 +47,8 @@ const StaffShell = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
-  const isFronter  = hasPermission('create_transfer');
-  const isCloser   = hasPermission('create_sale') || hasPermission('view_own_sales');
+  const isFronter  = user?.role === 'fronter' || (!hasPermission('create_sale') && hasPermission('create_transfer'));
+  const isCloser   = user?.role === 'closer'  || hasPermission('create_sale');
 
   const defaultTab = isCloser ? 'sales' : isFronter ? 'transfers' : 'callbacks';
   const [activeTab, setActiveTab] = useState(defaultTab);
