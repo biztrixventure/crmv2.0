@@ -54,7 +54,7 @@ const ManagerShell = () => {
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
     ...(hasPermission('view_team_sales')
       ? [{ key: 'team_sales', label: 'Team Sales',     icon: DollarSign }] : []),
-    ...(hasPermission('view_own_sales') || hasPermission('create_sale')
+    ...(hasPermission('create_sale')
       ? [{ key: 'my_sales',   label: 'My Sales',       icon: DollarSign }] : []),
     ...(hasPermission('view_team_callbacks')
       ? [{ key: 'callbacks',  label: 'Team Callbacks', icon: Phone      }] : []),
@@ -149,7 +149,7 @@ const ManagerShell = () => {
     if (!reassignCloser) { setReassignMsg('Select a closer.'); return; }
     setReassigning(true);
     try {
-      await client.post(`transfers/${reassignTarget.id}/reassign`, { closer_id: reassignCloser });
+      await client.put(`transfers/${reassignTarget.id}`, { assigned_closer_id: reassignCloser });
       setReassignTarget(null);
       setReassignCloser('');
       setReassignMsg('');
