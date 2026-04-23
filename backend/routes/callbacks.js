@@ -8,7 +8,12 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 // Role levels that can see all company callbacks
-const MANAGER_LEVELS = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'closer_manager', 'operations_manager', 'compliance_manager'];
+const MANAGER_LEVELS = [
+  'superadmin', 'readonly_admin',
+  'company_admin', 'operations_manager',
+  'fronter_manager', 'manager',
+  'closer_manager', 'compliance_manager',
+];
 
 // ============================================================================
 // GET /callbacks — list callbacks for current user (or all company if manager)

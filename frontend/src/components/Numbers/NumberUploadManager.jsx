@@ -64,9 +64,9 @@ const parseXLSX = async (file) => {
 };
 
 // ── NumberUploadManager ───────────────────────────────────────────────────────
-const NumberUploadManager = ({ user }) => {
+const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
   const fileInputRef  = useRef(null);
-  const companyId     = user?.company_id;
+  const companyId     = companyIdProp || user?.company_id;
 
   // ── Upload / preview state ──
   const [step,        setStep]        = useState('idle'); // idle | preview | assigning | done

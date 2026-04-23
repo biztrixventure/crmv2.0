@@ -16,20 +16,23 @@ const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
 const { sendPushToUser, sendPushToUsers } = require('./pushService');
 
-// Roles notified for company-wide manager events
+// All management roles — notified for company-wide events.
+// 'manager' kept for backward compat with legacy roles whose level was 'manager'
+// (same behavior as fronter_manager).
 const MANAGER_LEVELS = [
-  'manager',
-  'fronter_manager',
-  'closer_manager',
-  'operations_manager',
-  'compliance_manager',
-  'company_admin',
-  'readonly_admin',
-  'superadmin',
+  'superadmin', 'readonly_admin',
+  'company_admin', 'operations_manager',
+  'fronter_manager', 'manager',
+  'closer_manager', 'compliance_manager',
 ];
 
-// Roles that are "floor managers" — receive per-event (transfer/sale) notifications
-const FLOOR_MANAGER_LEVELS = ['manager', 'fronter_manager', 'closer_manager', 'operations_manager'];
+// Floor managers — receive per-event (transfer/sale) notifications.
+// Does NOT include compliance_manager (they only care about sales in review queue).
+const FLOOR_MANAGER_LEVELS = [
+  'company_admin', 'operations_manager',
+  'fronter_manager', 'manager',
+  'closer_manager',
+];
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

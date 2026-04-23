@@ -195,7 +195,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "fronter_manager", "manager", "operations_manager", "closer_manager", "compliance_manager", "operations"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],
@@ -261,6 +261,23 @@ router.post(
         return res.status(403).json({
           error: "Cannot create role with same or higher authority",
         });
+      }
+
+      // Enforce company-type / role-level alignment
+      if (targetCompanyId) {
+        const { data: co } = await supabaseAdmin
+          .from('companies').select('company_type').eq('id', targetCompanyId).single();
+        if (co?.company_type) {
+          const FRONTER_LEVELS = ['fronter', 'fronter_manager', 'operations_manager', 'company_admin'];
+          const CLOSER_LEVELS  = ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
+          const allowed = co.company_type === 'fronter' ? FRONTER_LEVELS : CLOSER_LEVELS;
+          if (!allowed.includes(level)) {
+            return res.status(400).json({
+              error: `Role level "${level}" is not valid for a ${co.company_type} company. ` +
+                     `Allowed levels: ${allowed.join(', ')}`,
+            });
+          }
+        }
       }
 
       // Create role
@@ -546,32 +563,47 @@ const OPS_MANAGER_ROLE = {
   ],
 };
 
-// Fronter company: lead generation side — no sales workflow, no compliance
+// ─── Canonical permission sets ───────────────────────────────────────────────
+// These are the single source of truth for default role permissions.
+// Used by both seed-defaults and seed-defaults?reset=true.
+// Hierarchy: company_admin ⊇ operations_manager ⊇ fronter_manager ⊇ fronter
+//            company_admin ⊇ operations_manager ⊇ closer_manager  ⊇ closer
+//                                                ⊇ compliance_manager
+
+// Fronter company: lead generation side — no sales creation, no compliance
 const FRONTER_DEFAULTS = [
   {
     name: 'Fronter',
     description: 'Creates transfers/leads, manages own pipeline and callbacks',
     level: 'fronter',
     permissions: [
+      // Transfers
       'create_transfer', 'view_own_transfers',
+      // Callbacks
       'manage_callbacks', 'view_callbacks', 'manage_callback_numbers',
-      'view_own_sales',
-      'submit_call_review', 'submit_call_dispo',
+      // Notifications
       'view_notifications',
     ],
   },
   {
     name: 'Fronter Manager',
-    description: 'Manages fronter team — routes transfers, tracks pipeline and callbacks',
+    description: 'Manages fronter team — routes transfers, tracks pipeline and call reviews',
     level: 'fronter_manager',
     permissions: [
+      // Transfers — full team visibility + routing
       'create_transfer', 'view_own_transfers', 'view_team_transfers', 'view_all_company_transfers',
       'assign_transfer', 'reassign_transfer', 'edit_transfer_reason',
+      // Callbacks
       'manage_callbacks', 'view_callbacks', 'view_team_callbacks', 'manage_callback_numbers',
-      'view_own_sales', 'view_team_sales',
-      'submit_call_review', 'submit_call_dispo', 'view_call_reviews',
+      // Sales visibility (read-only — see where leads went)
+      'view_team_sales', 'search_sales',
+      // Reviews
+      'view_call_reviews', 'view_all_call_reviews',
+      // Reports
       'view_fronter_stats', 'view_company_reports',
+      // Team management
       'view_company_members', 'create_user', 'edit_user',
+      // Notifications
       'view_notifications',
     ],
   },
@@ -586,10 +618,16 @@ const CLOSER_DEFAULTS = [
     description: 'Receives transfers, converts to sales, schedules callbacks',
     level: 'closer',
     permissions: [
+      // Transfers
       'view_own_transfers', 'reject_transfer',
+      // Sales — own pipeline
       'create_sale', 'view_own_sales', 'update_sale', 'submit_for_review',
+      'view_financial_data',
+      // Callbacks
       'manage_callbacks', 'view_callbacks',
+      // Reviews
       'submit_call_review', 'submit_call_dispo',
+      // Notifications
       'view_notifications',
     ],
   },
@@ -598,28 +636,40 @@ const CLOSER_DEFAULTS = [
     description: 'Manages closer team — tracks all sales, callbacks and assigned transfers',
     level: 'closer_manager',
     permissions: [
+      // Transfers — full team visibility + routing
       'view_own_transfers', 'reject_transfer',
       'view_team_transfers', 'view_all_company_transfers',
       'assign_transfer', 'reassign_transfer', 'edit_transfer_reason',
+      // Sales — full team visibility
       'create_sale', 'view_own_sales', 'update_sale', 'submit_for_review',
       'view_team_sales', 'view_financial_data', 'search_sales',
+      // Callbacks
       'manage_callbacks', 'view_callbacks', 'view_team_callbacks',
+      // Reviews
       'submit_call_review', 'submit_call_dispo',
       'view_call_reviews', 'view_all_call_reviews',
+      // Reports
       'view_closer_stats', 'view_company_reports',
+      // Team management
       'view_company_members', 'create_user', 'edit_user',
+      // Notifications
       'view_notifications',
     ],
   },
   {
     name: 'Compliance Manager',
-    description: 'Reviews submitted sales — can approve, return, or reject back to closers',
+    description: 'Reviews submitted sales — can approve, return, or modify back to closers',
     level: 'compliance_manager',
     permissions: [
+      // Compliance actions
       'manage_compliance',
+      // Sales visibility (read + review)
       'view_team_sales', 'view_all_company_sales', 'view_financial_data', 'search_sales',
+      // Team visibility
       'view_company_members',
+      // Reviews
       'view_all_call_reviews',
+      // Notifications
       'view_notifications',
     ],
   },
@@ -628,54 +678,63 @@ const CLOSER_DEFAULTS = [
 ];
 
 router.post('/seed-defaults', asyncHandler(async (req, res) => {
-  const userId = req.user.id;
+  const userId    = req.user.id;
   const companyId = req.query.company_id || req.body.company_id || req.user.company_id;
+  // reset=true → wipe & re-apply permissions on EXISTING roles (keeps user assignments)
+  const reset     = req.query.reset === 'true' || req.body.reset === true;
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
   const superadmin = await isSuperAdmin(userId);
   if (!superadmin) return res.status(403).json({ error: 'SuperAdmin only' });
 
-  // Fetch company_type to select correct role set
   const { data: company, error: companyErr } = await supabaseAdmin
-    .from('companies')
-    .select('company_type')
-    .eq('id', companyId)
-    .single();
-
-  if (companyErr || !company) {
-    return res.status(404).json({ error: 'Company not found' });
-  }
+    .from('companies').select('company_type').eq('id', companyId).single();
+  if (companyErr || !company) return res.status(404).json({ error: 'Company not found' });
 
   const defaults = company.company_type === 'closer' ? CLOSER_DEFAULTS : FRONTER_DEFAULTS;
-  logger.info('SEED_ROLES', `Seeding ${company.company_type} defaults`, { companyId, count: defaults.length });
+  logger.info('SEED_ROLES', `Seeding ${company.company_type} defaults (reset=${reset})`, { companyId });
 
-  // Fetch all permission IDs once
   const { data: allPerms } = await supabaseAdmin.from('permissions').select('id, name');
   const permMap = Object.fromEntries((allPerms || []).map(p => [p.name, p.id]));
 
-  // Fetch existing role names for this company to skip duplicates
   const { data: existing } = await supabaseAdmin
-    .from('custom_roles')
-    .select('name')
-    .eq('company_id', companyId);
-  const existingNames = new Set((existing || []).map(r => r.name));
+    .from('custom_roles').select('id, name').eq('company_id', companyId);
+  const existingMap = Object.fromEntries((existing || []).map(r => [r.name, r.id]));
 
   const created = [];
+  const updated = [];
   const skipped = [];
 
   for (const tpl of defaults) {
-    if (existingNames.has(tpl.name)) { skipped.push(tpl.name); continue; }
+    const permIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
 
+    if (existingMap[tpl.name]) {
+      // Role already exists
+      if (reset) {
+        // Re-apply the canonical permission set
+        const roleId = existingMap[tpl.name];
+        await supabaseAdmin.from('role_permissions').delete().eq('role_id', roleId);
+        if (permIds.length > 0) {
+          await supabaseAdmin.from('role_permissions').insert(
+            permIds.map(pid => ({ role_id: roleId, permission_id: pid }))
+          );
+        }
+        updated.push(tpl.name);
+      } else {
+        skipped.push(tpl.name);
+      }
+      continue;
+    }
+
+    // Create new role
     const { data: role, error: roleErr } = await supabaseAdmin
       .from('custom_roles')
       .insert({ name: tpl.name, description: tpl.description, level: tpl.level, company_id: companyId })
-      .select()
-      .single();
+      .select().single();
 
     if (roleErr) { logger.warn('SEED_ROLES', `Failed to create ${tpl.name}: ${roleErr.message}`); continue; }
 
-    const permIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
     if (permIds.length > 0) {
       await supabaseAdmin.from('role_permissions').insert(
         permIds.map(pid => ({ role_id: role.id, permission_id: pid }))
@@ -684,8 +743,8 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
     created.push(tpl.name);
   }
 
-  logger.success('SEED_ROLES', `Seeded defaults: created=${created.join(',')}, skipped=${skipped.join(',')}`);
-  res.json({ message: 'Default roles seeded', created, skipped, company_type: company.company_type });
+  logger.success('SEED_ROLES', `Done: created=[${created}] updated=[${updated}] skipped=[${skipped}]`);
+  res.json({ message: 'Default roles seeded', created, updated, skipped, company_type: company.company_type, reset });
 }));
 
 module.exports = router;

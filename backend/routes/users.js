@@ -327,6 +327,22 @@ router.post(
             error: "Cannot assign role with same or higher authority than yours",
           });
         }
+
+        // Validate role level is compatible with company type
+        if (userCompanyId) {
+          const { data: co } = await supabaseAdmin
+            .from('companies').select('company_type').eq('id', userCompanyId).single();
+          if (co?.company_type) {
+            const FRONTER_LEVELS = ['fronter', 'fronter_manager', 'operations_manager', 'company_admin'];
+            const CLOSER_LEVELS  = ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
+            const allowed = co.company_type === 'fronter' ? FRONTER_LEVELS : CLOSER_LEVELS;
+            if (!allowed.includes(role.level)) {
+              return res.status(400).json({
+                error: `Role level "${role.level}" is not valid for a ${co.company_type} company. Allowed levels: ${allowed.join(', ')}`,
+              });
+            }
+          }
+        }
       }
 
       // Create user in Supabase Auth
@@ -492,6 +508,20 @@ router.put(
         if (!canAssign) {
           logger.error('UPDATE_USER', 'Cannot assign new role due to hierarchy', new Error('Role level too high'));
           return res.status(403).json({ error: "Cannot assign this role" });
+        }
+
+        // Validate role level is compatible with company type
+        const { data: co } = await supabaseAdmin
+          .from('companies').select('company_type').eq('id', targetAssignment.company_id).single();
+        if (co?.company_type && newRole?.level) {
+          const FRONTER_LEVELS = ['fronter', 'fronter_manager', 'operations_manager', 'company_admin'];
+          const CLOSER_LEVELS  = ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
+          const allowed = co.company_type === 'fronter' ? FRONTER_LEVELS : CLOSER_LEVELS;
+          if (!allowed.includes(newRole.level)) {
+            return res.status(400).json({
+              error: `Role level "${newRole.level}" is not valid for a ${co.company_type} company. Allowed levels: ${allowed.join(', ')}`,
+            });
+          }
         }
       }
 
