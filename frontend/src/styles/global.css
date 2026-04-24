@@ -134,7 +134,8 @@
   --radius-full: 9999px;   /* pill-shaped */
 
   /* ========== TYPOGRAPHY ========== */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Playfair Display', Georgia, serif;
   --font-serif: 'Merriweather', 'Georgia', serif;
   --font-mono: 'Fira Code', 'Courier New', monospace;
 
@@ -182,34 +183,76 @@
   --gradient-sidebar: linear-gradient(180deg, #A8885C 0%, #C4A77E 100%);
 }
 
-/* Dark Mode */
+/* Dark Mode — Warm Obsidian */
 html.dark {
-  /* ========== PRIMARY COLORS - Black Matte ========== */
-  --color-bg: #0a0a0a;
-  --color-text: #fafafa;
-  --color-border: #262626;
-  --color-primary: #525252;
-  --color-primary-50: #fafafa;
-  --color-primary-100: #f5f5f5;
-  --color-primary-200: #e5e5e5;
-  --color-primary-300: #d4d4d4;
-  --color-primary-400: #a3a3a3;
-  --color-primary-500: #737373;
-  --color-primary-600: #525252;
-  --color-primary-700: #262626;
-  --color-primary-800: #171717;
-  --color-primary-900: #0a0a0a;
+  /* ========== BACKGROUNDS — deep warm brown-black ========== */
+  --color-bg: #0D0A07;
+  --color-bg-secondary: #150D07;
+  --color-surface: #1A1108;
+  --color-surface-hover: #241508;
+  --color-border: #2C1E10;
 
-  /* ========== SECONDARY COLORS & ACCENTS ========== */
-  --color-accent: #525252;
-  --color-cream-200: #262626;
-  --color-cream-400: #404040;
-  --color-cream-500: #525252;
-  --color-bg-secondary: #1a1a1a;
-  --color-surface: #171717;
-  --color-surface-hover: #262626;
+  /* ========== TEXT — warm cream ========== */
+  --color-text: #F0E6D8;
+  --color-text-secondary: #C0A282;
+  --color-text-tertiary: #7A6448;
+  --color-text-disabled: #4A3828;
+  --color-text-inverse: #0D0A07;
+  --color-placeholder: #6A5040;
 
-  /* ========== ERROR/VALIDATION COLORS - Dark Mode ========== */
+  /* ========== LINKS — warm amber ========== */
+  --color-link: #D4A060;
+  --color-link-hover: #E8C080;
+  --color-link-visited: #C4894A;
+
+  /* ========== PRIMARY — warm amber brand scale ========== */
+  --color-primary: #C4894A;
+  --color-primary-50: #EDD8B4;
+  --color-primary-100: #D4B880;
+  --color-primary-200: #B89060;
+  --color-primary-300: #9A6E38;
+  --color-primary-400: #7E5028;
+  --color-primary-500: #C4894A;
+  --color-primary-600: #C4894A;
+  --color-primary-700: #9E6830;
+  --color-primary-800: #241508;
+  --color-primary-900: #150D07;
+
+  /* ========== SECONDARY COLORS ========== */
+  --color-accent: #D4905A;
+  --color-cream-200: #2C1E10;
+  --color-cream-400: #5A3818;
+  --color-cream-500: #7A5030;
+
+  /* ========== INTERACTIVE STATES ========== */
+  --color-disabled-text: #5A4030;
+  --color-disabled-bg: #1E1408;
+  --color-interactive-hover: #241508;
+  --color-interactive-active: #2C1E10;
+  --color-focus-ring: #D4905A;
+
+  /* ========== SCROLLBAR ========== */
+  --scrollbar-track: #0D0A07;
+  --scrollbar-thumb: #2C1E10;
+  --scrollbar-thumb-hover: #4A3018;
+
+  /* ========== LOADING STATES ========== */
+  --color-skeleton: #1A1108;
+  --color-skeleton-secondary: #2C1E10;
+
+  /* ========== SHADOWS — warm-tinted ========== */
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
+
+  /* ========== GRADIENTS ========== */
+  --gradient-warm: linear-gradient(135deg, #1A1108 0%, #0D0A07 50%, #150D07 100%);
+  --gradient-sidebar: linear-gradient(180deg, #7A4820 0%, #5A3210 100%);
+
+  /* ========== ERROR — Dark Mode ========== */
   --color-error-50: #7F1D1D;
   --color-error-100: #991B1B;
   --color-error-200: #B91C1C;
@@ -221,7 +264,7 @@ html.dark {
   --color-error-800: #FEF2F2;
   --color-error-900: #FFFFFF;
 
-  /* ========== SUCCESS COLORS - Dark Mode ========== */
+  /* ========== SUCCESS — Dark Mode ========== */
   --color-success-50: #145231;
   --color-success-100: #166534;
   --color-success-200: #15803D;
@@ -233,7 +276,7 @@ html.dark {
   --color-success-800: #DCFCE7;
   --color-success-900: #F0FDF4;
 
-  /* ========== WARNING COLORS - Dark Mode ========== */
+  /* ========== WARNING — Dark Mode ========== */
   --color-warning-50: #78350F;
   --color-warning-100: #92400E;
   --color-warning-200: #B45309;
@@ -245,7 +288,7 @@ html.dark {
   --color-warning-800: #FEF3C7;
   --color-warning-900: #FFFBEB;
 
-  /* ========== INFO COLORS - Dark Mode ========== */
+  /* ========== INFO — Dark Mode ========== */
   --color-info-50: #0C4A6E;
   --color-info-100: #075985;
   --color-info-200: #0369A1;
@@ -256,44 +299,6 @@ html.dark {
   --color-info-700: #BAE6FD;
   --color-info-800: #E0F2FE;
   --color-info-900: #F0F9FF;
-
-  /* ========== SEMANTIC TEXT COLORS - Dark Mode ========== */
-  --color-text-secondary: #D1D5DB;
-  --color-text-tertiary: #9CA3AF;
-  --color-text-disabled: #6B7280;
-  --color-text-inverse: #0a0a0a;
-  --color-placeholder: #6B7280;
-  --color-link: #93C5FD;
-  --color-link-hover: #BFDBFE;
-  --color-link-visited: #C4B5FD;
-
-  /* ========== INTERACTIVE STATES - Dark Mode ========== */
-  --color-disabled-text: #6B7280;
-  --color-disabled-bg: #374151;
-  --color-interactive-hover: #262626;
-  --color-interactive-active: #404040;
-  --color-focus-ring: #93C5FD;
-
-  /* ========== SCROLLBAR COLORS - Dark ========== */
-  --scrollbar-track: #0a0a0a;
-  --scrollbar-thumb: #262626;
-  --scrollbar-thumb-hover: #404040;
-
-  /* ========== LOADING STATES - Dark Mode ========== */
-  --color-skeleton: #1a1a1a;
-  --color-skeleton-secondary: #262626;
-
-  /* ========== SHADOWS - Dark Mode (More Prominent) ========== */
-  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
-  --shadow-elevated: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
-
-  /* ========== GRADIENTS - Dark ========== */
-  --gradient-warm: linear-gradient(135deg, #171717 0%, #0a0a0a 50%, #000000 100%);
-  --gradient-sidebar: linear-gradient(180deg, #262626 0%, #171717 100%);
 }
 
 /* ============================================================================
@@ -687,8 +692,8 @@ strong {
   }
 
   html.dark .input:focus {
-    border-color: var(--color-info-500);
-    box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.1);
+    border-color: var(--color-primary-500);
+    box-shadow: 0 0 0 3px rgba(196, 137, 74, 0.15);
   }
 
   .input:disabled {
@@ -898,11 +903,11 @@ strong {
   }
 
   html.dark .link {
-    color: var(--color-info-400);
+    color: var(--color-link);
   }
 
   html.dark .link:hover {
-    color: var(--color-info-300);
+    color: var(--color-link-hover);
   }
 
   /* ========== FORM GROUP STYLES ========== */
