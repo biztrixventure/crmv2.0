@@ -32,10 +32,9 @@ const Field = ({ label, required, error, hint, children, className = '' }) => (
 );
 
 const STATUSES = [
-  { value: 'sold',      label: 'SOLD',      color: '#22c55e' },
-  { value: 'open',      label: 'PENDING',   color: '#f59e0b' },
+  { value: 'open',      label: 'OPEN',      color: '#f59e0b' },
+  { value: 'follow_up', label: 'CALLBACK',  color: '#3b82f6' },
   { value: 'cancelled', label: 'CANCELLED', color: '#ef4444' },
-  { value: 'follow_up', label: 'FOLLOW UP', color: '#3b82f6' },
 ];
 
 // Maps known form field names to sales table columns for search indexing
@@ -83,7 +82,7 @@ const SaleForm = ({ user, transfer = null, onSubmit, isLoading = false }) => {
     client_name:      '',
     fronter_id:       '',
     sale_date:        new Date().toISOString().split('T')[0],
-    status:           'sold',
+    status:           'open',
   });
 
   // Fetch fronters in the same company

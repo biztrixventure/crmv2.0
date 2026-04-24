@@ -4,7 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Shield, Search, RefreshCw, ChevronDown, ChevronUp,
-  FileText, Star, CheckCircle, RotateCcw, Clock,
+  FileText, Star, CheckCircle, RotateCcw, Clock, Download,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import { AppHeader } from "../components/Layout";
@@ -32,8 +32,11 @@ const ALL_STATUSES = [
   'pending_review', 'needs_revision',
 ];
 
-const POST_CONFIRM_STATUSES = [
-  'closed_won', 'compliance_cancelled', 'dispute', 'chargeback', 'closed_lost',
+// Statuses compliance can set via the /compliance endpoint
+const COMPLIANCE_EDIT_STATUSES = [
+  'open', 'sold', 'cancelled', 'follow_up',
+  'closed_won', 'closed_lost',
+  'compliance_cancelled', 'dispute', 'chargeback',
 ];
 
 const RATING_COLOR = {
@@ -229,6 +232,33 @@ const ComplianceShell = () => {
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); loadSales(); };
 
+  const exportCSV = () => {
+    const headers = ['Customer','Phone','Email','Reference','Vehicle','Plan','Monthly Payment','Down Payment','Status','Sale Date','Created At'];
+    const rows = sales.map(s => [
+      s.customer_name   || '',
+      s.customer_phone  || '',
+      s.customer_email  || '',
+      s.reference_no    || '',
+      [s.car_year, s.car_make, s.car_model].filter(Boolean).join(' '),
+      s.plan            || '',
+      s.monthly_payment || '',
+      s.down_payment    || '',
+      s.status          || '',
+      s.sale_date       || '',
+      s.created_at ? new Date(s.created_at).toLocaleDateString() : '',
+    ]);
+    const csv = [headers, ...rows]
+      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `sales_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── Tabs config ───────────────────────────────────────────────────────────
   const TABS = [
     { key: 'queue',   label: 'Pending Review', icon: Clock,      badge: queue.length || null },
@@ -419,11 +449,19 @@ const ComplianceShell = () => {
                   Full sales history for your company
                 </p>
               </div>
-              <button onClick={loadSales}
-                className="p-2 rounded-lg hover:bg-bg-secondary transition-colors"
-                title="Refresh">
-                <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={exportCSV} disabled={sales.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-105 disabled:opacity-40"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  title="Export current results to CSV">
+                  <Download size={14} /> Export CSV
+                </button>
+                <button onClick={loadSales}
+                  className="p-2 rounded-lg hover:bg-bg-secondary transition-colors"
+                  title="Refresh">
+                  <RefreshCw size={18} style={{ color: 'var(--color-text-secondary)' }} />
+                </button>
+              </div>
             </div>
 
             {/* Filters */}
@@ -509,15 +547,7 @@ const ComplianceShell = () => {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
-                                {POST_CONFIRM_STATUSES.includes(s.status) && (
-                                  <button
-                                    onClick={() => openEdit(s)}
-                                    className="px-3 py-1 rounded-lg text-xs font-bold text-white transition-all hover:scale-105"
-                                    style={{ background: 'var(--gradient-sidebar)' }}>
-                                    Update
-                                  </button>
-                                )}
-                                {s.status === 'pending_review' && (
+                                {s.status === 'pending_review' ? (
                                   <div className="flex items-center gap-1">
                                     <button
                                       onClick={() => handleApprove(s)}
@@ -533,6 +563,13 @@ const ComplianceShell = () => {
                                       Return
                                     </button>
                                   </div>
+                                ) : (
+                                  <button
+                                    onClick={() => openEdit(s)}
+                                    className="px-3 py-1 rounded-lg text-xs font-bold text-white transition-all hover:scale-105"
+                                    style={{ background: 'var(--gradient-sidebar)' }}>
+                                    Update
+                                  </button>
                                 )}
                                 {Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
                                   <button
@@ -807,7 +844,7 @@ const ComplianceShell = () => {
 
             <label className="block text-sm font-medium text-text-secondary mb-1">New Status</label>
             <select value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input mb-3">
-              {POST_CONFIRM_STATUSES.map(s => (
+              {COMPLIANCE_EDIT_STATUSES.map(s => (
                 <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
               ))}
             </select>

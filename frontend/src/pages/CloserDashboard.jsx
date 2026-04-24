@@ -22,8 +22,8 @@ import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
 
 const statusBadge  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error' };
-const saleBadge    = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'info', closed_won: 'success', closed_lost: 'error' };
-const saleLabel    = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Won', closed_lost: 'Lost' };
+const saleBadge    = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
+const saleLabel    = { open: 'Open', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Callback', closed_won: 'Won', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
 const RATINGS      = ['excellent', 'good', 'average', 'below_average', 'bad'];
 const DISPOS       = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
 const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
@@ -109,6 +109,8 @@ const CloserDashboard = () => {
       setSaleSuccess(`Sale created! Ref: ${formData.reference_no || 'Generated'}`);
       fetchStats();
       fetchTransfers({ date_from, date_to });
+      fetchSales({ date_from, date_to });
+      if (formData.status === 'follow_up') setActiveTab('callbacks');
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       const msg = err.response?.data?.errors
@@ -125,6 +127,18 @@ const CloserDashboard = () => {
       await updateSale(saleId, { status });
       fetchStats();
     } catch {}
+  };
+
+  const handleSubmitForReview = async (saleId) => {
+    try {
+      await client.post(`sales/${saleId}/submit-review`);
+      setSaleSuccess('Sale submitted for compliance review!');
+      fetchSales({ date_from, date_to });
+      fetchStats();
+      setTimeout(() => setSaleSuccess(''), 5000);
+    } catch (err) {
+      setSaleError(err.response?.data?.error || 'Failed to submit for review');
+    }
   };
 
   const handleRateCall = async () => {
@@ -150,6 +164,7 @@ const CloserDashboard = () => {
       setDispoTarget(null);
       setReviewSuccess('Disposition saved!');
       setTimeout(() => setReviewSuccess(''), 4000);
+      if (dispoVal === 'callback') setActiveTab('callbacks');
     } catch (err) {
       setDispoMsg(err.response?.data?.error || 'Failed to save disposition');
     } finally {
@@ -452,22 +467,32 @@ const CloserDashboard = () => {
                         )}
                       </div>
                     </div>
-                    {s.status === 'open' && hasPermission('update_sale') && (
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          onClick={() => handleUpdateSale(s.id, 'sold')}
-                          className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
-                          style={{ backgroundColor: '#16a34a' }}
-                        >
-                          <CheckCircle size={12} /> Mark Sold
-                        </button>
-                        <button
-                          onClick={() => handleUpdateSale(s.id, 'cancelled')}
-                          className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-red-600 flex items-center justify-center gap-1 border transition-all hover:bg-red-50"
-                          style={{ borderColor: '#ef4444' }}
-                        >
-                          <XCircle size={12} /> Cancel
-                        </button>
+                    {(s.status === 'open' || s.status === 'needs_revision') && hasPermission('update_sale') && (
+                      <div className="flex flex-col gap-2 mt-3">
+                        {s.status === 'needs_revision' && s.compliance_note && (
+                          <div className="text-xs px-2 py-1.5 rounded-lg"
+                            style={{ backgroundColor: 'var(--color-warning-50)', color: 'var(--color-warning-700)', border: '1px solid var(--color-warning-200)' }}>
+                            <strong>Compliance note:</strong> {s.compliance_note}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSubmitForReview(s.id)}
+                            className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
+                            style={{ background: 'var(--gradient-sidebar)' }}
+                          >
+                            <Shield size={12} /> {s.status === 'needs_revision' ? 'Resubmit' : 'Submit for Review'}
+                          </button>
+                          {s.status === 'open' && (
+                            <button
+                              onClick={() => handleUpdateSale(s.id, 'cancelled')}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border transition-all hover:bg-error-50"
+                              style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}
+                            >
+                              <XCircle size={12} /> Cancel
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
