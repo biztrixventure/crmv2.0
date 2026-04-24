@@ -33,7 +33,7 @@ router.get(
           .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
         const coUserIds = (coUsers || []).map(u => u.user_id);
         if (userRole === 'closer') {
-          transferQuery = transferQuery.eq('assigned_to', userId);
+          transferQuery = transferQuery.eq('assigned_closer_id', userId);
         } else if (coUserIds.length > 0) {
           transferQuery = transferQuery.in('assigned_closer_id', coUserIds);
         } else {
@@ -73,7 +73,7 @@ router.get(
       }
 
       if (userRole === 'closer') {
-        salesQuery = salesQuery.eq('created_by', userId);
+        salesQuery = salesQuery.eq('closer_id', userId);
       }
 
       const { data: sales, count: salesCount } = await salesQuery;
@@ -85,7 +85,7 @@ router.get(
 
       // Conversion rate
       stats.conversionRate = stats.totalTransfers > 0
-        ? Math.round((stats.closedWon / stats.totalTransfers) * 100)
+        ? Math.round((stats.completedTransfers / stats.totalTransfers) * 100)
         : 0;
 
       // Admin-level stats

@@ -182,7 +182,7 @@ router.post('/', [
   if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
 
   const userId    = req.user.id;
-  const companyId = req.body.company_id || req.user.company_id;
+  const companyId = req.user.company_id;
   const { form_data, assigned_closer_id } = req.body;
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
@@ -294,6 +294,27 @@ router.put('/:id', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Permission denied' });
   }
 
+  // Company scope guard for non-superadmin managers
+  if (isManager && userRole !== 'superadmin') {
+    const userCompanyId = req.user.company_id;
+    const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole);
+    if (isCloserSide) {
+      // Closer-side managers: verify assigned_closer_id belongs to their company
+      if (existing.assigned_closer_id) {
+        const { data: ucr } = await supabaseAdmin
+          .from('user_company_roles')
+          .select('user_id')
+          .eq('company_id', userCompanyId)
+          .eq('user_id', existing.assigned_closer_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (!ucr) return res.status(403).json({ error: 'Transfer not within your company scope' });
+      }
+    } else if (existing.company_id !== userCompanyId) {
+      return res.status(403).json({ error: 'Transfer not within your company scope' });
+    }
+  }
+
   // If manager is editing form_data, reason is required
   if (form_data && isManager && !reason) {
     return res.status(400).json({ error: 'A reason is required when editing transfer data' });
@@ -304,6 +325,15 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
   // Reassign to a different closer
   if (assigned_closer_id) {
+    const { data: closerRoleRow } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('custom_roles(level)')
+      .eq('user_id', assigned_closer_id)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!closerRoleRow || closerRoleRow.custom_roles?.level !== 'closer') {
+      return res.status(400).json({ error: 'Assigned user must have the closer role' });
+    }
     updates.assigned_closer_id = assigned_closer_id;
     updates.assigned_to        = assigned_closer_id;
     if (!status) updates.status = 'assigned';

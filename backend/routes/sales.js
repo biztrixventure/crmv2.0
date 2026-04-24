@@ -393,9 +393,19 @@ router.put(
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
+    // Company scope: managers can only edit sales in their own company
+    if (isManager && userRole !== 'superadmin' && existing.company_id !== req.user.company_id) {
+      return res.status(403).json({ error: 'Sale not within your company scope' });
+    }
+
     // Block edits to sales under compliance review (except by compliance/superadmin)
     if (existing.status === 'pending_review' && !isCompliance) {
       return res.status(403).json({ error: 'This sale is under compliance review and cannot be edited' });
+    }
+
+    // Block edits to finalized sales (except by compliance/superadmin)
+    if (['closed_won', 'closed_lost'].includes(existing.status) && !isCompliance) {
+      return res.status(403).json({ error: 'This sale has been finalized and cannot be edited' });
     }
 
     const {
@@ -408,6 +418,9 @@ router.put(
     const validStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status', allowed: validStatuses });
+    }
+    if (status && ['closed_won', 'closed_lost'].includes(status) && !isCompliance) {
+      return res.status(400).json({ error: 'This status can only be set through the compliance workflow' });
     }
 
     const updates = { updated_at: new Date().toISOString() };
@@ -550,7 +563,7 @@ router.post('/:id/compliance-approve', asyncHandler(async (req, res) => {
 // POST /sales/:id/compliance-return — Compliance returns sale to closer with note
 // ============================================================================
 router.post('/:id/compliance-return', [
-  body('note').isString().trim().notEmpty().withMessage('A note explaining what needs to change is required'),
+  body('note').isString().trim().notEmpty().withMessage('A note explaining what needs to change is required').isLength({ max: 2000 }).withMessage('Note must be 2000 characters or fewer'),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
