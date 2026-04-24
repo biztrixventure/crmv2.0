@@ -74,7 +74,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const ownerId   = req.query.owner_id; // manager filter by member
 
   const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
   let query = supabaseAdmin
     .from('callback_numbers')
@@ -148,7 +148,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
   const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
   const { data: number, error } = await supabaseAdmin
     .from('callback_numbers')
@@ -469,7 +469,7 @@ router.put('/:id',
     const userId   = req.user.id;
 
     const superadmin = await isSuperAdmin(userId);
-    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
     const { data: existing } = await supabaseAdmin
       .from('callback_numbers')
@@ -509,7 +509,7 @@ router.put('/:id/reassign',
 
     const userId   = req.user.id;
     const superadmin = await isSuperAdmin(userId);
-    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
     if (!isManager) return res.status(403).json({ error: 'Managers only' });
 
     const { id }          = req.params;
@@ -565,7 +565,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const userId   = req.user.id;
 
   const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
   const { data: number } = await supabaseAdmin
     .from('callback_numbers')
@@ -601,7 +601,7 @@ router.get('/:id/team-members', asyncHandler(async (req, res) => {
   const companyId = req.user.company_id;
 
   const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role_level);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
   if (!isManager) return res.status(403).json({ error: 'Managers only' });
 
   const { data } = await supabaseAdmin

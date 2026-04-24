@@ -113,24 +113,31 @@ router.get('/fronters', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-  const { data, error } = await supabaseAdmin
+  const { data: roleRows, error } = await supabaseAdmin
     .from('user_company_roles')
-    .select(`
-      user_id,
-      custom_roles!inner (level),
-      user_profiles!inner (first_name, last_name)
-    `)
+    .select('user_id, custom_roles!inner(level)')
     .eq('company_id', companyId)
     .eq('is_active', true);
 
   if (error) return res.status(500).json({ error: error.message });
 
-  const fronters = (data || [])
+  const fronterIds = (roleRows || [])
     .filter(r => r.custom_roles?.level === 'fronter')
-    .map(r => ({
-      id:   r.user_id,
-      name: `${r.user_profiles?.first_name || ''} ${r.user_profiles?.last_name || ''}`.trim() || 'Unknown',
-    }));
+    .map(r => r.user_id);
+
+  if (!fronterIds.length) return res.json({ fronters: [] });
+
+  const { data: profiles } = await supabaseAdmin
+    .from('user_profiles')
+    .select('user_id, first_name, last_name')
+    .in('user_id', fronterIds);
+
+  const profileMap = {};
+  (profiles || []).forEach(p => {
+    profileMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+  });
+
+  const fronters = fronterIds.map(id => ({ id, name: profileMap[id] || 'Unknown' }));
 
   res.json({ fronters });
 }));
