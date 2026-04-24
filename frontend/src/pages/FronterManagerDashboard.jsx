@@ -235,8 +235,8 @@ const FronterManagerDashboard = () => {
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
                 style={{
-                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                  color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  background: activeTab === tab.key ? 'var(--gradient-sidebar)' : 'transparent',
+                  color: activeTab === tab.key ? 'white' : 'var(--color-text-secondary)',
                   boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
                 }}>
                 <tab.icon size={15} />

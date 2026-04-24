@@ -267,8 +267,8 @@ const ComplianceShell = () => {
             <button key={t.key} onClick={() => setActiveTab(t.key)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
               style={{
-                backgroundColor: activeTab === t.key ? 'var(--color-surface)' : 'transparent',
-                color: activeTab === t.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                background: activeTab === t.key ? 'var(--gradient-sidebar)' : 'transparent',
+                color: activeTab === t.key ? 'white' : 'var(--color-text-secondary)',
                 boxShadow: activeTab === t.key ? 'var(--shadow-sm)' : 'none',
               }}>
               <t.icon size={15} />

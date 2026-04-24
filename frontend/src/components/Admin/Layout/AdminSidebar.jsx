@@ -104,9 +104,9 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
       <div className="p-4 border-t flex-shrink-0"
         style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white"
             style={{ background: 'var(--gradient-sidebar)' }}>
-            B
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.875rem' }}>B</span>
           </div>
           <div>
             <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>BizTrix CRM</p>

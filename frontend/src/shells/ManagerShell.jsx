@@ -221,8 +221,8 @@ const ManagerShell = () => {
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap"
                 style={{
-                  backgroundColor: activeTab === tab.key ? 'var(--color-surface)' : 'transparent',
-                  color: activeTab === tab.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  background: activeTab === tab.key ? 'var(--gradient-sidebar)' : 'transparent',
+                  color: activeTab === tab.key ? 'white' : 'var(--color-text-secondary)',
                   boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
                 }}>
                 <tab.icon size={15} />{tab.label}
@@ -247,7 +247,7 @@ const ManagerShell = () => {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      <p className={`text-3xl font-bold text-${color}-600`}>{statsLoading ? '—' : value}</p>
+                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{statsLoading ? '—' : value}</p>
                     </div>
                     <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
                       <Icon size={22} className={`text-${color}-600`} />

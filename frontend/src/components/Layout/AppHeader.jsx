@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Moon, Sun, LogOut, ChevronDown } from 'lucide-react';
-import Button from '../UI/Button';
 import NotificationBell from '../UI/NotificationBell';
 import ProfileModal from '../Profile/ProfileModal';
 
@@ -15,11 +14,9 @@ const AppHeader = ({
   onUpdateUser = () => {},
   onLogout = () => {},
   actions = [],
-  // Cross-role navigation
   navItems = [],
   activeNav = 'dashboard',
   onNavChange = () => {},
-  // Notifications
   notifications = [],
   unreadCount = 0,
   onMarkRead = () => {},
@@ -31,124 +28,192 @@ const AppHeader = ({
 }) => {
   const [profileOpen, setProfileOpen] = useState(false);
 
+  const initials = [user?.first_name, user?.last_name]
+    .filter(Boolean)
+    .map(n => n[0].toUpperCase())
+    .join('') || (userEmail?.[0]?.toUpperCase() ?? 'U');
+
   return (
     <>
       <div className="sticky top-0 z-50">
-      <header className={`header h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between ${className}`} {...props}>
-        {/* Left: Logo & Title */}
-        <div className="flex items-center gap-4">
-          {logo ? logo : (
-            <div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
-              <span className="text-xl font-bold text-white">B</span>
-            </div>
-          )}
-          <h1 className="text-2xl font-bold text-primary-600">{title}</h1>
-        </div>
-
-        {/* Center: Custom Actions */}
-        {actions.length > 0 && (
-          <div className="flex items-center gap-2 flex-1 justify-center">
-            {actions.map((action, idx) => <div key={idx}>{action}</div>)}
-          </div>
-        )}
-
-        {/* Right: Notifications + Theme + User + Logout */}
-        <div className="flex items-center gap-3">
-          {/* Notification Bell */}
-          <NotificationBell
-            notifications={notifications}
-            unreadCount={unreadCount}
-            onMarkRead={onMarkRead}
-            onMarkAllRead={onMarkAllRead}
-            onDelete={onDeleteNotification}
-            onClearAll={onClearNotifications}
-          />
-
-          {/* Theme Toggle */}
-          <Button variant="ghost" size="sm" onClick={onThemeToggle}
-            title="Toggle dark mode" aria-label="Toggle dark mode">
-            {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-          </Button>
-
-          {/* User Info — clickable to open profile */}
-          {userEmail && (
-            <button
-              onClick={() => setProfileOpen(true)}
-              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all hover:bg-bg-secondary group"
-              title="View profile"
-            >
-              {/* Avatar initials */}
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                style={{ background: 'var(--gradient-sidebar)' }}>
-                {[user?.first_name, user?.last_name]
-                  .filter(Boolean).map(n => n[0].toUpperCase()).join('')
-                  || userEmail[0].toUpperCase()}
-              </div>
-              <div className="text-right">
-                <p className="font-semibold text-sm text-text leading-tight">
-                  {[user?.first_name, user?.last_name].filter(Boolean).join(' ') || userEmail}
-                </p>
-                {userRole && <p className="text-xs text-text-secondary leading-tight">{userRole}</p>}
-              </div>
-              <ChevronDown size={13} className="text-text-tertiary group-hover:text-text-secondary transition-colors" />
-            </button>
-          )}
-
-          {/* Logout */}
-          <Button variant="primary" size="sm" onClick={onLogout} className="flex items-center gap-2">
-            <LogOut size={18} />
-            <span className="hidden sm:inline">Logout</span>
-          </Button>
-        </div>
-      </header>
-
-      {/* Cross-role nav bar — only renders when cross-role items exist */}
-      {navItems.length > 0 && (
-        <nav
-          className="px-4 sm:px-6 lg:px-8 flex items-center gap-1 h-11"
-          style={{
-            backgroundColor: 'var(--color-surface)',
-            borderBottom: '1px solid var(--color-border)',
-            boxShadow: 'var(--shadow-sm)',
-          }}
+        <header
+          className={`header h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between ${className}`}
+          {...props}
         >
-          <div className="max-w-7xl w-full mx-auto flex items-center gap-1">
-            {/* My Dashboard — always first */}
-            <button
-              onClick={() => onNavChange('dashboard')}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+          {/* Left: Logo & Title */}
+          <div className="flex items-center gap-3">
+            {logo ?? (
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontWeight: 700,
+                    fontSize: '1.1rem',
+                    color: 'white',
+                  }}
+                >
+                  B
+                </span>
+              </div>
+            )}
+            <h1
+              className="hidden sm:block"
               style={{
-                backgroundColor: activeNav === 'dashboard' ? 'var(--color-primary-50)' : 'transparent',
-                color: activeNav === 'dashboard' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                fontFamily: 'var(--font-display)',
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                letterSpacing: '-0.025em',
+                color: 'var(--color-primary-600)',
               }}
             >
-              My Dashboard
+              {title}
+            </h1>
+          </div>
+
+          {/* Center: Custom Actions */}
+          {actions.length > 0 && (
+            <div className="flex items-center gap-2 flex-1 justify-center">
+              {actions.map((action, idx) => <div key={idx}>{action}</div>)}
+            </div>
+          )}
+
+          {/* Right: Notifications + Theme + User + Logout */}
+          <div className="flex items-center gap-2">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkRead={onMarkRead}
+              onMarkAllRead={onMarkAllRead}
+              onDelete={onDeleteNotification}
+              onClearAll={onClearNotifications}
+            />
+
+            {/* Theme Toggle */}
+            <button
+              onClick={onThemeToggle}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105"
+              style={{
+                backgroundColor: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border)',
+              }}
+              title="Toggle theme"
+              aria-label="Toggle theme"
+            >
+              {theme === 'light'
+                ? <Moon size={17} style={{ color: 'var(--color-text-secondary)' }} />
+                : <Sun  size={17} style={{ color: 'var(--color-text-secondary)' }} />
+              }
             </button>
 
-            {/* Divider */}
-            <div className="w-px h-5 mx-1 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
-
-            {/* Cross-role items */}
-            {navItems.map(item => (
+            {/* User pill */}
+            {userEmail && (
               <button
-                key={item.key}
-                onClick={() => onNavChange(item.key)}
-                className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+                onClick={() => setProfileOpen(true)}
+                className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl transition-all hover:bg-bg-secondary group"
+                style={{ border: '1px solid var(--color-border)' }}
+                title="View profile"
+              >
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                  style={{ background: 'var(--gradient-sidebar)' }}
+                >
+                  {initials}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--color-text)' }}>
+                    {[user?.first_name, user?.last_name].filter(Boolean).join(' ') || userEmail}
+                  </p>
+                  {userRole && (
+                    <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {userRole}
+                    </p>
+                  )}
+                </div>
+                <ChevronDown
+                  size={12}
+                  className="text-text-tertiary group-hover:text-text-secondary transition-colors"
+                />
+              </button>
+            )}
+
+            {/* Logout */}
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 hover:scale-[1.02]"
+              style={{
+                background: 'linear-gradient(135deg, #7A4820 0%, #C4894A 100%)',
+                boxShadow: '0 2px 8px rgba(196, 137, 74, 0.2)',
+              }}
+            >
+              <LogOut size={15} />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Cross-role nav bar — only renders when cross-role items exist */}
+        {navItems.length > 0 && (
+          <nav
+            className="px-4 sm:px-6 lg:px-8 flex items-center h-11"
+            style={{
+              backgroundColor: 'var(--color-surface)',
+              borderBottom: '1px solid var(--color-border)',
+              boxShadow: 'var(--shadow-sm)',
+            }}
+          >
+            <div className="max-w-7xl w-full mx-auto flex items-center gap-1">
+              {/* My Dashboard — always first */}
+              <button
+                onClick={() => onNavChange('dashboard')}
+                className="relative flex items-center gap-2 px-4 h-11 text-sm font-semibold transition-all duration-150"
                 style={{
-                  backgroundColor: activeNav === item.key ? 'var(--color-primary-50)' : 'transparent',
-                  color: activeNav === item.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  color: activeNav === 'dashboard'
+                    ? 'var(--color-primary-600)'
+                    : 'var(--color-text-secondary)',
                 }}
               >
-                {item.icon && <item.icon size={14} />}
-                {item.label}
+                My Dashboard
+                {activeNav === 'dashboard' && (
+                  <span
+                    className="absolute bottom-0 left-3 right-3 h-0.5 rounded-t-full"
+                    style={{ backgroundColor: 'var(--color-primary-600)' }}
+                  />
+                )}
               </button>
-            ))}
-          </div>
-        </nav>
-      )}
+
+              <div className="w-px h-5 mx-1 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+
+              {/* Cross-role items */}
+              {navItems.map(item => (
+                <button
+                  key={item.key}
+                  onClick={() => onNavChange(item.key)}
+                  className="relative flex items-center gap-2 px-4 h-11 text-sm font-semibold transition-all duration-150"
+                  style={{
+                    color: activeNav === item.key
+                      ? 'var(--color-primary-600)'
+                      : 'var(--color-text-secondary)',
+                  }}
+                >
+                  {item.icon && <item.icon size={14} />}
+                  {item.label}
+                  {activeNav === item.key && (
+                    <span
+                      className="absolute bottom-0 left-3 right-3 h-0.5 rounded-t-full"
+                      style={{ backgroundColor: 'var(--color-primary-600)' }}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
       </div>
 
-      {/* Profile modal — rendered outside header flow */}
+      {/* Profile modal */}
       {user && (
         <ProfileModal
           isOpen={profileOpen}
