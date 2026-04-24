@@ -435,7 +435,8 @@ const ManagerShell = () => {
                 : sales.filter(s => s.closer_id === user?.id).length === 0 ? <p className="text-text-secondary text-center py-8">No personal sales yet.</p>
                 : (
                   <div className="space-y-3">
-                    {sales.filter(s => s.closer_id === user?.id).slice(0, 20).map(s => (
+                    {/* Filter client-side from pre-fetched list; server scopes to closer_id for closer role */}
+                    {sales.filter(s => s.closer_id === user?.id).map(s => (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>

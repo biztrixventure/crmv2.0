@@ -186,7 +186,20 @@ router.post(
         .select("permissions(name)")
         .eq("role_id", userRole.role_id);
 
-      const userPermissions = (permissions || []).map((p) => p.permissions.name);
+      let userPermissions = (permissions || []).map((p) => p.permissions.name);
+
+      // Apply per-user permission overrides (same logic as /auth/me)
+      const { data: overrides } = await supabaseAdmin
+        .from('user_permission_overrides')
+        .select('override_type, permissions(name)')
+        .eq('user_id', data.user.id)
+        .eq('company_id', userRole.company_id);
+      for (const ov of (overrides || [])) {
+        const name = ov.permissions?.name;
+        if (!name) continue;
+        if (ov.override_type === 'grant' && !userPermissions.includes(name)) userPermissions.push(name);
+        if (ov.override_type === 'revoke') userPermissions = userPermissions.filter(p => p !== name);
+      }
 
       // Return user data and token
       res.json({

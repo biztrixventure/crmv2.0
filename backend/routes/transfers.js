@@ -155,9 +155,9 @@ router.get('/closers', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
-  // Accept any role whose level contains 'closer' (case-insensitive)
+  // Only roles with level exactly 'closer' — exclude closer_manager from the dropdown
   const closers = (data || [])
-    .filter(r => (r.custom_roles?.level || '').toLowerCase().includes('closer'))
+    .filter(r => r.custom_roles?.level === 'closer')
     .map(r => ({
       id:           r.user_id,
       first_name:   profileMap[r.user_id]?.first_name || '',

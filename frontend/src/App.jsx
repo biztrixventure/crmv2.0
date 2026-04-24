@@ -6,15 +6,15 @@ import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import AcceptInvite from "./pages/AcceptInvite";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
-const AdminPanel          = lazy(() => import("./pages/AdminPanel"));
-const StaffShell          = lazy(() => import("./shells/StaffShell"));
-const ManagerShell        = lazy(() => import("./shells/ManagerShell"));
-const ComplianceShell     = lazy(() => import("./shells/ComplianceShell"));
-const CompanyDashboard = lazy(() => import("./pages/CompanyDashboard"));
-const NotFound         = lazy(() => import("./pages/NotFound"));
+const AdminPanel      = lazy(() => import("./pages/AdminPanel"));
+const StaffShell      = lazy(() => import("./shells/StaffShell"));
+const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
+const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
+const NotFound        = lazy(() => import("./pages/NotFound"));
 
 const PageSpinner = () => (
   <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
@@ -57,14 +57,15 @@ const AppContent = () => {
     <Router>
       <Suspense fallback={<PageSpinner />}>
         <Routes>
-          <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
+          <Route path="/login"          element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password"  element={<ResetPassword />} />
+          <Route path="/accept-invite"   element={<AcceptInvite />} />
 
           {/* Smart redirect */}
           <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
 
-          {/* SuperAdmin */}
+          {/* SuperAdmin + ReadOnly Admin */}
           <Route path="/admin/*" element={
             <ProtectedRoute requiredRole="admin"><AdminPanel /></ProtectedRoute>
           } />
@@ -74,21 +75,16 @@ const AppContent = () => {
             <ProtectedRoute requiredRole="compliance_manager"><ComplianceShell /></ProtectedRoute>
           } />
 
-          {/* Staff Shell — closer / fronter / operations staff */}
+          {/* Staff Shell — closer / fronter */}
           <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
           <Route path="/fronter/*" element={<ProtectedRoute requiredRole="fronter"><StaffShell /></ProtectedRoute>} />
           <Route path="/staff/*"   element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
 
-          {/* Manager Shell — all manager roles */}
+          {/* Manager Shell — all manager roles + company_admin */}
           <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/operations/*"      element={<ProtectedRoute requiredRole="operations_manager"><ManagerShell /></ProtectedRoute>} />
-
-          {/* Company Admin — still on legacy dashboard until migrated */}
-          <Route path="/company/*" element={
-            <ProtectedRoute requiredRole="company_admin"><CompanyDashboard /></ProtectedRoute>
-          } />
 
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
           <Route path="*" element={<NotFound />} />

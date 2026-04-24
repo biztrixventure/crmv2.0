@@ -235,7 +235,7 @@ router.post(
         transfer_id: transfer_id || null,
         created_by: userId,
         company_id: companyId,
-        status: status || 'sold',
+        status: status || 'open',
         // Customer
         customer_name,
         customer_phone,

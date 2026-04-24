@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import client from '../api/client';
 
 /**
@@ -10,9 +10,11 @@ export const useTransfers = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [total, setTotal] = useState(0);
+  const lastFilters = useRef({});
 
   // Fetch transfers (role-based filtering done server-side)
   const fetchTransfers = useCallback(async (filters = {}) => {
+    lastFilters.current = filters;
     setLoading(true);
     setError(null);
     try {
@@ -58,7 +60,7 @@ export const useTransfers = (companyId = null) => {
     setError(null);
     try {
       const response = await client.put(`transfers/${transferId}`, updates);
-      await fetchTransfers(); // Refresh list
+      await fetchTransfers(lastFilters.current); // Refresh with current date filters
       return response.data.transfer;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to update transfer';

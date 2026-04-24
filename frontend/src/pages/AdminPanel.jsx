@@ -58,11 +58,13 @@ const AdminPanel = () => {
     navigate("/login");
   };
 
+  const isReadOnly = user?.role === 'readonly_admin';
+
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
-    { id: "companies",   label: "Companies"    },
-    ...(hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
-    ...(hasPermission('search_sales')  ? [{ id: "sale-search", label: "Sale Search"  }] : []),
+    ...(!isReadOnly                            ? [{ id: "companies",   label: "Companies"    }] : []),
+    ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
+    ...(hasPermission('search_sales')          ? [{ id: "sale-search", label: "Sale Search"  }] : []),
   ];
 
   // ── Stat metric cards ──
@@ -78,8 +80,8 @@ const AdminPanel = () => {
   ];
 
   const quickActions = [
-    { id: 'companies',   label: 'Companies',    desc: 'Create and manage companies, members and roles',     icon: Building2,  accent: '#10b981' },
-    { id: 'forms',       label: 'Form Builder', desc: 'Customize transfer form fields & sale configuration', icon: FileText,   accent: '#8b5cf6' },
+    ...(!isReadOnly ? [{ id: 'companies',   label: 'Companies',    desc: 'Create and manage companies, members and roles',     icon: Building2,  accent: '#10b981' }] : []),
+    ...(!isReadOnly ? [{ id: 'forms',       label: 'Form Builder', desc: 'Customize transfer form fields & sale configuration', icon: FileText,   accent: '#8b5cf6' }] : []),
     { id: 'sale-search', label: 'Sale Search',  desc: 'Search all sale records',                            icon: Search,     accent: '#6366f1' },
   ];
 
@@ -107,6 +109,14 @@ const AdminPanel = () => {
             {/* ── Dashboard ── */}
             {activeTab === "dashboard" && (
               <div className="animate-fade-in space-y-8">
+
+                {isReadOnly && (
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium"
+                    style={{ backgroundColor: 'var(--color-warning-50)', border: '1px solid var(--color-warning-200)', color: 'var(--color-warning-700)' }}>
+                    <Shield size={16} />
+                    Read-only admin — you can view all data but cannot create or modify records.
+                  </div>
+                )}
 
                 {/* Page header */}
                 <div className="flex items-start justify-between">
