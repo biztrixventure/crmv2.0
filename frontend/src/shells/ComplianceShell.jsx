@@ -47,12 +47,19 @@ const RATING_COLOR = {
 const LIMIT = 30;
 
 const ComplianceShell = () => {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
 
   const isSuperadmin = user?.role === 'superadmin';
+
+  // ── Permission gates ─────────────────────────────────────────────────────
+  const canManageCompliance = isSuperadmin || hasPermission('manage_compliance');
+  const canViewAllSales     = isSuperadmin || hasPermission('view_all_company_sales');
+  const canViewReviews      = isSuperadmin || hasPermission('view_all_call_reviews');
+  const canViewFinancial    = isSuperadmin || hasPermission('view_financial_data');
+  const canSearch           = isSuperadmin || hasPermission('search_sales');
 
   // ── Tab state ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('queue');
@@ -165,12 +172,12 @@ const ComplianceShell = () => {
     }
   }, [reviewCompany]);
 
-  useEffect(() => { loadQueue(); },    [loadQueue]);
-  useEffect(() => { loadSales(); },    [loadSales]);
-  useEffect(() => { loadCompanies(); },[loadCompanies]);
+  useEffect(() => { if (canManageCompliance) loadQueue(); }, [loadQueue, canManageCompliance]);
+  useEffect(() => { if (canViewAllSales) loadSales(); },    [loadSales, canViewAllSales]);
+  useEffect(() => { loadCompanies(); },                     [loadCompanies]);
   useEffect(() => {
-    if (activeTab === 'reviews') loadReviews();
-  }, [activeTab, loadReviews]);
+    if (activeTab === 'reviews' && canViewReviews) loadReviews();
+  }, [activeTab, loadReviews, canViewReviews]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -259,12 +266,19 @@ const ComplianceShell = () => {
     URL.revokeObjectURL(url);
   };
 
-  // ── Tabs config ───────────────────────────────────────────────────────────
+  // ── Tabs config (permission-gated) ──────────────────────────────────────
   const TABS = [
-    { key: 'queue',   label: 'Pending Review', icon: Clock,      badge: queue.length || null },
-    { key: 'sales',   label: 'All Sales',      icon: FileText,   badge: null },
-    { key: 'reviews', label: 'Call Reviews',   icon: Star,       badge: null },
-  ];
+    canManageCompliance && { key: 'queue',   label: 'Pending Review', icon: Clock,    badge: queue.length || null },
+    canViewAllSales     && { key: 'sales',   label: 'All Sales',      icon: FileText, badge: null },
+    canViewReviews      && { key: 'reviews', label: 'Call Reviews',   icon: Star,     badge: null },
+  ].filter(Boolean);
+
+  // Auto-reset to first available tab when permissions change
+  useEffect(() => {
+    if (TABS.length > 0 && !TABS.find(t => t.key === activeTab)) {
+      setActiveTab(TABS[0].key);
+    }
+  }, [canManageCompliance, canViewAllSales, canViewReviews]);
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
@@ -290,8 +304,22 @@ const ComplianceShell = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
+        {/* ── No access state ──────────────────────────────────────────── */}
+        {TABS.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-32 text-center">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <Shield size={32} style={{ color: 'var(--color-text-tertiary)' }} />
+            </div>
+            <h2 className="text-xl font-bold text-text mb-2">No Access</h2>
+            <p className="text-text-secondary max-w-sm">
+              Your role has no permissions enabled. Ask your admin to grant you the appropriate compliance permissions.
+            </p>
+          </div>
+        )}
+
         {/* ── Primary tabs ──────────────────────────────────────────────── */}
-        <div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
+        {TABS.length > 0 && <><div className="flex gap-1 mb-6 p-1 rounded-xl w-fit"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {TABS.map(t => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
@@ -450,12 +478,14 @@ const ComplianceShell = () => {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={exportCSV} disabled={sales.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-105 disabled:opacity-40"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                  title="Export current results to CSV">
-                  <Download size={14} /> Export CSV
-                </button>
+                {canViewAllSales && (
+                  <button onClick={exportCSV} disabled={sales.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-105 disabled:opacity-40"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    title="Export current results to CSV">
+                    <Download size={14} /> Export CSV
+                  </button>
+                )}
                 <button onClick={loadSales}
                   className="p-2 rounded-lg hover:bg-bg-secondary transition-colors"
                   title="Refresh">
@@ -468,17 +498,20 @@ const ComplianceShell = () => {
             <Card className="p-5 mb-6">
               <form onSubmit={handleSearch}
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                <div className="relative lg:col-span-2">
-                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2"
-                    style={{ color: 'var(--color-text-tertiary)' }} />
-                  <input
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    placeholder="Name, phone, reference…"
-                    className="input pl-9"
-                  />
-                </div>
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input">
+                {canSearch && (
+                  <div className="relative lg:col-span-2">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2"
+                      style={{ color: 'var(--color-text-tertiary)' }} />
+                    <input
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="Name, phone, reference…"
+                      className="input pl-9"
+                    />
+                  </div>
+                )}
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                  className={`input ${canSearch ? '' : 'lg:col-span-2'}`}>
                   <option value="">All statuses</option>
                   {ALL_STATUSES.map(s => (
                     <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
@@ -493,7 +526,7 @@ const ComplianceShell = () => {
                 <button type="submit"
                   className="py-2 rounded-lg font-semibold text-sm text-white"
                   style={{ background: 'var(--gradient-sidebar)' }}>
-                  Search ({total} records)
+                  Filter ({total} records)
                 </button>
               </form>
             </Card>
@@ -515,7 +548,7 @@ const ComplianceShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                        {['Customer', 'Phone', 'Reference', 'Vehicle', 'Status', isSuperadmin && 'Company', 'Date', 'Actions']
+                        {['Customer', 'Phone', 'Reference', 'Vehicle', canViewFinancial && 'Payment', 'Status', isSuperadmin && 'Company', 'Date', canManageCompliance && 'Actions']
                           .filter(Boolean)
                           .map(h => (
                             <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">{h}</th>
@@ -534,6 +567,12 @@ const ComplianceShell = () => {
                             <td className="px-4 py-3 text-text-secondary text-xs">
                               {[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}
                             </td>
+                            {canViewFinancial && (
+                              <td className="px-4 py-3 text-xs font-semibold"
+                                style={{ color: 'var(--color-success-600)' }}>
+                                {s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}
+                              </td>
+                            )}
                             <td className="px-4 py-3">
                               <Badge variant={STATUS_BADGE[s.status] || 'secondary'} size="sm">
                                 {s.status?.replace(/_/g, ' ')}
@@ -545,9 +584,9 @@ const ComplianceShell = () => {
                             <td className="px-4 py-3 text-text-tertiary text-xs">
                               {s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}
                             </td>
-                            <td className="px-4 py-3">
+                            {canManageCompliance && <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
-                                {s.status === 'pending_review' ? (
+                                {s.status === 'pending_review' && canManageCompliance ? (
                                   <div className="flex items-center gap-1">
                                     <button
                                       onClick={() => handleApprove(s)}
@@ -563,14 +602,14 @@ const ComplianceShell = () => {
                                       Return
                                     </button>
                                   </div>
-                                ) : (
+                                ) : canManageCompliance && s.status !== 'pending_review' ? (
                                   <button
                                     onClick={() => openEdit(s)}
                                     className="px-3 py-1 rounded-lg text-xs font-bold text-white transition-all hover:scale-105"
                                     style={{ background: 'var(--gradient-sidebar)' }}>
                                     Update
                                   </button>
-                                )}
+                                ) : null}
                                 {Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
                                   <button
                                     onClick={() => setExpanded(expanded === s.id ? null : s.id)}
@@ -582,11 +621,11 @@ const ComplianceShell = () => {
                                   </button>
                                 )}
                               </div>
-                            </td>
+                            </td>}
                           </tr>
                           {expanded === s.id && Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
                             <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                              <td colSpan={isSuperadmin ? 8 : 7} className="px-4 py-3">
+                              <td colSpan={[true, true, true, true, canViewFinancial, true, isSuperadmin, true, canManageCompliance].filter(Boolean).length} className="px-4 py-3">
                                 <p className="text-xs font-bold text-text-secondary mb-2">Audit Trail</p>
                                 <div className="space-y-1">
                                   {s.edit_history.map((h, i) => (
@@ -784,6 +823,7 @@ const ComplianceShell = () => {
             </Card>
           </div>
         )}
+      </>}
       </main>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
