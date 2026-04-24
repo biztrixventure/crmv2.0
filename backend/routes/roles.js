@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
-const { hasPermission, canAssignRole, createRole, isSuperAdmin } = require('../models/helpers');
+const { hasPermission, canAssignRole, createRole, isSuperAdmin, getCompanyTypeLevels } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -268,13 +268,10 @@ router.post(
         const { data: co } = await supabaseAdmin
           .from('companies').select('company_type').eq('id', targetCompanyId).single();
         if (co?.company_type) {
-          const FRONTER_LEVELS = ['fronter', 'fronter_manager', 'operations_manager', 'company_admin'];
-          const CLOSER_LEVELS  = ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
-          const allowed = co.company_type === 'fronter' ? FRONTER_LEVELS : CLOSER_LEVELS;
+          const allowed = getCompanyTypeLevels(co.company_type);
           if (!allowed.includes(level)) {
             return res.status(400).json({
-              error: `Role level "${level}" is not valid for a ${co.company_type} company. ` +
-                     `Allowed levels: ${allowed.join(', ')}`,
+              error: `Role level "${level}" is not valid for a ${co.company_type} company. Allowed levels: ${allowed.join(', ')}`,
             });
           }
         }

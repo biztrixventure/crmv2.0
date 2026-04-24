@@ -2,9 +2,15 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
-
 const router = express.Router();
+
+// Fetch all user IDs active in a company — used to scope reviews for closer-side roles.
+const getCompanyUserIds = async (companyId) => {
+  const { data } = await supabaseAdmin
+    .from('user_company_roles').select('user_id')
+    .eq('company_id', companyId).eq('is_active', true);
+  return (data || []).map(u => u.user_id);
+};
 
 const RATINGS      = ['excellent', 'good', 'average', 'below_average', 'bad'];
 const DISPOSITIONS = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
@@ -109,13 +115,10 @@ router.post('/transfer/:id/dispo', [
 //   - others: own company only
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
-  const userId    = req.user.id;
   const userRole  = req.user.role;
   const { company_id, rating, page = 1, limit = 50, date_from, date_to } = req.query;
 
-  const isSA      = await isSuperAdmin(userId);
-  const isQA      = ['compliance_manager', 'superadmin'].includes(userRole);
-  const scopeAll  = isSA || isQA;
+  const scopeAll = ['compliance_manager', 'superadmin'].includes(userRole);
 
   const targetCompany = company_id || req.user.company_id || null;
 
@@ -127,16 +130,10 @@ router.get('/', asyncHandler(async (req, res) => {
   // Closer-side roles (closer_manager, compliance_manager) live in a closer company.
   // Reviews are tagged with the FRONTER's company_id (from the transfer), so filtering
   // by company_id would return 0 results. Scope by closer_id for their company's users instead.
-  const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole) && !scopeAll;
-  if (isCloserSide && targetCompany) {
-    const { data: coUsers } = await supabaseAdmin
-      .from('user_company_roles').select('user_id')
-      .eq('company_id', targetCompany).eq('is_active', true);
-    const closerIds = (coUsers || []).map(u => u.user_id);
-    if (closerIds.length === 0) {
-      return res.json({ reviews: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-    }
-    query = query.in('closer_id', closerIds);
+  if (!scopeAll && targetCompany && ['closer_manager', 'compliance_manager'].includes(userRole)) {
+    const ids = await getCompanyUserIds(targetCompany);
+    if (ids.length === 0) return res.json({ reviews: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+    query = query.in('closer_id', ids);
   } else if (!scopeAll && targetCompany) {
     query = query.eq('company_id', targetCompany);
   }
@@ -178,13 +175,10 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /reviews/dispositions — list dispositions scoped to company
 // ============================================================================
 router.get('/dispositions', asyncHandler(async (req, res) => {
-  const userId    = req.user.id;
   const userRole  = req.user.role;
   const { company_id, disposition, page = 1, limit = 50 } = req.query;
 
-  const isSA     = await isSuperAdmin(userId);
-  const isQA     = ['compliance_manager', 'superadmin'].includes(userRole);
-  const scopeAll = isSA || isQA;
+  const scopeAll = ['compliance_manager', 'superadmin'].includes(userRole);
 
   const targetCompany = company_id || req.user.company_id || null;
 
@@ -193,17 +187,10 @@ router.get('/dispositions', asyncHandler(async (req, res) => {
     .select('id, disposition, notes, created_at, transfer_id, company_id, closer_id', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  // Same scoping fix as /reviews: closer-side roles scope by closer_id not company_id
-  const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole) && !scopeAll;
-  if (isCloserSide && targetCompany) {
-    const { data: coUsers } = await supabaseAdmin
-      .from('user_company_roles').select('user_id')
-      .eq('company_id', targetCompany).eq('is_active', true);
-    const closerIds = (coUsers || []).map(u => u.user_id);
-    if (closerIds.length === 0) {
-      return res.json({ dispositions: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-    }
-    query = query.in('closer_id', closerIds);
+  if (!scopeAll && targetCompany && ['closer_manager', 'compliance_manager'].includes(userRole)) {
+    const ids = await getCompanyUserIds(targetCompany);
+    if (ids.length === 0) return res.json({ dispositions: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+    query = query.in('closer_id', ids);
   } else if (!scopeAll && targetCompany) {
     query = query.eq('company_id', targetCompany);
   }

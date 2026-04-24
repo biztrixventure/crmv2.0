@@ -2,7 +2,6 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
 const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 
@@ -73,8 +72,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const status    = req.query.status;   // optional filter
   const ownerId   = req.query.owner_id; // manager filter by member
 
-  const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  const isManager = MANAGER_LEVELS.includes(req.user.role);
 
   let query = supabaseAdmin
     .from('callback_numbers')
@@ -147,8 +145,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
 
-  const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  const isManager = MANAGER_LEVELS.includes(req.user.role);
 
   const { data: number, error } = await supabaseAdmin
     .from('callback_numbers')
@@ -468,8 +465,7 @@ router.put('/:id',
     const { id }   = req.params;
     const userId   = req.user.id;
 
-    const superadmin = await isSuperAdmin(userId);
-    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+    const isManager = MANAGER_LEVELS.includes(req.user.role);
 
     const { data: existing } = await supabaseAdmin
       .from('callback_numbers')
@@ -508,8 +504,7 @@ router.put('/:id/reassign',
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
 
     const userId   = req.user.id;
-    const superadmin = await isSuperAdmin(userId);
-    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+    const isManager = MANAGER_LEVELS.includes(req.user.role);
     if (!isManager) return res.status(403).json({ error: 'Managers only' });
 
     const { id }          = req.params;
@@ -564,8 +559,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const { id }   = req.params;
   const userId   = req.user.id;
 
-  const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  const isManager = MANAGER_LEVELS.includes(req.user.role);
 
   const { data: number } = await supabaseAdmin
     .from('callback_numbers')
@@ -600,8 +594,7 @@ router.get('/:id/team-members', asyncHandler(async (req, res) => {
   const userId   = req.user.id;
   const companyId = req.user.company_id;
 
-  const superadmin = await isSuperAdmin(userId);
-  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  const isManager = MANAGER_LEVELS.includes(req.user.role);
   if (!isManager) return res.status(403).json({ error: 'Managers only' });
 
   const { data } = await supabaseAdmin

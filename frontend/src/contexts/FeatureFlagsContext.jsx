@@ -5,7 +5,7 @@ import client from '../api/client';
 const FeatureFlagsContext = createContext({
   flags: {},
   isEnabled: () => false,
-  loading: true,
+  loading: false,
   refresh: () => {},
 });
 

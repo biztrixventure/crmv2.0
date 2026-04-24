@@ -186,7 +186,7 @@ router.post(
         .select("permissions(name)")
         .eq("role_id", userRole.role_id);
 
-      let userPermissions = (permissions || []).map((p) => p.permissions.name);
+      const permSet = new Set((permissions || []).map((p) => p.permissions.name));
 
       // Apply per-user permission overrides (same logic as /auth/me)
       const { data: overrides } = await supabaseAdmin
@@ -197,9 +197,10 @@ router.post(
       for (const ov of (overrides || [])) {
         const name = ov.permissions?.name;
         if (!name) continue;
-        if (ov.override_type === 'grant' && !userPermissions.includes(name)) userPermissions.push(name);
-        if (ov.override_type === 'revoke') userPermissions = userPermissions.filter(p => p !== name);
+        if (ov.override_type === 'grant')  permSet.add(name);
+        if (ov.override_type === 'revoke') permSet.delete(name);
       }
+      const userPermissions = [...permSet];
 
       // Return user data and token
       res.json({

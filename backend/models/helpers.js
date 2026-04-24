@@ -321,6 +321,13 @@ const getTeamMembers = async (managerId, companyId) => {
   }
 };
 
+// Returns allowed role levels for a given company type.
+// Single source of truth — used by roles.js and users.js for role-level validation.
+const getCompanyTypeLevels = (companyType) =>
+  companyType === 'fronter'
+    ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin']
+    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
+
 module.exports = {
   getUserRole,
   hasPermission,
@@ -331,4 +338,5 @@ module.exports = {
   assignUserToCompany,
   isSuperAdmin,
   getTeamMembers,
+  getCompanyTypeLevels,
 };
