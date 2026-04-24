@@ -10,10 +10,11 @@ import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
+import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import {
   BarChart3, Users, Shield, Building2, FileText,
   Activity, DollarSign, Target,
-  CheckCircle, Layers, Search,
+  CheckCircle, Layers, Search, Zap,
 } from "lucide-react";
 
 // ============================================================================
@@ -62,9 +63,10 @@ const AdminPanel = () => {
 
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
-    ...(!isReadOnly                            ? [{ id: "companies",   label: "Companies"    }] : []),
+    ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"    }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
-    ...(hasPermission('search_sales')          ? [{ id: "sale-search", label: "Sale Search"  }] : []),
+    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Sale Search"  }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"     }] : []),
   ];
 
   // ── Stat metric cards ──
@@ -255,8 +257,9 @@ const AdminPanel = () => {
               </div>
             )}
 
-            {activeTab === "companies"  && <CompanyManagement />}
+            {activeTab === "companies"   && <CompanyManagement />}
             {activeTab === "sale-search" && <SaleSearchPanel />}
+            {activeTab === "features"    && <FeatureFlagsManager />}
           </div>
           )}
         </main>

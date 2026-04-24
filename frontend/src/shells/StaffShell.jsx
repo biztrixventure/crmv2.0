@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
@@ -45,6 +46,7 @@ const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706'
 const StaffShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { isEnabled } = useFeatureFlags();
   const navigate = useNavigate();
 
   const isFronter  = user?.role === 'fronter' || (!hasPermission('create_sale') && hasPermission('create_transfer'));
@@ -273,8 +275,8 @@ const StaffShell = () => {
     ...(isCloser   ? [{ key: 'sales',           label: 'My Sales',        icon: DollarSign }] : []),
     ...(isFronter  ? [{ key: 'transfers',        label: 'My Transfers',    icon: Send       }] : []),
     ...(hasPermission('view_callbacks')          ? [{ key: 'callbacks',       label: 'Callbacks',       icon: Phone }] : []),
-    ...(hasPermission('manage_callback_numbers') ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash  }] : []),
-    ...(isFronter                                ? [{ key: 'numbers',         label: 'My Numbers',      icon: Hash  }] : []),
+    ...(hasPermission('manage_callback_numbers') && isEnabled('callback_numbers')  ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash  }] : []),
+    ...(isFronter && isEnabled('number_assignment')                                ? [{ key: 'numbers',         label: 'My Numbers',      icon: Hash  }] : []),
     ...(hasPermission('search_sales')            ? [{ key: 'search',          label: 'Search Sales',    icon: Search}] : []),
   ];
 

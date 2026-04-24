@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { FeatureFlagsProvider } from "./contexts/FeatureFlagsContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -98,7 +99,9 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppContent />
+        <FeatureFlagsProvider>
+          <AppContent />
+        </FeatureFlagsProvider>
       </AuthProvider>
     </ThemeProvider>
   );

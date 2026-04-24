@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
@@ -36,6 +37,7 @@ const XFER_BADGE  = { pending: 'warning', assigned: 'info', completed: 'success'
 const ManagerShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { isEnabled } = useFeatureFlags();
   const navigate = useNavigate();
   const notifHook = useNotifications();
 
@@ -68,7 +70,7 @@ const ManagerShell = () => {
       ? [{ key: 'roles',      label: 'Roles',          icon: Shield     }] : []),
     ...(hasPermission('manage_forms')
       ? [{ key: 'forms',      label: 'Form Builder',   icon: FileText   }] : []),
-    ...(hasPermission('manage_callback_numbers')
+    ...(hasPermission('manage_callback_numbers') && (isEnabled('callback_numbers') || isEnabled('number_assignment'))
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
@@ -478,8 +480,8 @@ const ManagerShell = () => {
         {activeTab === 'callbacks' && <CallbacksOverview user={user} companyId={companyId} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
-            <CallbackNumbers user={user} />
-            {hasPermission('manage_callback_numbers') && <NumberUploadManager companyId={companyId} />}
+            {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
+            {isEnabled('number_assignment') && hasPermission('manage_callback_numbers') && <NumberUploadManager companyId={companyId} />}
           </div>
         )}
         {activeTab === 'search'    && <SaleSearch />}

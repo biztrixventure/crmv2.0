@@ -24,6 +24,7 @@ const pushRoutes          = require('./routes/push');
 const reviewsRoutes       = require('./routes/reviews');
 const numberListsRoutes       = require('./routes/numberLists');
 const callbackNumbersRoutes   = require('./routes/callbackNumbers');
+const featureFlagsRoutes      = require('./routes/featureFlags');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
@@ -138,6 +139,7 @@ app.use('/api/notifications', authMiddleware, notificationsRoutes);
 app.use('/api/reviews',      authMiddleware, reviewsRoutes);
 app.use('/api/number-lists',      authMiddleware, numberListsRoutes);
 app.use('/api/callback-numbers',  authMiddleware, callbackNumbersRoutes);
+app.use('/api/feature-flags',     authMiddleware, featureFlagsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)
