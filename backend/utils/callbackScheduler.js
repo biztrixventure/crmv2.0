@@ -34,39 +34,48 @@ async function processDueCallbacks() {
     logger.info('SCHEDULER', `Processing ${due.length} due callback(s)`);
 
     for (const cb of due) {
-      const time = new Date(cb.callback_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      const title = `📞 Callback Due: ${cb.customer_name}`;
-      const message = `${cb.customer_phone ? cb.customer_phone + ' — ' : ''}${cb.notes || 'No notes'} at ${time}`;
+      try {
+        const title   = `📞 Callback: ${cb.customer_name}`;
+        const message = [
+          cb.customer_phone || null,
+          cb.notes          || null,
+        ].filter(Boolean).join(' — ') || 'Time for your scheduled callback';
 
-      // 1. Create in-app notification
-      await supabaseAdmin.from('notifications').insert({
-        user_id:    cb.user_id,
-        company_id: cb.company_id,
-        type:       'callback_due',
-        title,
-        message,
-        data: {
-          callback_id:   cb.id,
-          customer_name: cb.customer_name,
-          customer_phone: cb.customer_phone,
-          callback_at:   cb.callback_at,
-        },
-        is_read: false,
-      });
+        // 1. Create in-app notification
+        const { error: notifErr } = await supabaseAdmin.from('notifications').insert({
+          user_id:    cb.user_id,
+          company_id: cb.company_id,
+          type:       'callback_due',
+          title,
+          message,
+          data: {
+            callback_id:    cb.id,
+            customer_name:  cb.customer_name,
+            customer_phone: cb.customer_phone,
+            callback_at:    cb.callback_at,
+          },
+          is_read: false,
+        });
+        if (notifErr) logger.warn('SCHEDULER', `Notification insert error for ${cb.id}: ${notifErr.message}`);
 
-      // 2. Send Web Push (OS notification)
-      await sendPushToUser(cb.user_id, {
-        title,
-        body: message,
-        tag:  `callback-${cb.id}`,
-        data: { type: 'callback_due', callback_id: cb.id },
-      });
+        // 2. Send Web Push (OS notification — fires to Windows/macOS notification center)
+        await sendPushToUser(cb.user_id, {
+          title,
+          body:              message,
+          tag:               `callback-${cb.id}`,
+          requireInteraction: true,
+          data:              { type: 'callback_due', callback_id: cb.id },
+        });
 
-      // 3. Mark notified so we don't fire again
-      await supabaseAdmin
-        .from('callbacks')
-        .update({ notified: true })
-        .eq('id', cb.id);
+        // 3. Mark notified so we don't fire again
+        await supabaseAdmin
+          .from('callbacks')
+          .update({ notified: true })
+          .eq('id', cb.id);
+
+      } catch (cbErr) {
+        logger.warn('SCHEDULER', `Failed to process callback ${cb.id}: ${cbErr.message}`);
+      }
     }
   } catch (err) {
     logger.warn('SCHEDULER', `processDueCallbacks error: ${err.message}`);

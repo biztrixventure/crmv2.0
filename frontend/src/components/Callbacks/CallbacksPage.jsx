@@ -31,14 +31,22 @@ const StatusBadge = ({ status }) => {
 const formatDateTime = (iso) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const isPast = (iso) => iso && new Date(iso) < new Date();
 const isDueSoon = (iso) => {
   if (!iso) return false;
   const diff = new Date(iso) - new Date();
-  return diff > 0 && diff < 30 * 60 * 1000; // within 30 minutes
+  return diff > 0 && diff < 30 * 60 * 1000;
+};
+
+// Convert a UTC ISO string to the value string needed by <input type="datetime-local">
+// (browser datetime-local inputs expect local time, not UTC)
+const toLocalInputValue = (utcIso) => {
+  const d = new Date(utcIso);
+  const offsetMs = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
 // ── Create / Edit Modal ──────────────────────────────────────────────────────
@@ -50,11 +58,8 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
     customer_email: callback?.customer_email || '',
     notes:          callback?.notes          || '',
     callback_at:    callback?.callback_at
-      ? new Date(callback.callback_at).toISOString().slice(0, 16)
-      : (() => {
-          const d = new Date(); d.setMinutes(d.getMinutes() + 30);
-          return d.toISOString().slice(0, 16);
-        })(),
+      ? toLocalInputValue(callback.callback_at)
+      : toLocalInputValue(Date.now() + 30 * 60000),
     status: callback?.status || 'pending',
   });
   const [saving, setSaving] = useState(false);
@@ -65,11 +70,13 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
     if (!form.customer_name.trim()) return setErr('Customer name required');
     setSaving(true); setErr('');
     try {
+      // Convert datetime-local value (device local time) to UTC ISO string
+      const payload = { ...form, callback_at: new Date(form.callback_at).toISOString() };
       if (isEdit) {
-        const res = await client.put(`callbacks/${callback.id}`, form);
+        const res = await client.put(`callbacks/${callback.id}`, payload);
         onSave(res.data.callback, 'edit');
       } else {
-        const res = await client.post('callbacks', { ...form, company_id: companyId });
+        const res = await client.post('callbacks', { ...payload, company_id: companyId });
         onSave(res.data.callback, 'create');
       }
       onClose();
@@ -167,17 +174,19 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
 };
 
 // ── Push Permission Banner ───────────────────────────────────────────────────
-const PushBanner = ({ onEnable, onDismiss, loading }) => (
+const PushBanner = ({ onEnable, onDismiss, loading, alreadyGranted }) => (
   <div className="mb-5 p-4 rounded-2xl flex items-start gap-4 justify-between"
     style={{ backgroundColor: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)' }}>
     <div className="flex items-center gap-3">
       <Bell size={20} style={{ color: '#6366f1' }} className="flex-shrink-0 mt-0.5" />
       <div>
         <p className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>
-          Enable callback reminders
+          {alreadyGranted ? 'Re-enable callback reminders' : 'Enable callback reminders'}
         </p>
         <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-          Get browser notifications when it's time for a scheduled callback — even when the tab is closed.
+          {alreadyGranted
+            ? 'Your notification subscription was reset. Click Enable to receive Windows notifications when a callback is due.'
+            : 'Get Windows/browser notifications when a callback is due — even when the tab is in the background.'}
         </p>
       </div>
     </div>
@@ -207,10 +216,12 @@ const CallbacksPage = ({ user }) => {
   const { permission, subscribed, loading: pushLoading, isSupported, subscribe } =
     usePushNotifications();
 
-  // Show push banner if not yet subscribed and browser supports it
+  // Show push banner if not subscribed and permission not explicitly denied
   useEffect(() => {
-    if (isSupported && permission === 'default' && !subscribed) {
+    if (isSupported && !subscribed && permission !== 'denied') {
       setShowPushBanner(true);
+    } else {
+      setShowPushBanner(false);
     }
   }, [isSupported, permission, subscribed]);
 
@@ -279,9 +290,10 @@ const CallbacksPage = ({ user }) => {
       {/* Push notification banner */}
       {showPushBanner && (
         <PushBanner
-          onEnable={async () => { await subscribe(); setShowPushBanner(false); }}
+          onEnable={async () => { const ok = await subscribe(); if (ok) setShowPushBanner(false); }}
           onDismiss={() => setShowPushBanner(false)}
           loading={pushLoading}
+          alreadyGranted={permission === 'granted'}
         />
       )}
 
