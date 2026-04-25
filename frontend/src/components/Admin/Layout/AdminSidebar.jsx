@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Search } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Search, Zap } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -21,6 +21,12 @@ const NAV_SECTIONS = [
     label: 'Sales',
     items: [
       { id: 'sale-search', label: 'Sale Search', icon: Search },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { id: 'features', label: 'Feature Flags', icon: Zap },
     ],
   },
 ];
