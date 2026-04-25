@@ -203,75 +203,6 @@ async function onTransferEdited({ transfer, editorName, reason }) {
   }
 }
 
-/**
- * A closer created a sale.
- * Notify: the original fronter + fronter manager + operations manager.
- */
-async function onSaleCreated({ sale, fronterUserId, closerName }) {
-  const customerName = sale.customer_name || 'Customer';
-  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
-  const companyId    = sale.company_id;
-
-  // Auto-resolve fronter from linked transfer if not explicitly provided
-  let resolvedFronterUserId = fronterUserId || sale.fronter_id || null;
-  if (!resolvedFronterUserId && sale.transfer_id) {
-    const { data: tf } = await supabaseAdmin.from('transfers').select('created_by').eq('id', sale.transfer_id).single();
-    resolvedFronterUserId = tf?.created_by || null;
-  }
-  const fronterUserId_ = resolvedFronterUserId;
-
-  if (fronterUserId_) {
-    await createNotification({
-      userId: fronterUserId_, companyId,
-      type: 'sale_created',
-      title: 'Your lead became a sale!',
-      message: `${customerName} (Ref: ${refNo}) was closed by ${closerName || 'a closer'}.`,
-      data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
-    });
-    sendPushToUser(fronterUserId_, {
-      title: 'Sale closed!',
-      body:  `${customerName} — Ref: ${refNo}`,
-      tag:   'sale_created',
-      data:  { sale_id: sale.id },
-    }).catch(() => {});
-  }
-
-  // Notify floor managers in closer's company
-  await notifyFloorManagers(companyId, {
-    type: 'sale_created',
-    title: 'New sale closed',
-    message: `${closerName || 'A closer'} closed ${customerName} — Ref: ${refNo}.`,
-    data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
-  });
-
-  // Also notify floor managers in the fronter's company (via transfer link)
-  if (sale.transfer_id) {
-    const { data: tf } = await supabaseAdmin.from('transfers').select('company_id').eq('id', sale.transfer_id).single();
-    if (tf?.company_id && tf.company_id !== companyId) {
-      await notifyFloorManagers(tf.company_id, {
-        type: 'sale_created',
-        title: 'Transfer converted to sale',
-        message: `${closerName || 'A closer'} closed ${customerName} — Ref: ${refNo}.`,
-        data: { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
-      });
-    }
-  }
-}
-
-/**
- * A sale status was updated.
- */
-async function onSaleUpdated({ sale, updaterName }) {
-  const customerName = sale.customer_name || 'Customer';
-  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
-
-  await notifyManagers(sale.company_id, {
-    type: 'sale_updated',
-    title: `Sale updated — ${sale.status?.toUpperCase()}`,
-    message: `${updaterName} updated ${customerName} (Ref: ${refNo}) → ${sale.status?.toUpperCase()}.`,
-    data: { sale_id: sale.id, reference_no: refNo, status: sale.status },
-  });
-}
 
 /**
  * Closer submitted sale for compliance review.
@@ -294,7 +225,7 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
 
 /**
  * Compliance approved a sale → closed_won.
- * Notify: closer (submitter) + closer_manager + operations_manager + company_admin.
+ * Notify: closer + closer company managers + fronter (via transfer link) + fronter company managers.
  */
 async function onSaleApproved({ sale, reviewerName }) {
   const customerName = sale.customer_name || 'Customer';
@@ -319,15 +250,55 @@ async function onSaleApproved({ sale, reviewerName }) {
     }).catch(() => {});
   }
 
-  // Notify managers
-  const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
-  await notifyUsers(managerIds, {
+  // Notify managers in closer's company
+  const closerMgrIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
+  await notifyUsers(closerMgrIds, {
     companyId,
     type:    'sale_approved',
     title:   `Sale confirmed — ${customerName}`,
     message: `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.`,
     data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
   });
+
+  // Notify the fronter + their company managers (sale is only confirmed at this point)
+  let fronterUserId    = sale.fronter_id || null;
+  let fronterCompanyId = null;
+  if (sale.transfer_id) {
+    const { data: tf } = await supabaseAdmin
+      .from('transfers')
+      .select('created_by, company_id')
+      .eq('id', sale.transfer_id)
+      .single();
+    if (tf) {
+      fronterUserId    = fronterUserId || tf.created_by;
+      fronterCompanyId = tf.company_id;
+    }
+  }
+
+  if (fronterUserId) {
+    await createNotification({
+      userId: fronterUserId, companyId: fronterCompanyId || companyId,
+      type:    'sale_approved',
+      title:   'Your lead was confirmed as a sale!',
+      message: `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
+      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    });
+    sendPushToUser(fronterUserId, {
+      title: 'Lead confirmed!',
+      body:  `${customerName} — Ref: ${refNo} closed won`,
+      tag:   'sale_approved',
+      data:  { sale_id: sale.id },
+    }).catch(() => {});
+  }
+
+  if (fronterCompanyId && fronterCompanyId !== companyId) {
+    await notifyFloorManagers(fronterCompanyId, {
+      type:    'sale_approved',
+      title:   `Transfer confirmed as sale — ${customerName}`,
+      message: `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
+      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    });
+  }
 }
 
 /**
@@ -386,12 +357,10 @@ module.exports = {
   onTransferCreated,
   onTransferRejected,
   onTransferEdited,
-  onSaleCreated,
-  onSaleUpdated,
-  onComplianceUpdate,
   onSaleSubmittedForReview,
   onSaleApproved,
   onSaleReturned,
+  onComplianceUpdate,
   notifyManagers,
   notifyFloorManagers,
   getUserIdsByLevel,

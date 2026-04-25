@@ -270,11 +270,6 @@ router.post(
 
     logger.success('CREATE_SALE', `Sale created: ${sale.id} ref=${refNo}`);
 
-    // Fire notifications asynchronously
-    const { data: closerAuth } = await supabaseAdmin.auth.admin.getUserById(userId);
-    const closerName = closerAuth?.user?.user_metadata?.first_name || closerAuth?.user?.email || 'A closer';
-    notifications.onSaleCreated({ sale, fronterUserId: fronter_id || null, closerName }).catch(() => {});
-
     res.status(201).json({ sale });
   })
 );
@@ -450,13 +445,6 @@ router.put(
     if (updateError) {
       logger.error('UPDATE_SALE', 'Update failed', updateError);
       return res.status(500).json({ error: updateError.message });
-    }
-
-    // Notify on status change
-    if (status && status !== existing.status) {
-      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      const updaterName = authUser?.user?.email || 'Someone';
-      notifications.onSaleUpdated({ sale: updated, updaterName }).catch(() => {});
     }
 
     logger.success('UPDATE_SALE', `Sale updated: ${id}`);
