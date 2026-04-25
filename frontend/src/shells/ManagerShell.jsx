@@ -52,27 +52,27 @@ const ManagerShell = () => {
   // ── Tab logic ─────────────────────────────────────────────────────────────
   const TABS = [
     { key: 'overview',  label: 'Overview',        icon: TrendingUp, always: true },
-    ...(hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')
+    ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
-    ...(hasPermission('view_team_sales')
+    ...(hasPermission('view_team_sales') && isEnabled('sales')
       ? [{ key: 'team_sales', label: 'Team Sales',     icon: DollarSign }] : []),
-    ...(hasPermission('create_sale')
+    ...(hasPermission('create_sale') && isEnabled('sales')
       ? [{ key: 'my_sales',   label: 'My Sales',       icon: DollarSign }] : []),
-    ...(hasPermission('view_team_callbacks')
+    ...(hasPermission('view_team_callbacks') && isEnabled('callbacks')
       ? [{ key: 'callbacks',  label: 'Team Callbacks', icon: Phone      }] : []),
-    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')
+    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')) && isEnabled('reports')
       ? [{ key: 'reports',    label: 'Reports',        icon: BarChart3  }] : []),
-    ...(hasPermission('view_all_call_reviews')
+    ...(hasPermission('view_all_call_reviews') && isEnabled('call_reviews')
       ? [{ key: 'reviews',    label: 'Reviews',        icon: Star       }] : []),
     ...(hasPermission('create_user') || hasPermission('edit_user')
       ? [{ key: 'team',       label: 'Team',           icon: Users      }] : []),
     ...(hasPermission('manage_roles')
       ? [{ key: 'roles',      label: 'Roles',          icon: Shield     }] : []),
-    ...(hasPermission('manage_forms')
+    ...(hasPermission('manage_forms') && isEnabled('form_builder')
       ? [{ key: 'forms',      label: 'Form Builder',   icon: FileText   }] : []),
     ...(hasPermission('manage_callback_numbers') && (isEnabled('callback_numbers') || isEnabled('number_assignment'))
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
-    ...(hasPermission('search_sales')
+    ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
   ];
 

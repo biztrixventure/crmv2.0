@@ -79,38 +79,29 @@ export const useNotifications = () => {
     try { await client.delete('notifications'); } catch {}
   }, []);
 
-  // ── Realtime subscription ────────────────────────────────────────────────
-  // Subscribes to INSERT events on notifications table for the current user.
-  // Supabase filters by user_id using RLS + filter() so only own rows arrive.
+  // ── Realtime + 30s polling fallback ─────────────────────────────────────
+  // Realtime requires the notifications table to have Realtime enabled in
+  // Supabase Dashboard → Database → Replication. The 30s poll ensures
+  // notifications appear even if Realtime is off or the WS drops.
   useEffect(() => {
     fetchNotifications();
 
-    // Get current user ID from localStorage for realtime filter
     const storedUser = localStorage.getItem('user');
     const uid = storedUser ? JSON.parse(storedUser)?.id : null;
     if (!uid) return;
     userIdRef.current = uid;
 
-    const channelName = `notifications-${uid}`;
+    // Realtime subscription
     const channel = supabase
-      .channel(channelName)
+      .channel(`notifications-${uid}`)
       .on(
         'postgres_changes',
-        {
-          event:  'INSERT',
-          schema: 'public',
-          table:  'notifications',
-          filter: `user_id=eq.${uid}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
         (payload) => {
           const newNotif = payload.new;
           if (!newNotif) return;
-
-          // Prepend to list, bump unread count
           setNotifications(prev => [newNotif, ...prev].slice(0, 40));
           setUnreadCount(prev => prev + 1);
-
-          // Play soft sound
           playNotificationSound();
         }
       )
@@ -118,8 +109,12 @@ export const useNotifications = () => {
 
     channelRef.current = channel;
 
+    // Polling fallback — silent refetch every 30 s
+    const pollInterval = setInterval(() => fetchNotifications(true), 30_000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, [fetchNotifications]);
 

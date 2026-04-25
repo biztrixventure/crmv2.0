@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
@@ -51,15 +52,17 @@ const ComplianceShell = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
+  const { isEnabled } = useFeatureFlags();
 
   const isSuperadmin = user?.role === 'superadmin';
 
-  // ── Permission gates ─────────────────────────────────────────────────────
-  const canManageCompliance = isSuperadmin || hasPermission('manage_compliance');
-  const canViewAllSales     = isSuperadmin || hasPermission('view_all_company_sales');
-  const canViewReviews      = isSuperadmin || hasPermission('view_all_call_reviews');
+  // ── Permission + feature gates ───────────────────────────────────────────
+  const canManageCompliance = (isSuperadmin || hasPermission('manage_compliance')) && isEnabled('compliance_workflow');
+  const canViewAllSales     = (isSuperadmin || hasPermission('view_all_company_sales')) && isEnabled('sales');
+  const canViewReviews      = (isSuperadmin || hasPermission('view_all_call_reviews')) && isEnabled('call_reviews');
   const canViewFinancial    = isSuperadmin || hasPermission('view_financial_data');
-  const canSearch           = isSuperadmin || hasPermission('search_sales');
+  const canSearch           = (isSuperadmin || hasPermission('search_sales')) && isEnabled('search_sales');
+  const canExportCSV        = (isSuperadmin || hasPermission('view_all_company_sales')) && isEnabled('csv_export');
 
   // ── Tab state ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('queue');
@@ -478,7 +481,7 @@ const ComplianceShell = () => {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {canViewAllSales && (
+                {canExportCSV && (
                   <button onClick={exportCSV} disabled={sales.length === 0}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-105 disabled:opacity-40"
                     style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}

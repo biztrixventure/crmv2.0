@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireFeature } = require('../utils/featureGate');
 const router = express.Router();
 
 // Fetch all user IDs active in a company — used to scope reviews for closer-side roles.
@@ -18,7 +19,9 @@ const DISPOSITIONS = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up'
 // ============================================================================
 // POST /reviews/transfer/:id/review — closer submits rating for a transfer
 // ============================================================================
-router.post('/transfer/:id/review', [
+router.post('/transfer/:id/review',
+  requireFeature('call_reviews'),
+  [
   body('rating').isIn(RATINGS),
   body('notes').optional().isString().isLength({ max: 1000 }),
 ], asyncHandler(async (req, res) => {
@@ -66,7 +69,9 @@ router.post('/transfer/:id/review', [
 // ============================================================================
 // POST /reviews/transfer/:id/dispo — closer sets disposition for a transfer
 // ============================================================================
-router.post('/transfer/:id/dispo', [
+router.post('/transfer/:id/dispo',
+  requireFeature('call_reviews'),
+  [
   body('disposition').isIn(DISPOSITIONS),
   body('notes').optional().isString().isLength({ max: 1000 }),
 ], asyncHandler(async (req, res) => {

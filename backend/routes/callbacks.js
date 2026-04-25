@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const logger = require('../utils/logger');
+const { requireFeature } = require('../utils/featureGate');
 
 const router = express.Router();
 
@@ -88,6 +89,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 // POST /callbacks — create a callback
 // ============================================================================
 router.post('/',
+  requireFeature('callbacks'),
   [
     body('customer_name').trim().notEmpty().withMessage('customer_name required'),
     body('callback_at').isISO8601().withMessage('callback_at must be ISO8601 datetime'),

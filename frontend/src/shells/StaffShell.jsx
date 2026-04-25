@@ -272,12 +272,12 @@ const StaffShell = () => {
   };
 
   const TABS = [
-    ...(isCloser   ? [{ key: 'sales',           label: 'My Sales',        icon: DollarSign }] : []),
-    ...(isFronter  ? [{ key: 'transfers',        label: 'My Transfers',    icon: Send       }] : []),
-    ...(hasPermission('view_callbacks')          ? [{ key: 'callbacks',       label: 'Callbacks',       icon: Phone }] : []),
-    ...(hasPermission('manage_callback_numbers') && isEnabled('callback_numbers')  ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash  }] : []),
-    ...(isFronter && isEnabled('number_assignment')                                ? [{ key: 'numbers',         label: 'My Numbers',      icon: Hash  }] : []),
-    ...(hasPermission('search_sales')            ? [{ key: 'search',          label: 'Search Sales',    icon: Search}] : []),
+    ...(isCloser && isEnabled('sales')                                                          ? [{ key: 'sales',           label: 'My Sales',        icon: DollarSign }] : []),
+    ...(isFronter && isEnabled('transfers')                                                     ? [{ key: 'transfers',        label: 'My Transfers',    icon: Send       }] : []),
+    ...(hasPermission('view_callbacks') && isEnabled('callbacks')                               ? [{ key: 'callbacks',        label: 'Callbacks',       icon: Phone      }] : []),
+    ...(hasPermission('manage_callback_numbers') && isEnabled('callback_numbers')               ? [{ key: 'tracked_numbers',  label: 'Tracked Numbers', icon: Hash       }] : []),
+    ...(isFronter && isEnabled('number_assignment')                                             ? [{ key: 'numbers',          label: 'My Numbers',      icon: Hash       }] : []),
+    ...(hasPermission('search_sales') && isEnabled('search_sales')                             ? [{ key: 'search',           label: 'Search Sales',    icon: Search     }] : []),
   ];
 
   const conversionRate = transfers.length > 0

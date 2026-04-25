@@ -2,8 +2,10 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireFeature } = require('../utils/featureGate');
 
 const router = express.Router();
+router.use(requireFeature('number_assignment'));
 
 const MANAGER_LEVELS = [
   'superadmin', 'readonly_admin', 'company_admin',

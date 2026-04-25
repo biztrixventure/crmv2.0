@@ -4,8 +4,12 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
+const { requireFeature } = require('../utils/featureGate');
 
 const router = express.Router();
+
+// All callbackNumbers routes require the feature to be enabled
+router.use(requireFeature('callback_numbers'));
 
 const MANAGER_LEVELS = [
   'superadmin', 'company_admin', 'manager',

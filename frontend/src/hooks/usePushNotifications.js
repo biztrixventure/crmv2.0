@@ -44,12 +44,32 @@ export const usePushNotifications = ({ onNewNotification } = {}) => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
     navigator.serviceWorker.register('/sw.js')
-      .then(reg => {
+      .then(async reg => {
         swRef.current = reg;
-        // Check if already subscribed
-        return reg.pushManager.getSubscription();
+        const existing = await reg.pushManager.getSubscription();
+        if (existing) {
+          setSubscribed(true);
+          return; // already subscribed — no action needed
+        }
+
+        // Auto-subscribe if permission is already granted (user said yes in a prior session)
+        // but the subscription was lost (browser update, SW re-register, cleared storage, etc.)
+        if (Notification.permission === 'granted') {
+          try {
+            const { default: clientMod } = await import('../api/client');
+            const vapidRes = await clientMod.get('push/vapid-key');
+            const appKey   = urlBase64ToUint8Array(vapidRes.data.publicKey);
+            const sub      = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+            const subJson  = sub.toJSON();
+            await clientMod.post('push/subscribe', {
+              endpoint:  subJson.endpoint,
+              keys:      subJson.keys,
+              userAgent: navigator.userAgent.slice(0, 200),
+            });
+            setSubscribed(true);
+          } catch { /* silent — user can re-subscribe manually */ }
+        }
       })
-      .then(sub => { if (sub) setSubscribed(true); })
       .catch(() => {});
 
     // Listen for SW → page messages (play sound + refresh bell)

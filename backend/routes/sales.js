@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const notifications = require('../utils/notificationService');
 const { hasPermission, isSuperAdmin } = require('../models/helpers');
+const { requireFeature } = require('../utils/featureGate');
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ function generateReferenceNo() {
 // Requires search_sales permission OR superadmin.
 // Uses pg_trgm GIN indexes for sub-10ms partial match on name/phone/ref/vin.
 // ============================================================================
-router.get('/search', asyncHandler(async (req, res) => {
+router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
   const q         = (req.query.q || '').trim();

@@ -1,12 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bell, Check, Trash2, X, DollarSign, Users, ArrowRight } from 'lucide-react';
+import { Bell, Check, Trash2, X, DollarSign, Users, ArrowRight, Phone, ShieldCheck, RotateCcw, AlertCircle } from 'lucide-react';
 
 // Icon per notification type
 const TYPE_ICON = {
-  sale_created:      { icon: DollarSign, bg: '#dcfce7', color: '#16a34a' },
-  sale_updated:      { icon: DollarSign, bg: '#fef9c3', color: '#ca8a04' },
-  transfer_created:  { icon: Users,      bg: '#dbeafe', color: '#2563eb' },
-  transfer_assigned: { icon: ArrowRight, bg: '#f3e8ff', color: '#7c3aed' },
+  sale_created:        { icon: DollarSign,  bg: '#dcfce7', color: '#16a34a' },
+  sale_updated:        { icon: DollarSign,  bg: '#fef9c3', color: '#ca8a04' },
+  sale_approved:       { icon: ShieldCheck, bg: '#dcfce7', color: '#15803d' },
+  sale_needs_revision: { icon: RotateCcw,   bg: '#fee2e2', color: '#b91c1c' },
+  sale_pending_review: { icon: AlertCircle, bg: '#fef3c7', color: '#b45309' },
+  transfer_created:    { icon: Users,       bg: '#dbeafe', color: '#2563eb' },
+  transfer_assigned:   { icon: ArrowRight,  bg: '#f3e8ff', color: '#7c3aed' },
+  transfer_rejected:   { icon: X,           bg: '#fee2e2', color: '#b91c1c' },
+  callback_due:        { icon: Phone,       bg: '#fef3c7', color: '#d97706' },
+  number_claimable:    { icon: Phone,       bg: '#dbeafe', color: '#2563eb' },
+  compliance_updated:  { icon: ShieldCheck, bg: '#f3e8ff', color: '#7c3aed' },
 };
 
 function timeAgo(dateStr) {
