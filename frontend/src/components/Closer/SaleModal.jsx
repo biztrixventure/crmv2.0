@@ -6,7 +6,7 @@ import SaleForm from './SaleForm';
  * SaleModal — wraps SaleForm in a full-screen overlay modal.
  * Handles its own scroll since the form is long.
  */
-const SaleModal = ({ isOpen, onClose, user, transfer = null, onSubmit, isLoading = false }) => {
+const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null, onSubmit, isLoading = false }) => {
   if (!isOpen) return null;
 
   // Close on backdrop click
@@ -40,11 +40,11 @@ const SaleModal = ({ isOpen, onClose, user, transfer = null, onSubmit, isLoading
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">
-                {transfer ? 'Convert Transfer to Sale' : 'Create New Sale'}
+                {existingSale ? 'Edit Sale' : transfer ? 'Convert Transfer to Sale' : 'Create New Sale'}
               </h2>
-              {transfer?.form_data?.customer_name && (
+              {(existingSale?.customer_name || transfer?.form_data?.customer_name) && (
                 <p className="text-sm text-white/70">
-                  Customer: {transfer.form_data.customer_name}
+                  Customer: {existingSale?.customer_name || transfer.form_data.customer_name}
                 </p>
               )}
             </div>
@@ -65,6 +65,7 @@ const SaleModal = ({ isOpen, onClose, user, transfer = null, onSubmit, isLoading
           <SaleForm
             user={user}
             transfer={transfer}
+            existingSale={existingSale}
             onSubmit={onSubmit}
             isLoading={isLoading}
           />

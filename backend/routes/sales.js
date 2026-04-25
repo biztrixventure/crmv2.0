@@ -338,7 +338,29 @@ router.get('/compliance', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  res.json({ sales: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  // Enrich with closer/fronter names and company names
+  const closerIds  = [...new Set((data || []).map(s => s.closer_id).filter(Boolean))];
+  const fronterIds = [...new Set((data || []).map(s => s.fronter_id).filter(Boolean))];
+  const allUids    = [...new Set([...closerIds, ...fronterIds])];
+  const compIds    = [...new Set((data || []).map(s => s.company_id).filter(Boolean))];
+
+  let profileMap = {}, companyMap = {};
+  const [profilesRes, companiesRes] = await Promise.all([
+    allUids.length ? supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', allUids) : { data: [] },
+    compIds.length ? supabaseAdmin.from('companies').select('id,name').in('id', compIds)                               : { data: [] },
+  ]);
+  (profilesRes.data  || []).forEach(p => { profileMap[p.user_id] = p; });
+  (companiesRes.data || []).forEach(c => { companyMap[c.id]       = c; });
+
+  const enriched = (data || []).map(s => ({
+    ...s,
+    user_profiles: profileMap[s.closer_id]  || null,
+    companies:     companyMap[s.company_id] || null,
+    closer_name:  profileMap[s.closer_id]  ? `${profileMap[s.closer_id].first_name  || ''} ${profileMap[s.closer_id].last_name  || ''}`.trim() || null : null,
+    fronter_name: profileMap[s.fronter_id] ? `${profileMap[s.fronter_id].first_name || ''} ${profileMap[s.fronter_id].last_name || ''}`.trim() || null : null,
+  }));
+
+  res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
 // ============================================================================
@@ -408,7 +430,7 @@ router.put(
       status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
-      reference_no, client_name, fronter_id, sale_date,
+      reference_no, client_name, fronter_id, sale_date, form_data,
     } = req.body;
 
     const validStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
@@ -439,6 +461,7 @@ router.put(
     if (client_name !== undefined)     updates.client_name      = client_name;
     if (fronter_id !== undefined)      updates.fronter_id       = fronter_id;
     if (sale_date !== undefined)       updates.sale_date        = sale_date;
+    if (form_data !== undefined)       updates.form_data        = form_data;
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('sales').update(updates).eq('id', id).select().single();

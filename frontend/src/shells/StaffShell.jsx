@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
-  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus,
+  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -125,6 +125,11 @@ const StaffShell = () => {
   const [submitting, setSubmitting]     = useState(null); // sale id being submitted
   const [submitMsg, setSubmitMsg]       = useState('');
 
+  // Edit sale state
+  const [editSale, setEditSale]                 = useState(null);
+  const [editSaleLoading, setEditSaleLoading]   = useState(false);
+  const [editSaleError, setEditSaleError]       = useState('');
+
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData]             = useState({});
@@ -162,6 +167,22 @@ const StaffShell = () => {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
     } finally {
       setSaleLoading(false);
+    }
+  };
+
+  const handleSaleEdit = async (formData) => {
+    setEditSaleLoading(true);
+    setEditSaleError('');
+    try {
+      await client.put(`sales/${editSale.id}`, formData);
+      setEditSale(null);
+      setSaleSuccess('Sale updated!');
+      fetchSales({ date_from, date_to });
+      setTimeout(() => setSaleSuccess(''), 5000);
+    } catch (err) {
+      setEditSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to update sale');
+    } finally {
+      setEditSaleLoading(false);
     }
   };
 
@@ -520,6 +541,12 @@ const StaffShell = () => {
                                   : <><CheckCircle size={12} /> Submit for Review</>}
                               </button>
                             )}
+                            <button
+                              onClick={e => { e.stopPropagation(); setEditSale(s); setEditSaleError(''); }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1 transition-all hover:bg-bg-secondary"
+                              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                              <Pencil size={11} /> Edit
+                            </button>
                           </div>
                         )}
 
@@ -532,15 +559,23 @@ const StaffShell = () => {
                         )}
 
                         {s.status === 'needs_revision' && (
-                          <button
-                            onClick={e => { e.stopPropagation(); handleSubmitForReview(s.id); }}
-                            disabled={submitting === s.id}
-                            className="w-full mt-3 py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
-                            style={{ backgroundColor: 'var(--color-error-600)', color: '#fff' }}>
-                            {submitting === s.id
-                              ? <><RefreshCw size={11} className="animate-spin" /> Resubmitting…</>
-                              : <><RefreshCw size={11} /> Resubmit for Review</>}
-                          </button>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={e => { e.stopPropagation(); setEditSale(s); setEditSaleError(''); }}
+                              className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all hover:scale-[1.02]"
+                              style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
+                              <Pencil size={11} /> Edit Sale
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); handleSubmitForReview(s.id); }}
+                              disabled={submitting === s.id}
+                              className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                              style={{ backgroundColor: 'var(--color-error-600)', color: '#fff' }}>
+                              {submitting === s.id
+                                ? <><RefreshCw size={11} className="animate-spin" /> Resubmitting…</>
+                                : <><RefreshCw size={11} /> Resubmit</>}
+                            </button>
+                          </div>
                         )}
 
                         {/* Schedule callback from sale */}
@@ -709,6 +744,16 @@ const StaffShell = () => {
       {/* ── MODALS ── */}
       <SaleModal isOpen={modalOpen} onClose={() => setModalOpen(false)} user={user}
         transfer={activeTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
+
+      {/* Edit sale modal */}
+      <SaleModal isOpen={!!editSale} onClose={() => { setEditSale(null); setEditSaleError(''); }} user={user}
+        existingSale={editSale} onSubmit={handleSaleEdit} isLoading={editSaleLoading} />
+      {editSaleError && (
+        <div className="fixed bottom-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-semibold text-white shadow-lg"
+          style={{ backgroundColor: 'var(--color-error-600)' }}>
+          {editSaleError}
+        </div>
+      )}
 
       {rejectTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>

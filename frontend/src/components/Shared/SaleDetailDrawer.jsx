@@ -49,7 +49,7 @@ export default function SaleDetailDrawer({ sale, onClose }) {
   const fd = sale.form_data || {};
   const extraFields = Object.entries(fd).filter(([k]) => !SKIP_KEYS.has(k));
 
-  const hist = Array.isArray(sale.compliance_history) ? sale.compliance_history : [];
+  const hist = Array.isArray(sale.edit_history) ? sale.edit_history : [];
 
   const complianceColor = {
     open: 'var(--color-info-600)',
@@ -183,30 +183,47 @@ export default function SaleDetailDrawer({ sale, onClose }) {
             {sale.updated_at && sale.updated_at !== sale.created_at && (
               <Row label="Updated" value={new Date(sale.updated_at).toLocaleString()} />
             )}
-            {sale.submitted_at && (
-              <Row label="Submitted" value={new Date(sale.submitted_at).toLocaleString()} />
+            {sale.submitted_for_review_at && (
+              <Row label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} />
             )}
-            {sale.reviewed_at && (
-              <Row label="Reviewed" value={new Date(sale.reviewed_at).toLocaleString()} />
+            {sale.compliance_reviewed_at && (
+              <Row label="Compliance Reviewed" value={new Date(sale.compliance_reviewed_at).toLocaleString()} />
             )}
           </Section>
 
-          {/* Compliance history */}
+          {/* Audit trail */}
           {hist.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: 'var(--color-primary-600)' }}>Compliance History</p>
+                style={{ color: 'var(--color-primary-600)' }}>Audit Trail</p>
               <div className="space-y-2">
-                {hist.map((h, i) => (
-                  <div key={i} className="p-3 rounded-xl text-xs"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                    <div className="flex justify-between text-text-tertiary mb-1">
-                      <span className="font-semibold capitalize">{h.action || 'Review'}</span>
-                      <span>{new Date(h.reviewed_at || h.at).toLocaleString()}</span>
+                {hist.map((h, i) => {
+                  const actionLabel = h.action === 'approved' ? '✓ Approved'
+                    : h.action === 'returned' ? '↩ Returned'
+                    : h.action ? h.action.replace(/_/g, ' ') : 'Updated';
+                  const actionColor = h.action === 'approved' ? '#16a34a'
+                    : h.action === 'returned' ? '#d97706'
+                    : 'var(--color-text-secondary)';
+                  return (
+                    <div key={i} className="p-3 rounded-xl text-xs"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      <div className="flex justify-between mb-1">
+                        <span className="font-bold capitalize" style={{ color: actionColor }}>{actionLabel}</span>
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>
+                          {new Date(h.edited_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {h.previous_status && (
+                        <p className="mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                          {h.previous_status} → {h.new_status || h.action}
+                        </p>
+                      )}
+                      {(h.note || h.reason) && (
+                        <p style={{ color: 'var(--color-text)' }} className="italic">"{h.note || h.reason}"</p>
+                      )}
                     </div>
-                    {h.note && <p className="text-text italic">"{h.note}"</p>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
