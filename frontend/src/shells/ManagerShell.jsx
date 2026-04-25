@@ -7,6 +7,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
+  MessageSquare, Trash2,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -42,7 +43,7 @@ const ManagerShell = () => {
   const notifHook = useNotifications();
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
-  const { sales, loading: salesLoading, fetchSales, createSale, updateSale } = useSales(user?.company_id);
+  const { sales, loading: salesLoading, fetchSales, createSale, updateSale, deleteSale } = useSales(user?.company_id);
   const { transfers, loading: xferLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
 
   const companyId = user?.company_id;
@@ -54,23 +55,23 @@ const ManagerShell = () => {
     { key: 'overview',  label: 'Overview',        icon: TrendingUp, always: true },
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
-    ...(hasPermission('view_team_sales') && isEnabled('sales')
+    ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && isEnabled('sales')
       ? [{ key: 'team_sales', label: 'Team Sales',     icon: DollarSign }] : []),
-    ...(hasPermission('create_sale') && isEnabled('sales')
+    ...((hasPermission('create_sale') || hasPermission('view_own_sales')) && isEnabled('sales')
       ? [{ key: 'my_sales',   label: 'My Sales',       icon: DollarSign }] : []),
     ...(hasPermission('view_team_callbacks') && isEnabled('callbacks')
       ? [{ key: 'callbacks',  label: 'Team Callbacks', icon: Phone      }] : []),
-    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')) && isEnabled('reports')
+    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
       ? [{ key: 'reports',    label: 'Reports',        icon: BarChart3  }] : []),
-    ...(hasPermission('view_all_call_reviews') && isEnabled('call_reviews')
+    ...((hasPermission('view_all_call_reviews') || hasPermission('view_call_reviews')) && isEnabled('call_reviews')
       ? [{ key: 'reviews',    label: 'Reviews',        icon: Star       }] : []),
-    ...(hasPermission('create_user') || hasPermission('edit_user')
+    ...(hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
       ? [{ key: 'team',       label: 'Team',           icon: Users      }] : []),
-    ...(hasPermission('manage_roles')
+    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')
       ? [{ key: 'roles',      label: 'Roles',          icon: Shield     }] : []),
     ...(hasPermission('manage_forms') && isEnabled('form_builder')
       ? [{ key: 'forms',      label: 'Form Builder',   icon: FileText   }] : []),
-    ...(hasPermission('manage_callback_numbers') && (isEnabled('callback_numbers') || isEnabled('number_assignment'))
+    ...((hasPermission('manage_callback_numbers') || hasPermission('view_team_callback_numbers') || hasPermission('reassign_callback_numbers')) && (isEnabled('callback_numbers') || isEnabled('number_assignment'))
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
@@ -94,6 +95,47 @@ const ManagerShell = () => {
   // ── Detail drawers ────────────────────────────────────────────────────────
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
+
+  // ── Rate call / Set dispo ─────────────────────────────────────────────────
+  const RATINGS = ['excellent', 'good', 'average', 'below_average', 'bad'];
+  const DISPOS  = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
+  const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
+
+  const [rateTarget, setRateTarget]   = useState(null);
+  const [ratingVal, setRatingVal]     = useState('good');
+  const [ratingNotes, setRatingNotes] = useState('');
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [ratingMsg, setRatingMsg]     = useState('');
+
+  const [dispoTarget, setDispoTarget] = useState(null);
+  const [dispoVal, setDispoVal]       = useState('sale');
+  const [dispoNotes, setDispoNotes]   = useState('');
+  const [dispoSaving, setDispoSaving] = useState(false);
+  const [dispoMsg, setDispoMsg]       = useState('');
+
+  const handleRateCall = async () => {
+    setRatingSaving(true);
+    try {
+      await client.post(`transfers/${rateTarget.id}/review`, { rating: ratingVal, notes: ratingNotes });
+      setRateTarget(null);
+    } catch (err) {
+      setRatingMsg(err.response?.data?.error || 'Failed to save rating');
+    } finally {
+      setRatingSaving(false);
+    }
+  };
+
+  const handleSetDispo = async () => {
+    setDispoSaving(true);
+    try {
+      await client.post(`transfers/${dispoTarget.id}/disposition`, { disposition: dispoVal, notes: dispoNotes });
+      setDispoTarget(null);
+    } catch (err) {
+      setDispoMsg(err.response?.data?.error || 'Failed to save disposition');
+    } finally {
+      setDispoSaving(false);
+    }
+  };
 
   // ── My Sales (for closer_manager who also sells) ──────────────────────────
   const [saleModalOpen, setSaleModalOpen] = useState(false);
@@ -365,13 +407,36 @@ const ManagerShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-3">
-                            {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
-                              <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                                style={{ background: 'var(--gradient-sidebar)' }}>
-                                Reassign
-                              </button>
-                            )}
+                            <div className="flex flex-wrap gap-1">
+                              {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
+                                <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                                  style={{ background: 'var(--gradient-sidebar)' }}>
+                                  Reassign
+                                </button>
+                              )}
+                              {hasPermission('submit_call_review') && (
+                                <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
+                                  <Star size={11} className="inline mr-1" />Rate
+                                </button>
+                              )}
+                              {hasPermission('submit_call_dispo') && (
+                                <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
+                                  <MessageSquare size={11} className="inline mr-1" />Dispo
+                                </button>
+                              )}
+                              {hasPermission('delete_transfer') && (
+                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchTransfers({ date_from, date_to })); } }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                  <Trash2 size={11} className="inline" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -393,7 +458,7 @@ const ManagerShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date'].filter(Boolean).map(h => (
+                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
                           <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -408,6 +473,15 @@ const ManagerShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                          {hasPermission('delete_sale') && (
+                            <td className="py-3 px-3">
+                              <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
+                                className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
+                                style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -528,6 +602,68 @@ const ManagerShell = () => {
 
       <SaleModal isOpen={saleModalOpen} onClose={() => setSaleModalOpen(false)}
         user={user} transfer={saleTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
+
+      {/* Rate Call modal */}
+      {rateTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2"><Star size={18} style={{ color: '#f59e0b' }} /> Rate Call</h3>
+            <p className="text-sm text-text-secondary mb-4">Customer: <strong>{rateTarget.form_data?.customer_name || rateTarget.form_data?.FirstName || 'Unknown'}</strong></p>
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {RATINGS.map(r => (
+                <button key={r} onClick={() => setRatingVal(r)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all capitalize"
+                  style={{ borderColor: ratingVal === r ? RATING_COLOR[r] : 'var(--color-border)',
+                    backgroundColor: ratingVal === r ? `${RATING_COLOR[r]}15` : 'transparent',
+                    color: ratingVal === r ? RATING_COLOR[r] : 'var(--color-text-secondary)' }}>
+                  {r.replace(/_/g, ' ')}
+                </button>
+              ))}
+            </div>
+            <textarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
+            {ratingMsg && <p className="text-sm text-error-600 mb-3">{ratingMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setRateTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+              <button onClick={handleRateCall} disabled={ratingSaving}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {ratingSaving ? 'Saving…' : 'Save Rating'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set Dispo modal */}
+      {dispoTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
+              <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
+            </h3>
+            <p className="text-sm text-text-secondary mb-4">Customer: <strong>{dispoTarget.form_data?.customer_name || dispoTarget.form_data?.FirstName || 'Unknown'}</strong></p>
+            <select value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
+              {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
+            </select>
+            <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
+            {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setDispoTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+              <button onClick={handleSetDispo} disabled={dispoSaving}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {dispoSaving ? 'Saving…' : 'Save Dispo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <TransferDetailDrawer transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
       <SaleDetailDrawer     sale={detailSale}         onClose={() => setDetailSale(null)} />

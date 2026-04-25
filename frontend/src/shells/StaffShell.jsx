@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
-  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil,
+  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -21,6 +21,7 @@ import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
+import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
@@ -58,7 +59,7 @@ const StaffShell = () => {
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, loading: tLoading, fetchTransfers, createTransfer } = useTransfers(user?.company_id);
-  const { sales, loading: sLoading, fetchSales, createSale } = useSales(user?.company_id);
+  const { sales, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
   const { closers, fetchClosers } = useClosers(user?.company_id);
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
@@ -69,15 +70,15 @@ const StaffShell = () => {
 
   // Cross-role nav
   const crossNavItems = [
-    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user')
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
       ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
-    ...(hasPermission('manage_roles')
+    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')
       ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
     ...(hasPermission('manage_forms')
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
-    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports')
+    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
   ];
 
@@ -293,12 +294,24 @@ const StaffShell = () => {
   };
 
   const TABS = [
-    ...(isCloser && isEnabled('sales')                                                          ? [{ key: 'sales',           label: 'My Sales',        icon: DollarSign }] : []),
-    ...(isFronter && isEnabled('transfers')                                                     ? [{ key: 'transfers',        label: 'My Transfers',    icon: Send       }] : []),
-    ...(hasPermission('view_callbacks') && isEnabled('callbacks')                               ? [{ key: 'callbacks',        label: 'Callbacks',       icon: Phone      }] : []),
-    ...(hasPermission('manage_callback_numbers') && isEnabled('callback_numbers')               ? [{ key: 'tracked_numbers',  label: 'Tracked Numbers', icon: Hash       }] : []),
-    ...(isFronter && isEnabled('number_assignment')                                             ? [{ key: 'numbers',          label: 'My Numbers',      icon: Hash       }] : []),
-    ...(hasPermission('search_sales') && isEnabled('search_sales')                             ? [{ key: 'search',           label: 'Search Sales',    icon: Search     }] : []),
+    ...((isCloser || hasPermission('view_own_sales')) && isEnabled('sales')
+      ? [{ key: 'sales',          label: 'My Sales',        icon: DollarSign }] : []),
+    ...((isFronter || hasPermission('view_own_transfers')) && isEnabled('transfers')
+      ? [{ key: 'transfers',      label: 'My Transfers',    icon: Send       }] : []),
+    ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
+      ? [{ key: 'team_transfers', label: 'Team Transfers',  icon: Send       }] : []),
+    ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && isEnabled('sales')
+      ? [{ key: 'team_sales',     label: 'Team Sales',      icon: DollarSign }] : []),
+    ...(hasPermission('view_callbacks') && isEnabled('callbacks')
+      ? [{ key: 'callbacks',      label: 'Callbacks',       icon: Phone      }] : []),
+    ...(hasPermission('view_team_callbacks') && isEnabled('callbacks')
+      ? [{ key: 'team_callbacks', label: 'Team Callbacks',  icon: Phone      }] : []),
+    ...((hasPermission('manage_callback_numbers') || hasPermission('view_team_callback_numbers') || hasPermission('reassign_callback_numbers')) && isEnabled('callback_numbers')
+      ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash      }] : []),
+    ...(isFronter && isEnabled('number_assignment')
+      ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
+    ...(hasPermission('search_sales') && isEnabled('search_sales')
+      ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
   ];
 
   const conversionRate = transfers.length > 0
@@ -365,9 +378,81 @@ const StaffShell = () => {
 
         {/* ── NON-SALES TABS ── */}
         {activeTab === 'callbacks'       && <CallbacksPage user={user} />}
+        {activeTab === 'team_callbacks'  && <CallbacksOverview user={user} companyId={user?.company_id} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
         {activeTab === 'search'          && <SaleSearch />}
+
+        {/* ── TEAM TRANSFERS TAB ── */}
+        {activeTab === 'team_transfers' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
+            {tLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+              : transfers.length === 0 ? <p className="text-text-secondary text-center py-8">No transfers found.</p>
+              : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {['Customer', 'Phone', 'Status', 'Closer', 'Date'].map(h => (
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transfers.slice(0, 100).map(t => (
+                        <tr key={t.id} onClick={() => setDetailTransfer(t)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                          <td className="py-3 px-3 font-semibold text-text">
+                            {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
+                          </td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                          <td className="py-3 px-3"><Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || t.closer_name || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+          </Card>
+        )}
+
+        {/* ── TEAM SALES TAB ── */}
+        {activeTab === 'team_sales' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
+            {sLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+              : sales.length === 0 ? <p className="text-text-secondary text-center py-8">No sales found.</p>
+              : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date'].filter(Boolean).map(h => (
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sales.slice(0, 100).map(s => (
+                        <tr key={s.id} onClick={() => setDetailSale(s)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
+                          <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
+                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
+                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+          </Card>
+        )}
 
         {/* ── MY SALES TAB (closer view) ── */}
         {activeTab === 'sales' && isCloser && (
@@ -585,6 +670,14 @@ const StaffShell = () => {
                             className="w-full mt-2 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-info-50"
                             style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
                             <CalendarPlus size={11} /> Schedule Callback
+                          </button>
+                        )}
+                        {hasPermission('delete_sale') && (
+                          <button
+                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
+                            className="w-full mt-1 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-error-50"
+                            style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                            <Trash2 size={11} /> Delete Sale
                           </button>
                         )}
                       </div>
