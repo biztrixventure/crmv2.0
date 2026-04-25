@@ -411,8 +411,8 @@ router.put(
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
-    // Company scope: managers can only edit sales in their own company
-    if (isManager && userRole !== 'superadmin' && existing.company_id !== req.user.company_id) {
+    // Company scope: managers can only edit sales in their own company (compliance sees all)
+    if (isManager && !isCompliance && existing.company_id !== req.user.company_id) {
       return res.status(403).json({ error: 'Sale not within your company scope' });
     }
 
@@ -707,7 +707,7 @@ router.delete(
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
     const isCreator = existing.created_by === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
+    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
 
     const { error: deleteError } = await supabaseAdmin.from('sales').delete().eq('id', id);
