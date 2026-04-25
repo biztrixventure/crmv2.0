@@ -90,7 +90,15 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Rate limiting
-app.use('/api/auth/login',           rateLimit({ windowMs: 15 * 60 * 1000, max: 10,  message: { error: 'Too many login attempts, try again later' } }));
+app.use('/api/auth/login', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  // Key on email so 300 users sharing one NAT/IP each get their own bucket.
+  // Falls back to IP if body isn't parsed yet or email is missing.
+  keyGenerator: (req) => (req.body?.email || '').toLowerCase().trim() || req.ip,
+  message: { error: 'Too many login attempts, try again later' },
+  skipSuccessfulRequests: true, // successful logins don't count against the limit
+}));
 app.use('/api/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 5,   message: { error: 'Too many requests, try again later' } }));
 app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 20,  message: { error: 'Too many invite requests' } }));
 app.use('/api/',                     rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: { error: 'Too many requests' } }));
