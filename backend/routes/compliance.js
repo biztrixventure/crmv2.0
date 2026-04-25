@@ -185,15 +185,24 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  const [profileMap, companyMap] = await Promise.all([
-    enrichProfiles(data || [], t => t.created_by),
-    enrichCompanies(data || [], t => t.company_id),
-  ]);
+  // Fetch profiles for both creator and assigned closer in one query
+  const allUserIds = [...new Set([
+    ...(data || []).map(t => t.created_by).filter(Boolean),
+    ...(data || []).map(t => t.assigned_closer_id).filter(Boolean),
+  ])];
+  const profileMap = allUserIds.length
+    ? await (async () => {
+        const { data: p } = await supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', allUserIds);
+        const m = {}; (p || []).forEach(x => { m[x.user_id] = x; }); return m;
+      })()
+    : {};
+  const companyMap = await enrichCompanies(data || [], t => t.company_id);
 
   const enriched = (data || []).map(t => ({
     ...t,
-    created_by_name: profileName(profileMap, t.created_by),
-    company_name:    companyMap[t.company_id]?.name || null,
+    created_by_name:       profileName(profileMap, t.created_by),
+    assigned_closer_name:  profileName(profileMap, t.assigned_closer_id),
+    company_name:          companyMap[t.company_id]?.name || null,
   }));
 
   res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });

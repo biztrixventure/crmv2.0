@@ -383,6 +383,10 @@ const ComplianceShell = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting]         = useState(false);
 
+  // ── Record detail modals ──────────────────────────────────────────────────
+  const [detailTransfer, setDetailTransfer] = useState(null);
+  const [detailCallback, setDetailCallback] = useState(null);
+
   // ── Export modal ──────────────────────────────────────────────────────────
   const [exportModal, setExportModal] = useState(null); // null | tab string
 
@@ -1079,7 +1083,9 @@ const ComplianceShell = () => {
                         </thead>
                         <tbody>
                           {transfers.map(t => (
-                            <tr key={t.id} style={{ borderBottom: '1px solid var(--color-border)' }}
+                            <tr key={t.id} className="cursor-pointer transition-colors"
+                              style={{ borderBottom: '1px solid var(--color-border)' }}
+                              onClick={() => setDetailTransfer(t)}
                               onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
                               onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
                               <td className="px-4 py-3">
@@ -1116,7 +1122,7 @@ const ComplianceShell = () => {
                 <div className="flex gap-1 p-1 rounded-xl mb-4 w-fit"
                   style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   {[{ key: 'fronter', label: 'Fronter Callbacks' }, { key: 'closer', label: 'Closer Callbacks' }].map(t => (
-                    <button key={t.key} onClick={() => { setCbType(t.key); setCbPage(1); }}
+                    <button key={t.key} onClick={() => { setCbType(t.key); setCbPage(1); setCbCompany(''); }}
                       className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
                       style={{
                         backgroundColor: cbType === t.key ? 'var(--color-surface)' : 'transparent',
@@ -1131,7 +1137,7 @@ const ComplianceShell = () => {
                 <FilterBar onSubmit={() => { setCbPage(1); loadCallbacks(); }}>
                   <FSelect label="Company" value={cbCompany} onChange={e => setCbCompany(e.target.value)}>
                     <option value="">All companies</option>
-                    {companyList.filter(c => cbCompany || c.company_type === cbType || true).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {companyList.filter(c => c.company_type === cbType).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </FSelect>
                   <FSelect label="Status" value={cbStatus} onChange={e => setCbStatus(e.target.value)}>
                     <option value="">All statuses</option>
@@ -1152,7 +1158,9 @@ const ComplianceShell = () => {
                         </thead>
                         <tbody>
                           {callbacks.map(c => (
-                            <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}
+                            <tr key={c.id} className="cursor-pointer transition-colors"
+                              style={{ borderBottom: '1px solid var(--color-border)' }}
+                              onClick={() => setDetailCallback(c)}
                               onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
                               onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
                               <td className="px-4 py-3">
@@ -1396,6 +1404,183 @@ const ComplianceShell = () => {
           onClose={() => setExportModal(null)}
           onExport={exportData}
         />
+      )}
+
+      {/* ── TRANSFER DETAIL MODAL ────────────────────────────────────────────── */}
+      {detailTransfer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-2xl mx-4 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: '90vh' }}>
+
+            <div className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+              style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--gradient-sidebar)' }}>
+              <div className="flex items-center gap-3">
+                <ArrowRight size={18} className="text-white opacity-80" />
+                <div>
+                  <h3 className="text-base font-bold text-white">Transfer Record</h3>
+                  <p className="text-xs text-white opacity-70">{customerName(detailTransfer)}</p>
+                </div>
+              </div>
+              <button onClick={() => setDetailTransfer(null)} className="p-1 rounded-lg text-white opacity-70 hover:opacity-100">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-6 space-y-5">
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>Trace Info</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Record ID',       val: detailTransfer.id },
+                    { label: 'Status',          val: <Badge variant={STATUS_BADGE[detailTransfer.status] || 'secondary'} size="sm">{STATUS_LABEL[detailTransfer.status] || detailTransfer.status}</Badge> },
+                    { label: 'Company',         val: detailTransfer.company_name || '—' },
+                    { label: 'Created By',      val: detailTransfer.created_by_name || '—' },
+                    { label: 'Assigned Closer', val: detailTransfer.assigned_closer_name || '—' },
+                    { label: 'Entered At',      val: fmtDateTime(detailTransfer.created_at) },
+                    { label: 'Last Updated',    val: fmtDateTime(detailTransfer.updated_at) },
+                  ].map(row => (
+                    <div key={row.label} className="rounded-xl p-3"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{row.label}</p>
+                      <div className="text-sm font-medium" style={{ color: 'var(--color-text)', wordBreak: 'break-all' }}>{row.val || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {detailTransfer.form_data && Object.keys(detailTransfer.form_data).length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>Form Fields</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {Object.entries(detailTransfer.form_data).map(([key, val]) => (
+                      <div key={key} className="rounded-xl p-3"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                        <p className="text-xs font-semibold mb-1 capitalize" style={{ color: 'var(--color-text-secondary)' }}>{key.replace(/_/g, ' ')}</p>
+                        <p className="text-sm font-medium" style={{ color: 'var(--color-text)', wordBreak: 'break-all' }}>
+                          {val === null || val === undefined || val === '' ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {detailTransfer.notes && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-secondary)' }}>Notes</p>
+                  <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    <p className="text-sm" style={{ color: 'var(--color-text)' }}>{detailTransfer.notes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 pb-6 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <button onClick={() => setDetailTransfer(null)}
+                className="w-full py-2.5 rounded-xl border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CALLBACK DETAIL MODAL ────────────────────────────────────────────── */}
+      {detailCallback && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-lg mx-4 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: '90vh' }}>
+
+            <div className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+              style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--gradient-sidebar)' }}>
+              <div className="flex items-center gap-3">
+                <PhoneCall size={18} className="text-white opacity-80" />
+                <div>
+                  <h3 className="text-base font-bold text-white">Callback Record</h3>
+                  <p className="text-xs text-white opacity-70">{detailCallback.customer_name || '—'}</p>
+                </div>
+              </div>
+              <button onClick={() => setDetailCallback(null)} className="p-1 rounded-lg text-white opacity-70 hover:opacity-100">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-6 space-y-5">
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>Customer</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Name',  val: detailCallback.customer_name  || '—' },
+                    { label: 'Phone', val: detailCallback.customer_phone || '—' },
+                  ].map(row => (
+                    <div key={row.label} className="rounded-xl p-3"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{row.label}</p>
+                      <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{row.val}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>Callback Details</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Scheduled At', val: fmtDateTime(detailCallback.callback_at) },
+                    { label: 'Status',       val: <Badge variant={STATUS_BADGE[detailCallback.status] || 'secondary'} size="sm">{STATUS_LABEL[detailCallback.status] || detailCallback.status}</Badge> },
+                    { label: 'Agent',        val: detailCallback.user_name || '—' },
+                    { label: 'Company',      val: detailCallback.company_name || '—' },
+                  ].map(row => (
+                    <div key={row.label} className="rounded-xl p-3"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{row.label}</p>
+                      <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{row.val}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {detailCallback.notes && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-secondary)' }}>Notes</p>
+                  <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    <p className="text-sm" style={{ color: 'var(--color-text)' }}>{detailCallback.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>Trace Info</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Record ID',  val: detailCallback.id },
+                    { label: 'Entered At', val: fmtDateTime(detailCallback.created_at) },
+                    { label: 'Push Sent',  val: detailCallback.notified ? 'Yes — OS notification fired' : 'No — not yet notified' },
+                  ].map(row => (
+                    <div key={row.label} className="rounded-xl p-3"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{row.label}</p>
+                      <p className="text-sm font-medium" style={{ color: 'var(--color-text)', wordBreak: 'break-all' }}>{row.val || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <button onClick={() => setDetailCallback(null)}
+                className="w-full py-2.5 rounded-xl border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
