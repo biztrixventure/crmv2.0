@@ -1,147 +1,153 @@
 const { supabaseAdmin } = require('../config/database');
 
+// Lower number = higher authority
+const ROLE_HIERARCHY = {
+  superadmin:          0,
+  readonly_admin:      1,
+  company_admin:       2,
+  operations_manager:  3,
+  fronter_manager:     4,
+  closer_manager:      4,
+  compliance_manager:  4,
+  closer:              5,
+  fronter:             6,
+};
+
 // ============================================================================
 // Get User Role in Company
 // ============================================================================
 const getUserRole = async (userId, companyId) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("user_company_roles")
-      .select(
-        `
-        id,
-        role_id,
-        custom_roles (id, name, level),
-        is_active
-      `
-      )
-      .eq("user_id", userId)
-      .eq("company_id", companyId)
-      .eq("is_active", true)
+    const { data } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('role_id, custom_roles(id, name, level)')
+      .eq('user_id', userId)
+      .eq('company_id', companyId)
+      .eq('is_active', true)
       .single();
 
-    if (error || !data) {
-      return null;
-    }
-
+    if (!data?.custom_roles) return null;
     return {
-      id: data.id,
-      role_id: data.role_id,
-      role_name: data.custom_roles.name,
+      role_id:    data.role_id,
+      role_name:  data.custom_roles.name,
       role_level: data.custom_roles.level,
     };
-  } catch (err) {
-    console.error("Error getting user role:", err);
+  } catch {
     return null;
   }
 };
 
 // ============================================================================
 // Check if User has Permission
+// Single embedded query + parallel override check (was 2 sequential queries).
+// Override table takes precedence over role permissions.
 // ============================================================================
 const hasPermission = async (userId, companyId, permissionName) => {
   try {
-    const userRole = await getUserRole(userId, companyId);
+    const [roleRes, overrideRes] = await Promise.all([
+      supabaseAdmin
+        .from('user_company_roles')
+        .select('custom_roles(level, role_permissions(permissions(name)))')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .single(),
+      supabaseAdmin
+        .from('user_permission_overrides')
+        .select('override_type, permissions(name)')
+        .eq('user_id', userId)
+        .eq('company_id', companyId),
+    ]);
 
-    if (!userRole) {
-      console.error(`hasPermission: No role found for user ${userId} in company ${companyId}`);
-      return false;
-    }
+    if (!roleRes.data?.custom_roles) return false;
 
-    // SuperAdmin has all permissions (level 'superadmin' - stored as enum string in database)
-    if (userRole.role_level === 'superadmin') {
-      console.log(`hasPermission: User ${userId} is SuperAdmin ('superadmin'), granting ${permissionName}`);
-      return true;
-    }
+    const level = roleRes.data.custom_roles.level;
+    if (level === 'superadmin') return true;
 
-    // Check if role has this permission
-    const { data: permissions, error } = await supabaseAdmin
-      .from("role_permissions")
-      .select(
-        `
-        permissions (name)
-      `
-      )
-      .eq("role_id", userRole.role_id);
+    // Per-user override takes precedence over role assignment
+    const overrides = overrideRes.data || [];
+    const override = overrides.find(o => o.permissions?.name === permissionName);
+    if (override?.override_type === 'revoke') return false;
+    if (override?.override_type === 'grant')  return true;
 
-    if (error) {
-      return false;
-    }
-
-    return (permissions || []).some((p) => p.permissions.name === permissionName);
-  } catch (err) {
-    console.error("Error checking permission:", err);
+    const rolePerms = new Set(
+      (roleRes.data.custom_roles.role_permissions || [])
+        .map(rp => rp.permissions?.name)
+        .filter(Boolean)
+    );
+    return rolePerms.has(permissionName);
+  } catch {
     return false;
   }
 };
 
 // ============================================================================
-// Get User Permissions
+// Get All Permissions for User
+// Returns array of permission name strings with override support applied.
 // ============================================================================
 const getUserPermissions = async (userId, companyId) => {
   try {
-    const userRole = await getUserRole(userId, companyId);
+    const [roleRes, overrideRes] = await Promise.all([
+      supabaseAdmin
+        .from('user_company_roles')
+        .select('custom_roles(level, role_permissions(permissions(name)))')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .single(),
+      supabaseAdmin
+        .from('user_permission_overrides')
+        .select('override_type, permissions(name)')
+        .eq('user_id', userId)
+        .eq('company_id', companyId),
+    ]);
 
-    if (!userRole) {
-      return [];
+    if (!roleRes.data?.custom_roles) return [];
+
+    const level = roleRes.data.custom_roles.level;
+    if (level === 'superadmin') {
+      const { data } = await supabaseAdmin.from('permissions').select('name');
+      return (data || []).map(p => p.name);
     }
 
-    // SuperAdmin has all permissions - fetch all (level 'superadmin')
-    if (userRole.role_level === 'superadmin') {
-      const { data } = await supabaseAdmin.from("permissions").select("name");
-      return (data || []).map((p) => p.name);
+    const perms = new Set(
+      (roleRes.data.custom_roles.role_permissions || [])
+        .map(rp => rp.permissions?.name)
+        .filter(Boolean)
+    );
+
+    // Apply per-user overrides
+    for (const o of (overrideRes.data || [])) {
+      const name = o.permissions?.name;
+      if (!name) continue;
+      if (o.override_type === 'revoke') perms.delete(name);
+      if (o.override_type === 'grant')  perms.add(name);
     }
 
-    // Get permissions for this role
-    const { data: permissions } = await supabaseAdmin
-      .from("role_permissions")
-      .select("permissions(name)")
-      .eq("role_id", userRole.role_id);
-
-    return (permissions || []).map((p) => p.permissions.name);
-  } catch (err) {
-    console.error("Error getting user permissions:", err);
+    return [...perms];
+  } catch {
     return [];
   }
 };
 
 // ============================================================================
-// Check Role Hierarchy (Can assign lower or equal role)
+// Check Role Hierarchy
+// Strict: a user can only assign roles with LOWER authority (higher number).
+// Same-level assignment is not allowed — prevents lateral escalation.
 // ============================================================================
 const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => {
   try {
     const sourceRole = await getUserRole(sourceUserId, sourceCompanyId);
+    if (!sourceRole) return false;
 
-    if (!sourceRole) {
-      return false;
-    }
-
-    // Role hierarchy: lower number = higher authority
-    const roleHierarchy = {
-      superadmin: 0,
-      readonly_admin: 1,
-      company_admin: 2,
-      manager: 3,
-      fronter_manager: 3,
-      operations_manager: 4,
-      closer_manager: 4,
-      compliance_manager: 4,
-      closer: 6,
-      fronter: 7,
-      operations: 8,
-    };
-
-    // sourceRole.role_level is string ('superadmin', 'company_admin', etc)
-    const sourceLevel = roleHierarchy[sourceRole.role_level] ?? 999;
-    // If targetRoleLevel is a number (old code), convert it; if string, use hierarchy
+    const sourceLevel = ROLE_HIERARCHY[sourceRole.role_level] ?? 999;
     const targetLevel = typeof targetRoleLevel === 'number'
       ? targetRoleLevel
-      : (roleHierarchy[targetRoleLevel] ?? 999);
+      : (ROLE_HIERARCHY[targetRoleLevel] ?? 999);
 
-    // Can only assign roles at equal or lower level (lower number = higher authority)
-    return sourceLevel <= targetLevel;
-  } catch (err) {
-    console.error("Error checking role hierarchy:", err);
+    // Strict less-than: can only assign roles with strictly lower authority
+    return sourceLevel < targetLevel;
+  } catch {
     return false;
   }
 };
@@ -151,28 +157,18 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
 // ============================================================================
 const getUserCompanies = async (userId) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("user_company_roles")
-      .select(
-        `
-        company_id,
-        companies (id, name, is_active)
-      `
-      )
-      .eq("user_id", userId)
-      .eq("is_active", true);
+    const { data } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('company_id, companies(id, name, is_active)')
+      .eq('user_id', userId)
+      .eq('is_active', true);
 
-    if (error) {
-      return [];
-    }
-
-    return (data || []).map((row) => ({
-      id: row.company_id,
-      name: row.companies.name,
+    return (data || []).map(row => ({
+      id:        row.company_id,
+      name:      row.companies.name,
       is_active: row.companies.is_active,
     }));
-  } catch (err) {
-    console.error("Error getting user companies:", err);
+  } catch {
     return [];
   }
 };
@@ -181,95 +177,64 @@ const getUserCompanies = async (userId) => {
 // Create Custom Role
 // ============================================================================
 const createRole = async (name, description, level, companyId, permissions = []) => {
-  try {
-    // Insert role
-    const { data: role, error: roleError } = await supabaseAdmin
-      .from("custom_roles")
-      .insert({
-        name,
-        description,
-        level,
-        company_id: companyId,
-      })
-      .select()
-      .single();
+  const { data: role, error: roleError } = await supabaseAdmin
+    .from('custom_roles')
+    .insert({ name, description, level, company_id: companyId })
+    .select()
+    .single();
 
-    if (roleError || !role) {
-      throw new Error(roleError?.message || "Failed to create role");
+  if (roleError || !role) throw new Error(roleError?.message || 'Failed to create role');
+
+  if (permissions.length > 0) {
+    const { data: perms } = await supabaseAdmin
+      .from('permissions')
+      .select('id')
+      .in('name', permissions);
+
+    if (perms?.length > 0) {
+      await supabaseAdmin.from('role_permissions').insert(
+        perms.map(p => ({ role_id: role.id, permission_id: p.id }))
+      );
     }
-
-    // Add permissions to role
-    if (permissions.length > 0) {
-      const { data: perms } = await supabaseAdmin
-        .from("permissions")
-        .select("id")
-        .in("name", permissions);
-
-      if (perms && perms.length > 0) {
-        await supabaseAdmin.from("role_permissions").insert(
-          perms.map((p) => ({
-            role_id: role.id,
-            permission_id: p.id,
-          }))
-        );
-      }
-    }
-
-    return role;
-  } catch (err) {
-    console.error("Error creating role:", err);
-    throw err;
   }
+
+  return role;
 };
 
 // ============================================================================
 // Assign User to Company
 // ============================================================================
 const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("user_company_roles")
-      .insert({
-        user_id: userId,
-        company_id: companyId,
-        role_id: roleId,
-        assigned_by: assignedBy,
-        is_active: true,
-      })
-      .select()
-      .single();
+  const { data, error } = await supabaseAdmin
+    .from('user_company_roles')
+    .insert({ user_id: userId, company_id: companyId, role_id: roleId, assigned_by: assignedBy, is_active: true })
+    .select()
+    .single();
 
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return data;
-  } catch (err) {
-    console.error("Error assigning user to company:", err);
-    throw err;
-  }
+  if (error) throw new Error(error.message);
+  return data;
 };
 
 // ============================================================================
-// Check if is SuperAdmin
-// Does NOT require companyId — checks any active role across all companies.
+// Check if user is SuperAdmin
+// Fast path: check role level in user_company_roles. If none found (system
+// superadmin with no company assignment), fall back to email match.
 // ============================================================================
 const isSuperAdmin = async (userId) => {
   try {
-    // Check company-assigned superadmin role
-    const { data, error } = await supabaseAdmin
+    const { data } = await supabaseAdmin
       .from('user_company_roles')
       .select('custom_roles(level)')
       .eq('user_id', userId)
       .eq('is_active', true);
 
-    if (!error && data && data.some(r => r.custom_roles?.level === 'superadmin')) return true;
+    if (data?.some(r => r.custom_roles?.level === 'superadmin')) return true;
 
-    // Fallback: system superadmin has no company assignment — check by email
-    const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-    if (superadminEmails.length > 0) {
+    // System superadmin has no company assignment — check by email against env
+    const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+    if (emails.length > 0) {
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      return superadminEmails.includes(authUser?.user?.email || '');
+      return emails.includes(authUser?.user?.email || '');
     }
     return false;
   } catch {
@@ -282,47 +247,25 @@ const isSuperAdmin = async (userId) => {
 // ============================================================================
 const getTeamMembers = async (managerId, companyId) => {
   try {
-    // Get manager's role level
-    const managerRole = await getUserRole(managerId, companyId);
+    const { data } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, custom_roles(name, level), user_profiles(first_name, last_name, user_id)')
+      .eq('company_id', companyId)
+      .eq('is_active', true);
 
-    if (!managerRole) {
-      return [];
-    }
-
-    // For simplicity, managers see all users in their company
-    // In production, you'd implement proper team hierarchies
-
-    const { data, error } = await supabaseAdmin
-      .from("user_company_roles")
-      .select(
-        `
-        user_id,
-        custom_roles (name, level),
-        user_profiles (first_name, last_name, user_id)
-      `
-      )
-      .eq("company_id", companyId)
-      .eq("is_active", true);
-
-    if (error) {
-      return [];
-    }
-
-    return (data || []).map((row) => ({
-      user_id: row.user_id,
-      role: row.custom_roles.name,
+    return (data || []).map(row => ({
+      user_id:    row.user_id,
+      role:       row.custom_roles.name,
       role_level: row.custom_roles.level,
       first_name: row.user_profiles?.first_name,
-      last_name: row.user_profiles?.last_name,
+      last_name:  row.user_profiles?.last_name,
     }));
-  } catch (err) {
-    console.error("Error getting team members:", err);
+  } catch {
     return [];
   }
 };
 
-// Returns allowed role levels for a given company type.
-// Single source of truth — used by roles.js and users.js for role-level validation.
+// Single source of truth for which role levels are valid per company type.
 const getCompanyTypeLevels = (companyType) =>
   companyType === 'fronter'
     ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin']
@@ -339,4 +282,5 @@ module.exports = {
   isSuperAdmin,
   getTeamMembers,
   getCompanyTypeLevels,
+  ROLE_HIERARCHY,
 };

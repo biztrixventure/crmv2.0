@@ -136,7 +136,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    level: 'manager',
+    level: 'fronter',
     permissions: [],
   });
   const [errors, setErrors] = useState({});
@@ -147,7 +147,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
       setFormData({
         name: role.name || '',
         description: role.description || '',
-        level: role.level || 'manager',
+        level: role.level || 'fronter',
         permissions: Array.isArray(role.permissions) ? role.permissions : [],
       });
       setShowTemplates(false);
@@ -277,15 +277,13 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           className="input"
         >
           <option value="">Select level</option>
-          <option value="superadmin">SuperAdmin</option>
-          <option value="readonly_admin">Readonly Admin</option>
           <option value="company_admin">Company Admin</option>
-          <option value="manager">Manager (Fronter Manager)</option>
           <option value="operations_manager">Operations Manager</option>
+          <option value="compliance_manager">Compliance Manager</option>
           <option value="closer_manager">Closer Manager</option>
+          <option value="fronter_manager">Fronter Manager</option>
           <option value="closer">Closer</option>
           <option value="fronter">Fronter</option>
-          <option value="operations">Operations</option>
         </select>
       </FormField>
 

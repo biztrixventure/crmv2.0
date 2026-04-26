@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
-const { hasPermission, canAssignRole, createRole, isSuperAdmin, getCompanyTypeLevels } = require('../models/helpers');
+const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -195,7 +195,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "closer", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager", "closer"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],
@@ -343,36 +343,18 @@ router.put(
 
       logger.success('UPDATE_ROLE', `Found role`, { id, level: role.level });
 
-      // For SuperAdmin roles (company_id = null), get user's company context
-      let targetCompanyId = role.company_id;
-      if (!targetCompanyId) {
-        try {
-          logger.debug('UPDATE_ROLE', 'Fetching user company for superadmin role context', { userId });
-          const { data: userCompany } = await supabaseAdmin
-            .from("user_company_roles")
-            .select("company_id")
-            .eq("user_id", userId)
-            .eq("is_active", true)
-            .limit(1)
-            .single();
-
-          if (userCompany) {
-            targetCompanyId = userCompany.company_id;
-            logger.success('UPDATE_ROLE', 'Resolved company context from user', { targetCompanyId });
-          }
-        } catch (err) {
-          logger.error('UPDATE_ROLE', 'Error fetching user company for SuperAdmin role update', err);
+      // System-level roles (company_id = null): superadmin only.
+      // Company roles: requester must belong to THAT company with manage_roles.
+      if (!role.company_id) {
+        if (req.user.role !== 'superadmin') {
+          return res.status(403).json({ error: 'System-level roles can only be modified by SuperAdmin' });
         }
-      }
-
-      // Check permission
-      logger.debug('UPDATE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
-      const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
-      logger.success('UPDATE_ROLE', `Permission check: ${hasPerm}`);
-
-      if (!hasPerm && req.user.role !== 'superadmin') {
-        logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
-        return res.status(403).json({ error: "You don't have permission to update roles" });
+      } else {
+        const hasPerm = await hasPermission(userId, role.company_id, 'manage_roles');
+        if (!hasPerm && req.user.role !== 'superadmin') {
+          logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
+          return res.status(403).json({ error: "You don't have permission to update roles" });
+        }
       }
 
       // Update description if provided
@@ -451,36 +433,18 @@ router.delete(
 
       logger.success('DELETE_ROLE', `Found role`, { id });
 
-      // For SuperAdmin roles (company_id = null), get user's company context
-      let targetCompanyId = role.company_id;
-      if (!targetCompanyId) {
-        try {
-          logger.debug('DELETE_ROLE', 'Fetching user company for superadmin role context', { userId });
-          const { data: userCompany } = await supabaseAdmin
-            .from("user_company_roles")
-            .select("company_id")
-            .eq("user_id", userId)
-            .eq("is_active", true)
-            .limit(1)
-            .single();
-
-          if (userCompany) {
-            targetCompanyId = userCompany.company_id;
-            logger.success('DELETE_ROLE', 'Resolved company context from user', { targetCompanyId });
-          }
-        } catch (err) {
-          logger.error('DELETE_ROLE', 'Error fetching user company for SuperAdmin role deletion', err);
+      // System-level roles (company_id = null): superadmin only.
+      // Company roles: requester must belong to THAT company with manage_roles.
+      if (!role.company_id) {
+        if (req.user.role !== 'superadmin') {
+          return res.status(403).json({ error: 'System-level roles can only be deleted by SuperAdmin' });
         }
-      }
-
-      // Check permission
-      logger.debug('DELETE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
-      const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
-      logger.success('DELETE_ROLE', `Permission check: ${hasPerm}`);
-
-      if (!hasPerm && req.user.role !== 'superadmin') {
-        logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
-        return res.status(403).json({ error: "You don't have permission to delete roles" });
+      } else {
+        const hasPerm = await hasPermission(userId, role.company_id, 'manage_roles');
+        if (!hasPerm && req.user.role !== 'superadmin') {
+          logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
+          return res.status(403).json({ error: "You don't have permission to delete roles" });
+        }
       }
 
       // Check if role is in use
@@ -682,8 +646,7 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-  const superadmin = await isSuperAdmin(userId);
-  if (!superadmin) return res.status(403).json({ error: 'SuperAdmin only' });
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'SuperAdmin only' });
 
   const { data: company, error: companyErr } = await supabaseAdmin
     .from('companies').select('company_type').eq('id', companyId).single();
