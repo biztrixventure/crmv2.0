@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
-const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels } = require('../models/helpers');
+const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels, getUserRole, ROLE_HIERARCHY } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -76,18 +76,26 @@ router.get(
         return res.status(400).json({ error: error.message });
       }
 
-      logger.success('GET_ROLES', `Fetched ${data?.length || 0} roles`, { count: data?.length || 0 });
+      let roles = (data || []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        level: r.level,
+        permissions: (r.role_permissions || []).map((rp) => rp.permissions?.name).filter(Boolean),
+      }));
 
-      res.json({
-        total: data.length,
-        roles: (data || []).map((r) => ({
-          id: r.id,
-          name: r.name,
-          description: r.description,
-          level: r.level,
-          permissions: (r.role_permissions || []).map((rp) => rp.permissions?.name).filter(Boolean),
-        })),
-      });
+      // for_assignment=true: only return roles the requester can actually assign
+      // (strictly lower authority than themselves). Superadmin sees all.
+      const forAssignment = req.query.for_assignment === 'true';
+      if (forAssignment && req.user.role !== 'superadmin' && companyId) {
+        const requesterRole = await getUserRole(userId, companyId);
+        const requesterLevel = ROLE_HIERARCHY[requesterRole?.role_level] ?? 0;
+        roles = roles.filter(r => (ROLE_HIERARCHY[r.level] ?? 0) > requesterLevel);
+        logger.debug('GET_ROLES', `for_assignment filter: requesterLevel=${requesterLevel}, kept ${roles.length} roles`);
+      }
+
+      logger.success('GET_ROLES', `Returning ${roles.length} roles`);
+      res.json({ total: roles.length, roles });
     } catch (err) {
       logger.error('GET_ROLES', 'Unhandled exception', err);
       res.status(500).json({ error: err.message });

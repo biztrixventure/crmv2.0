@@ -17,11 +17,12 @@ const UserModal = ({ user = null, onClose, onSave }) => {
   const [rolesLoading, setRolesLoading] = useState(true);
 
   useEffect(() => {
-    client.get('roles')
+    const companyId = user?.company_id;
+    client.get('roles', { params: { company_id: companyId, for_assignment: true } })
       .then(res => setRoles(res.data.roles || []))
       .catch(() => {})
       .finally(() => setRolesLoading(false));
-  }, []);
+  }, [user?.company_id]);
 
   // Reset to Details tab when user changes
   useEffect(() => { setTab('details'); }, [user?.id]);

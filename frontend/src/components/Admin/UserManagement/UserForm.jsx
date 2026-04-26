@@ -111,15 +111,26 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
       </FormField>
 
       {/* Role */}
-      <FormField label="Role" required error={errors.role_id}
-        hint={selectedRole ? `Level: ${selectedRole.level}` : 'Select the user\'s role'}>
+      <FormField label="Role" required error={errors.role_id}>
         <select name="role_id" value={formData.role_id}
           onChange={handleInputChange} className="input">
-          <option value="">Select a role</option>
+          <option value="">— Select a role —</option>
           {roles.map(role => (
-            <option key={role.id} value={role.id}>{role.name}</option>
+            <option key={role.id} value={role.id}>
+              {role.name}{role.level ? ` (${role.level.replace(/_/g,' ')})` : ''}
+            </option>
           ))}
         </select>
+        {selectedRole && (
+          <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            {selectedRole.level?.replace(/_/g, ' ')} · {selectedRole.permissions?.length ?? 0} permissions
+          </p>
+        )}
+        {roles.length === 0 && (
+          <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
+            No assignable roles available — you can only assign roles below your own level.
+          </p>
+        )}
       </FormField>
 
       {/* Company — CREATE MODE */}
