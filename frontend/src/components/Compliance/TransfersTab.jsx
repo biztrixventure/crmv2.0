@@ -1,0 +1,200 @@
+import { useState, useCallback, useEffect } from 'react';
+import { ArrowRight } from 'lucide-react';
+import { Badge } from '../UI';
+import client from '../../api/client';
+import ExportModal from './ExportModal';
+import {
+  STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
+  fmtDate, fmtDateTime, customerName, downloadCSV,
+  TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
+  Overlay, ModalBox, ModalHeader, InfoTile,
+} from './shared';
+
+const TransfersTab = ({ companyList, initCompany = '' }) => {
+  const [transfers, setTransfers] = useState([]);
+  const [total, setTotal]         = useState(0);
+  const [loading, setLoading]     = useState(false);
+  const [page, setPage]           = useState(1);
+  const [status, setStatus]       = useState('');
+  const [company, setCompany]     = useState(initCompany);
+  const [dateFrom, setDateFrom]   = useState('');
+  const [dateTo, setDateTo]       = useState('');
+
+  const [detail, setDetail]   = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await client.get('compliance/transfers', {
+        params: {
+          status: status || undefined, company_id: company || undefined,
+          date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          page, limit: LIMIT,
+        },
+      });
+      setTransfers(res.data.transfers || []);
+      setTotal(res.data.total || 0);
+    } catch { /* non-critical */ } finally { setLoading(false); }
+  }, [status, company, dateFrom, dateTo, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
+    const res = await client.get('compliance/transfers', {
+      params: { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
+    });
+    const rows = (res.data.transfers || []).map(t => [
+      customerName(t), t.form_data?.Phone || '',
+      t.created_by_name || '', t.assigned_closer_name || '',
+      t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
+      fmtDate(t.created_at),
+    ]);
+    downloadCSV(rows, ['Customer','Phone','Created By','Assigned Closer','Company','Status','Created'],
+      `transfers_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  return (
+    <div>
+      <TabHeader
+        title="All Transfers"
+        subtitle="Read-only view of lead transfers across all companies"
+        onRefresh={() => { setPage(1); load(); }}
+        onExport={() => setExportOpen(true)}
+      />
+
+      <Filters onSubmit={() => { setPage(1); load(); }}>
+        <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
+          <option value="">All companies</option>
+          {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FSelect>
+        <FSelect label="Status" value={status} onChange={e => setStatus(e.target.value)}>
+          <option value="">All statuses</option>
+          {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+        </FSelect>
+        <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
+      </Filters>
+
+      <div className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        {loading ? <Spinner /> : transfers.length === 0 ? (
+          <Empty icon={ArrowRight} msg="No transfers found." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                  <Th>Customer</Th>
+                  <Th>Created By</Th>
+                  <Th>Assigned Closer</Th>
+                  <Th>Company</Th>
+                  <Th>Status</Th>
+                  <Th>Date</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.map(t => (
+                  <tr key={t.id} className="cursor-pointer"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}
+                    onClick={() => setDetail(t)}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t.form_data?.Phone || t.form_data?.customer_phone || ''}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t.created_by_name || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t.assigned_closer_name || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t.company_name || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={STATUS_BADGE[t.status] || 'secondary'} size="sm">
+                        {STATUS_LABEL[t.status] || t.status?.replace(/_/g,' ')}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {fmtDate(t.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
+      </div>
+
+      {/* Transfer detail modal */}
+      {detail && (
+        <Overlay>
+          <ModalBox wide>
+            <ModalHeader icon={ArrowRight} title="Transfer Record"
+              subtitle={customerName(detail)} onClose={() => setDetail(null)} />
+            <div className="overflow-y-auto p-6 space-y-5">
+              <section>
+                <p className="text-xs font-bold uppercase tracking-wide mb-3"
+                  style={{ color: 'var(--color-text-secondary)' }}>Trace Info</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <InfoTile label="Record ID"       value={detail.id} />
+                  <InfoTile label="Status"          value={<Badge variant={STATUS_BADGE[detail.status] || 'secondary'} size="sm">{STATUS_LABEL[detail.status] || detail.status}</Badge>} />
+                  <InfoTile label="Company"         value={detail.company_name} />
+                  <InfoTile label="Created By"      value={detail.created_by_name} />
+                  <InfoTile label="Assigned Closer" value={detail.assigned_closer_name} />
+                  <InfoTile label="Entered At"      value={fmtDateTime(detail.created_at)} />
+                  <InfoTile label="Last Updated"    value={fmtDateTime(detail.updated_at)} />
+                </div>
+              </section>
+
+              {detail.form_data && Object.keys(detail.form_data).length > 0 && (
+                <section>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-3"
+                    style={{ color: 'var(--color-text-secondary)' }}>Form Fields</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {Object.entries(detail.form_data).map(([key, val]) => (
+                      <InfoTile key={key} label={key}
+                        value={val === null || val === undefined || val === '' ? '—'
+                          : typeof val === 'object' ? JSON.stringify(val) : String(val)} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {detail.notes && (
+                <section>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-2"
+                    style={{ color: 'var(--color-text-secondary)' }}>Notes</p>
+                  <div className="rounded-xl p-4"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    <p className="text-sm" style={{ color: 'var(--color-text)' }}>{detail.notes}</p>
+                  </div>
+                </section>
+              )}
+            </div>
+            <div className="px-6 pb-6 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <button onClick={() => setDetail(null)}
+                className="w-full py-2.5 rounded-xl border font-semibold text-sm"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                Close
+              </button>
+            </div>
+          </ModalBox>
+        </Overlay>
+      )}
+
+      {exportOpen && (
+        <ExportModal tab="transfers" companyList={companyList}
+          onClose={() => setExportOpen(false)} onExport={handleExport} />
+      )}
+    </div>
+  );
+};
+
+export default TransfersTab;
