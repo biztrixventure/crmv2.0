@@ -301,12 +301,15 @@ const ComplianceShell = () => {
 
   const userRole    = user?.role;
   const isSuperadmin = userRole === 'superadmin';
-  const isCompliance = userRole === 'compliance_manager' || isSuperadmin;
+  const isComplianceManager = userRole === 'compliance_manager';
+  const isCompliance = isComplianceManager || isSuperadmin;
 
-  const canManageCompliance = isCompliance && (isSuperadmin || hasPermission('manage_compliance')) && isEnabled('compliance_workflow');
-  const canViewAllSales     = isCompliance && (isSuperadmin || hasPermission('view_all_company_sales'));
-  const canViewFinancial    = isSuperadmin || hasPermission('view_financial_data');
-  const canViewReviews      = isCompliance && (isSuperadmin || hasPermission('view_all_call_reviews')) && isEnabled('call_reviews');
+  // compliance_manager role already implies all compliance capabilities — skip permission/flag gates.
+  // Superadmin still respects flags so platform-level features can be toggled globally.
+  const canManageCompliance = isCompliance && (isComplianceManager || (hasPermission('manage_compliance') && isEnabled('compliance_workflow')));
+  const canViewAllSales     = isCompliance && (isComplianceManager || hasPermission('view_all_company_sales'));
+  const canViewFinancial    = isCompliance && (isComplianceManager || isSuperadmin || hasPermission('view_financial_data'));
+  const canViewReviews      = isCompliance && (isComplianceManager || (hasPermission('view_all_call_reviews') && isEnabled('call_reviews')));
 
   // ── Tab ──────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('companies');
