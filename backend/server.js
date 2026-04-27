@@ -114,7 +114,17 @@ app.use((req, res, next) => {
 // ============================================================================
 const path = require('path');
 const frontendDistPath = path.join(__dirname, '../frontend/dist');
-app.use(express.static(frontendDistPath));
+app.use(express.static(frontendDistPath, {
+  maxAge: '1y',
+  immutable: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html') || filePath.endsWith('version.json')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  },
+}));
 
 // ============================================================================
 // HEALTH CHECK (no auth required)
@@ -170,6 +180,9 @@ app.get('*', (req, res, next) => {
   }
 
   const indexPath = path.join(frontendDistPath, 'index.html');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.sendFile(indexPath, (err) => {
     if (err) {
       res.status(404).json({ error: 'Not found' });

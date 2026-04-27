@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useVersionCheck } from '../hooks/useVersionCheck';
+import UpdateBanner from '../components/UI/UpdateBanner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
@@ -31,6 +33,7 @@ const ComplianceShell = () => {
   const { theme, toggleTheme }       = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
+  const updateAvailable = useVersionCheck();
 
   const [activeTab, setActiveTab]   = useState('companies');
   const [tabInit, setTabInit]       = useState({});
@@ -57,6 +60,7 @@ const ComplianceShell = () => {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
+      {updateAvailable && <UpdateBanner />}
       <AppHeader
         title="Compliance"
         logo={

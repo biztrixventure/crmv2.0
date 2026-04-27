@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { useVersionCheck } from "../hooks/useVersionCheck";
+import UpdateBanner from "../components/UI/UpdateBanner";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -50,6 +52,7 @@ const StaffShell = () => {
   const { theme, toggleTheme } = useTheme();
   const { isEnabled } = useFeatureFlags();
   const navigate = useNavigate();
+  const updateAvailable = useVersionCheck();
 
   const isFronter  = user?.role === 'fronter' || (!hasPermission('create_sale') && hasPermission('create_transfer'));
   const isCloser   = user?.role === 'closer'  || hasPermission('create_sale');
@@ -321,6 +324,7 @@ const StaffShell = () => {
 
   return (
     <div className="min-h-screen bg-bg">
+      {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Dashboard'}
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">

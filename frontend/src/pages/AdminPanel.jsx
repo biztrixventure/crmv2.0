@@ -1,5 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { useVersionCheck } from "../hooks/useVersionCheck";
+import UpdateBanner from "../components/UI/UpdateBanner";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import { Card, Badge } from "../components/UI";
@@ -49,6 +51,7 @@ const AdminPanel = () => {
   const { user, logout, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const updateAvailable = useVersionCheck();
   const [activeTab, setActiveTab] = useState("dashboard");
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const notifHook = useNotifications();
@@ -90,6 +93,7 @@ const AdminPanel = () => {
 
   return (
     <div className="min-h-screen bg-bg">
+      {updateAvailable && <UpdateBanner />}
       <AdminHeader
         theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout}
         notifications={notifHook.notifications}

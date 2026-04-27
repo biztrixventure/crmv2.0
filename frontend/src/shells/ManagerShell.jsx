@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { useVersionCheck } from "../hooks/useVersionCheck";
+import UpdateBanner from "../components/UI/UpdateBanner";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -42,6 +44,7 @@ const ManagerShell = () => {
   const { isEnabled } = useFeatureFlags();
   const navigate = useNavigate();
   const notifHook = useNotifications();
+  const updateAvailable = useVersionCheck();
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { sales, loading: salesLoading, fetchSales, createSale, updateSale, deleteSale } = useSales(user?.company_id);
@@ -226,6 +229,7 @@ const ManagerShell = () => {
 
   return (
     <div className="min-h-screen bg-bg">
+      {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Manager Dashboard'}
         logo={<div className="w-10 h-10 bg-gradient-sidebar rounded-lg flex items-center justify-center">
