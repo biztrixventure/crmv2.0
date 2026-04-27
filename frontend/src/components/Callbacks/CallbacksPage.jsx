@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Phone, Plus, Clock, CheckCircle, XCircle, PhoneOff, Trash2, Edit2, Bell, X, Calendar } from 'lucide-react';
 import client from '../../api/client';
+import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 const STATUS_CONFIG = {
@@ -71,7 +72,11 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
     setSaving(true); setErr('');
     try {
       // Convert datetime-local value (device local time) to UTC ISO string
-      const payload = { ...form, callback_at: new Date(form.callback_at).toISOString() };
+      const payload = {
+        ...form,
+        callback_at: new Date(form.callback_at).toISOString(),
+        user_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      };
       if (isEdit) {
         const res = await client.put(`callbacks/${callback.id}`, payload);
         onSave(res.data.callback, 'edit');
@@ -136,6 +141,22 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
               </label>
               <input value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
                 className="input" type="datetime-local" required />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[
+                  { label: '+5 min',        ms: 5  * 60 * 1000 },
+                  { label: '+10 min',       ms: 10 * 60 * 1000 },
+                  { label: '+15 min',       ms: 15 * 60 * 1000 },
+                  { label: '+1 hour',       ms: 60 * 60 * 1000 },
+                  { label: 'Tomorrow',      ms: 24 * 60 * 60 * 1000 },
+                ].map(({ label, ms }) => (
+                  <button key={label} type="button"
+                    onClick={() => setForm(p => ({ ...p, callback_at: toLocalInputValue(Date.now() + ms) }))}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Notes</label>
@@ -235,7 +256,24 @@ const CallbacksPage = ({ user }) => {
     } catch {} finally { setLoading(false); }
   }, [user?.company_id, filter]);
 
-  useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
+  useEffect(() => {
+    fetchCallbacks();
+
+    if (!user?.id) return;
+    const channel = supabase
+      .channel('callbacks-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'callbacks',
+        filter: `user_id=eq.${user.id}`,
+      }, () => {
+        fetchCallbacks();
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [fetchCallbacks, user?.id]);
 
   const handleSave = (cb, action) => {
     if (action === 'create') setCallbacks(prev => [cb, ...prev]);

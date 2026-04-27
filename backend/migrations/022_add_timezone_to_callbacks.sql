@@ -1,0 +1,1 @@
+ALTER TABLE callbacks ADD COLUMN IF NOT EXISTS user_timezone TEXT;
