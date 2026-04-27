@@ -4,6 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { Moon, Sun, Mail, ArrowLeft, Shield, CheckCircle } from "lucide-react";
 import { Alert } from "../components/UI";
 import client from "../api/client";
+import DevCredit from "../components/DevCredit";
 
 const ForgotPassword = () => {
   const { theme, toggleTheme } = useTheme();
@@ -171,6 +172,7 @@ const ForgotPassword = () => {
               </form>
             </>
           )}
+          <DevCredit />
         </div>
       </div>
     </div>

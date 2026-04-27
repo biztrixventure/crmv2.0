@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
 import { useNotifications } from '../hooks/useNotifications';
 import client from '../api/client';
+import DevCredit from '../components/DevCredit';
 
 import CompaniesTab  from '../components/Compliance/CompaniesTab';
 import QueueTab      from '../components/Compliance/QueueTab';
@@ -126,6 +127,7 @@ const ComplianceShell = () => {
         {activeTab === 'reviews' && (
           <ReviewsTab companyList={companyList} />
         )}
+        <DevCredit />
       </main>
     </div>
   );

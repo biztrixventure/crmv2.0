@@ -4,6 +4,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { Moon, Sun, Lock, Shield, CheckCircle, AlertCircle } from "lucide-react";
 import { Alert } from "../components/UI";
 import { supabase } from "../api/supabase";
+import DevCredit from "../components/DevCredit";
 
 const AcceptInvite = () => {
   const { theme, toggleTheme } = useTheme();
@@ -217,6 +218,7 @@ const AcceptInvite = () => {
               </form>
             </>
           )}
+          <DevCredit />
         </div>
       </div>
     </div>

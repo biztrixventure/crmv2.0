@@ -6,6 +6,7 @@ import { getRoleRoute } from "../utils/roleRouting";
 import { Moon, Sun, Lock, Mail, ArrowRight, Shield } from "lucide-react";
 import { Alert } from "../components/UI";
 import client from "../api/client";
+import DevCredit from "../components/DevCredit";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -332,6 +333,7 @@ const Login = () => {
               </span>
             </p>
           </form>
+          <DevCredit />
         </div>
       </div>
     </div>

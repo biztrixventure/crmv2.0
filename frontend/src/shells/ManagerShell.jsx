@@ -30,6 +30,7 @@ const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuild
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
+import DevCredit from "../components/DevCredit";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
@@ -570,6 +571,7 @@ const ManagerShell = () => {
             </Suspense>
           </div>
         )}
+        <DevCredit />
       </main>
 
       {/* Reassign modal */}

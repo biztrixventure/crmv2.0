@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Home, ArrowLeft } from "lucide-react";
+import DevCredit from "../components/DevCredit";
 
 const NotFound = () => {
   return (
@@ -46,6 +47,7 @@ const NotFound = () => {
           </Link>
         </div>
       </div>
+      <DevCredit />
     </div>
   );
 };

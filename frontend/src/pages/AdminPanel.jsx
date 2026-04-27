@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import { Card, Badge } from "../components/UI";
+import DevCredit from "../components/DevCredit";
 import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
@@ -264,6 +265,7 @@ const AdminPanel = () => {
             {activeTab === "features"    && <FeatureFlagsManager />}
           </div>
           )}
+          <DevCredit />
         </main>
       </div>
     </div>

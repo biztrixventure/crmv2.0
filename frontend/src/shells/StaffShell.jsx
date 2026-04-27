@@ -28,6 +28,7 @@ import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
+import DevCredit from "../components/DevCredit";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 const SALE_BADGE = {
@@ -832,6 +833,7 @@ const StaffShell = () => {
             </div>
           </div>
         )}
+        <DevCredit />
       </main>
 
       {/* ── MODALS ── */}
