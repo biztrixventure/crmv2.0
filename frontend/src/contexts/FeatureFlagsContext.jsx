@@ -2,6 +2,23 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { useAuth } from './AuthContext';
 import client from '../api/client';
 
+const CACHE_KEY = 'bx_feature_flags';
+
+const readCache = () => {
+  try {
+    const s = localStorage.getItem(CACHE_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+};
+
+const writeCache = (flags) => {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(flags)); } catch {}
+};
+
+const clearCache = () => {
+  try { localStorage.removeItem(CACHE_KEY); } catch {}
+};
+
 const FeatureFlagsContext = createContext({
   flags: {},
   isEnabled: () => false,
@@ -10,18 +27,20 @@ const FeatureFlagsContext = createContext({
 });
 
 export const FeatureFlagsProvider = ({ children }) => {
-  const [flags, setFlags]   = useState({});
+  // Seed from localStorage so the correct values are available on first render,
+  // preventing the "show then hide" flicker caused by the API round-trip.
+  const [flags, setFlags]     = useState(() => readCache() || {});
   const [loading, setLoading] = useState(true);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated }   = useAuth();
 
   const refresh = useCallback(async () => {
     try {
-      // GET /feature-flags returns company-scoped flag states
       const res = await client.get('feature-flags');
-      // Response is { flags: { key: { is_enabled, label, ... } } } (object map)
-      setFlags(res.data.flags || {});
+      const newFlags = res.data.flags || {};
+      setFlags(newFlags);
+      writeCache(newFlags);
     } catch {
-      // non-critical — leave stale flags in place
+      // non-critical — leave cached/stale flags in place
     } finally {
       setLoading(false);
     }
@@ -33,11 +52,12 @@ export const FeatureFlagsProvider = ({ children }) => {
     } else {
       setFlags({});
       setLoading(false);
+      clearCache();
     }
   }, [isAuthenticated, refresh]);
 
   // Returns true if the feature is enabled for the current user's company.
-  // Defaults to true if the flag is unknown (new flag not yet in DB).
+  // Defaults to true only for genuinely unknown flags (new flag not yet in DB catalog).
   const isEnabled = (key) => {
     if (!(key in flags)) return true;
     return flags[key]?.is_enabled ?? false;
