@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { PhoneCall } from 'lucide-react';
+import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
 import ExportModal from './ExportModal';
@@ -21,8 +22,9 @@ const CallbacksTab = ({ companyList }) => {
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
 
-  const [detail, setDetail]       = useState(null);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [detail,      setDetail]      = useState(null);
+  const [phoneDrawer, setPhoneDrawer] = useState(null); // { phone, customerName }
+  const [exportOpen,  setExportOpen]  = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,7 +135,15 @@ const CallbacksTab = ({ companyList }) => {
                     onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
                     <td className="px-4 py-3">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{c.customer_name || '—'}</p>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{c.customer_phone || ''}</p>
+                      {c.customer_phone ? (
+                        <button
+                          onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: c.customer_phone, customerName: c.customer_name }); }}
+                          className="text-xs mt-0.5 font-mono hover:underline text-left"
+                          style={{ color: 'var(--color-primary-600)' }}
+                          title="View all callbacks for this number">
+                          {c.customer_phone}
+                        </button>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {fmtDateTime(c.callback_at)}
@@ -225,6 +235,14 @@ const CallbacksTab = ({ companyList }) => {
       {exportOpen && (
         <ExportModal tab="callbacks" companyList={filteredCompanies} cbType={cbType}
           onClose={() => setExportOpen(false)} onExport={handleExport} />
+      )}
+
+      {phoneDrawer && (
+        <CallbackPhoneHistoryDrawer
+          phone={phoneDrawer.phone}
+          customerName={phoneDrawer.customerName}
+          onClose={() => setPhoneDrawer(null)}
+        />
       )}
     </div>
   );

@@ -11,11 +11,12 @@ import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
 import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
-import SaleDetailDrawer            from '../../Shared/SaleDetailDrawer';
-import TransferDetailDrawer        from '../../Shared/TransferDetailDrawer';
-import CallbackDetailDrawer        from '../../Shared/CallbackDetailDrawer';
-import UserDetailDrawer            from '../../Shared/UserDetailDrawer';
-import CallbackNumberDetailDrawer  from '../../Shared/CallbackNumberDetailDrawer';
+import SaleDetailDrawer              from '../../Shared/SaleDetailDrawer';
+import TransferDetailDrawer          from '../../Shared/TransferDetailDrawer';
+import CallbackDetailDrawer          from '../../Shared/CallbackDetailDrawer';
+import UserDetailDrawer              from '../../Shared/UserDetailDrawer';
+import CallbackNumberDetailDrawer    from '../../Shared/CallbackNumberDetailDrawer';
+import CallbackPhoneHistoryDrawer    from '../../Shared/CallbackPhoneHistoryDrawer';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -27,13 +28,14 @@ const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
 
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type }) => {
-  const [rows, setRows]         = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [loading, setLoading]   = useState(false);
-  const [search, setSearch]     = useState('');
-  const [status, setStatus]     = useState('');
-  const [page, setPage]         = useState(1);
-  const [selected, setSelected] = useState(null);
+  const [rows, setRows]               = useState([]);
+  const [total, setTotal]             = useState(0);
+  const [loading, setLoading]         = useState(false);
+  const [search, setSearch]           = useState('');
+  const [status, setStatus]           = useState('');
+  const [page, setPage]               = useState(1);
+  const [selected, setSelected]       = useState(null);
+  const [phoneDrawer, setPhoneDrawer] = useState(null);
 
   const statuses = type === 'sales' ? SALE_STATUSES : type === 'transfers' ? TRANSFER_STATUSES : CALLBACK_STATUSES;
 
@@ -136,7 +138,17 @@ const RecordsPanel = ({ companyId, type }) => {
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2.5 font-semibold text-text">{r.customer_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.customer_phone||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        {r.customer_phone ? (
+                          <button
+                            onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: r.customer_phone, customerName: r.customer_name }); }}
+                            className="font-mono hover:underline"
+                            style={{ color: 'var(--color-primary-600)' }}
+                            title="View all callbacks for this number">
+                            {r.customer_phone}
+                          </button>
+                        ) : '—'}
+                      </td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{new Date(r.callback_at).toLocaleString()}</td>
                       <td className="px-3 py-2.5"><Badge variant={r.status==='pending'?'warning':r.status==='completed'?'success':'error'} size="sm">{r.status}</Badge></td>
                     </tr>
@@ -161,6 +173,13 @@ const RecordsPanel = ({ companyId, type }) => {
       {type === 'sales'     && <SaleDetailDrawer     sale={selected}     onClose={() => setSelected(null)} />}
       {type === 'transfers' && <TransferDetailDrawer transfer={selected} onClose={() => setSelected(null)} />}
       {type === 'callbacks' && <CallbackDetailDrawer callback={selected} onClose={() => setSelected(null)} />}
+      {phoneDrawer && (
+        <CallbackPhoneHistoryDrawer
+          phone={phoneDrawer.phone}
+          customerName={phoneDrawer.customerName}
+          onClose={() => setPhoneDrawer(null)}
+        />
+      )}
     </div>
   );
 };

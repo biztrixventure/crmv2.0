@@ -262,6 +262,57 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
+// ── GET /compliance/callbacks/phone-history ──────────────────────────────────
+// All callbacks for a given phone number across all companies + agents.
+// Sorted oldest-first so "first" is index 0.
+router.get('/callbacks/phone-history', asyncHandler(async (req, res) => {
+  const { phone } = req.query;
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+
+  const { data, error } = await supabaseAdmin
+    .from('callbacks')
+    .select('*')
+    .eq('customer_phone', phone)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const rows = data || [];
+
+  // Enrich user + company in one pass
+  const userIds    = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
+  const companyIds = [...new Set(rows.map(r => r.company_id).filter(Boolean))];
+
+  const [profileMap, companyMap2] = await Promise.all([
+    enrichProfiles(rows, r => r.user_id),
+    companyIds.length
+      ? supabaseAdmin.from('companies').select('id,name').in('id', companyIds)
+          .then(({ data: co }) => Object.fromEntries((co || []).map(c => [c.id, c.name])))
+      : Promise.resolve({}),
+  ]);
+
+  const enriched = rows.map((r, i) => ({
+    ...r,
+    agent_name:   profileName(profileMap, r.user_id)  || 'Unknown',
+    company_name: companyMap2[r.company_id]            || null,
+    is_first:     i === 0,
+  }));
+
+  // Stats
+  const pending_count  = enriched.filter(r => r.status === 'pending').length;
+  const first          = enriched[0] || null;
+
+  res.json({
+    phone,
+    total:         enriched.length,
+    pending_count,
+    first_agent:   first?.agent_name   || null,
+    first_company: first?.company_name || null,
+    first_at:      first?.created_at   || null,
+    callbacks:     enriched,
+  });
+}));
+
 // ── GET /compliance/callback-numbers ─────────────────────────────────────────
 router.get('/callback-numbers', asyncHandler(async (req, res) => {
   const { company_id, status, search, page = 1, limit = 50 } = req.query;
