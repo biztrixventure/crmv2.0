@@ -3,7 +3,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign,
   Calendar, BarChart3, Search, RefreshCw, Settings,
-  PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2,
+  PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
@@ -11,10 +11,11 @@ import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
 import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
-import SaleDetailDrawer     from '../../Shared/SaleDetailDrawer';
-import TransferDetailDrawer from '../../Shared/TransferDetailDrawer';
-import CallbackDetailDrawer from '../../Shared/CallbackDetailDrawer';
-import UserDetailDrawer     from '../../Shared/UserDetailDrawer';
+import SaleDetailDrawer            from '../../Shared/SaleDetailDrawer';
+import TransferDetailDrawer        from '../../Shared/TransferDetailDrawer';
+import CallbackDetailDrawer        from '../../Shared/CallbackDetailDrawer';
+import UserDetailDrawer            from '../../Shared/UserDetailDrawer';
+import CallbackNumberDetailDrawer  from '../../Shared/CallbackNumberDetailDrawer';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -705,6 +706,113 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
   );
 };
 
+// ── NumbersPanel ──────────────────────────────────────────────────────────────
+const NUM_STATUS_BADGE = { active: 'success', claimable: 'warning', released: 'secondary' };
+
+const NumbersPanel = ({ companyId }) => {
+  const [rows, setRows]         = useState([]);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(false);
+  const [search, setSearch]     = useState('');
+  const [status, setStatus]     = useState('');
+  const [page, setPage]         = useState(1);
+  const [selected, setSelected] = useState(null);
+  const LIMIT = 50;
+
+  const load = useCallback(async (p = 1) => {
+    setLoading(true);
+    try {
+      const res = await client.get('compliance/callback-numbers', {
+        params: { company_id: companyId, search: search || undefined, status: status || undefined, page: p, limit: LIMIT },
+      });
+      setRows(res.data.numbers || []);
+      setTotal(res.data.total || 0);
+      setPage(p);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, [companyId, search, status]);
+
+  useEffect(() => { load(1); }, [companyId]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
+            placeholder="Search phone…" className="input pl-9 text-sm" />
+        </div>
+        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
+          <option value="">All statuses</option>
+          {['active','claimable','released'].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
+        </select>
+        <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
+          Search · {total}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+      ) : rows.length === 0 ? (
+        <p className="text-center text-text-secondary py-8 text-sm">No callback numbers.</p>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+                  {['Phone Number','Owner','Status','Attempts','Last Outcome'].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id} onClick={() => setSelected(r)}
+                    className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <Hash size={11} style={{ color: 'var(--color-primary-500)', flexShrink: 0 }} />
+                        <span className="font-mono font-semibold text-text">{r.phone_number}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary">{r.owner_name || <span className="italic opacity-60">Unowned</span>}</td>
+                    <td className="px-3 py-2.5">
+                      <Badge variant={NUM_STATUS_BADGE[r.status] || 'secondary'} size="sm">
+                        {r.status?.charAt(0).toUpperCase()+r.status?.slice(1)}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-center text-text-secondary">{r.attempt_count ?? 0}</td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{r.last_outcome?.replace(/_/g,' ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {total > LIMIT && (
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}–{Math.min(page*LIMIT,total)} of {total}</span>
+              <div className="flex gap-2">
+                <button disabled={page===1} onClick={() => load(page-1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Prev</button>
+                <button disabled={page*LIMIT>=total} onClick={() => load(page+1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Next</button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {selected && (
+        <CallbackNumberDetailDrawer
+          numberId={selected.id}
+          numberRow={selected}
+          onClose={() => setSelected(null)}
+          apiBase="compliance/callback-numbers"
+        />
+      )}
+    </div>
+  );
+};
+
 // ── main CompanyDetail ────────────────────────────────────────────────────────
 const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
   const { hasPermission } = useAuth();
@@ -717,9 +825,10 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
     ...(hasPermission('view_company_members') ? [{ key: 'members',   label: 'Members',   icon: Users      }] : []),
     ...(hasPermission('manage_roles')         ? [{ key: 'roles',     label: 'Roles',     icon: Shield     }] : []),
     ...(hasPermission('edit_company')         ? [{ key: 'settings',  label: 'Settings',  icon: Settings   }] : []),
-    { key: 'transfers',  label: 'Transfers', icon: Send       },
-    { key: 'sales',      label: 'Sales',     icon: DollarSign },
-    { key: 'callbacks',  label: 'Callbacks', icon: Calendar   },
+    { key: 'transfers',  label: 'Transfers',    icon: Send       },
+    { key: 'sales',      label: 'Sales',        icon: DollarSign },
+    { key: 'callbacks',  label: 'Callbacks',    icon: Calendar   },
+    { key: 'numbers',    label: 'Call Numbers', icon: Hash       },
   ];
 
   const handleCompanyUpdated = (updated) => {
@@ -776,6 +885,7 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
       {activeTab === 'transfers'  && <RecordsPanel   key={`tr-${refresh}`} companyId={company.id} type="transfers" />}
       {activeTab === 'sales'      && <RecordsPanel   key={`sa-${refresh}`} companyId={company.id} type="sales" />}
       {activeTab === 'callbacks'  && <RecordsPanel   key={`cb-${refresh}`} companyId={company.id} type="callbacks" />}
+      {activeTab === 'numbers'    && <NumbersPanel   key={`nb-${refresh}`} companyId={company.id} />}
     </div>
   );
 };

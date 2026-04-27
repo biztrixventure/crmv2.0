@@ -262,4 +262,132 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
 
+// ── GET /compliance/callback-numbers ─────────────────────────────────────────
+router.get('/callback-numbers', asyncHandler(async (req, res) => {
+  const { company_id, status, search, page = 1, limit = 50 } = req.query;
+
+  let query = supabaseAdmin
+    .from('callback_numbers')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (company_id) query = query.eq('company_id', company_id);
+  if (status)     query = query.eq('status', status);
+  if (search)     query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  query = query.range(offset, offset + parseInt(limit) - 1);
+
+  const { data, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  if (!data?.length) return res.json({ numbers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+
+  // Owner profiles
+  const ownerIds = [...new Set(data.map(n => n.owner_id).filter(Boolean))];
+  const profileMap = {};
+  if (ownerIds.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles').select('user_id,first_name,last_name').in('user_id', ownerIds);
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
+  }
+
+  const companyMap = await enrichCompanies(data, n => n.company_id);
+
+  // Attempt counts per number (single bulk query)
+  const numberIds = data.map(n => n.id);
+  const { data: attemptRows } = await supabaseAdmin
+    .from('callback_number_attempts')
+    .select('callback_number_id, outcome')
+    .in('callback_number_id', numberIds)
+    .order('attempted_at', { ascending: false });
+
+  const attemptMap = {};
+  (attemptRows || []).forEach(a => {
+    if (!attemptMap[a.callback_number_id]) {
+      attemptMap[a.callback_number_id] = { count: 0, last_outcome: a.outcome };
+    }
+    attemptMap[a.callback_number_id].count++;
+  });
+
+  // Claim counts
+  const { data: claimRows } = await supabaseAdmin
+    .from('callback_number_claims')
+    .select('callback_number_id')
+    .in('callback_number_id', numberIds);
+  const claimMap = {};
+  (claimRows || []).forEach(c => { claimMap[c.callback_number_id] = (claimMap[c.callback_number_id] || 0) + 1; });
+
+  const numbers = data.map(n => ({
+    ...n,
+    owner_name:    profileName(profileMap, n.owner_id),
+    company_name:  companyMap[n.company_id]?.name || null,
+    attempt_count: attemptMap[n.id]?.count || 0,
+    last_outcome:  attemptMap[n.id]?.last_outcome || null,
+    owner_count:   claimMap[n.id] || 0,
+  }));
+
+  res.json({ numbers, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
+
+// ── GET /compliance/callback-numbers/:id ──────────────────────────────────────
+router.get('/callback-numbers/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const [numberRes, claimsRes, attemptsRes] = await Promise.all([
+    supabaseAdmin.from('callback_numbers').select('*').eq('id', id).single(),
+    supabaseAdmin.from('callback_number_claims')
+      .select('*').eq('callback_number_id', id).order('owned_from', { ascending: false }),
+    supabaseAdmin.from('callback_number_attempts')
+      .select('*').eq('callback_number_id', id).order('attempted_at', { ascending: false }),
+  ]);
+
+  if (numberRes.error || !numberRes.data) return res.status(404).json({ error: 'Number not found' });
+
+  const number  = numberRes.data;
+  const claims  = claimsRes.data  || [];
+  const attempts = attemptsRes.data || [];
+
+  // Bulk enrich all user IDs in one query
+  const allUserIds = [...new Set([
+    number.owner_id,
+    ...claims.map(c => c.owner_id),
+    ...attempts.map(a => a.caller_id),
+  ].filter(Boolean))];
+
+  const profileMap = {};
+  if (allUserIds.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles').select('user_id,first_name,last_name').in('user_id', allUserIds);
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
+  }
+
+  // Linked transfer
+  let transfer = null;
+  if (number.source === 'transfer' && number.source_id) {
+    const { data: tr } = await supabaseAdmin
+      .from('transfers').select('id,form_data,status,created_at').eq('id', number.source_id).single();
+    transfer = tr || null;
+  }
+
+  const companyMap = await enrichCompanies([number], n => n.company_id);
+
+  res.json({
+    number: {
+      ...number,
+      owner_name:   profileName(profileMap, number.owner_id),
+      company_name: companyMap[number.company_id]?.name || null,
+    },
+    claims: claims.map(c => ({
+      ...c,
+      owner_name: profileName(profileMap, c.owner_id) || 'Unknown',
+    })),
+    attempts: attempts.map(a => ({
+      ...a,
+      caller_name: profileName(profileMap, a.caller_id) || 'Unknown',
+    })),
+    transfer,
+  });
+}));
+
 module.exports = router;

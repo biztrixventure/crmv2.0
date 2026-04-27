@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
@@ -8,12 +8,13 @@ import { useNotifications } from '../hooks/useNotifications';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
 
-import CompaniesTab  from '../components/Compliance/CompaniesTab';
-import QueueTab      from '../components/Compliance/QueueTab';
-import SalesTab      from '../components/Compliance/SalesTab';
-import TransfersTab  from '../components/Compliance/TransfersTab';
-import CallbacksTab  from '../components/Compliance/CallbacksTab';
-import ReviewsTab    from '../components/Compliance/ReviewsTab';
+import CompaniesTab        from '../components/Compliance/CompaniesTab';
+import QueueTab            from '../components/Compliance/QueueTab';
+import SalesTab            from '../components/Compliance/SalesTab';
+import TransfersTab        from '../components/Compliance/TransfersTab';
+import CallbacksTab        from '../components/Compliance/CallbacksTab';
+import ReviewsTab          from '../components/Compliance/ReviewsTab';
+import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 
 const TABS = [
   { key: 'companies', label: 'Companies',    icon: Building2 },
@@ -22,6 +23,7 @@ const TABS = [
   { key: 'transfers', label: 'Transfers',    icon: ArrowRight },
   { key: 'callbacks', label: 'Callbacks',    icon: PhoneCall },
   { key: 'reviews',   label: 'Call Reviews', icon: Star },
+  { key: 'numbers',   label: 'Call Numbers', icon: Hash },
 ];
 
 const ComplianceShell = () => {
@@ -126,6 +128,9 @@ const ComplianceShell = () => {
         )}
         {activeTab === 'reviews' && (
           <ReviewsTab companyList={companyList} />
+        )}
+        {activeTab === 'numbers' && (
+          <CallbackNumbersTab companyList={companyList} />
         )}
         <DevCredit />
       </main>
