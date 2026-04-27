@@ -334,25 +334,29 @@ router.get('/callback-numbers', asyncHandler(async (req, res) => {
 router.get('/callback-numbers/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const [numberRes, claimsRes, attemptsRes] = await Promise.all([
+  const [numberRes, claimsRes, attemptsRes, historyRes] = await Promise.all([
     supabaseAdmin.from('callback_numbers').select('*').eq('id', id).single(),
     supabaseAdmin.from('callback_number_claims')
       .select('*').eq('callback_number_id', id).order('owned_from', { ascending: false }),
     supabaseAdmin.from('callback_number_attempts')
       .select('*').eq('callback_number_id', id).order('attempted_at', { ascending: false }),
+    supabaseAdmin.from('callback_number_history')
+      .select('*').eq('callback_number_id', id).order('created_at', { ascending: false }),
   ]);
 
   if (numberRes.error || !numberRes.data) return res.status(404).json({ error: 'Number not found' });
 
-  const number  = numberRes.data;
-  const claims  = claimsRes.data  || [];
+  const number   = numberRes.data;
+  const claims   = claimsRes.data   || [];
   const attempts = attemptsRes.data || [];
+  const history  = historyRes.data  || [];
 
   // Bulk enrich all user IDs in one query
   const allUserIds = [...new Set([
     number.owner_id,
     ...claims.map(c => c.owner_id),
     ...attempts.map(a => a.caller_id),
+    ...history.map(h => h.actor_id),
   ].filter(Boolean))];
 
   const profileMap = {};
@@ -385,6 +389,10 @@ router.get('/callback-numbers/:id', asyncHandler(async (req, res) => {
     attempts: attempts.map(a => ({
       ...a,
       caller_name: profileName(profileMap, a.caller_id) || 'Unknown',
+    })),
+    history: history.map(h => ({
+      ...h,
+      actor_name: h.actor_id ? (profileName(profileMap, h.actor_id) || 'Unknown') : 'System',
     })),
     transfer,
   });

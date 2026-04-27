@@ -28,6 +28,21 @@ function addDays(date, days) {
   return d.toISOString();
 }
 
+async function logHistory(numberId, actorId, action, opts = {}) {
+  const { field, oldVal, newVal, metadata = {} } = opts;
+  try {
+    await supabaseAdmin.from('callback_number_history').insert({
+      callback_number_id: numberId,
+      actor_id:           actorId || null,
+      action,
+      field_name:  field  ?? null,
+      old_value:   oldVal != null ? String(oldVal) : null,
+      new_value:   newVal != null ? String(newVal) : null,
+      metadata,
+    });
+  } catch { /* non-critical — never block the main operation */ }
+}
+
 async function enrichWithOwnerNames(numbers) {
   if (!numbers.length) return numbers;
   const ownerIds = [...new Set(numbers.map(n => n.owner_id).filter(Boolean))];
@@ -303,6 +318,10 @@ router.post('/',
       owned_from:         now.toISOString(),
     });
 
+    await logHistory(data.id, userId, 'created', {
+      metadata: { phone_number: data.phone_number, source: data.source, customer_name: data.customer_name || null },
+    });
+
     logger.info('CALLBACK_NUMBERS', `Created tracked number ${data.phone_number}`, { userId });
     res.status(201).json({ number: data });
   })
@@ -370,6 +389,10 @@ router.post('/:id/attempt',
     if (outcome === 'do_not_call') {
       numberUpdates.status     = 'released';
       numberUpdates.owner_id   = null;
+      await logHistory(id, userId, 'status_changed', {
+        field: 'status', oldVal: number.status, newVal: 'released',
+        metadata: { reason: 'do_not_call' },
+      });
     }
 
     await supabaseAdmin.from('callback_numbers').update(numberUpdates).eq('id', id);
@@ -452,6 +475,11 @@ router.post('/:id/claim', asyncHandler(async (req, res) => {
     owned_from:         now.toISOString(),
   });
 
+  await logHistory(id, userId, 'status_changed', {
+    field: 'status', oldVal: 'claimable', newVal: 'active',
+    metadata: { reason: 'claimed', prev_owner: number.owner_id || null },
+  });
+
   logger.info('CALLBACK_NUMBERS', `Number ${number.phone_number} claimed by ${userId}`);
   res.json({ message: 'Number claimed successfully' });
 }));
@@ -473,7 +501,7 @@ router.put('/:id',
 
     const { data: existing } = await supabaseAdmin
       .from('callback_numbers')
-      .select('owner_id, company_id')
+      .select('owner_id, company_id, customer_name, notes, phone_number')
       .eq('id', id)
       .single();
 
@@ -494,6 +522,16 @@ router.put('/:id',
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    // Log each changed field
+    for (const k of allowed) {
+      if (req.body[k] !== undefined && req.body[k] !== existing[k]) {
+        await logHistory(id, userId, 'field_updated', {
+          field: k, oldVal: existing[k] ?? '', newVal: req.body[k] ?? '',
+        });
+      }
+    }
+
     res.json({ number: data });
   })
 );
@@ -551,6 +589,11 @@ router.put('/:id/reassign',
       owned_from:         now.toISOString(),
     });
 
+    await logHistory(id, userId, 'reassigned', {
+      field: 'owner_id', oldVal: number.owner_id || null, newVal: new_owner_id,
+      metadata: { prev_owner: number.owner_id || null, new_owner: new_owner_id },
+    });
+
     logger.info('CALLBACK_NUMBERS', `Number ${number.phone_number} reassigned by manager ${userId} → ${new_owner_id}`);
     res.json({ message: 'Reassigned successfully' });
   })
@@ -586,6 +629,11 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     status:     'released',
     updated_at: now.toISOString(),
   }).eq('id', id);
+
+  await logHistory(id, userId, 'status_changed', {
+    field: 'status', oldVal: number.status, newVal: 'released',
+    metadata: { reason: isManager ? 'manager_release' : 'self_release' },
+  });
 
   logger.info('CALLBACK_NUMBERS', `Number ${number.phone_number} released`, { userId });
   res.json({ message: 'Number released' });
