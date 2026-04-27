@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
@@ -9,7 +9,7 @@ import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
 import SaleSearch from "../components/Sales/SaleSearch";
-import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
+const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import {
   BarChart3, Users, Shield, Building2, FileText,
@@ -104,7 +104,9 @@ const AdminPanel = () => {
 
         <main className="flex-1 overflow-auto bg-bg">
           {activeTab === 'forms' ? (
-            <FormBuilder />
+            <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+              <FormBuilder />
+            </Suspense>
           ) : (
           <div className="p-6 lg:p-8 max-w-7xl">
 

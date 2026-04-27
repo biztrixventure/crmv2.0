@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
@@ -26,7 +26,7 @@ import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
 import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
-import FormBuilder from "../components/Admin/FormBuilder/FormBuilder";
+const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
@@ -565,7 +565,9 @@ const ManagerShell = () => {
         {activeTab === 'reports'   && <ReportsPanel companyId={companyId} />}
         {activeTab === 'forms'     && (
           <div className="animate-fade-in">
-            <FormBuilder />
+            <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+              <FormBuilder />
+            </Suspense>
           </div>
         )}
       </main>
