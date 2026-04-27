@@ -3,9 +3,31 @@ import { Moon, Sun, LogOut, ChevronDown } from 'lucide-react';
 import NotificationBell from '../UI/NotificationBell';
 import ProfileModal from '../Profile/ProfileModal';
 
+const CompanyLogoImg = ({ src }) => {
+  const [errored, setErrored] = useState(false);
+  if (errored) return (
+    <div
+      className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+      style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+    >
+      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>B</span>
+    </div>
+  );
+  return (
+    <img
+      src={src}
+      alt="Company logo"
+      onError={() => setErrored(true)}
+      className="h-9 w-auto max-w-[120px] rounded-lg object-contain flex-shrink-0"
+      style={{ boxShadow: 'var(--shadow-sm)' }}
+    />
+  );
+};
+
 const AppHeader = ({
   title = 'BizTrix CRM',
   logo = null,
+  companyLogoUrl = null,
   theme = 'light',
   onThemeToggle = () => {},
   userEmail = '',
@@ -42,7 +64,9 @@ const AppHeader = ({
         >
           {/* Left: Logo & Title */}
           <div className="flex items-center gap-3">
-            {logo ?? (
+            {companyLogoUrl ? (
+              <CompanyLogoImg src={companyLogoUrl} />
+            ) : logo ?? (
               <div
                 className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                 style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}

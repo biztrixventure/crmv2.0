@@ -39,7 +39,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const [{ data: userRoles }, { data: profile }] = await Promise.all([
     supabaseAdmin
       .from('user_company_roles')
-      .select('role_id, company_id, custom_roles(id, name, level), companies(name)')
+      .select('role_id, company_id, custom_roles(id, name, level), companies(name, logo_url)')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('created_at', { ascending: false })
@@ -90,6 +90,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     role_name: ur.custom_roles.name,
     company_id: ur.company_id,
     company_name: ur.companies?.name,
+    company_logo_url: ur.companies?.logo_url || null,
     first_name: profile?.first_name,
     last_name: profile?.last_name,
     permissions: userPermissions,
@@ -159,7 +160,7 @@ router.post(
           role_id,
           company_id,
           custom_roles (id, name, level),
-          companies (name)
+          companies (name, logo_url)
         `
         )
         .eq("user_id", data.user.id)
@@ -214,6 +215,7 @@ router.post(
           role_name: roleData.name,
           company_id: userRole.company_id,
           company_name: companyData.name,
+          company_logo_url: companyData.logo_url || null,
           first_name: profile?.first_name,
           last_name: profile?.last_name,
           permissions: userPermissions,

@@ -69,6 +69,7 @@ const ComplianceShell = () => {
             <Shield className="text-white" size={22} />
           </div>
         }
+        companyLogoUrl={user?.company_logo_url}
         theme={theme} onThemeToggle={toggleTheme}
         userEmail={user?.email}
         userRole={user?.role_name || 'Compliance Manager'}
