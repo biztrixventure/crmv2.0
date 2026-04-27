@@ -11,6 +11,10 @@ import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
 import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
+import SaleDetailDrawer     from '../../Shared/SaleDetailDrawer';
+import TransferDetailDrawer from '../../Shared/TransferDetailDrawer';
+import CallbackDetailDrawer from '../../Shared/CallbackDetailDrawer';
+import UserDetailDrawer     from '../../Shared/UserDetailDrawer';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -20,14 +24,15 @@ const SALE_STATUSES     = ['open','sold','cancelled','follow_up','closed_won','c
 const TRANSFER_STATUSES = ['pending','assigned','completed','cancelled','rejected'];
 const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
 
-// ── RecordsPanel (unchanged) ──────────────────────────────────────────────────
+// ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type }) => {
-  const [rows, setRows]       = useState([]);
-  const [total, setTotal]     = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch]   = useState('');
-  const [status, setStatus]   = useState('');
-  const [page, setPage]       = useState(1);
+  const [rows, setRows]         = useState([]);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(false);
+  const [search, setSearch]     = useState('');
+  const [status, setStatus]     = useState('');
+  const [page, setPage]         = useState(1);
+  const [selected, setSelected] = useState(null);
 
   const statuses = type === 'sales' ? SALE_STATUSES : type === 'transfers' ? TRANSFER_STATUSES : CALLBACK_STATUSES;
 
@@ -78,7 +83,9 @@ const RecordsPanel = ({ companyId, type }) => {
                 </tr></thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <tr key={r.id} onClick={() => setSelected(r)}
+                      className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                      style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2.5 font-semibold text-text">{r.customer_name||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{r.customer_phone||'—'}</td>
                       <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{r.reference_no||'—'}</td>
@@ -100,7 +107,9 @@ const RecordsPanel = ({ companyId, type }) => {
                 </tr></thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <tr key={r.id} onClick={() => setSelected(r)}
+                      className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                      style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2.5 font-semibold text-text">
                         {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'—'}
                       </td>
@@ -122,7 +131,9 @@ const RecordsPanel = ({ companyId, type }) => {
                 </tr></thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <tr key={r.id} onClick={() => setSelected(r)}
+                      className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                      style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2.5 font-semibold text-text">{r.customer_name||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{r.customer_phone||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{new Date(r.callback_at).toLocaleString()}</td>
@@ -144,6 +155,11 @@ const RecordsPanel = ({ companyId, type }) => {
           )}
         </Card>
       )}
+
+      {/* Detail drawers */}
+      {type === 'sales'     && <SaleDetailDrawer     sale={selected}     onClose={() => setSelected(null)} />}
+      {type === 'transfers' && <TransferDetailDrawer transfer={selected} onClose={() => setSelected(null)} />}
+      {type === 'callbacks' && <CallbackDetailDrawer callback={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 };
@@ -202,6 +218,7 @@ const MembersPanel = ({ companyId }) => {
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser]     = useState(null);
+  const [viewUser, setViewUser]     = useState(null);
   const [actionErr, setActionErr]   = useState('');
   const [confirm, setConfirm]       = useState(null); // { id, name, action: 'delete'|'deactivate' }
 
@@ -274,7 +291,9 @@ const MembersPanel = ({ companyId }) => {
               </thead>
               <tbody>
                 {users.map(u => (
-                  <tr key={u.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <tr key={u.id} onClick={() => setViewUser(u)}
+                    className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td className="px-3 py-2.5 font-semibold text-text">
                       {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
                     </td>
@@ -286,7 +305,7 @@ const MembersPanel = ({ companyId }) => {
                         {u.is_active ? 'Active' : 'Inactive'}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-2">
                         {hasPermission('edit_user') && (
                         <button
@@ -354,6 +373,8 @@ const MembersPanel = ({ companyId }) => {
           </div>
         </Modal>
       )}
+
+      <UserDetailDrawer user={viewUser} onClose={() => setViewUser(null)} />
     </div>
   );
 };

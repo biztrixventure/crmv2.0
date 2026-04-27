@@ -24,8 +24,8 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
           </thead>
           <tbody>
             {companies.map(company => (
-              <tr key={company.id}
-                className="transition-colors hover:bg-bg-secondary"
+              <tr key={company.id} onClick={() => onView(company)}
+                className="transition-colors hover:bg-bg-secondary cursor-pointer"
                 style={{ borderBottom: '1px solid var(--color-border)' }}>
 
                 {/* Name */}
@@ -60,7 +60,7 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
                 </td>
 
                 {/* Actions */}
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-1 flex-wrap">
                     {/* View */}
                     <button onClick={() => onView(company)}
