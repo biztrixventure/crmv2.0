@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useFeatureFlags } from '../contexts/FeatureFlagsContext';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
 import { useNotifications } from '../hooks/useNotifications';
@@ -14,20 +15,21 @@ import TransfersTab  from '../components/Compliance/TransfersTab';
 import CallbacksTab  from '../components/Compliance/CallbacksTab';
 import ReviewsTab    from '../components/Compliance/ReviewsTab';
 
-const TABS = [
-  { key: 'companies', label: 'Companies',    icon: Building2 },
-  { key: 'queue',     label: 'Review Queue', icon: Clock },
-  { key: 'sales',     label: 'All Sales',    icon: FileText },
-  { key: 'transfers', label: 'Transfers',    icon: ArrowRight },
-  { key: 'callbacks', label: 'Callbacks',    icon: PhoneCall },
-  { key: 'reviews',   label: 'Call Reviews', icon: Star },
-];
-
 const ComplianceShell = () => {
   const { user, logout, updateUser } = useAuth();
   const { theme, toggleTheme }       = useTheme();
+  const { isEnabled }                = useFeatureFlags();
   const navigate = useNavigate();
   const notifHook = useNotifications();
+
+  const TABS = [
+    { key: 'companies', label: 'Companies',    icon: Building2 },
+    { key: 'queue',     label: 'Review Queue', icon: Clock },
+    { key: 'sales',     label: 'All Sales',    icon: FileText },
+    ...(isEnabled('transfers')   ? [{ key: 'transfers', label: 'Transfers',    icon: ArrowRight }] : []),
+    ...(isEnabled('callbacks')   ? [{ key: 'callbacks', label: 'Callbacks',    icon: PhoneCall  }] : []),
+    ...(isEnabled('call_reviews')? [{ key: 'reviews',   label: 'Call Reviews', icon: Star       }] : []),
+  ];
 
   const [activeTab, setActiveTab]   = useState('companies');
   const [tabInit, setTabInit]       = useState({});
