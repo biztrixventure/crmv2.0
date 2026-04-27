@@ -3,31 +3,86 @@ import client from "../api/client";
 
 export const AuthContext = createContext(null);
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser]         = useState(() => {
-    const stored = localStorage.getItem("user");
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [token, setToken]       = useState(() => localStorage.getItem("token"));
-  const [isRefreshing, setIsRefreshing] = useState(!!localStorage.getItem("token")); // true while /auth/me is in-flight
-  const refreshedRef = useRef(false);
+// Decode JWT payload without a library
+const getTokenExpiry = (token) => {
+  try {
+    return JSON.parse(atob(token.split('.')[1])).exp * 1000; // ms
+  } catch { return null; }
+};
 
-  const login = useCallback((userData, accessToken) => {
-    setUser(userData);
-    setToken(accessToken);
-    setIsRefreshing(false); // login already has fresh data — skip /auth/me
-    refreshedRef.current = true;
-    localStorage.setItem("user", JSON.stringify(userData));
-    localStorage.setItem("token", accessToken);
+export const AuthProvider = ({ children }) => {
+  const [user,  setUser]  = useState(() => {
+    const s = localStorage.getItem("user");
+    return s ? JSON.parse(s) : null;
+  });
+  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [isRefreshing, setIsRefreshing] = useState(!!localStorage.getItem("token"));
+  const refreshedRef   = useRef(false);
+  const timerRef       = useRef(null);
+  const refreshTokRef  = useRef(localStorage.getItem("refresh_token"));
+
+  // ── internal refresh ────────────────────────────────────────────────────────
+  const doRefresh = useCallback(async () => {
+    const rt = refreshTokRef.current;
+    if (!rt) return;
+    try {
+      const res = await client.post("auth/refresh", { refresh_token: rt });
+      const newToken = res.data.token;
+      const newRT    = res.data.refresh_token || rt;
+      setToken(newToken);
+      refreshTokRef.current = newRT;
+      localStorage.setItem("token", newToken);
+      localStorage.setItem("refresh_token", newRT);
+    } catch {
+      // Refresh failed — clear everything and send to login
+      setUser(null);
+      setToken(null);
+      refreshTokRef.current = null;
+      localStorage.removeItem("token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+    }
   }, []);
 
+  // ── schedule next refresh 3 min before expiry ────────────────────────────────
+  const scheduleRefresh = useCallback((accessToken) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const exp = getTokenExpiry(accessToken);
+    if (!exp) return;
+    const delay = exp - Date.now() - 3 * 60 * 1000; // 3 min buffer
+    if (delay <= 0) {
+      // Already expired or within buffer — refresh immediately
+      doRefresh();
+    } else {
+      timerRef.current = setTimeout(doRefresh, delay);
+    }
+  }, [doRefresh]);
+
+  // ── public login ─────────────────────────────────────────────────────────────
+  const login = useCallback((userData, accessToken, refreshToken) => {
+    setUser(userData);
+    setToken(accessToken);
+    setIsRefreshing(false);
+    refreshedRef.current  = true;
+    refreshTokRef.current = refreshToken || null;
+    localStorage.setItem("user",          JSON.stringify(userData));
+    localStorage.setItem("token",         accessToken);
+    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    scheduleRefresh(accessToken);
+  }, [scheduleRefresh]);
+
+  // ── public logout ─────────────────────────────────────────────────────────────
   const logout = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setUser(null);
     setToken(null);
     setIsRefreshing(false);
+    refreshedRef.current  = false;
+    refreshTokRef.current = null;
     localStorage.removeItem("user");
     localStorage.removeItem("token");
-    refreshedRef.current = false;
+    localStorage.removeItem("refresh_token");
   }, []);
 
   const updateUser = useCallback((updates) => {
@@ -36,53 +91,58 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem("user", JSON.stringify(updated));
   }, [user]);
 
-  // On mount (or when token appears), fetch fresh role + permissions from DB.
-  // This ensures that if an admin changed this user's role/permissions,
-  // after a page refresh they see the updated dashboard immediately.
+  // ── on mount: validate stored token, schedule refresh ───────────────────────
   useEffect(() => {
-    if (!token || refreshedRef.current) return;
+    if (!token) { setIsRefreshing(false); return; }
+    if (refreshedRef.current) return;
     refreshedRef.current = true;
+
+    const exp = getTokenExpiry(token);
+    const now = Date.now();
+
+    if (exp && exp < now) {
+      // Token already expired — try refresh before /auth/me
+      doRefresh().then(() => {
+        const freshToken = localStorage.getItem("token");
+        if (!freshToken) return;
+        setIsRefreshing(true);
+        client.get("auth/me")
+          .then(res => { setUser(res.data); localStorage.setItem("user", JSON.stringify(res.data)); })
+          .catch(() => {})
+          .finally(() => setIsRefreshing(false));
+      });
+      return;
+    }
+
+    // Token still valid — schedule refresh then fetch fresh user data
+    if (exp) scheduleRefresh(token);
     setIsRefreshing(true);
     client.get("auth/me")
-      .then(res => {
-        const fresh = res.data;
-        setUser(fresh);
-        localStorage.setItem("user", JSON.stringify(fresh));
-      })
-      .catch(() => {
-        // 401 → axios interceptor already clears storage + redirects to /login
-      })
-      .finally(() => {
-        setIsRefreshing(false);
-      });
-  }, [token]);
+      .then(res => { setUser(res.data); localStorage.setItem("user", JSON.stringify(res.data)); })
+      .catch(() => {})
+      .finally(() => setIsRefreshing(false));
 
-  // Returns true if logged-in user has given permission name.
-  // SuperAdmin always gets true. Others check user.permissions[].
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const hasPermission = useCallback((name) => {
     if (!user) return false;
     if (user.role === "superadmin") return true;
     return Array.isArray(user.permissions) && user.permissions.includes(name);
   }, [user]);
 
-  const value = {
-    user,
-    token,
-    login,
-    logout,
-    updateUser,
-    hasPermission,
-    isRefreshing,
-    isAuthenticated: !!user && !!token,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{
+      user, token, login, logout, updateUser, hasPermission,
+      isRefreshing, isAuthenticated: !!user && !!token,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
 };

@@ -24,7 +24,7 @@ const Login = () => {
     try {
       const response = await client.post("auth/login", { email, password });
       if (response.data.token && response.data.user) {
-        login(response.data.user, response.data.token);
+        login(response.data.user, response.data.token, response.data.refresh_token);
         navigate(getRoleRoute(response.data.user.role));
       }
     } catch (err) {

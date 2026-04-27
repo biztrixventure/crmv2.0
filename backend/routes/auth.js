@@ -134,7 +134,8 @@ router.post(
           supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', data.user.id).single(),
         ]);
         return res.json({
-          token: data.session.access_token,
+          token:         data.session.access_token,
+          refresh_token: data.session.refresh_token,
           user: {
             id: data.user.id,
             email: data.user.email,
@@ -204,7 +205,8 @@ router.post(
 
       // Return user data and token
       res.json({
-        token: data.session.access_token,
+        token:         data.session.access_token,
+        refresh_token: data.session.refresh_token,
         user: {
           id: data.user.id,
           email: data.user.email,
