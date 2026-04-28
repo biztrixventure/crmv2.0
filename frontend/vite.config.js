@@ -1,15 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import fs from "fs";
-import path from "path";
 
 function versionPlugin() {
   return {
     name: "write-version-json",
-    closeBundle() {
-      const version = Date.now().toString();
-      const outDir = path.resolve(__dirname, "dist");
-      fs.writeFileSync(path.join(outDir, "version.json"), JSON.stringify({ version }));
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "version.json",
+        source: JSON.stringify({ version: Date.now().toString() }),
+      });
     },
   };
 }
