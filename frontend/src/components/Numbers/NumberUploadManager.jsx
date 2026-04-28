@@ -89,6 +89,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
   const [deleting,    setDeleting]   = useState(null);
   const [expandedList,setExpandedList] = useState(null);
   const [listNumbers, setListNumbers] = useState({});
+  const [listSearch,  setListSearch]  = useState('');
 
   // ── Load fronters + existing lists ──
   const loadFronters = useCallback(async () => {
@@ -206,8 +207,9 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
 
   // ── Expand list → load individual numbers ──
   const toggleList = async (name) => {
-    if (expandedList === name) { setExpandedList(null); return; }
+    if (expandedList === name) { setExpandedList(null); setListSearch(''); return; }
     setExpandedList(name);
+    setListSearch('');
     if (listNumbers[name]) return;
     try {
       const res = await client.get('number-lists', { params: { company_id: companyId, list_name: name } });
@@ -519,45 +521,72 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                   </div>
                 </div>
 
-                {/* Expanded: first 20 numbers */}
+                {/* Expanded: numbers with search */}
                 {expandedList === list.list_name && (
                   <div className="px-4 pb-3 pt-1"
                     style={{ backgroundColor: 'var(--color-bg)' }}>
-                    {listNumbers[list.list_name] ? (
-                      <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                              <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
-                              <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>
-                              <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {listNumbers[list.list_name].slice(0, 20).map(n => (
-                              <tr key={n.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                                <td className="px-3 py-2 font-mono" style={{ color: 'var(--color-text)' }}>{n.phone_number}</td>
-                                <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{n.customer_name || '—'}</td>
-                                <td className="px-3 py-2">
-                                  <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                                    style={{
-                                      backgroundColor: STATUS_COLORS[n.status]?.bg || '#f3f4f6',
-                                      color: STATUS_COLORS[n.status]?.color || '#6b7280',
-                                    }}>
-                                    {STATUS_COLORS[n.status]?.label || n.status}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        {listNumbers[list.list_name].length > 20 && (
-                          <p className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                            + {listNumbers[list.list_name].length - 20} more numbers
-                          </p>
-                        )}
-                      </div>
-                    ) : (
+                    {listNumbers[list.list_name] ? (() => {
+                      const q = listSearch.trim().toLowerCase();
+                      const filtered = q
+                        ? listNumbers[list.list_name].filter(n =>
+                            n.phone_number?.toLowerCase().includes(q) ||
+                            n.customer_name?.toLowerCase().includes(q)
+                          )
+                        : listNumbers[list.list_name];
+                      const visible = filtered.slice(0, 20);
+                      return (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={listSearch}
+                            onChange={e => setListSearch(e.target.value)}
+                            placeholder="Search phone or name…"
+                            className="input text-xs w-full"
+                            style={{ maxWidth: 280 }}
+                          />
+                          <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
+                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>
+                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visible.map(n => (
+                                  <tr key={n.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                                    <td className="px-3 py-2 font-mono" style={{ color: 'var(--color-text)' }}>{n.phone_number}</td>
+                                    <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{n.customer_name || '—'}</td>
+                                    <td className="px-3 py-2">
+                                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+                                        style={{
+                                          backgroundColor: STATUS_COLORS[n.status]?.bg || '#f3f4f6',
+                                          color: STATUS_COLORS[n.status]?.color || '#6b7280',
+                                        }}>
+                                        {STATUS_COLORS[n.status]?.label || n.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {visible.length === 0 && (
+                                  <tr>
+                                    <td colSpan={3} className="px-3 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>
+                                      No numbers match.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                            {filtered.length > 20 && (
+                              <p className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                + {filtered.length - 20} more numbers
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })() : (
                       <div className="flex justify-center py-4">
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600" />
                       </div>

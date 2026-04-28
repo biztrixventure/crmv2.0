@@ -88,8 +88,9 @@ async function enrichWithAttemptSummary(numbers) {
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
-  const status    = req.query.status;   // optional filter
-  const ownerId   = req.query.owner_id; // manager filter by member
+  const status    = req.query.status;
+  const ownerId   = req.query.owner_id;
+  const search    = req.query.search;
 
   const isManager = MANAGER_LEVELS.includes(req.user.role);
 
@@ -106,6 +107,7 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   if (status) query = query.eq('status', status);
+  if (search)  query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });

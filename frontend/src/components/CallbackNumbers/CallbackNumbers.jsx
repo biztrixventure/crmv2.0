@@ -731,6 +731,7 @@ const CallbackNumbers = ({ user }) => {
   const [tab,         setTab]         = useState(isManager ? 'all' : 'mine');
   const [statusFilter,setStatusFilter]= useState('all');
   const [ownerFilter, setOwnerFilter] = useState('');
+  const [search,      setSearch]      = useState('');
   const [msg,         setMsg]         = useState(null);
 
   // Modals
@@ -740,9 +741,12 @@ const CallbackNumbers = ({ user }) => {
   const [reassignTarget,setReassignTarget]= useState(null);
 
   const load = useCallback(() => {
-    fetchNumbers(statusFilter !== 'all' ? { status: statusFilter } : {});
+    const filters = {};
+    if (statusFilter !== 'all') filters.status = statusFilter;
+    if (search.trim()) filters.search = search.trim();
+    fetchNumbers(filters);
     fetchClaimable();
-  }, [fetchNumbers, fetchClaimable, statusFilter]);
+  }, [fetchNumbers, fetchClaimable, statusFilter, search]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -928,6 +932,13 @@ const CallbackNumbers = ({ user }) => {
 
               {/* Filters */}
               <div className="flex flex-wrap gap-3">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search phone or customer…"
+                  className="input w-56"
+                />
                 <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); }} className="input w-auto">
                   <option value="all">All statuses</option>
                   <option value="active">Active</option>

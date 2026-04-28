@@ -39,7 +39,7 @@ const enrichWithNames = async (rows) => {
 // Query params: fronter_id, status, list_name
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
-  const { fronter_id, status, list_name } = req.query;
+  const { fronter_id, status, list_name, search } = req.query;
   const companyId = req.query.company_id || req.user.company_id;
   const userId    = req.user.id;
   const userRole  = req.user.role;
@@ -61,6 +61,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (status)    query = query.eq('status', status);
   if (list_name) query = query.eq('list_name', list_name);
+  if (search)    query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
