@@ -93,15 +93,36 @@ app.use(cors(corsOptions));
 app.use('/api/auth/login', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  // Key on email so 300 users sharing one NAT/IP each get their own bucket.
+  // Key on email so hundreds of users sharing one NAT/IP each get their own bucket.
   // Falls back to IP if body isn't parsed yet or email is missing.
   keyGenerator: (req) => (req.body?.email || '').toLowerCase().trim() || req.ip,
   message: { error: 'Too many login attempts, try again later' },
-  skipSuccessfulRequests: true, // successful logins don't count against the limit
+  skipSuccessfulRequests: true,
 }));
 app.use('/api/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 5,   message: { error: 'Too many requests, try again later' } }));
-app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 20,  message: { error: 'Too many invite requests' } }));
-app.use('/api/',                     rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: { error: 'Too many requests' } }));
+// Raised to 200/hr: admins may batch-invite many users during onboarding.
+app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 200, message: { error: 'Too many invite requests' } }));
+
+// General API limiter — keyed by user ID extracted from the Bearer JWT payload
+// (no signature verification needed here; actual auth still runs on all routes).
+// This gives each authenticated user their own 1000-request/15min bucket instead
+// of sharing one IP-based bucket across all users behind a corporate NAT/proxy.
+const userIdFromToken = (req) => {
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) {
+    try {
+      const payload = JSON.parse(Buffer.from(auth.split('.')[1], 'base64url').toString());
+      if (payload.sub) return `uid:${payload.sub}`;
+    } catch { /* fall through to IP */ }
+  }
+  return req.ip;
+};
+app.use('/api/', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  keyGenerator: userIdFromToken,
+  message: { error: 'Too many requests' },
+}));
 
 // Request logging middleware
 app.use((req, res, next) => {
