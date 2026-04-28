@@ -449,4 +449,48 @@ router.get('/callback-numbers/:id', asyncHandler(async (req, res) => {
   });
 }));
 
+// ── GET /compliance/callback-audit-log ───────────────────────────────────────
+// Full status-change audit trail for callbacks. Supports company/actor/date filters.
+router.get('/callback-audit-log', asyncHandler(async (req, res) => {
+  const { company_id, actor_id, date_from, date_to, page = 1, limit = 50 } = req.query;
+  const lim = Math.min(parseInt(limit) || 50, 500);
+  const off = (parseInt(page) - 1) * lim;
+
+  let query = supabaseAdmin
+    .from('callback_audit_log')
+    .select('*, companies(name)', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(off, off + lim - 1);
+
+  if (company_id) query = query.eq('company_id', company_id);
+  if (actor_id)   query = query.eq('actor_id', actor_id);
+  if (date_from)  query = query.gte('created_at', date_from + 'T00:00:00');
+  if (date_to)    query = query.lte('created_at', date_to   + 'T23:59:59');
+
+  const { data, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Enrich with actor display names
+  const actorIds = [...new Set((data || []).map(e => e.actor_id).filter(Boolean))];
+  let actorMap = {};
+  if (actorIds.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id, first_name, last_name')
+      .in('user_id', actorIds);
+    (profiles || []).forEach(p => {
+      actorMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+    });
+  }
+
+  const entries = (data || []).map(e => ({
+    ...e,
+    actor_name:   actorMap[e.actor_id] || 'System',
+    company_name: e.companies?.name   || null,
+    callback_deleted: e.callback_id === null,
+  }));
+
+  res.json({ entries, total: count || 0, page: parseInt(page), limit: lim });
+}));
+
 module.exports = router;

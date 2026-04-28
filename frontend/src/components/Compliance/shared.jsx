@@ -8,6 +8,7 @@ export const STATUS_BADGE = {
   dispute: 'warning', chargeback: 'error', pending_review: 'warning',
   needs_revision: 'error', pending: 'warning', completed: 'success', missed: 'error',
   accepted: 'success', rejected: 'error',
+  no_answer: 'secondary', answering_machine: 'secondary',
 };
 
 export const STATUS_LABEL = {
@@ -17,6 +18,7 @@ export const STATUS_LABEL = {
   pending_review: 'Pending Review', needs_revision: 'Needs Revision',
   pending: 'Pending', completed: 'Completed', missed: 'Missed',
   accepted: 'Accepted', rejected: 'Rejected',
+  no_answer: 'No Answer', answering_machine: 'Ans. Machine',
 };
 
 export const ALL_SALE_STATUSES = [
@@ -28,7 +30,7 @@ export const COMPLIANCE_EDIT_STATUSES = [
   'compliance_cancelled','dispute','chargeback',
 ];
 export const TRANSFER_STATUSES = ['pending','accepted','completed','rejected','cancelled'];
-export const CALLBACK_STATUSES = ['pending','completed','missed','cancelled'];
+export const CALLBACK_STATUSES = ['pending','completed','no_answer','answering_machine','cancelled'];
 export const LIMIT = 30;
 
 // ── Formatters ────────────────────────────────────────────────────────────────

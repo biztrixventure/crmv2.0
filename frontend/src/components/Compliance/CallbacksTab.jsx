@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { PhoneCall } from 'lucide-react';
+import { PhoneCall, ArrowRight, Trash2 } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
@@ -11,7 +11,141 @@ import {
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from './shared';
 
+// ── Audit Log sub-component ────────────────────────────────────────────────
+const AuditLogView = ({ companyList }) => {
+  const [entries, setEntries]   = useState([]);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(false);
+  const [page, setPage]         = useState(1);
+  const [company, setCompany]   = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo]     = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await client.get('compliance/callback-audit-log', {
+        params: {
+          company_id: company || undefined,
+          date_from:  dateFrom || undefined,
+          date_to:    dateTo   || undefined,
+          page, limit: LIMIT,
+        },
+      });
+      setEntries(res.data.entries || []);
+      setTotal(res.data.total || 0);
+    } catch { /* non-critical */ } finally { setLoading(false); }
+  }, [company, dateFrom, dateTo, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleExport = async () => {
+    const res = await client.get('compliance/callback-audit-log', {
+      params: { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined, limit: 5000, page: 1 },
+    });
+    const rows = (res.data.entries || []).map(e => [
+      fmtDateTime(e.created_at),
+      e.actor_name || e.actor_id || '—',
+      e.customer_name_snapshot || '—',
+      e.customer_phone_snapshot || '—',
+      STATUS_LABEL[e.old_status] || e.old_status || '—',
+      STATUS_LABEL[e.new_status] || e.new_status || '—',
+      e.notes || '',
+      e.callback_deleted ? 'Yes' : 'No',
+    ]);
+    downloadCSV(rows, ['Timestamp','Actor','Customer','Phone','From Status','To Status','Notes','Callback Deleted'],
+      `callback_audit_log_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  return (
+    <div>
+      <Filters onSubmit={() => { setPage(1); load(); }}>
+        <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
+          <option value="">All companies</option>
+          {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FSelect>
+        <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
+      </Filters>
+
+      <div className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        {loading ? <Spinner /> : entries.length === 0 ? (
+          <Empty icon={PhoneCall} msg="No audit log entries found." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                  <Th>Timestamp</Th>
+                  <Th>Actor</Th>
+                  <Th>Customer</Th>
+                  <Th>Status Change</Th>
+                  <Th>Notes</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map(e => (
+                  <tr key={e.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                      {fmtDateTime(e.created_at)}
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text)' }}>
+                      {e.actor_name || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                        {e.customer_name_snapshot || '—'}
+                        {e.callback_deleted && (
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-bold"
+                            style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+                            <Trash2 size={9} /> Deleted
+                          </span>
+                        )}
+                      </p>
+                      {e.customer_phone_snapshot && (
+                        <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                          {e.customer_phone_snapshot}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge variant={STATUS_BADGE[e.old_status] || 'secondary'} size="sm">
+                          {STATUS_LABEL[e.old_status] || e.old_status || '—'}
+                        </Badge>
+                        <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                        <Badge variant={STATUS_BADGE[e.new_status] || 'secondary'} size="sm">
+                          {STATUS_LABEL[e.new_status] || e.new_status}
+                        </Badge>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                      {e.notes || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <button onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+          Export CSV
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── Main CallbacksTab ──────────────────────────────────────────────────────
 const CallbacksTab = ({ companyList }) => {
+  const [view, setView]           = useState('callbacks'); // 'callbacks' | 'audit'
   const [callbacks, setCallbacks] = useState([]);
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(false);
@@ -23,7 +157,7 @@ const CallbacksTab = ({ companyList }) => {
   const [dateTo, setDateTo]       = useState('');
 
   const [detail,      setDetail]      = useState(null);
-  const [phoneDrawer, setPhoneDrawer] = useState(null); // { phone, customerName }
+  const [phoneDrawer, setPhoneDrawer] = useState(null);
   const [exportOpen,  setExportOpen]  = useState(false);
 
   const load = useCallback(async () => {
@@ -44,7 +178,7 @@ const CallbacksTab = ({ companyList }) => {
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [cbType, company, status, dateFrom, dateTo, page]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (view === 'callbacks') load(); }, [load, view]);
 
   const switchType = (t) => { setCbType(t); setCompany(''); setPage(1); };
 
@@ -73,9 +207,31 @@ const CallbacksTab = ({ companyList }) => {
       <TabHeader
         title="Callbacks"
         subtitle="Scheduled callbacks across all companies — read-only view"
-        onRefresh={() => { setPage(1); load(); }}
-        onExport={() => setExportOpen(true)}
+        onRefresh={view === 'callbacks' ? () => { setPage(1); load(); } : undefined}
+        onExport={view === 'callbacks' ? () => setExportOpen(true) : undefined}
+        extra={
+          <div className="flex gap-1 p-1 rounded-lg"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[
+              { key: 'callbacks', label: 'Callbacks' },
+              { key: 'audit',     label: 'Audit Log' },
+            ].map(v => (
+              <button key={v.key} onClick={() => setView(v.key)}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor: view === v.key ? 'var(--color-surface)' : 'transparent',
+                  color: view === v.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow: view === v.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+        }
       />
+
+      {view === 'audit' && <AuditLogView companyList={companyList} />}
+      {view === 'callbacks' && <>
 
       {/* Fronter / Closer toggle */}
       <div className="flex gap-1 p-1 rounded-xl mb-4 w-fit"
@@ -244,6 +400,7 @@ const CallbacksTab = ({ companyList }) => {
           onClose={() => setPhoneDrawer(null)}
         />
       )}
+      </>}
     </div>
   );
 };

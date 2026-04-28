@@ -138,7 +138,7 @@ router.post('/',
 // ============================================================================
 router.put('/:id',
   [
-    body('status').optional().isIn(['pending', 'completed', 'cancelled', 'no_answer']),
+    body('status').optional().isIn(['pending', 'completed', 'cancelled', 'no_answer', 'answering_machine']),
     body('callback_at').optional().isISO8601(),
     body('notes').optional().trim(),
     body('customer_name').optional().trim(),
@@ -162,6 +162,13 @@ router.put('/:id',
     const superadmin = await isSuperAdmin(userId);
     const condition  = superadmin ? { id } : { id, user_id: userId };
 
+    // Fetch current record to capture old_status for audit log
+    const { data: current } = await supabaseAdmin
+      .from('callbacks')
+      .select('status, customer_name, customer_phone, company_id')
+      .match(condition)
+      .single();
+
     const { data, error } = await supabaseAdmin
       .from('callbacks')
       .update(updates)
@@ -171,6 +178,20 @@ router.put('/:id',
 
     if (error) return res.status(400).json({ error: error.message });
     if (!data)  return res.status(404).json({ error: 'Callback not found or no access' });
+
+    // Audit log: fire-and-forget on status change
+    if (current && updates.status && updates.status !== current.status) {
+      supabaseAdmin.from('callback_audit_log').insert({
+        callback_id:            id,
+        company_id:             current.company_id,
+        actor_id:               userId,
+        old_status:             current.status,
+        new_status:             updates.status,
+        notes:                  updates.notes || null,
+        customer_name_snapshot: current.customer_name,
+        customer_phone_snapshot: current.customer_phone || null,
+      }).then(() => {}).catch(() => {});
+    }
 
     res.json({ callback: data });
   })

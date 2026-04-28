@@ -6,15 +6,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
-  Calendar, User, Filter, RefreshCw,
+  Calendar, User, Filter, RefreshCw, Voicemail, X,
 } from 'lucide-react';
 import client from '../../api/client';
 
 const STATUS_CONFIG = {
-  pending:   { label: 'Pending',   color: '#f59e0b', bg: '#fef3c7', icon: Clock      },
-  completed: { label: 'Completed', color: '#10b981', bg: '#d1fae5', icon: CheckCircle },
-  cancelled: { label: 'Cancelled', color: '#ef4444', bg: '#fee2e2', icon: XCircle     },
-  no_answer: { label: 'No Answer', color: '#6b7280', bg: '#f3f4f6', icon: PhoneOff    },
+  pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
+  completed:         { label: 'Completed',         color: '#10b981', bg: '#d1fae5', icon: CheckCircle  },
+  cancelled:         { label: 'Cancelled',         color: '#ef4444', bg: '#fee2e2', icon: XCircle      },
+  no_answer:         { label: 'No Answer',         color: '#6b7280', bg: '#f3f4f6', icon: PhoneOff     },
+  answering_machine: { label: 'Answering Machine', color: '#8b5cf6', bg: '#ede9fe', icon: Voicemail    },
 };
 
 const StatusBadge = ({ status }) => {
@@ -44,14 +45,87 @@ const isDueSoon = (iso) => {
   return diff > 0 && diff < 30 * 60 * 1000;
 };
 
-const CallbacksOverview = ({ user }) => {
-  const [callbacks,     setCallbacks]     = useState([]);
-  const [loading,       setLoading]       = useState(false);
-  const [statusFilter,  setStatusFilter]  = useState('all');
-  const [memberFilter,  setMemberFilter]  = useState('all');
-  const [updatingId,    setUpdatingId]    = useState(null);
+// ── Outcome Notes Modal ──────────────────────────────────────────────────────
+const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose }) => {
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  // Derived list of unique team members from loaded callbacks
+  const submit = async (withNotes) => {
+    setSaving(true);
+    await onConfirm(pendingStatus, withNotes ? notes.trim() : '');
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-fade-in"
+        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-base" style={{ color: 'var(--color-text)' }}>Outcome Notes</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">
+            <X size={15} style={{ color: 'var(--color-text-tertiary)' }} />
+          </button>
+        </div>
+
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            Marking <strong style={{ color: 'var(--color-text)' }}>{customerName}</strong> as
+          </span>
+          <StatusBadge status={pendingStatus} />
+        </div>
+
+        <div className="mb-5">
+          <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+            Call outcome
+            <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              (optional but recommended)
+            </span>
+          </label>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            className="input resize-none"
+            rows={3}
+            placeholder={
+              pendingStatus === 'answering_machine' ? 'Left voicemail. Will call again tomorrow...'
+              : pendingStatus === 'no_answer'       ? 'No answer. Will retry in 2 hours...'
+              : pendingStatus === 'completed'       ? 'Spoke with customer. Resolved / booked...'
+              : 'Add notes about this call...'
+            }
+            autoFocus
+          />
+        </div>
+
+        <div className="flex justify-end gap-3">
+          <button onClick={() => submit(false)} disabled={saving}
+            className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
+            Skip
+          </button>
+          <button onClick={() => submit(true)} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            {saving
+              ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+              : <CheckCircle size={14} />}
+            Save & Submit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CallbacksOverview = ({ user }) => {
+  const [callbacks,    setCallbacks]    = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [memberFilter, setMemberFilter] = useState('all');
+  const [updatingId,   setUpdatingId]   = useState(null);
+  const [outcomeModal, setOutcomeModal] = useState(null); // { id, status, customerName }
+
   const members = useCallback(() => {
     const map = {};
     callbacks.forEach(c => {
@@ -68,21 +142,26 @@ const CallbacksOverview = ({ user }) => {
       if (statusFilter !== 'all') params.status = statusFilter;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
-    } catch { /* non-critical */ } finally {
-      setLoading(false);
-    }
+    } catch {} finally { setLoading(false); }
   }, [user?.company_id, statusFilter]);
 
   useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
 
-  const handleStatusUpdate = async (id, status) => {
+  const handleStatusConfirm = async (status, notes) => {
+    if (!outcomeModal) return;
+    const { id } = outcomeModal;
     setUpdatingId(id);
     try {
-      const res = await client.put(`callbacks/${id}`, { status });
+      const payload = { status };
+      if (notes) payload.notes = notes;
+      const res = await client.put(`callbacks/${id}`, payload);
       setCallbacks(prev => prev.map(c => c.id === id ? { ...c, ...res.data.callback } : c));
-    } catch { /* non-critical */ } finally {
-      setUpdatingId(null);
-    }
+    } catch {} finally { setUpdatingId(null); }
+    setOutcomeModal(null);
+  };
+
+  const handleStatusClick = (id, status, customerName) => {
+    setOutcomeModal({ id, status, customerName });
   };
 
   const visible = callbacks.filter(c =>
@@ -125,9 +204,9 @@ const CallbacksOverview = ({ user }) => {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3 mb-6">
         {[
-          { label: 'Pending',    value: counts.pending,   color: '#f59e0b', bg: '#fef3c7'  },
-          { label: 'Overdue',    value: counts.overdue,   color: '#ef4444', bg: '#fee2e2'  },
-          { label: 'Completed',  value: counts.completed, color: '#10b981', bg: '#d1fae5'  },
+          { label: 'Pending',   value: counts.pending,   color: '#f59e0b', bg: '#fef3c7' },
+          { label: 'Overdue',   value: counts.overdue,   color: '#ef4444', bg: '#fee2e2' },
+          { label: 'Completed', value: counts.completed, color: '#10b981', bg: '#d1fae5' },
         ].map(s => (
           <div key={s.label} className="rounded-2xl p-4 text-center"
             style={{ backgroundColor: s.bg, border: `1px solid ${s.color}30` }}>
@@ -139,14 +218,14 @@ const CallbacksOverview = ({ user }) => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-5">
-        {/* Status filter */}
         <div className="flex gap-1 p-1 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
-            { key: 'all',       label: 'All'       },
-            { key: 'pending',   label: 'Pending'   },
-            { key: 'completed', label: 'Completed' },
-            { key: 'no_answer', label: 'No Answer' },
+            { key: 'all',              label: 'All'             },
+            { key: 'pending',          label: 'Pending'         },
+            { key: 'completed',        label: 'Completed'       },
+            { key: 'no_answer',        label: 'No Answer'       },
+            { key: 'answering_machine',label: 'Ans. Machine'    },
           ].map(f => (
             <button key={f.key} onClick={() => setStatusFilter(f.key)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
@@ -160,15 +239,11 @@ const CallbacksOverview = ({ user }) => {
           ))}
         </div>
 
-        {/* Member filter */}
         {members().length > 0 && (
           <div className="flex items-center gap-2">
             <Filter size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-            <select
-              value={memberFilter}
-              onChange={e => setMemberFilter(e.target.value)}
-              className="input py-1.5 text-sm h-auto"
-              style={{ minWidth: 160 }}>
+            <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+              className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
               <option value="all">All team members</option>
               {members().map(m => (
                 <option key={m.id} value={m.id}>{m.name}</option>
@@ -206,8 +281,6 @@ const CallbacksOverview = ({ user }) => {
                 }}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
-
-                    {/* Name + status */}
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <p className="font-bold text-text">{cb.customer_name}</p>
                       <StatusBadge status={cb.status} />
@@ -215,7 +288,6 @@ const CallbacksOverview = ({ user }) => {
                       {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
                     </div>
 
-                    {/* Assigned to (who scheduled this callback) */}
                     <div className="flex items-center gap-1.5 mb-2">
                       <div className="w-5 h-5 rounded-full flex items-center justify-center"
                         style={{ background: 'var(--gradient-sidebar)' }}>
@@ -226,13 +298,11 @@ const CallbacksOverview = ({ user }) => {
                       </span>
                     </div>
 
-                    {/* Contact details */}
                     <div className="flex flex-wrap gap-x-3 text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
                       {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                       {cb.customer_email && <span>✉ {cb.customer_email}</span>}
                     </div>
 
-                    {/* Callback time */}
                     <div className="flex items-center gap-1.5 text-xs font-medium"
                       style={{ color: past ? '#dc2626' : soon ? '#b45309' : 'var(--color-text-tertiary)' }}>
                       <Calendar size={12} />
@@ -247,22 +317,29 @@ const CallbacksOverview = ({ user }) => {
                     )}
                   </div>
 
-                  {/* Manager: update status */}
+                  {/* Manager status actions */}
                   {cb.status === 'pending' && (
                     <div className="flex flex-col gap-1.5 flex-shrink-0">
                       <button
-                        onClick={() => handleStatusUpdate(cb.id, 'completed')}
+                        onClick={() => handleStatusClick(cb.id, 'completed', cb.customer_name)}
                         disabled={updatingId === cb.id}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
                         style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
                         <CheckCircle size={12} /> Mark Done
                       </button>
                       <button
-                        onClick={() => handleStatusUpdate(cb.id, 'no_answer')}
+                        onClick={() => handleStatusClick(cb.id, 'no_answer', cb.customer_name)}
                         disabled={updatingId === cb.id}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
                         style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
                         <PhoneOff size={12} /> No Answer
+                      </button>
+                      <button
+                        onClick={() => handleStatusClick(cb.id, 'answering_machine', cb.customer_name)}
+                        disabled={updatingId === cb.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                        style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+                        <Voicemail size={12} /> Ans. Machine
                       </button>
                     </div>
                   )}
@@ -271,6 +348,15 @@ const CallbacksOverview = ({ user }) => {
             );
           })}
         </div>
+      )}
+
+      {outcomeModal && (
+        <StatusOutcomeModal
+          pendingStatus={outcomeModal.status}
+          customerName={outcomeModal.customerName}
+          onConfirm={handleStatusConfirm}
+          onClose={() => setOutcomeModal(null)}
+        />
       )}
     </div>
   );
