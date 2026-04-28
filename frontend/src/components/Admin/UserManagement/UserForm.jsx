@@ -121,17 +121,17 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
             </option>
           ))}
         </select>
-        {selectedRole && (
-          <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            {selectedRole.level?.replace(/_/g, ' ')} · {selectedRole.permissions?.length ?? 0} permissions
-          </p>
-        )}
-        {roles.length === 0 && (
-          <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
-            No assignable roles available — you can only assign roles below your own level.
-          </p>
-        )}
       </FormField>
+      {selectedRole && (
+        <p className="text-xs -mt-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+          {selectedRole.level?.replace(/_/g, ' ')} · {selectedRole.permissions?.length ?? 0} permissions
+        </p>
+      )}
+      {roles.length === 0 && (
+        <p className="text-xs -mt-3" style={{ color: 'var(--color-warning-600)' }}>
+          No assignable roles available — you can only assign roles below your own level.
+        </p>
+      )}
 
       {/* Company — CREATE MODE */}
       {!user && (

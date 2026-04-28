@@ -22,6 +22,11 @@ const FormField = ({
 }) => {
   const fieldId = props.id || `field-${Math.random().toString(36).substr(2, 9)}`;
 
+  // Support multiple children: only the first gets id/className injected; rest render as-is.
+  const childArray = React.Children.toArray(children);
+  const inputChild = childArray[0];
+  const extraChildren = childArray.slice(1);
+
   return (
     <div className={`form-group ${className}`}>
       {label && (
@@ -34,10 +39,11 @@ const FormField = ({
       )}
 
       <div className="flex-1">
-        {React.cloneElement(children, {
+        {inputChild && React.cloneElement(inputChild, {
           id: fieldId,
-          className: `${children.props.className || ''} ${error ? 'error' : ''}`.trim(),
+          className: `${inputChild.props.className || ''} ${error ? 'error' : ''}`.trim(),
         })}
+        {extraChildren}
       </div>
 
       {error && (
