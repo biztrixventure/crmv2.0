@@ -153,6 +153,7 @@ const CallbacksTab = ({ companyList }) => {
   const [cbType, setCbType]       = useState('fronter');
   const [status, setStatus]       = useState('');
   const [company, setCompany]     = useState('');
+  const [search, setSearch]       = useState('');
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
 
@@ -165,9 +166,12 @@ const CallbacksTab = ({ companyList }) => {
     try {
       const res = await client.get('compliance/callbacks', {
         params: {
+          // When a specific company is selected, skip company_type — the company_id filter
+          // is sufficient and avoids filtering out companies whose type doesn't match the toggle.
           company_type: company ? undefined : cbType,
           company_id:   company || undefined,
           status:       status || undefined,
+          search:       search || undefined,
           date_from:    dateFrom || undefined,
           date_to:      dateTo || undefined,
           page, limit: LIMIT,
@@ -176,19 +180,23 @@ const CallbacksTab = ({ companyList }) => {
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [cbType, company, status, dateFrom, dateTo, page]);
+  }, [cbType, company, status, search, dateFrom, dateTo, page]);
 
   useEffect(() => { if (view === 'callbacks') load(); }, [load, view]);
 
-  const switchType = (t) => { setCbType(t); setCompany(''); setPage(1); };
+  const switchType = (t) => { setCbType(t); setCompany(''); setSearch(''); setPage(1); };
 
-  const filteredCompanies = companyList.filter(c => c.company_type === cbType);
+  // Show ALL companies in the dropdown — not filtered by cbType.
+  // The cbType toggle only affects the "all companies" aggregate view; when a specific
+  // company is picked the company_type filter is irrelevant and would hide valid companies.
+  const sortedCompanies = [...companyList].sort((a, b) => a.name.localeCompare(b.name));
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
     const res = await client.get('compliance/callbacks', {
       params: {
         company_type: co ? undefined : cbType, company_id: co || undefined,
         date_from: df || undefined, date_to: dt || undefined,
+        search: search || undefined,
         user_ids: userIds.length ? userIds.join(',') : undefined,
         limit: 5000, page: 1,
       },
@@ -253,9 +261,15 @@ const CallbacksTab = ({ companyList }) => {
       </div>
 
       <Filters onSubmit={() => { setPage(1); load(); }}>
+        <FInput label="Search" placeholder="Name or phone…" value={search}
+          onChange={e => setSearch(e.target.value)} style={{ minWidth: 160 }} />
         <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
-          <option value="">All {cbType} companies</option>
-          {filteredCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <option value="">All companies</option>
+          {sortedCompanies.map(c => (
+            <option key={c.id} value={c.id}>
+              {c.name}{c.company_type ? ` (${c.company_type})` : ''}
+            </option>
+          ))}
         </FSelect>
         <FSelect label="Status" value={status} onChange={e => setStatus(e.target.value)}>
           <option value="">All statuses</option>
@@ -389,7 +403,7 @@ const CallbacksTab = ({ companyList }) => {
       )}
 
       {exportOpen && (
-        <ExportModal tab="callbacks" companyList={filteredCompanies} cbType={cbType}
+        <ExportModal tab="callbacks" companyList={sortedCompanies} cbType={cbType}
           onClose={() => setExportOpen(false)} onExport={handleExport} />
       )}
 
