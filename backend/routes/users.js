@@ -84,21 +84,22 @@ router.get(
           profileMap[p.user_id] = p;
         });
 
-        // Fetch emails from auth
-        logger.debug('GET_USERS', 'Fetching emails from Supabase auth');
+        // Fetch emails via getUserById in parallel — listUsers paginates at 1000
+        // and silently drops users beyond the first page, causing N/A fallback.
+        logger.debug('GET_USERS', `Fetching emails for ${userIds.length} users via getUserById`);
 
-        const { data: authUsers, error: authError } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
-
-        if (authError) {
-          logger.error('GET_USERS', 'Failed to fetch auth users', authError);
-        } else {
-          logger.success('GET_USERS', `Fetched ${authUsers?.users?.length || 0} auth users`, { count: authUsers?.users?.length || 0 });
-        }
+        const authResults = await Promise.allSettled(
+          userIds.map(uid => supabaseAdmin.auth.admin.getUserById(uid))
+        );
 
         const emailMap = {};
-        authUsers?.users?.forEach(u => {
-          emailMap[u.id] = u.email;
+        authResults.forEach((result, i) => {
+          if (result.status === 'fulfilled' && result.value.data?.user?.email) {
+            emailMap[userIds[i]] = result.value.data.user.email;
+          }
         });
+
+        logger.success('GET_USERS', `Resolved emails for ${Object.keys(emailMap).length}/${userIds.length} users`);
 
         // Combine all data
         users = users.map(u => ({
@@ -186,17 +187,16 @@ router.get(
         logger.warn('GET_USER_BY_ID', `No profile found for user`, { user_id: data.user_id });
       }
 
-      // Fetch email from auth
+      // Fetch email via getUserById — targeted, no pagination issues
       let email = 'N/A';
       try {
         logger.debug('GET_USER_BY_ID', `Fetching email from auth`, { user_id: data.user_id });
-        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ limit: 10000 });
-        const authUser = authUsers?.users?.find(u => u.id === data.user_id);
-        if (authUser) {
-          email = authUser.email;
+        const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(data.user_id);
+        if (authUserData?.user?.email) {
+          email = authUserData.user.email;
           logger.success('GET_USER_BY_ID', `Found auth user email`, { email });
         } else {
-          logger.warn('GET_USER_BY_ID', `Auth user not found`, { user_id: data.user_id });
+          logger.warn('GET_USER_BY_ID', `Auth user not found`, { user_id: data.user_id, error: authUserError?.message });
         }
       } catch (emailErr) {
         logger.error('GET_USER_BY_ID', 'Error fetching user email', emailErr);
