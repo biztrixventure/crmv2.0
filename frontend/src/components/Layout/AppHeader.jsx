@@ -7,8 +7,8 @@ const CompanyLogoImg = ({ src }) => {
   const [errored, setErrored] = useState(false);
   if (errored) return (
     <div
-      className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-      style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+      className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+      style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}
     >
       <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>B</span>
     </div>
@@ -18,11 +18,26 @@ const CompanyLogoImg = ({ src }) => {
       src={src}
       alt="Company logo"
       onError={() => setErrored(true)}
-      className="h-9 w-auto max-w-[120px] rounded-lg object-contain flex-shrink-0"
+      className="h-9 w-auto max-w-[120px] rounded-xl object-contain flex-shrink-0"
       style={{ boxShadow: 'var(--shadow-sm)' }}
     />
   );
 };
+
+const IconBtn = ({ onClick, title, children }) => (
+  <button
+    onClick={onClick}
+    title={title}
+    aria-label={title}
+    className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 flex-shrink-0"
+    style={{
+      backgroundColor: 'var(--color-bg-secondary)',
+      border: '1px solid var(--color-border)',
+    }}
+  >
+    {children}
+  </button>
+);
 
 const AppHeader = ({
   title = 'BizTrix CRM',
@@ -55,46 +70,51 @@ const AppHeader = ({
     .map(n => n[0].toUpperCase())
     .join('') || (userEmail?.[0]?.toUpperCase() ?? 'U');
 
+  const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || userEmail;
+
   return (
     <>
       <div className="sticky top-0 z-50">
+        {/* Main header bar */}
         <header
-          className={`header h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between ${className}`}
+          className={`header h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 ${className}`}
           {...props}
         >
           {/* Left: Logo & Title */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {companyLogoUrl ? (
               <CompanyLogoImg src={companyLogoUrl} />
             ) : logo ?? (
               <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: 'var(--gradient-sidebar)',
+                  boxShadow: '0 2px 8px rgba(168,136,92,0.35)',
+                }}
               >
-                <span
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    fontWeight: 700,
-                    fontSize: '1.1rem',
-                    color: 'white',
-                  }}
-                >
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>
                   B
                 </span>
               </div>
             )}
-            <h1
-              className="hidden sm:block"
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: '1.25rem',
-                fontWeight: 700,
-                letterSpacing: '-0.025em',
-                color: 'var(--color-primary-600)',
-              }}
-            >
-              {title}
-            </h1>
+            <div className="hidden sm:flex flex-col min-w-0">
+              <span
+                className="leading-tight font-bold truncate"
+                style={{
+                  fontSize: '1.05rem',
+                  letterSpacing: '-0.02em',
+                  color: 'var(--color-primary-700)',
+                }}
+              >
+                {title}
+              </span>
+              <span
+                className="text-xs leading-tight truncate"
+                style={{ color: 'var(--color-text-tertiary)', letterSpacing: '0.02em' }}
+              >
+                CRM Platform
+              </span>
+            </div>
           </div>
 
           {/* Center: Custom Actions */}
@@ -105,7 +125,8 @@ const AppHeader = ({
           )}
 
           {/* Right: Notifications + Theme + User + Logout */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Notification bell */}
             <NotificationBell
               notifications={notifications}
               unreadCount={unreadCount}
@@ -115,81 +136,101 @@ const AppHeader = ({
               onClearAll={onClearNotifications}
             />
 
-            {/* Theme Toggle */}
-            <button
-              onClick={onThemeToggle}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105"
-              style={{
-                backgroundColor: 'var(--color-bg-secondary)',
-                border: '1px solid var(--color-border)',
-              }}
-              title="Toggle theme"
-              aria-label="Toggle theme"
-            >
+            {/* Theme toggle */}
+            <IconBtn onClick={onThemeToggle} title="Toggle theme">
               {theme === 'light'
-                ? <Moon size={17} style={{ color: 'var(--color-text-secondary)' }} />
-                : <Sun  size={17} style={{ color: 'var(--color-text-secondary)' }} />
+                ? <Moon size={16} style={{ color: 'var(--color-text-secondary)' }} />
+                : <Sun  size={16} style={{ color: 'var(--color-accent)' }} />
               }
-            </button>
+            </IconBtn>
 
-            {/* User pill */}
+            {/* Profile pill — filled, never transparent */}
             {userEmail && (
               <button
                 onClick={() => setProfileOpen(true)}
-                className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl transition-all hover:bg-bg-secondary group"
-                style={{ border: '1px solid var(--color-border)' }}
+                className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 h-9 rounded-xl transition-all duration-150 flex-shrink-0 group"
+                style={{
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border)',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-primary-100)';
+                  e.currentTarget.style.borderColor = 'var(--color-primary-300)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--color-border)';
+                }}
                 title="View profile"
               >
+                {/* Avatar */}
                 <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                  style={{ background: 'var(--gradient-sidebar)' }}
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                  style={{
+                    background: 'var(--gradient-sidebar)',
+                    boxShadow: '0 1px 4px rgba(168,136,92,0.4)',
+                    fontSize: '10px',
+                  }}
                 >
                   {initials}
                 </div>
-                <div>
-                  <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--color-text)' }}>
-                    {[user?.first_name, user?.last_name].filter(Boolean).join(' ') || userEmail}
+
+                {/* Name + role */}
+                <div className="min-w-0">
+                  <p
+                    className="text-xs font-semibold leading-tight truncate max-w-[120px]"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {displayName}
                   </p>
                   {userRole && (
-                    <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
-                      {userRole}
+                    <p
+                      className="text-xs leading-tight truncate capitalize"
+                      style={{ color: 'var(--color-text-tertiary)', fontSize: '10px' }}
+                    >
+                      {userRole.replace(/_/g, ' ')}
                     </p>
                   )}
                 </div>
-                <ChevronDown
-                  size={12}
-                  className="text-text-tertiary group-hover:text-text-secondary transition-colors"
-                />
+
+                <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
               </button>
             )}
 
             {/* Logout */}
             <button
               onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 hover:scale-[1.02]"
+              className="h-9 flex items-center gap-1.5 px-3 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 hover:scale-[1.02] flex-shrink-0"
               style={{
-                background: 'linear-gradient(135deg, #7A4820 0%, #C4894A 100%)',
-                boxShadow: '0 2px 8px rgba(196, 137, 74, 0.2)',
+                background: 'var(--gradient-sidebar)',
+                boxShadow: '0 2px 8px rgba(168,136,92,0.3)',
               }}
+              title="Logout"
             >
-              <LogOut size={15} />
+              <LogOut size={14} />
               <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </header>
 
-        {/* Cross-role nav bar — only renders when cross-role items exist */}
+        {/* Gradient accent line below header */}
+        <div
+          className="h-px w-full"
+          style={{ background: 'linear-gradient(to right, transparent, var(--color-primary-300), var(--color-cream-400), var(--color-primary-300), transparent)' }}
+        />
+
+        {/* Cross-role nav bar */}
         {navItems.length > 0 && (
           <nav
             className="px-4 sm:px-6 lg:px-8 flex items-center h-11"
             style={{
               backgroundColor: 'var(--color-surface)',
               borderBottom: '1px solid var(--color-border)',
-              boxShadow: 'var(--shadow-sm)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
             }}
           >
             <div className="max-w-7xl w-full mx-auto flex items-center gap-1">
-              {/* My Dashboard — always first */}
+              {/* My Dashboard */}
               <button
                 onClick={() => onNavChange('dashboard')}
                 className="relative flex items-center gap-2 px-4 h-11 text-sm font-semibold transition-all duration-150"
@@ -203,7 +244,7 @@ const AppHeader = ({
                 {activeNav === 'dashboard' && (
                   <span
                     className="absolute bottom-0 left-3 right-3 h-0.5 rounded-t-full"
-                    style={{ backgroundColor: 'var(--color-primary-600)' }}
+                    style={{ background: 'var(--gradient-sidebar)' }}
                   />
                 )}
               </button>
@@ -227,7 +268,7 @@ const AppHeader = ({
                   {activeNav === item.key && (
                     <span
                       className="absolute bottom-0 left-3 right-3 h-0.5 rounded-t-full"
-                      style={{ backgroundColor: 'var(--color-primary-600)' }}
+                      style={{ background: 'var(--gradient-sidebar)' }}
                     />
                   )}
                 </button>

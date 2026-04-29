@@ -786,10 +786,10 @@ textarea {
 
   /* ========== HEADER COMPONENT ========== */
   .header {
-    @apply border-b transition-all duration-300;
-    background-color: var(--color-bg);
-    border-color: var(--color-border);
-    box-shadow: var(--shadow-xs);
+    @apply transition-all duration-300;
+    background-color: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
   }
 
   /* ========== ALERT/NOTIFICATION STYLES ========== */
