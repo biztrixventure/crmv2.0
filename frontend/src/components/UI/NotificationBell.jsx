@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import SmartText from './SmartText';
 import { Bell, Check, Trash2, X, DollarSign, Users, ArrowRight, Phone, ShieldCheck, RotateCcw, AlertCircle } from 'lucide-react';
 
 // Icon per notification type
@@ -160,9 +161,12 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
                         {n.title}
                       </p>
                       {n.message && (
-                        <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
-                          {n.message}
-                        </p>
+                        <SmartText
+                          text={n.message}
+                          maxLines={2}
+                          className="text-xs mt-0.5"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        />
                       )}
                       <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                         {timeAgo(n.created_at)}

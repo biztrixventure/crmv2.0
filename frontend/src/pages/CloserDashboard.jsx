@@ -7,7 +7,7 @@ import {
   CheckCircle, XCircle, Plus, Hash, User, Car, Phone, Search,
   Star, MessageSquare, Users, Shield, FileText, BarChart3,
 } from "lucide-react";
-import { Card, Badge, Alert } from "../components/UI";
+import { Card, Badge, Alert, AutoResizeTextarea } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -532,10 +532,10 @@ const CloserDashboard = () => {
             <label className="block text-sm font-medium text-text-secondary mb-1">
               Reason for rejection <span className="text-error-500">*</span>
             </label>
-            <textarea
+            <AutoResizeTextarea
               value={rejectReason} onChange={e => setRejectReason(e.target.value)}
               placeholder="e.g. Customer already closed, wrong product, call dropped…"
-              rows={3} className="input mb-3"
+              minRows={3} className="input mb-3"
             />
             {rejectMsg && <p className="text-sm text-error-600 mb-3">{rejectMsg}</p>}
             <div className="flex gap-3">
@@ -587,8 +587,8 @@ const CloserDashboard = () => {
               ))}
             </div>
             <label className="block text-sm font-medium text-text-secondary mb-1">Notes (optional)</label>
-            <textarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
-              placeholder="Any notes about this call…" rows={2} className="input mb-3" />
+            <AutoResizeTextarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
+              placeholder="Any notes about this call…" minRows={2} maxRows={6} className="input mb-3" />
             {ratingMsg && <p className="text-sm text-error-600 mb-3">{ratingMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setRateTarget(null)}
@@ -631,8 +631,8 @@ const CloserDashboard = () => {
               ))}
             </select>
             <label className="block text-sm font-medium text-text-secondary mb-1">Notes (optional)</label>
-            <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
-              placeholder="Any notes about this disposition…" rows={2} className="input mb-3" />
+            <AutoResizeTextarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
+              placeholder="Any notes about this disposition…" minRows={2} maxRows={6} className="input mb-3" />
             {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setDispoTarget(null)}

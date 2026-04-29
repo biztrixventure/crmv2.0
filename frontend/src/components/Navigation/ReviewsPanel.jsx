@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Star } from 'lucide-react';
-import { Card } from '../UI';
+import { Card, SmartText } from '../UI';
 import client from '../../api/client';
 
 const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
@@ -83,7 +83,9 @@ const ReviewsPanel = ({ companyId }) => {
                           {r.rating?.replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{r.notes || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-text-secondary max-w-xs">
+                        <SmartText text={r.notes || '—'} maxLines={2} />
+                      </td>
                       <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
@@ -120,7 +122,9 @@ const ReviewsPanel = ({ companyId }) => {
                           {d.disposition?.replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-text-secondary max-w-xs truncate">{d.notes || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-text-secondary max-w-xs">
+                        <SmartText text={d.notes || '—'} maxLines={2} />
+                      </td>
                       <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(d.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}

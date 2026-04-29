@@ -1,5 +1,5 @@
 import { X, AlertTriangle, DollarSign, CheckCircle, Clock } from 'lucide-react';
-import { Badge } from '../UI';
+import { Badge, SmartText, BalancedText } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
 
 const SALE_BADGE = {
@@ -112,7 +112,7 @@ export default function SaleDetailDrawer({ sale, onClose }) {
             <AlertTriangle size={14} className="text-error-600 mt-0.5 flex-shrink-0" />
             <div>
               <p className="text-xs font-bold text-error-700">Compliance Note</p>
-              <p className="text-xs text-error-600 mt-0.5">{sale.compliance_note}</p>
+              <SmartText text={sale.compliance_note} maxLines={4} className="text-xs text-error-600 mt-0.5" />
             </div>
           </div>
         )}
@@ -219,7 +219,11 @@ export default function SaleDetailDrawer({ sale, onClose }) {
                         </p>
                       )}
                       {(h.note || h.reason) && (
-                        <p style={{ color: 'var(--color-text)' }} className="italic">"{h.note || h.reason}"</p>
+                        <BalancedText
+                          text={`"${h.note || h.reason}"`}
+                          className="italic"
+                          style={{ color: 'var(--color-text)' }}
+                        />
                       )}
                     </div>
                   );
