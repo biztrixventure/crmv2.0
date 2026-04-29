@@ -520,8 +520,9 @@ const ClientPlanMappingModal = ({ clients, plans, currentMapping, onSave, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
-      <div className="w-full max-w-lg mx-4 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]"
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[80vh]"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-center justify-between px-6 py-4"
           style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -575,6 +576,7 @@ const ClientPlanMappingModal = ({ clients, plans, currentMapping, onSave, onClos
           </button>
         </div>
       </div>
+      </div>
     </div>
   );
 };
@@ -597,8 +599,9 @@ const AddCustomModal = ({ onAdd, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
-      <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-text">Add Custom Field</h3>
@@ -646,6 +649,7 @@ const AddCustomModal = ({ onAdd, onClose }) => {
             className="flex-1 py-2 rounded-lg text-sm font-bold text-white"
             style={{ background: 'var(--gradient-sidebar)' }}>Add Field</button>
         </div>
+      </div>
       </div>
     </div>
   );

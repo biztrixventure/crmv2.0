@@ -731,9 +731,10 @@ const CloserManagerDashboard = () => {
 
       {/* Reject transfer modal */}
       {rejectTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 overflow-y-auto"
           style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
           onClick={e => { if (e.target === e.currentTarget) setRejectTarget(null); }}>
+          <div className="flex min-h-full items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl p-6"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-4">Reject Transfer</h3>
@@ -741,7 +742,7 @@ const CloserManagerDashboard = () => {
               Rejecting: <strong>{rejectTarget.form_data?.customer_name || 'Transfer'}</strong>
             </p>
             <textarea
-              className="input w-full resize-none mb-3" rows={3}
+              className="input w-full mb-3" rows={3}
               placeholder="Reason for rejection…"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
@@ -759,6 +760,7 @@ const CloserManagerDashboard = () => {
                 {rejecting ? 'Rejecting…' : 'Confirm Reject'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

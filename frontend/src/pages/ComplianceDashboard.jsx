@@ -440,9 +440,10 @@ const ComplianceDashboard = () => {
 
       {/* ── Edit Modal ────────────────────────────────────────────────── */}
       {editTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center"
+        <div className="fixed inset-0 z-50 overflow-y-auto"
           style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1">Compliance Update</h3>
             <p className="text-sm text-text-secondary mb-4">
@@ -481,6 +482,7 @@ const ComplianceDashboard = () => {
                 {editSaving ? 'Saving…' : 'Save Update'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

@@ -177,9 +177,11 @@ export const FSelect = ({ label, children, ...props }) => (
 );
 
 export const Overlay = ({ children }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+  <div className="fixed inset-0 z-50 overflow-y-auto"
     style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
-    {children}
+    <div className="flex min-h-full items-center justify-center p-4">
+      {children}
+    </div>
   </div>
 );
 

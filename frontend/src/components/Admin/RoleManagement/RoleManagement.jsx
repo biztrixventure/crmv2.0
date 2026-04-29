@@ -107,8 +107,9 @@ const RoleManagement = () => {
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 overflow-y-auto"
           style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
           <div className="rounded-2xl p-6 max-w-sm w-full"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <div className="flex items-center gap-3 mb-4">
@@ -138,6 +139,7 @@ const RoleManagement = () => {
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

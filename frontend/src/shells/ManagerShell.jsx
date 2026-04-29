@@ -581,8 +581,9 @@ const ManagerShell = () => {
 
       {/* Reassign modal */}
       {reassignTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1">Reassign Transfer</h3>
             <p className="text-sm text-text-secondary mb-4">
@@ -606,6 +607,7 @@ const ManagerShell = () => {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
@@ -614,8 +616,9 @@ const ManagerShell = () => {
 
       {/* Rate Call modal */}
       {rateTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2"><Star size={18} style={{ color: '#f59e0b' }} /> Rate Call</h3>
             <p className="text-sm text-text-secondary mb-4">Customer: <strong>{rateTarget.form_data?.customer_name || rateTarget.form_data?.FirstName || 'Unknown'}</strong></p>
@@ -643,13 +646,15 @@ const ManagerShell = () => {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {/* Set Dispo modal */}
       {dispoTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
               <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
@@ -670,6 +675,7 @@ const ManagerShell = () => {
                 {dispoSaving ? 'Saving…' : 'Save Dispo'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

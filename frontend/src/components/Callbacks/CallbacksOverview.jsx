@@ -57,8 +57,9 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-[60] overflow-y-auto"
       style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-fade-in"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
 
@@ -86,7 +87,7 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
-            className="input resize-none"
+            className="input"
             rows={3}
             placeholder={
               pendingStatus === 'answering_machine' ? 'Left voicemail. Will call again tomorrow...'
@@ -113,6 +114,7 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
             Save & Submit
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -76,8 +76,9 @@ const AddNumberModal = ({ onClose, onSave }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="w-full max-w-md mx-4 rounded-2xl shadow-2xl overflow-hidden"
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="px-6 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--color-border)' }}>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -118,6 +119,7 @@ const AddNumberModal = ({ onClose, onSave }) => {
           </div>
         </form>
       </div>
+      </div>
     </div>
   );
 };
@@ -146,8 +148,9 @@ const AttemptModal = ({ number, onClose, onSave }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="w-full max-w-lg mx-4 rounded-2xl shadow-2xl overflow-hidden"
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="px-6 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--color-border)' }}>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -219,6 +222,7 @@ const AttemptModal = ({ number, onClose, onSave }) => {
           </div>
         </form>
       </div>
+      </div>
     </div>
   );
 };
@@ -249,7 +253,8 @@ const NumberDetailModal = ({ numberId, isManager, onClose }) => {
   const sc = STATUS_CONFIG[number.status] || STATUS_CONFIG.released;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
 
@@ -430,6 +435,7 @@ const NumberDetailModal = ({ numberId, isManager, onClose }) => {
             Close
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -677,8 +683,9 @@ const ReassignModal = ({ number, onClose, onSave }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <h3 className="font-bold text-text flex items-center gap-2"><UserCheck size={16} /> Reassign Number</h3>
@@ -709,6 +716,7 @@ const ReassignModal = ({ number, onClose, onSave }) => {
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

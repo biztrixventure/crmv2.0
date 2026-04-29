@@ -856,8 +856,9 @@ const StaffShell = () => {
       )}
 
       {rejectTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1">Reject Transfer</h3>
             <p className="text-sm text-text-secondary mb-4">
@@ -879,12 +880,14 @@ const StaffShell = () => {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {rateTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2"><Star size={18} style={{ color: '#f59e0b' }} /> Rate Call</h3>
             <p className="text-sm text-text-secondary mb-4">Customer: <strong>{rateTarget.form_data?.customer_name || 'Unknown'}</strong></p>
@@ -912,12 +915,14 @@ const StaffShell = () => {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {dispoTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
               <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
@@ -939,13 +944,15 @@ const StaffShell = () => {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {/* Schedule Callback from Sale modal */}
       {callbackSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full max-w-sm mx-4 rounded-2xl p-6 shadow-2xl"
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl p-6 shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2">
               <CalendarPlus size={18} style={{ color: 'var(--color-info-600)' }} /> Schedule Callback
@@ -984,6 +991,7 @@ const StaffShell = () => {
                 {callbackSaving ? 'Saving…' : 'Schedule'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}
