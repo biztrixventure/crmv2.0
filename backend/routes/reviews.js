@@ -3,7 +3,10 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
+const { logActivity } = require('../utils/activityLogger');
 const router = express.Router();
+
+const MANAGER_ROLES = ['superadmin', 'company_admin', 'operations_manager', 'fronter_manager', 'closer_manager'];
 
 // Fetch all user IDs active in a company — used to scope reviews for closer-side roles.
 const getCompanyUserIds = async (companyId) => {
@@ -80,16 +83,28 @@ router.post('/transfer/:id/dispo',
 
   const { id: transferId }  = req.params;
   const { disposition, notes } = req.body;
-  const closerId              = req.user.id;
+  const actorId   = req.user.id;
+  const actorRole = req.user.role;
 
   const { data: transfer, error: tErr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, assigned_closer_id').eq('id', transferId).single();
+    .from('transfers').select('id, company_id, assigned_closer_id, form_data').eq('id', transferId).single();
 
   if (tErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
-  if (transfer.assigned_closer_id !== closerId) return res.status(403).json({ error: 'Only the assigned closer can set disposition' });
+
+  const isManager = MANAGER_ROLES.includes(actorRole);
+  if (!isManager && transfer.assigned_closer_id !== actorId) {
+    return res.status(403).json({ error: 'Only the assigned closer or a manager can set disposition' });
+  }
+
+  // For closers, scope to their own record; for managers, scope to the assigned closer's record (or any)
+  const scopedCloserId = isManager && transfer.assigned_closer_id
+    ? transfer.assigned_closer_id
+    : actorId;
 
   const { data: existing } = await supabaseAdmin
-    .from('call_dispositions').select('id').eq('transfer_id', transferId).eq('closer_id', closerId).single();
+    .from('call_dispositions').select('id, disposition').eq('transfer_id', transferId).eq('closer_id', scopedCloserId).maybeSingle();
+
+  const prevDisposition = existing?.disposition || null;
 
   let result;
   if (existing) {
@@ -102,7 +117,7 @@ router.post('/transfer/:id/dispo',
     const { data, error } = await supabaseAdmin
       .from('call_dispositions').insert({
         transfer_id: transferId,
-        closer_id:   closerId,
+        closer_id:   scopedCloserId,
         company_id:  transfer.company_id,
         disposition,
         notes: notes || null,
@@ -110,6 +125,21 @@ router.post('/transfer/:id/dispo',
     if (error) return res.status(500).json({ error: error.message });
     result = data;
   }
+
+  // Log the activity (fire-and-forget)
+  const customerName = transfer.form_data?.customer_name
+    || transfer.form_data?.FirstName
+    || 'Unknown';
+  logActivity({
+    companyId:  transfer.company_id,
+    userId:     actorId,
+    action:     existing ? 'disposition_updated' : 'disposition_set',
+    entityType: 'transfer',
+    entityId:   transferId,
+    oldValue:   prevDisposition ? { disposition: prevDisposition } : null,
+    newValue:   { disposition, notes: notes || null },
+    metadata:   { customer_name: customerName, actor_role: actorRole, manager_override: isManager },
+  });
 
   res.status(201).json({ disposition: result });
 }));
