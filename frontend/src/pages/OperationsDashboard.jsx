@@ -6,12 +6,12 @@ import {
   Settings, TrendingUp, Send, DollarSign, Users,
   Phone, Search, BarChart3, RefreshCw, CheckCircle,
   XCircle, Clock, AlertCircle, Star, PlusCircle, Trash2, Hash, Shield, FileText,
+  Activity, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import CreateUserModal from "../components/Admin/UserManagement/CreateUserModal";
-import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useNotifications } from "../hooks/useNotifications";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
@@ -23,12 +23,37 @@ import client from "../api/client";
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 const SALE_BADGE     = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error' };
 const RATING_COLOR   = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
+const PAGE_SIZE = 25;
+
+const Pagination = ({ page, total, pageSize, onChange }) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+      <span className="text-xs text-text-secondary">
+        {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button onClick={() => onChange(page - 1)} disabled={page <= 1}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronLeft size={14} />
+        </button>
+        <span className="text-xs font-semibold text-text">{page} / {totalPages}</span>
+        <button onClick={() => onChange(page + 1)} disabled={page >= totalPages}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const OperationsDashboard = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme }         = useTheme();
   const navigate                       = useNavigate();
-  const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const notifHook                      = useNotifications();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -46,6 +71,14 @@ const OperationsDashboard = () => {
   const [fronters, setFronters]     = useState([]);
   const [closersLb, setClosersLb]   = useState([]);
   const [loading, setLoading]       = useState(false);
+
+  // Pagination state
+  const [transfersPage, setTransfersPage] = useState(1);
+  const [salesPage, setSalesPage]         = useState(1);
+  const [activityPage, setActivityPage]   = useState(1);
+  const [activityLogs, setActivityLogs]   = useState([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   // Reassign state
   const [availableClosers, setAvailableClosers] = useState([]);
@@ -69,6 +102,27 @@ const OperationsDashboard = () => {
   const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
   const { date_from, date_to }    = dateRange;
 
+  const handleDateChange = (range) => {
+    setDateRange(range);
+    setTransfersPage(1);
+    setSalesPage(1);
+    setActivityPage(1);
+  };
+
+  const fetchActivityLogs = useCallback(async (page = 1) => {
+    if (!companyId) return;
+    setActivityLoading(true);
+    try {
+      const res = await client.get('activity-logs', {
+        params: { company_id: companyId, page, limit: PAGE_SIZE, date_from, date_to },
+      });
+      setActivityLogs(res.data.logs || []);
+      setActivityTotal(res.data.total || 0);
+    } catch { /* non-critical */ } finally {
+      setActivityLoading(false);
+    }
+  }, [companyId, date_from, date_to]);
+
   const loadReviews = useCallback(async () => {
     if (!companyId) return;
     setReviewsLoading(true);
@@ -87,7 +141,6 @@ const OperationsDashboard = () => {
   const loadAll = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    fetchStats();
     try {
       const [tRes, sRes, closersRes] = await Promise.all([
         client.get('transfers', { params: { company_id: companyId, limit: 200, date_from, date_to } }),
@@ -163,6 +216,7 @@ const OperationsDashboard = () => {
   useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => { if (activeTab === 'reviews') loadReviews(); }, [activeTab, loadReviews]);
   useEffect(() => { if (activeTab === 'team') loadTeam(); }, [activeTab, loadTeam]);
+  useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(activityPage); }, [activeTab, fetchActivityLogs, activityPage]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -179,6 +233,12 @@ const OperationsDashboard = () => {
   };
 
   const rejectedTransfers = transfers.filter(t => t.status === 'rejected');
+  const totalTransfers    = transfers.length;
+  const totalSales        = sales.length;
+  const wonSales          = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
+  const conversionRate    = totalTransfers > 0 ? Math.round((wonSales / totalTransfers) * 100) : 0;
+  const pagedTransfers    = transfers.slice((transfersPage - 1) * PAGE_SIZE, transfersPage * PAGE_SIZE);
+  const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
   const TABS = [
     { key: 'overview',   label: 'Overview',    icon: BarChart3  },
@@ -191,6 +251,7 @@ const OperationsDashboard = () => {
     ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Phone      }] : []),
     ...(hasPermission('view_team_callbacks')                                     ? [{ key: 'callbacks',       label: 'Team Callbacks',  icon: Phone      }] : []),
     ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'numbers',         label: 'Number Lists',    icon: Hash       }] : []),
+    { key: 'activity_log', label: 'Activity Log', icon: Activity },
   ];
 
   return (
@@ -221,11 +282,11 @@ const OperationsDashboard = () => {
 
         {/* Tabs */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
+          <div className="flex overflow-x-auto gap-1 p-1 rounded-xl"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {TABS.map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap flex-shrink-0"
                 style={{
                   background: activeTab === tab.key ? 'var(--gradient-sidebar)' : 'transparent',
                   color:      activeTab === tab.key ? 'white' : 'var(--color-text-secondary)',
@@ -240,7 +301,7 @@ const OperationsDashboard = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
+          <DateRangePicker onChange={handleDateChange} defaultPreset="30d" />
         </div>
 
         {/* ── OVERVIEW ──────────────────────────────────────────── */}
@@ -248,10 +309,10 @@ const OperationsDashboard = () => {
           <div className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Total Transfers', value: statsLoading ? '—' : stats.totalTransfers || 0,  icon: Send,        color: 'info'    },
-                { label: 'Total Sales',     value: statsLoading ? '—' : stats.totalSales     || 0,  icon: DollarSign,  color: 'success' },
-                { label: 'Conversion',      value: statsLoading ? '—' : `${stats.conversionRate || 0}%`, icon: TrendingUp, color: 'primary' },
-                { label: 'Rejected',        value: rejectedTransfers.length,                          icon: XCircle,     color: 'error'   },
+                { label: 'Total Transfers', value: loading ? '—' : totalTransfers,       icon: Send,       color: 'info'    },
+                { label: 'Total Sales',     value: loading ? '—' : totalSales,           icon: DollarSign, color: 'success' },
+                { label: 'Conversion',      value: loading ? '—' : `${conversionRate}%`, icon: TrendingUp, color: 'primary' },
+                { label: 'Rejected',        value: rejectedTransfers.length,              icon: XCircle,    color: 'error'   },
               ].map(s => (
                 <Card key={s.label} className="p-5">
                   <div className="flex items-start justify-between">
@@ -415,42 +476,45 @@ const OperationsDashboard = () => {
             ) : transfers.length === 0 ? (
               <p className="text-text-secondary text-center py-8">No transfers yet.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                      {['Customer', 'Phone', 'Status', 'Rejection Reason', 'Date', 'Action'].map(h => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transfers.map(t => (
-                      <tr key={t.id} className="hover:bg-bg-secondary transition-colors"
-                        style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td className="px-4 py-3 font-semibold text-text">
-                          {t.form_data?.FirstName
-                            ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
-                            : t.form_data?.customer_name || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-text-secondary">{t.form_data?.Phone || t.form_data?.customer_phone || '—'}</td>
-                        <td className="px-4 py-3"><Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
-                        <td className="px-4 py-3 text-xs text-error-600">{t.rejection_reason || '—'}</td>
-                        <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</td>
-                        <td className="px-4 py-3">
-                          {(t.status === 'rejected' || t.status === 'pending') && hasPermission('reassign_transfer') && (
-                            <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
-                              className="px-2 py-1 rounded text-xs font-bold text-white"
-                              style={{ background: 'var(--gradient-sidebar)' }}>
-                              Reassign
-                            </button>
-                          )}
-                        </td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        {['Customer', 'Phone', 'Status', 'Rejection Reason', 'Date', 'Action'].map(h => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {pagedTransfers.map(t => (
+                        <tr key={t.id} className="hover:bg-bg-secondary transition-colors"
+                          style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td className="px-4 py-3 font-semibold text-text">
+                            {t.form_data?.FirstName
+                              ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
+                              : t.form_data?.customer_name || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-text-secondary">{t.form_data?.Phone || t.form_data?.customer_phone || '—'}</td>
+                          <td className="px-4 py-3"><Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
+                          <td className="px-4 py-3 text-xs text-error-600">{t.rejection_reason || '—'}</td>
+                          <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            {(t.status === 'rejected' || t.status === 'pending') && hasPermission('reassign_transfer') && (
+                              <button onClick={() => { setReassignTarget(t); setReassignCloser(''); }}
+                                className="px-2 py-1 rounded text-xs font-bold text-white"
+                                style={{ background: 'var(--gradient-sidebar)' }}>
+                                Reassign
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={transfersPage} total={transfers.length} pageSize={PAGE_SIZE} onChange={setTransfersPage} />
+              </>
             )}
           </Card>
         )}
@@ -464,32 +528,35 @@ const OperationsDashboard = () => {
             ) : sales.length === 0 ? (
               <p className="text-text-secondary text-center py-8">No sales yet.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                      {['Customer', 'Phone', 'Reference', 'Vehicle', 'Plan', 'Monthly', 'Status', 'Date'].map(h => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sales.map(s => (
-                      <tr key={s.id} className="hover:bg-bg-secondary transition-colors"
-                        style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td className="px-4 py-3 font-semibold text-text">{s.customer_name || '—'}</td>
-                        <td className="px-4 py-3 text-text-secondary">{s.customer_phone || '—'}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-text-secondary">{s.reference_no || '—'}</td>
-                        <td className="px-4 py-3 text-xs text-text-secondary">{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
-                        <td className="px-4 py-3 text-xs text-text-secondary">{s.plan || '—'}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment && hasPermission('view_financial_data') ? `$${s.monthly_payment}` : '—'}</td>
-                        <td className="px-4 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
-                        <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        {['Customer', 'Phone', 'Reference', 'Vehicle', 'Plan', 'Monthly', 'Status', 'Date'].map(h => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {pagedSales.map(s => (
+                        <tr key={s.id} className="hover:bg-bg-secondary transition-colors"
+                          style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td className="px-4 py-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                          <td className="px-4 py-3 text-text-secondary">{s.customer_phone || '—'}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-text-secondary">{s.reference_no || '—'}</td>
+                          <td className="px-4 py-3 text-xs text-text-secondary">{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
+                          <td className="px-4 py-3 text-xs text-text-secondary">{s.plan || '—'}</td>
+                          <td className="px-4 py-3 text-xs font-semibold text-success-600">{s.monthly_payment && hasPermission('view_financial_data') ? `$${s.monthly_payment}` : '—'}</td>
+                          <td className="px-4 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
+                          <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={salesPage} total={sales.length} pageSize={PAGE_SIZE} onChange={setSalesPage} />
+              </>
             )}
           </Card>
         )}
@@ -539,7 +606,6 @@ const OperationsDashboard = () => {
         {/* ── REVIEWS ──────────────────────────────────────────── */}
         {activeTab === 'reviews' && (
           <div className="space-y-4">
-            {/* Sub-tab toggle */}
             <div className="flex gap-1 p-1 rounded-xl w-fit"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               {[{ key: 'ratings', label: 'Call Ratings' }, { key: 'dispos', label: 'Dispositions' }].map(t => (
@@ -636,6 +702,54 @@ const OperationsDashboard = () => {
               )}
             </Card>
           </div>
+        )}
+
+        {/* ── ACTIVITY LOG ──────────────────────────────────────── */}
+        {activeTab === 'activity_log' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold text-text mb-4 flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
+            {activityLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : activityLogs.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No activity yet.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        {['Actor', 'Action', 'Customer', 'Change', 'Date'].map(h => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activityLogs.map(log => (
+                        <tr key={log.id} className="hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td className="px-4 py-3 text-sm font-semibold text-text">
+                            {log.actor ? `${log.actor.first_name || ''} ${log.actor.last_name || ''}`.trim() || '—' : '—'}
+                            {log.metadata?.manager_override && (
+                              <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded font-bold bg-warning-100 text-warning-700">Mgr</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-text-secondary capitalize">{log.action?.replace(/_/g, ' ')}</td>
+                          <td className="px-4 py-3 text-xs text-text-secondary">{log.metadata?.customer_name || '—'}</td>
+                          <td className="px-4 py-3 text-xs">
+                            {log.old_value?.disposition && (
+                              <span className="text-text-tertiary">{log.old_value.disposition} → </span>
+                            )}
+                            <span className="font-semibold text-text">{log.new_value?.disposition || '—'}</span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(log.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={activityPage} total={activityTotal} pageSize={PAGE_SIZE} onChange={setActivityPage} />
+              </>
+            )}
+          </Card>
         )}
 
         {activeTab === 'search'          && <SaleSearch companyId={companyId} />}

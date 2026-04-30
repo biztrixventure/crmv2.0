@@ -9,12 +9,11 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
-import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
@@ -37,6 +36,32 @@ import DevCredit from "../components/DevCredit";
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
 const XFER_BADGE  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
+const PAGE_SIZE   = 25;
+
+const Pagination = ({ page, total, pageSize, onChange }) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+      <span className="text-xs text-text-secondary">
+        {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button onClick={() => onChange(page - 1)} disabled={page <= 1}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronLeft size={14} />
+        </button>
+        <span className="text-xs font-semibold text-text">{page} / {totalPages}</span>
+        <button onClick={() => onChange(page + 1)} disabled={page >= totalPages}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const ManagerShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
@@ -46,7 +71,6 @@ const ManagerShell = () => {
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
 
-  const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { sales, loading: salesLoading, fetchSales, createSale, updateSale, deleteSale } = useSales(user?.company_id);
   const { transfers, loading: xferLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
 
@@ -56,7 +80,7 @@ const ManagerShell = () => {
 
   // ── Tab logic ─────────────────────────────────────────────────────────────
   const TABS = [
-    { key: 'overview',  label: 'Overview',        icon: TrendingUp, always: true },
+    { key: 'overview',     label: 'Overview',        icon: TrendingUp, always: true },
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
     ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && isEnabled('sales')
@@ -79,6 +103,7 @@ const ManagerShell = () => {
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
+    { key: 'activity_log', label: 'Activity Log', icon: Activity },
   ];
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -88,6 +113,14 @@ const ManagerShell = () => {
   const [fronterLb, setFronterLb] = useState([]);
   const [closerLb, setCloserLb]   = useState([]);
   const [loading, setLoading]     = useState(false);
+
+  // ── Pagination ────────────────────────────────────────────────────────────
+  const [xferPage, setXferPage]           = useState(1);
+  const [salesPage, setSalesPage]         = useState(1);
+  const [activityPage, setActivityPage]   = useState(1);
+  const [activityLogs, setActivityLogs]   = useState([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   // ── Reassign ──────────────────────────────────────────────────────────────
   const [availableClosers, setAvailableClosers] = useState([]);
@@ -120,7 +153,7 @@ const ManagerShell = () => {
   const handleRateCall = async () => {
     setRatingSaving(true);
     try {
-      await client.post(`transfers/${rateTarget.id}/review`, { rating: ratingVal, notes: ratingNotes });
+      await client.post(`reviews/transfer/${rateTarget.id}/review`, { rating: ratingVal, notes: ratingNotes });
       setRateTarget(null);
     } catch (err) {
       setRatingMsg(err.response?.data?.error || 'Failed to save rating');
@@ -132,7 +165,7 @@ const ManagerShell = () => {
   const handleSetDispo = async () => {
     setDispoSaving(true);
     try {
-      await client.post(`transfers/${dispoTarget.id}/disposition`, { disposition: dispoVal, notes: dispoNotes });
+      await client.post(`reviews/transfer/${dispoTarget.id}/dispo`, { disposition: dispoVal, notes: dispoNotes });
       setDispoTarget(null);
     } catch (err) {
       setDispoMsg(err.response?.data?.error || 'Failed to save disposition');
@@ -148,10 +181,30 @@ const ManagerShell = () => {
   const [saleError, setSaleError]         = useState('');
   const [saleSuccess, setSaleSuccess]     = useState('');
 
+  const handleDateChange = (range) => {
+    setDateRange(range);
+    setXferPage(1);
+    setSalesPage(1);
+    setActivityPage(1);
+  };
+
+  const fetchActivityLogs = useCallback(async (page = 1) => {
+    if (!companyId) return;
+    setActivityLoading(true);
+    try {
+      const res = await client.get('activity-logs', {
+        params: { company_id: companyId, page, limit: PAGE_SIZE, date_from, date_to },
+      });
+      setActivityLogs(res.data.logs || []);
+      setActivityTotal(res.data.total || 0);
+    } catch { /* non-critical */ } finally {
+      setActivityLoading(false);
+    }
+  }, [companyId, date_from, date_to]);
+
   const loadOverview = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    fetchStats();
     try {
       const [tRes, sRes, closersRes] = await Promise.all([
         client.get('transfers', { params: { company_id: companyId, limit: 200, date_from, date_to } }),
@@ -190,6 +243,7 @@ const ManagerShell = () => {
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { fetchSales({ date_from, date_to }); },     [fetchSales, date_from, date_to]);
+  useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(activityPage); }, [activeTab, fetchActivityLogs, activityPage]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -216,7 +270,6 @@ const ManagerShell = () => {
       await createSale(formData);
       setSaleModalOpen(false);
       setSaleSuccess('Sale created!');
-      fetchStats();
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed');
@@ -225,7 +278,10 @@ const ManagerShell = () => {
     }
   };
 
-  const pendingTransfers = transfers.filter(t => ['pending', 'rejected'].includes(t.status));
+  const pendingTransfers  = transfers.filter(t => ['pending', 'rejected'].includes(t.status));
+  const approvedSales     = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
+  const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
+  const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -263,11 +319,11 @@ const ManagerShell = () => {
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <div className="flex gap-1 p-1 rounded-xl w-fit overflow-x-auto"
+          <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {TABS.map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap flex-shrink-0"
                 style={{
                   background: activeTab === tab.key ? 'var(--gradient-sidebar)' : 'transparent',
                   color: activeTab === tab.key ? 'white' : 'var(--color-text-secondary)',
@@ -277,7 +333,7 @@ const ManagerShell = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
+          <DateRangePicker onChange={handleDateChange} defaultPreset="30d" />
         </div>
 
         {/* ── OVERVIEW TAB ── */}
@@ -286,16 +342,16 @@ const ManagerShell = () => {
             {/* Stats cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               {[
-                { label: 'Total Transfers', value: stats.totalTransfers || 0,   icon: Send,       color: 'info'    },
-                { label: 'Total Sales',     value: stats.totalSales    || 0,     icon: DollarSign, color: 'success' },
-                { label: 'Approved Sales',  value: stats.closedWon     || 0,     icon: CheckCircle,color: 'success' },
-                { label: 'Pending',         value: pendingTransfers.length || 0, icon: Clock,      color: 'warning' },
+                { label: 'Total Transfers', value: transfers.length,          icon: Send,        color: 'info'    },
+                { label: 'Total Sales',     value: sales.length,              icon: DollarSign,  color: 'success' },
+                { label: 'Approved Sales',  value: approvedSales,             icon: CheckCircle, color: 'success' },
+                { label: 'Pending',         value: pendingTransfers.length,   icon: Clock,       color: 'warning' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <Card key={label} className="p-6">
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{statsLoading ? '—' : value}</p>
+                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{value}</p>
                     </div>
                     <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
                       <Icon size={22} className={`text-${color}-600`} />
@@ -392,63 +448,66 @@ const ManagerShell = () => {
             {xferLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
               : transfers.length === 0 ? <p className="text-text-secondary text-center py-8">No transfers in this period.</p>
               : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border">
-                        {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {transfers.slice(0, 50).map(t => (
-                        <tr key={t.id} onClick={() => setDetailTransfer(t)}
-                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                          <td className="py-3 px-3 font-semibold text-text">
-                            {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
-                          </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
-                          <td className="py-3 px-3"><Badge variant={XFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
-                          <td className="py-3 px-3">
-                            <div className="flex flex-wrap gap-1">
-                              {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
-                                <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                                  style={{ background: 'var(--gradient-sidebar)' }}>
-                                  Reassign
-                                </button>
-                              )}
-                              {hasPermission('submit_call_review') && (
-                                <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
-                                  <Star size={11} className="inline mr-1" />Rate
-                                </button>
-                              )}
-                              {hasPermission('submit_call_dispo') && (
-                                <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
-                                  <MessageSquare size={11} className="inline mr-1" />Dispo
-                                </button>
-                              )}
-                              {hasPermission('delete_transfer') && (
-                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchTransfers({ date_from, date_to })); } }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
-                                  <Trash2 size={11} className="inline" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border">
+                          {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
+                            <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {pagedTransfers.map(t => (
+                          <tr key={t.id} onClick={() => setDetailTransfer(t)}
+                            className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                            <td className="py-3 px-3 font-semibold text-text">
+                              {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
+                            </td>
+                            <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                            <td className="py-3 px-3"><Badge variant={XFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
+                            <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
+                            <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
+                            <td className="py-3 px-3">
+                              <div className="flex flex-wrap gap-1">
+                                {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
+                                  <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                                    style={{ background: 'var(--gradient-sidebar)' }}>
+                                    Reassign
+                                  </button>
+                                )}
+                                {hasPermission('submit_call_review') && (
+                                  <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
+                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                    style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
+                                    <Star size={11} className="inline mr-1" />Rate
+                                  </button>
+                                )}
+                                {hasPermission('submit_call_dispo') && (
+                                  <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
+                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                    style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
+                                    <MessageSquare size={11} className="inline mr-1" />Dispo
+                                  </button>
+                                )}
+                                {hasPermission('delete_transfer') && (
+                                  <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchTransfers({ date_from, date_to })); } }}
+                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                    style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                    <Trash2 size={11} className="inline" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination page={xferPage} total={transfers.length} pageSize={PAGE_SIZE} onChange={setXferPage} />
+                </>
               )}
           </Card>
         )}
@@ -460,39 +519,42 @@ const ManagerShell = () => {
             {salesLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
               : sales.length === 0 ? <p className="text-text-secondary text-center py-8">No sales in this period.</p>
               : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border">
-                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.slice(0, 50).map(s => (
-                        <tr key={s.id} onClick={() => setDetailSale(s)}
-                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
-                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
-                          <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
-                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
-                          {hasPermission('delete_sale') && (
-                            <td className="py-3 px-3">
-                              <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
-                                className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
-                                style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
-                                <Trash2 size={13} />
-                              </button>
-                            </td>
-                          )}
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border">
+                          {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
+                            <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {pagedSales.map(s => (
+                          <tr key={s.id} onClick={() => setDetailSale(s)}
+                            className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                            <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                            <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
+                            <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
+                            <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
+                            {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
+                            <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                            {hasPermission('delete_sale') && (
+                              <td className="py-3 px-3">
+                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
+                                  className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
+                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                  <Trash2 size={13} />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination page={salesPage} total={sales.length} pageSize={PAGE_SIZE} onChange={setSalesPage} />
+                </>
               )}
           </Card>
         )}
@@ -517,7 +579,6 @@ const ManagerShell = () => {
                 : sales.filter(s => s.closer_id === user?.id).length === 0 ? <p className="text-text-secondary text-center py-8">No personal sales yet.</p>
                 : (
                   <div className="space-y-3">
-                    {/* Filter client-side from pre-fetched list; server scopes to closer_id for closer role */}
                     {sales.filter(s => s.closer_id === user?.id).map(s => (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
@@ -554,6 +615,54 @@ const ManagerShell = () => {
                 )}
             </Card>
           </div>
+        )}
+
+        {/* ── ACTIVITY LOG TAB ── */}
+        {activeTab === 'activity_log' && (
+          <Card className="p-6">
+            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
+            {activityLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : activityLogs.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No activity yet.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {['Actor', 'Action', 'Customer', 'Change', 'Date'].map(h => (
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activityLogs.map(log => (
+                        <tr key={log.id} className="border-b border-border hover:bg-bg-secondary">
+                          <td className="py-3 px-3 font-semibold text-text text-sm">
+                            {log.actor ? `${log.actor.first_name || ''} ${log.actor.last_name || ''}`.trim() || '—' : '—'}
+                            {log.metadata?.manager_override && (
+                              <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded font-bold bg-warning-100 text-warning-700">Mgr</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-xs text-text-secondary capitalize">{log.action?.replace(/_/g, ' ')}</td>
+                          <td className="py-3 px-3 text-xs text-text-secondary">{log.metadata?.customer_name || '—'}</td>
+                          <td className="py-3 px-3 text-xs">
+                            {log.old_value?.disposition && (
+                              <span className="text-text-tertiary">{log.old_value.disposition} → </span>
+                            )}
+                            <span className="font-semibold text-text">{log.new_value?.disposition || '—'}</span>
+                          </td>
+                          <td className="py-3 px-3 text-xs text-text-tertiary">{new Date(log.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={activityPage} total={activityTotal} pageSize={PAGE_SIZE} onChange={setActivityPage} />
+              </>
+            )}
+          </Card>
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
