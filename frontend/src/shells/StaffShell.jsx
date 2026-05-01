@@ -140,6 +140,9 @@ const StaffShell = () => {
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
 
+  // Local phone filter for fronter's My Leads list
+  const [leadSearch, setLeadSearch] = useState('');
+
   useEffect(() => {
     fetchStats();
     if (isFronter) { fetchFields(); fetchConfigs(); }
@@ -312,8 +315,6 @@ const StaffShell = () => {
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
-    ...(isCloser
-      ? [{ key: 'phone_search',   label: 'Search by Phone', icon: Phone      }] : []),
   ];
 
   const conversionRate = transfers.length > 0
@@ -386,7 +387,6 @@ const StaffShell = () => {
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
         {activeTab === 'search'          && <SaleSearch />}
-        {activeTab === 'phone_search'    && isCloser && <PhoneSearch onCreateSale={openSaleModal} />}
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'team_transfers' && (
@@ -467,6 +467,11 @@ const StaffShell = () => {
             {reviewSuccess && <Alert type="success" title="Saved!" message={reviewSuccess} dismissible onDismiss={() => setReviewSuccess('')} />}
             {submitMsg   && <Alert type="error"   title="Error"         message={submitMsg}   dismissible onDismiss={() => setSubmitMsg('')}    />}
 
+            {/* Phone search — find leads from linked fronter companies by number */}
+            <div className="mb-6">
+              <PhoneSearch onCreateSale={openSaleModal} />
+            </div>
+
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
               {[
@@ -490,15 +495,15 @@ const StaffShell = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Assigned Transfers */}
+              {/* Leads — assigned to this closer + unassigned pool from linked fronter companies */}
               <Card className="p-6">
                 <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
-                  <Clock size={20} /> Assigned Transfers
+                  <Clock size={20} /> Leads
                 </h3>
                 {tLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : transfers.length === 0 ? (
-                  <p className="text-text-secondary text-center py-8">No transfers assigned yet.</p>
+                  <p className="text-text-secondary text-center py-8">No leads available yet.</p>
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {transfers.slice(0, 15).map(t => (
@@ -799,13 +804,29 @@ const StaffShell = () => {
               {/* My Leads */}
               <Card className="p-6">
                 <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><FileText size={20} /> My Leads</h3>
+                <div className="relative mb-3">
+                  <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input
+                    type="tel"
+                    value={leadSearch}
+                    onChange={e => setLeadSearch(e.target.value)}
+                    placeholder="Filter by phone or name…"
+                    className="input pl-8 text-sm"
+                  />
+                </div>
                 {tLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : transfers.length === 0 ? (
                   <p className="text-text-secondary text-center py-8">No leads yet.</p>
                 ) : (
                   <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                    {transfers.map(t => (
+                    {transfers.filter(t => {
+                      if (!leadSearch.trim()) return true;
+                      const q = leadSearch.trim().toLowerCase();
+                      const phone = (t.form_data?.customer_phone || t.form_data?.Phone || '').toLowerCase();
+                      const name  = (t.form_data?.customer_name  || `${t.form_data?.FirstName || ''} ${t.form_data?.LastName || ''}`).toLowerCase();
+                      return phone.includes(q) || name.includes(q);
+                    }).map(t => (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
                         className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>

@@ -32,10 +32,23 @@ router.get('/', asyncHandler(async (req, res) => {
     case 'fronter':
       query = query.eq('created_by', userId);
       break;
-    case 'closer':
-      // Only see transfers assigned to this closer
-      query = query.eq('assigned_closer_id', userId);
+    case 'closer': {
+      // Show transfers assigned to this closer PLUS unassigned transfers
+      // from fronter companies linked to the closer's company (the shared pool).
+      const { data: closerLinks } = await supabaseAdmin
+        .from('company_links')
+        .select('fronter_company_id')
+        .eq('closer_company_id', companyId);
+      const poolIds = (closerLinks || []).map(l => l.fronter_company_id);
+      if (poolIds.length > 0) {
+        query = query.or(
+          `assigned_closer_id.eq.${userId},and(assigned_closer_id.is.null,company_id.in.(${poolIds.join(',')}))`
+        );
+      } else {
+        query = query.eq('assigned_closer_id', userId);
+      }
       break;
+    }
     case 'closer_manager':
     case 'compliance_manager': {
       // See transfers assigned to any user in their (closer) company
@@ -59,9 +72,9 @@ router.get('/', asyncHandler(async (req, res) => {
   if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
 
   if (search) {
-    query = query.or(
-      `form_data->>'customer_name'.ilike.%${search}%,form_data->>'customer_phone'.ilike.%${search}%`
-    );
+    // Cast JSONB to text so any field (customer_phone, Phone, customer_name, etc.) is searched
+    // regardless of the key name configured by the admin.
+    query = query.filter('form_data::text', 'ilike', `%${search}%`);
   }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -208,13 +221,13 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 
   if (!fronterCompanyIds.length) return res.json({ transfers: [] });
 
-  // Search transfers by phone stored in form_data
-  // Supports both field name conventions: customer_phone (standard) and Phone (legacy)
+  // Search transfers — cast form_data to text so any phone field name (customer_phone,
+  // Phone, mobile, etc.) is matched regardless of how the admin named the field.
   const { data, error } = await supabaseAdmin
     .from('transfers')
     .select('*')
     .in('company_id', fronterCompanyIds)
-    .or(`form_data->>'customer_phone'.ilike.%${q}%,form_data->>'Phone'.ilike.%${q}%`)
+    .filter('form_data::text', 'ilike', `%${q}%`)
     .order('created_at', { ascending: false })
     .limit(50);
 
