@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Moon, Sun, LogOut, ChevronDown } from 'lucide-react';
 import NotificationBell from '../UI/NotificationBell';
 import ProfileModal from '../Profile/ProfileModal';
+import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 const CompanyLogoImg = ({ src }) => {
   const [errored, setErrored] = useState(false);
@@ -65,6 +66,15 @@ const AppHeader = ({
 }) => {
   const [profileOpen, setProfileOpen] = useState(false);
 
+  // Push notification setup — lives here so it only runs when authenticated
+  const {
+    permission: pushPermission,
+    subscribed: pushSubscribed,
+    loading:    pushLoading,
+    error:      pushError,
+    subscribe:  enablePush,
+  } = usePushNotifications();
+
   const initials = [user?.first_name, user?.last_name]
     .filter(Boolean)
     .map(n => n[0].toUpperCase())
@@ -126,7 +136,7 @@ const AppHeader = ({
 
           {/* Right: Notifications + Theme + User + Logout */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Notification bell */}
+            {/* Notification bell — receives push state for setup prompt */}
             <NotificationBell
               notifications={notifications}
               unreadCount={unreadCount}
@@ -134,6 +144,11 @@ const AppHeader = ({
               onMarkAllRead={onMarkAllRead}
               onDelete={onDeleteNotification}
               onClearAll={onClearNotifications}
+              pushSubscribed={pushSubscribed}
+              pushPermission={pushPermission}
+              pushLoading={pushLoading}
+              pushError={pushError}
+              onEnablePush={enablePush}
             />
 
             {/* Theme toggle */}

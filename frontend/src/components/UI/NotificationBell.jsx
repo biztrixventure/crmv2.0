@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SmartText from './SmartText';
-import { Bell, Check, Trash2, X, DollarSign, Users, ArrowRight, Phone, ShieldCheck, RotateCcw, AlertCircle } from 'lucide-react';
+import { Bell, BellOff, Check, Trash2, X, DollarSign, Users, ArrowRight, Phone, ShieldCheck, RotateCcw, AlertCircle, AlertTriangle } from 'lucide-react';
 
 // Icon per notification type
 const TYPE_ICON = {
@@ -28,7 +28,20 @@ function timeAgo(dateStr) {
   return `${d}d ago`;
 }
 
-const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onMarkAllRead, onDelete, onClearAll }) => {
+const NotificationBell = ({
+  notifications = [],
+  unreadCount = 0,
+  onMarkRead,
+  onMarkAllRead,
+  onDelete,
+  onClearAll,
+  // Push notification props
+  pushSubscribed   = null,  // null = loading/unknown, false = not subscribed, true = active
+  pushPermission   = 'default',
+  pushLoading      = false,
+  pushError        = '',
+  onEnablePush     = null,
+}) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -40,6 +53,11 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
   }, []);
 
   const handleOpen = () => setOpen(o => !o);
+
+  // Push status derived state
+  const pushDenied      = pushPermission === 'denied';
+  const pushNotSetup    = pushSubscribed === false && !pushDenied;
+  const showPushWarning = pushDenied || pushNotSetup;
 
   return (
     <div ref={ref} className="relative">
@@ -55,6 +73,8 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
       >
         <Bell size={20} style={{ color: unreadCount > 0 ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+
+        {/* Unread count badge */}
         {unreadCount > 0 && (
           <span
             className="absolute -top-1 -right-1 min-w-5 h-5 flex items-center justify-center text-white text-xs font-bold rounded-full px-1 animate-pulse"
@@ -62,6 +82,15 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
           >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
+        )}
+
+        {/* Push warning dot (only when no unread badge) */}
+        {unreadCount === 0 && showPushWarning && (
+          <span
+            className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: pushDenied ? '#ef4444' : '#f59e0b' }}
+            title={pushDenied ? 'Notifications blocked' : 'OS notifications off'}
+          />
         )}
       </button>
 
@@ -73,7 +102,7 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
             backgroundColor: 'var(--color-surface)',
             border: '1px solid var(--color-border)',
             boxShadow: 'var(--shadow-xl)',
-            maxHeight: '480px',
+            maxHeight: '520px',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -120,6 +149,50 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onMarkRead, onM
               )}
             </div>
           </div>
+
+          {/* Push status banner — only shown when there's an issue */}
+          {pushDenied && (
+            <div
+              className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0"
+              style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid var(--color-border)' }}
+            >
+              <AlertTriangle size={14} style={{ color: '#b91c1c', flexShrink: 0 }} />
+              <span className="text-xs" style={{ color: '#b91c1c' }}>
+                OS notifications blocked — unblock in browser settings
+              </span>
+            </div>
+          )}
+
+          {pushNotSetup && onEnablePush && (
+            <div
+              className="flex items-center justify-between gap-2 px-4 py-2.5 flex-shrink-0"
+              style={{ backgroundColor: '#fffbeb', borderBottom: '1px solid var(--color-border)' }}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <BellOff size={13} style={{ color: '#b45309', flexShrink: 0 }} />
+                <span className="text-xs truncate" style={{ color: '#92400e' }}>
+                  OS notifications are off
+                </span>
+              </div>
+              <button
+                onClick={() => { onEnablePush(); setOpen(false); }}
+                disabled={pushLoading}
+                className="text-xs px-2.5 py-1 rounded-lg font-semibold text-white flex-shrink-0 disabled:opacity-50"
+                style={{ background: 'var(--gradient-sidebar)' }}
+              >
+                {pushLoading ? 'Enabling…' : 'Enable'}
+              </button>
+            </div>
+          )}
+
+          {pushError && (
+            <div
+              className="px-4 py-2 flex-shrink-0"
+              style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid var(--color-border)' }}
+            >
+              <p className="text-xs" style={{ color: '#b91c1c' }}>{pushError}</p>
+            </div>
+          )}
 
           {/* List */}
           <div className="overflow-y-auto flex-1" style={{ minHeight: 0 }}>

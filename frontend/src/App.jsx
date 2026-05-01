@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { FeatureFlagsProvider } from "./contexts/FeatureFlagsContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
-import { usePushNotifications } from "./hooks/usePushNotifications";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -54,7 +53,6 @@ const DashboardRedirect = () => {
 
 const AppContent = () => {
   const { isAuthenticated } = useAuth();
-  usePushNotifications();
 
   return (
     <Router>

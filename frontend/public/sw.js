@@ -4,8 +4,6 @@
  * Shows OS-level notifications in Windows/macOS/Android notification center.
  */
 
-const CACHE_NAME = 'biztrix-sw-v1';
-
 // ── Push received from server ──────────────────────────────────────────────
 self.addEventListener('push', (event) => {
   if (!event.data) return;
@@ -13,22 +11,32 @@ self.addEventListener('push', (event) => {
   let payload = {};
   try { payload = event.data.json(); } catch { payload = { title: 'BizTrix', body: event.data.text() }; }
 
-  const title   = payload.title   || 'BizTrix CRM';
+  const title   = payload.title || 'BizTrix CRM';
+
+  // Use a unique tag per notification so each one fires a fresh OS sound.
+  // Static tags cause the OS to silently replace the previous notification.
+  const tag = payload.tag
+    ? `${payload.tag}-${Date.now()}`
+    : `biztrix-${Date.now()}`;
+
   const options = {
-    body:    payload.body    || '',
-    icon:    payload.icon    || '/favicon.svg',
-    badge:   '/favicon.svg',
-    tag:     payload.tag     || 'biztrix',
-    data:    payload.data    || {},
-    vibrate: [200, 100, 200],
+    body:               payload.body    || '',
+    icon:               payload.icon    || '/favicon.svg',
+    badge:              '/favicon.svg',
+    tag,
+    renotify:           true,   // always trigger OS sound even if same tag somehow repeats
+    silent:             false,  // explicit: let OS play notification sound
+    data:               payload.data    || {},
+    vibrate:            [200, 100, 200],
     requireInteraction: payload.requireInteraction || false,
-    actions: payload.actions || [],
+    actions:            payload.actions || [],
+    timestamp:          payload.timestamp || Date.now(),
   };
 
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(title, options),
-      // Notify all open tabs to play sound + update bell
+      // Notify all open tabs to play in-page sound + update bell
       self.clients.matchAll({ includeUncontrolled: true, type: 'window' }).then(clients => {
         clients.forEach(client => client.postMessage({ type: 'PUSH_RECEIVED', payload }));
       }),
@@ -59,6 +67,6 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// ── Install / activate (no-op cache) ──────────────────────────────────────
+// ── Install / activate ────────────────────────────────────────────────────
 self.addEventListener('install',  () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));

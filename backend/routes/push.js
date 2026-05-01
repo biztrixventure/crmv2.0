@@ -19,6 +19,51 @@ router.get('/vapid-key', (req, res) => {
 });
 
 // ============================================================================
+// GET /push/health — diagnostic: VAPID config + user's active subscription count
+// ============================================================================
+router.get('/health', asyncHandler(async (req, res) => {
+  const vapidConfigured = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+
+  let subscriptionCount = 0;
+  if (req.user?.id) {
+    const { count } = await supabaseAdmin
+      .from('push_subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', req.user.id);
+    subscriptionCount = count || 0;
+  }
+
+  res.json({
+    ok:                 vapidConfigured,
+    vapid_configured:   vapidConfigured,
+    subscription_count: subscriptionCount,
+    has_subscription:   subscriptionCount > 0,
+  });
+}));
+
+// ============================================================================
+// POST /push/verify — check if a specific subscription endpoint is in the DB
+// Returns { found: boolean } so the client can re-save if needed.
+// ============================================================================
+router.post('/verify',
+  [body('endpoint').notEmpty()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'endpoint required' });
+
+    const { endpoint } = req.body;
+    const { data } = await supabaseAdmin
+      .from('push_subscriptions')
+      .select('id')
+      .eq('user_id', req.user.id)
+      .eq('endpoint', endpoint)
+      .maybeSingle();
+
+    res.json({ found: !!data });
+  })
+);
+
+// ============================================================================
 // POST /push/subscribe — save a push subscription
 // ============================================================================
 router.post('/subscribe',
