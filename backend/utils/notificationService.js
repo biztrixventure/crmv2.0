@@ -10,6 +10,12 @@
  *   sale_created        — closer created a sale → fronter + managers notified
  *   sale_updated        — sale status changed → managers notified
  *   compliance_updated  — compliance manager updated sale → managers notified
+ *
+ * Deduplication:
+ *   createNotification / notifyUsers accept an optional dedupKey / dedupBase.
+ *   When provided, the row is upserted with ignoreDuplicates so retried HTTP
+ *   requests or race conditions cannot create duplicate notifications.
+ *   Key format: {type}_{entityId}_{userId}_{hourBlock} (1-hour window).
  */
 
 const { supabaseAdmin } = require('../config/database');
@@ -17,8 +23,6 @@ const logger = require('./logger');
 const { sendPushToUser, sendPushToUsers } = require('./pushService');
 
 // All management roles — notified for company-wide events.
-// 'manager' kept for backward compat with legacy roles whose level was 'manager'
-// (same behavior as fronter_manager).
 const MANAGER_LEVELS = [
   'superadmin', 'readonly_admin',
   'company_admin', 'operations_manager',
@@ -26,18 +30,25 @@ const MANAGER_LEVELS = [
   'closer_manager', 'compliance_manager',
 ];
 
-// Floor managers — receive per-event (transfer/sale) notifications.
-// Does NOT include compliance_manager (they only care about sales in review queue).
+// Floor managers — per-event notifications (not compliance_manager).
 const FLOOR_MANAGER_LEVELS = [
   'company_admin', 'operations_manager',
   'fronter_manager', 'manager',
   'closer_manager',
 ];
 
+// Current UTC hour block: e.g. "2024-01-15T14"
+// Used as dedup window — same event on same entity for same user within one hour = single notification.
+const hourBlock = () => new Date().toISOString().slice(0, 13);
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-async function createNotification({ userId, companyId, type, title, message, data }) {
-  const { error } = await supabaseAdmin.from('notifications').insert({
+/**
+ * Insert one notification.
+ * @param {string} [dedupKey] - If set, upsert with ignoreDuplicates to prevent duplicates on retry.
+ */
+async function createNotification({ userId, companyId, type, title, message, data, dedupKey }) {
+  const row = {
     user_id:    userId,
     company_id: companyId || null,
     type,
@@ -45,25 +56,52 @@ async function createNotification({ userId, companyId, type, title, message, dat
     message:    message || null,
     data:       data    || null,
     is_read:    false,
-  });
+  };
+  if (dedupKey) row.dedup_key = dedupKey;
+
+  const op = dedupKey
+    ? supabaseAdmin.from('notifications').upsert(row, { onConflict: 'dedup_key', ignoreDuplicates: true })
+    : supabaseAdmin.from('notifications').insert(row);
+
+  const { error } = await op;
   if (error) logger.warn('NOTIF', `Failed for user ${userId}: ${error.message}`);
 }
 
+/**
+ * Insert notifications for multiple users.
+ * @param {string} [payload.dedupBase] - Base string for dedup key; full key = dedupBase_userId_hour.
+ */
 async function notifyUsers(userIds, payload) {
   if (!userIds?.length) return;
-  const rows = userIds.map(uid => ({
-    user_id:    uid,
-    company_id: payload.companyId || null,
-    type:       payload.type,
-    title:      payload.title,
-    message:    payload.message  || null,
-    data:       payload.data     || null,
-    is_read:    false,
-  }));
-  const { error } = await supabaseAdmin.from('notifications').insert(rows);
+  const hour = hourBlock();
+  const rows = userIds.map(uid => {
+    const row = {
+      user_id:    uid,
+      company_id: payload.companyId || null,
+      type:       payload.type,
+      title:      payload.title,
+      message:    payload.message  || null,
+      data:       payload.data     || null,
+      is_read:    false,
+    };
+    if (payload.dedupBase) row.dedup_key = `${payload.dedupBase}_${uid}_${hour}`;
+    return row;
+  });
+
+  const op = payload.dedupBase
+    ? supabaseAdmin.from('notifications').upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true })
+    : supabaseAdmin.from('notifications').insert(rows);
+
+  const { error } = await op;
   if (error) logger.warn('NOTIF', `Bulk insert failed: ${error.message}`);
-  // Web Push (fire-and-forget)
-  sendPushToUsers(userIds, { title: payload.title, body: payload.message || payload.title }).catch(() => {});
+
+  // Web Push (fire-and-forget) — pass type as tag for OS notification grouping
+  sendPushToUsers(userIds, {
+    title: payload.title,
+    body:  payload.message || payload.title,
+    tag:   payload.type,
+    data:  payload.data || {},
+  }).catch(() => {});
 }
 
 /** Get user IDs in a company that match certain role levels */
@@ -93,22 +131,18 @@ async function notifyFloorManagers(companyId, payload) {
 
 // ─── business events ──────────────────────────────────────────────────────────
 
-/**
- * Fronter created a transfer and directly assigned to a specific closer.
- * Notify: the closer + fronter manager + operations manager.
- */
 async function onTransferCreated({ transfer, fronterName, closerUserId }) {
   const customerName = transfer.form_data?.customer_name || 'New Customer';
   const companyId    = transfer.company_id;
 
-  // Notify the closer directly assigned
   if (closerUserId) {
     await createNotification({
       userId: closerUserId, companyId,
-      type: 'transfer_assigned',
-      title: 'New transfer assigned to you',
-      message: `${fronterName} transferred ${customerName} directly to you.`,
-      data: { transfer_id: transfer.id, customer_name: customerName },
+      type:     'transfer_assigned',
+      title:    'New transfer assigned to you',
+      message:  `${fronterName} transferred ${customerName} directly to you.`,
+      data:     { transfer_id: transfer.id, customer_name: customerName },
+      dedupKey: `transfer_assigned_${transfer.id}_${closerUserId}_${hourBlock()}`,
     });
     sendPushToUser(closerUserId, {
       title: 'New transfer assigned',
@@ -118,32 +152,27 @@ async function onTransferCreated({ transfer, fronterName, closerUserId }) {
     }).catch(() => {});
   }
 
-  // Notify floor managers
   await notifyFloorManagers(companyId, {
-    type: 'transfer_created',
-    title: 'Transfer created',
-    message: `${fronterName} transferred ${customerName} to a closer.`,
-    data: { transfer_id: transfer.id, customer_name: customerName },
+    type:      'transfer_created',
+    title:     'Transfer created',
+    message:   `${fronterName} transferred ${customerName} to a closer.`,
+    data:      { transfer_id: transfer.id, customer_name: customerName },
+    dedupBase: `transfer_created_${transfer.id}`,
   });
 }
 
-/**
- * Closer rejected a transfer.
- * Notify: the original fronter + fronter manager + closer manager.
- */
 async function onTransferRejected({ transfer, closerName, reason }) {
-  const customerName = transfer.form_data?.customer_name || 'Customer';
-  const companyId    = transfer.company_id;
+  const customerName  = transfer.form_data?.customer_name || 'Customer';
+  const companyId     = transfer.company_id;
   const fronterUserId = transfer.created_by;
 
-  // Notify the fronter who created it
   if (fronterUserId) {
     await createNotification({
       userId: fronterUserId, companyId,
-      type: 'transfer_rejected',
-      title: 'Transfer rejected',
+      type:    'transfer_rejected',
+      title:   'Transfer rejected',
       message: `${closerName} rejected your transfer for ${customerName}. Reason: ${reason || 'No reason given'}`,
-      data: { transfer_id: transfer.id, customer_name: customerName, reason },
+      data:    { transfer_id: transfer.id, customer_name: customerName, reason },
     });
     sendPushToUser(fronterUserId, {
       title: 'Transfer rejected',
@@ -153,17 +182,15 @@ async function onTransferRejected({ transfer, closerName, reason }) {
     }).catch(() => {});
   }
 
-  // Notify fronter company managers
   const fronterMgrIds = await getUserIdsByLevel(companyId, ['manager', 'fronter_manager', 'operations_manager']);
   await notifyUsers(fronterMgrIds, {
     companyId,
-    type: 'transfer_rejected',
-    title: 'Transfer rejected by closer',
+    type:    'transfer_rejected',
+    title:   'Transfer rejected by closer',
     message: `${closerName} rejected the transfer for ${customerName}.`,
-    data: { transfer_id: transfer.id, customer_name: customerName, reason },
+    data:    { transfer_id: transfer.id, customer_name: customerName, reason },
   });
 
-  // Also notify managers in the closer's company (different company from transfer)
   if (transfer.assigned_closer_id) {
     const { data: closerRole } = await supabaseAdmin
       .from('user_company_roles')
@@ -175,19 +202,15 @@ async function onTransferRejected({ transfer, closerName, reason }) {
       const closerMgrIds = await getUserIdsByLevel(closerRole.company_id, ['closer_manager', 'operations_manager', 'company_admin']);
       await notifyUsers(closerMgrIds, {
         companyId: closerRole.company_id,
-        type: 'transfer_rejected',
-        title: 'Transfer rejected',
+        type:    'transfer_rejected',
+        title:   'Transfer rejected',
         message: `${closerName} rejected the transfer for ${customerName}.`,
-        data: { transfer_id: transfer.id, customer_name: customerName, reason },
+        data:    { transfer_id: transfer.id, customer_name: customerName, reason },
       });
     }
   }
 }
 
-/**
- * Fronter manager edited a transfer (with reason).
- * Notify: the fronter who created it.
- */
 async function onTransferEdited({ transfer, editorName, reason }) {
   const customerName  = transfer.form_data?.customer_name || 'Customer';
   const fronterUserId = transfer.created_by;
@@ -195,19 +218,14 @@ async function onTransferEdited({ transfer, editorName, reason }) {
   if (fronterUserId && fronterUserId !== transfer._editorId) {
     await createNotification({
       userId: fronterUserId, companyId: transfer.company_id,
-      type: 'transfer_edited',
-      title: 'Your transfer was updated',
+      type:    'transfer_edited',
+      title:   'Your transfer was updated',
       message: `${editorName} edited the transfer for ${customerName}. Reason: ${reason}`,
-      data: { transfer_id: transfer.id, customer_name: customerName, reason },
+      data:    { transfer_id: transfer.id, customer_name: customerName, reason },
     });
   }
 }
 
-
-/**
- * Closer submitted sale for compliance review.
- * Notify: all compliance_managers in the company.
- */
 async function onSaleSubmittedForReview({ sale, submitterName }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
@@ -216,31 +234,29 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
   const complianceIds = await getUserIdsByLevel(companyId, ['compliance_manager']);
   await notifyUsers(complianceIds, {
     companyId,
-    type:    'sale_pending_review',
-    title:   'Sale awaiting compliance review',
-    message: `${submitterName} submitted ${customerName} (Ref: ${refNo}) for review.`,
-    data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    type:      'sale_pending_review',
+    title:     'Sale awaiting compliance review',
+    message:   `${submitterName} submitted ${customerName} (Ref: ${refNo}) for review.`,
+    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    dedupBase: `sale_pending_${sale.id}`,
   });
 }
 
-/**
- * Compliance approved a sale → closed_won.
- * Notify: closer + closer company managers + fronter (via transfer link) + fronter company managers.
- */
 async function onSaleApproved({ sale, reviewerName }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
+  const hour         = hourBlock();
 
-  // Notify the closer who owns the sale
   const closerId = sale.closer_id || sale.submitted_by;
   if (closerId) {
     await createNotification({
       userId: closerId, companyId,
-      type:    'sale_approved',
-      title:   'Sale approved by compliance!',
-      message: `${customerName} (Ref: ${refNo}) was approved by ${reviewerName}.`,
-      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      type:     'sale_approved',
+      title:    'Sale approved by compliance!',
+      message:  `${customerName} (Ref: ${refNo}) was approved by ${reviewerName}.`,
+      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      dedupKey: `sale_approved_${sale.id}_${closerId}_${hour}`,
     });
     sendPushToUser(closerId, {
       title: 'Sale approved!',
@@ -250,17 +266,16 @@ async function onSaleApproved({ sale, reviewerName }) {
     }).catch(() => {});
   }
 
-  // Notify managers in closer's company
   const closerMgrIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
   await notifyUsers(closerMgrIds, {
     companyId,
-    type:    'sale_approved',
-    title:   `Sale confirmed — ${customerName}`,
-    message: `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.`,
-    data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    type:      'sale_approved',
+    title:     `Sale confirmed — ${customerName}`,
+    message:   `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.`,
+    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    dedupBase: `sale_approved_mgr_${sale.id}`,
   });
 
-  // Notify the fronter + their company managers (sale is only confirmed at this point)
   let fronterUserId    = sale.fronter_id || null;
   let fronterCompanyId = null;
   if (sale.transfer_id) {
@@ -278,10 +293,11 @@ async function onSaleApproved({ sale, reviewerName }) {
   if (fronterUserId) {
     await createNotification({
       userId: fronterUserId, companyId: fronterCompanyId || companyId,
-      type:    'sale_approved',
-      title:   'Your lead was confirmed as a sale!',
-      message: `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
-      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      type:     'sale_approved',
+      title:    'Your lead was confirmed as a sale!',
+      message:  `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
+      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      dedupKey: `sale_approved_${sale.id}_${fronterUserId}_${hour}`,
     });
     sendPushToUser(fronterUserId, {
       title: 'Lead confirmed!',
@@ -293,18 +309,15 @@ async function onSaleApproved({ sale, reviewerName }) {
 
   if (fronterCompanyId && fronterCompanyId !== companyId) {
     await notifyFloorManagers(fronterCompanyId, {
-      type:    'sale_approved',
-      title:   `Transfer confirmed as sale — ${customerName}`,
-      message: `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
-      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      type:      'sale_approved',
+      title:     `Transfer confirmed as sale — ${customerName}`,
+      message:   `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
+      data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      dedupBase: `sale_approved_fmgr_${sale.id}`,
     });
   }
 }
 
-/**
- * Compliance returned a sale to closer with note.
- * Notify: closer + their manager.
- */
 async function onSaleReturned({ sale, reviewerName, note }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
@@ -314,10 +327,11 @@ async function onSaleReturned({ sale, reviewerName, note }) {
   if (closerId) {
     await createNotification({
       userId: closerId, companyId,
-      type:    'sale_needs_revision',
-      title:   'Sale returned — changes required',
-      message: `${reviewerName} returned ${customerName} (Ref: ${refNo}). Note: ${note}`,
-      data:    { sale_id: sale.id, reference_no: refNo, customer_name: customerName, note },
+      type:     'sale_needs_revision',
+      title:    'Sale returned — changes required',
+      message:  `${reviewerName} returned ${customerName} (Ref: ${refNo}). Note: ${note}`,
+      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, note },
+      dedupKey: `sale_returned_${sale.id}_${closerId}_${hourBlock()}`,
     });
     sendPushToUser(closerId, {
       title: 'Sale needs revision',
@@ -327,7 +341,6 @@ async function onSaleReturned({ sale, reviewerName, note }) {
     }).catch(() => {});
   }
 
-  // Notify closer's manager
   const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager']);
   await notifyUsers(managerIds, {
     companyId,
@@ -338,18 +351,15 @@ async function onSaleReturned({ sale, reviewerName, note }) {
   });
 }
 
-/**
- * Compliance manager updated a sale.
- */
 async function onComplianceUpdate({ sale, editorName, reason }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
 
   await notifyManagers(sale.company_id, {
-    type: 'compliance_updated',
-    title: `Compliance update — ${sale.status?.toUpperCase()}`,
+    type:    'compliance_updated',
+    title:   `Compliance update — ${sale.status?.toUpperCase()}`,
     message: `${editorName} updated ${customerName} (Ref: ${refNo}) for compliance. Reason: ${reason}`,
-    data: { sale_id: sale.id, reference_no: refNo, status: sale.status, reason },
+    data:    { sale_id: sale.id, reference_no: refNo, status: sale.status, reason },
   });
 }
 

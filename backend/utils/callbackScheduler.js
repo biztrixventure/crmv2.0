@@ -10,13 +10,13 @@ const { sendPushToUser } = require('./pushService');
 const logger = require('./logger');
 
 let schedulerInterval = null;
+let isRunning         = false; // prevents overlapping ticks
 
 async function processDueCallbacks() {
   try {
-    const now = new Date();
-    const soon = new Date(now.getTime() + 60 * 1000); // next 60 seconds
+    const now  = new Date();
+    const soon = new Date(now.getTime() + 60 * 1000);
 
-    // Find all pending, un-notified callbacks due right now or overdue
     const { data: due, error } = await supabaseAdmin
       .from('callbacks')
       .select('id, user_id, company_id, customer_name, customer_phone, callback_at, notes')
@@ -58,13 +58,13 @@ async function processDueCallbacks() {
         });
         if (notifErr) logger.warn('SCHEDULER', `Notification insert error for ${cb.id}: ${notifErr.message}`);
 
-        // 2. Send Web Push (OS notification — fires to Windows/macOS notification center)
+        // 2. Send Web Push
         await sendPushToUser(cb.user_id, {
           title,
-          body:              message,
-          tag:               `callback-${cb.id}`,
+          body:               message,
+          tag:                `callback-${cb.id}`,
           requireInteraction: true,
-          data:              { type: 'callback_due', callback_id: cb.id },
+          data:               { type: 'callback_due', callback_id: cb.id },
         });
 
         // 3. Mark notified so we don't fire again
@@ -82,9 +82,6 @@ async function processDueCallbacks() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Expire callback_numbers: 7-day lock → claimable, 30-day → released
-// ─────────────────────────────────────────────────────────────────────────────
 async function processCallbackNumberExpiry() {
   try {
     const now = new Date().toISOString();
@@ -103,7 +100,6 @@ async function processCallbackNumberExpiry() {
         .update({ status: 'claimable', updated_at: now })
         .in('id', ids);
 
-      // Notify managers of each company that a number became claimable
       const byCompany = {};
       toClaimable.forEach(n => {
         if (!byCompany[n.company_id]) byCompany[n.company_id] = [];
@@ -111,7 +107,6 @@ async function processCallbackNumberExpiry() {
       });
 
       for (const [companyId, nums] of Object.entries(byCompany)) {
-        // Find managers in this company
         const { data: mgrs } = await supabaseAdmin
           .from('user_company_roles')
           .select('user_id, custom_roles(level)')
@@ -154,7 +149,6 @@ async function processCallbackNumberExpiry() {
         .update({ status: 'released', owner_id: null, updated_at: now })
         .in('id', ids);
 
-      // Close open claim records
       await supabaseAdmin
         .from('callback_number_claims')
         .update({ owned_until: now, release_reason: 'inactivity_30d' })
@@ -169,8 +163,20 @@ async function processCallbackNumberExpiry() {
 }
 
 async function runAll() {
-  await processDueCallbacks();
-  await processCallbackNumberExpiry();
+  // Guard: skip if a previous tick is still executing.
+  // Without this, slow DB or push sends can cause overlapping runs
+  // that produce duplicate callback notifications.
+  if (isRunning) {
+    logger.info('SCHEDULER', 'Previous tick still running — skipping');
+    return;
+  }
+  isRunning = true;
+  try {
+    await processDueCallbacks();
+    await processCallbackNumberExpiry();
+  } finally {
+    isRunning = false;
+  }
 }
 
 function startCallbackScheduler() {
