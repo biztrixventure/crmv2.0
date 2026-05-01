@@ -32,23 +32,10 @@ router.get('/', asyncHandler(async (req, res) => {
     case 'fronter':
       query = query.eq('created_by', userId);
       break;
-    case 'closer': {
-      // Show transfers assigned to this closer PLUS unassigned transfers
-      // from fronter companies linked to the closer's company (the shared pool).
-      const { data: closerLinks } = await supabaseAdmin
-        .from('company_links')
-        .select('fronter_company_id')
-        .eq('closer_company_id', companyId);
-      const poolIds = (closerLinks || []).map(l => l.fronter_company_id);
-      if (poolIds.length > 0) {
-        query = query.or(
-          `assigned_closer_id.eq.${userId},and(assigned_closer_id.is.null,company_id.in.(${poolIds.join(',')}))`
-        );
-      } else {
-        query = query.eq('assigned_closer_id', userId);
-      }
+    case 'closer':
+      // Only show transfers explicitly assigned to this closer
+      query = query.eq('assigned_closer_id', userId);
       break;
-    }
     case 'closer_manager':
     case 'compliance_manager': {
       // See transfers assigned to any user in their (closer) company

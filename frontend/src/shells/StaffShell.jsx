@@ -495,15 +495,15 @@ const StaffShell = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Leads — assigned to this closer + unassigned pool from linked fronter companies */}
+              {/* Assigned Transfers — only transfers explicitly assigned to this closer */}
               <Card className="p-6">
                 <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
-                  <Clock size={20} /> Leads
+                  <Clock size={20} /> Assigned Transfers
                 </h3>
                 {tLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : transfers.length === 0 ? (
-                  <p className="text-text-secondary text-center py-8">No leads available yet.</p>
+                  <p className="text-text-secondary text-center py-8">No transfers assigned yet.</p>
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {transfers.slice(0, 15).map(t => (

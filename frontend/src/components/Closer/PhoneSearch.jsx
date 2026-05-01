@@ -18,20 +18,20 @@ const TransferCard = ({ transfer, onCreateSale }) => {
     || 'Unknown';
   const phone = fd.customer_phone || fd.Phone || '—';
 
-  // All form_data fields except name/phone (already shown prominently)
   const skipKeys = new Set(['customer_name', 'customer_phone', 'FirstName', 'LastName', 'Phone']);
   const extraFields = Object.entries(fd)
     .filter(([k, v]) => v && !skipKeys.has(k))
-    .slice(0, 8);
+    .slice(0, 4);
 
   return (
-    <Card className="p-5 animate-fade-in">
-      <div className="flex items-start gap-4">
+    <div className="rounded-xl border px-3 py-2.5 animate-fade-in"
+      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+      <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
-          {/* Company slug + status + date */}
-          <div className="flex flex-wrap items-center gap-2 mb-2">
+          {/* Company + status row */}
+          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
             <span
-              className="px-2.5 py-0.5 rounded-lg text-xs font-bold uppercase tracking-widest"
+              className="px-1.5 py-0 rounded text-xs font-bold uppercase tracking-wider"
               style={{
                 backgroundColor: 'var(--color-primary-100)',
                 color: 'var(--color-primary-700)',
@@ -43,59 +43,48 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             <Badge variant={TRANSFER_BADGE[transfer.status] || 'secondary'} size="sm">
               {transfer.status}
             </Badge>
-            <span className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
-              <Clock size={11} />
-              {new Date(transfer.created_at).toLocaleString('en-US', {
-                month: 'short', day: 'numeric', year: 'numeric',
-                hour: '2-digit', minute: '2-digit',
-              })}
+            <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
+              {new Date(transfer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           </div>
 
-          {/* Customer */}
-          <p className="font-bold text-lg" style={{ color: 'var(--color-text)' }}>{customerName}</p>
-          <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-            <Phone size={12} style={{ display: 'inline', marginRight: 4 }} />
-            {phone}
+          {/* Name + phone on one line */}
+          <p className="font-semibold text-sm leading-tight" style={{ color: 'var(--color-text)' }}>
+            {customerName}
+            <span className="font-normal ml-2" style={{ color: 'var(--color-text-secondary)' }}>{phone}</span>
           </p>
 
-          {/* Form data fields */}
+          {/* Extra fields compact */}
           {extraFields.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 mt-2 pt-2"
-              style={{ borderTop: '1px solid var(--color-border)' }}>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
               {extraFields.map(([key, val]) => (
-                <div key={key}>
-                  <p className="text-xs capitalize" style={{ color: 'var(--color-text-tertiary)' }}>
-                    {key.replace(/_/g, ' ')}
-                  </p>
-                  <p className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>
-                    {String(val)}
-                  </p>
-                </div>
+                <span key={key} className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <span className="capitalize">{key.replace(/_/g, ' ')}</span>: <span style={{ color: 'var(--color-text-secondary)' }}>{String(val)}</span>
+                </span>
               ))}
             </div>
           )}
 
           {transfer.fronter_name && (
-            <p className="text-xs mt-3" style={{ color: 'var(--color-text-tertiary)' }}>
-              Added by: {transfer.fronter_name}
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+              By: {transfer.fronter_name}
             </p>
           )}
         </div>
 
         {/* Create Sale action */}
-        <div className="flex-shrink-0 pt-1">
+        <div className="flex-shrink-0">
           <button
             onClick={() => onCreateSale(transfer)}
-            className="flex items-center gap-1.5 py-2.5 px-4 rounded-xl font-semibold text-sm text-white
+            className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
                        hover:scale-[1.03] transition-all"
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap' }}
           >
-            <DollarSign size={14} /> Create Sale
+            <DollarSign size={12} /> Sale
           </button>
         </div>
       </div>
-    </Card>
+    </div>
   );
 };
 
@@ -123,57 +112,52 @@ const PhoneSearch = ({ onCreateSale }) => {
   };
 
   return (
-    <div>
-      {/* Search input */}
-      <Card className="p-6 mb-6">
-        <h3 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-          <Search size={20} style={{ color: 'var(--color-primary-600)' }} />
-          Search by Phone Number
-        </h3>
-        <form onSubmit={handleSearch} className="flex gap-3">
-          <div className="flex-1 relative">
-            <Phone
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2"
-              style={{ color: 'var(--color-text-tertiary)' }}
-            />
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="Enter phone number…"
-              className="input pl-9 w-full"
-              autoFocus
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex items-center gap-2 py-2 px-6 rounded-xl font-bold text-white disabled:opacity-50
-                       hover:scale-[1.02] transition-all"
-            style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
-          >
-            {loading
-              ? <><div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} /> Searching…</>
-              : <><Search size={16} /> Search</>}
-          </button>
-        </form>
-        {error && (
-          <p className="text-sm mt-2" style={{ color: 'var(--color-error-600)' }}>{error}</p>
-        )}
-      </Card>
+    <Card className="p-4">
+      {/* Search bar */}
+      <form onSubmit={handleSearch} className="flex gap-2 items-center">
+        <Search size={15} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
+        <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>Search Lead</span>
+        <div className="flex-1 relative">
+          <Phone
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          />
+          <input
+            type="tel"
+            value={phone}
+            onChange={e => setPhone(e.target.value)}
+            placeholder="Phone number…"
+            className="input pl-8 w-full text-sm h-9"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="flex items-center gap-1.5 py-2 px-4 rounded-lg font-semibold text-sm text-white disabled:opacity-50
+                     hover:scale-[1.02] transition-all flex-shrink-0"
+          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+        >
+          {loading
+            ? <div className="w-3.5 h-3.5 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+            : <Search size={14} />}
+          {loading ? 'Searching…' : 'Search'}
+        </button>
+      </form>
+      {error && (
+        <p className="text-xs mt-2 ml-1" style={{ color: 'var(--color-error-600)' }}>{error}</p>
+      )}
 
       {/* Results */}
       {results !== null && (
         results.length === 0 ? (
-          <Card className="p-10 text-center">
-            <Phone size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
-            <p style={{ color: 'var(--color-text-secondary)' }}>No transfers found for that number.</p>
-          </Card>
+          <p className="text-sm text-center mt-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+            No transfers found for that number.
+          </p>
         ) : (
-          <div className="space-y-3">
-            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              {results.length} record{results.length !== 1 ? 's' : ''} found — most recent first
+          <div className="mt-3 space-y-2">
+            <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              {results.length} record{results.length !== 1 ? 's' : ''} — most recent first
             </p>
             {results.map(t => (
               <TransferCard key={t.id} transfer={t} onCreateSale={onCreateSale} />
@@ -181,7 +165,7 @@ const PhoneSearch = ({ onCreateSale }) => {
           </div>
         )
       )}
-    </div>
+    </Card>
   );
 };
 
