@@ -72,9 +72,13 @@ router.get('/', asyncHandler(async (req, res) => {
   if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
 
   if (search) {
-    // Cast JSONB to text so any field (customer_phone, Phone, customer_name, etc.) is searched
-    // regardless of the key name configured by the admin.
-    query = query.filter('form_data::text', 'ilike', `%${search}%`);
+    // PostgREST JSONB text-extraction notation: ->>key (no SQL quotes around key)
+    query = query.or(
+      `form_data->>customer_name.ilike.%${search}%,` +
+      `form_data->>customer_phone.ilike.%${search}%,` +
+      `form_data->>Phone.ilike.%${search}%,` +
+      `form_data->>FirstName.ilike.%${search}%`
+    );
   }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -221,13 +225,12 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 
   if (!fronterCompanyIds.length) return res.json({ transfers: [] });
 
-  // Search transfers — cast form_data to text so any phone field name (customer_phone,
-  // Phone, mobile, etc.) is matched regardless of how the admin named the field.
+  // PostgREST JSONB text-extraction: ->>key (no SQL quotes). Covers both naming conventions.
   const { data, error } = await supabaseAdmin
     .from('transfers')
     .select('*')
     .in('company_id', fronterCompanyIds)
-    .filter('form_data::text', 'ilike', `%${q}%`)
+    .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
     .order('created_at', { ascending: false })
     .limit(50);
 
