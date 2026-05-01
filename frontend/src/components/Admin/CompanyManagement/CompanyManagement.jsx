@@ -62,11 +62,12 @@ const CompanyManagement = () => {
       if (selectedCompany) {
         await updateCompany(selectedCompany.id, {
           name: formData.name,
+          slug: formData.slug || null,
           logo_url: formData.logo_url,
           company_type: formData.company_type,
         });
       } else {
-        await createCompany(formData.name, formData.logo_url, formData.company_type);
+        await createCompany(formData.name, formData.slug, formData.logo_url, formData.company_type);
       }
       setShowModal(false);
       setSelectedCompany(null);

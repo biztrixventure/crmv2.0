@@ -98,6 +98,7 @@ router.post('/',
     body('notes').optional().trim(),
     body('source').optional().isIn(['manual', 'transfer', 'sale']),
     body('source_id').optional().isUUID(),
+    body('priority').optional().isIn(['High', 'Medium', 'Low']),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -118,6 +119,7 @@ router.post('/',
         customer_email: req.body.customer_email || null,
         notes:          req.body.notes          || null,
         callback_at:    req.body.callback_at,
+        priority:       req.body.priority || 'Medium',
         status:         'pending',
         source:         req.body.source  || 'manual',
         source_id:      req.body.source_id || null,
@@ -143,12 +145,13 @@ router.put('/:id',
     body('notes').optional().trim(),
     body('customer_name').optional().trim(),
     body('customer_phone').optional().trim(),
+    body('priority').optional().isIn(['High', 'Medium', 'Low']),
   ],
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const allowed = ['status', 'notes', 'callback_at', 'customer_name', 'customer_phone', 'customer_email'];
+    const allowed = ['status', 'notes', 'callback_at', 'customer_name', 'customer_phone', 'customer_email', 'priority'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];

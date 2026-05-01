@@ -1,13 +1,13 @@
 /**
  * CallbacksPage — shared for Fronter and Closer dashboards.
- * Lists scheduled callbacks with status, allows create/edit/delete.
- * When a callback is due, the server sends both an in-app notification
- * and a browser push (OS notification center).
+ * Compact list with click-to-drawer for full details.
+ * Priority (High / Medium / Low) shown as colored badges.
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
   Phone, Plus, Clock, CheckCircle, XCircle, PhoneOff,
-  Trash2, Edit2, Bell, X, Calendar, Voicemail,
+  Trash2, Edit2, Bell, X, Calendar, Voicemail, ChevronRight,
+  AlertTriangle, ArrowRight,
 } from 'lucide-react';
 import client from '../../api/client';
 import { supabase } from '../../api/supabase';
@@ -18,16 +18,33 @@ const STATUS_CONFIG = {
   completed:         { label: 'Completed',         color: '#10b981', bg: '#d1fae5', icon: CheckCircle  },
   cancelled:         { label: 'Cancelled',         color: '#ef4444', bg: '#fee2e2', icon: XCircle      },
   no_answer:         { label: 'No Answer',         color: '#6b7280', bg: '#f3f4f6', icon: PhoneOff     },
-  answering_machine: { label: 'Answering Machine', color: '#8b5cf6', bg: '#ede9fe', icon: Voicemail    },
+  answering_machine: { label: 'Ans. Machine',      color: '#8b5cf6', bg: '#ede9fe', icon: Voicemail    },
+};
+
+const PRIORITY_CONFIG = {
+  High:   { label: 'High',   color: '#dc2626', bg: '#fee2e2', dot: '#ef4444' },
+  Medium: { label: 'Medium', color: '#d97706', bg: '#fef3c7', dot: '#f59e0b' },
+  Low:    { label: 'Low',    color: '#2563eb', bg: '#dbeafe', dot: '#3b82f6' },
 };
 
 const StatusBadge = ({ status }) => {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold"
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
       style={{ backgroundColor: cfg.bg, color: cfg.color }}>
-      <Icon size={11} />
+      <Icon size={10} />
+      {cfg.label}
+    </span>
+  );
+};
+
+const PriorityBadge = ({ priority }) => {
+  const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.Medium;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+      style={{ backgroundColor: cfg.bg, color: cfg.color }}>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
       {cfg.label}
     </span>
   );
@@ -39,7 +56,7 @@ const formatDateTime = (iso) => {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-const isPast = (iso) => iso && new Date(iso) < new Date();
+const isPast   = (iso) => iso && new Date(iso) < new Date();
 const isDueSoon = (iso) => {
   if (!iso) return false;
   const diff = new Date(iso) - new Date();
@@ -52,11 +69,10 @@ const toLocalInputValue = (utcIso) => {
   return new Date(d.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
-// ── Outcome Notes Modal — shown when agent clicks a quick-status button ────────
+// ── Outcome Notes Modal ──────────────────────────────────────────────────────
 const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose }) => {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const cfg = STATUS_CONFIG[pendingStatus] || STATUS_CONFIG.pending;
 
   const submit = async (withNotes) => {
     setSaving(true);
@@ -70,58 +86,37 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
       <div className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-fade-in"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base" style={{ color: 'var(--color-text)' }}>Outcome Notes</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary">
             <X size={15} style={{ color: 'var(--color-text-tertiary)' }} />
           </button>
         </div>
-
-        <div className="mb-4 flex items-center gap-2 flex-wrap">
-          <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Marking <strong style={{ color: 'var(--color-text)' }}>{customerName}</strong> as
-          </span>
+        <div className="mb-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Marking <strong style={{ color: 'var(--color-text)' }}>{customerName}</strong> as&nbsp;
           <StatusBadge status={pendingStatus} />
         </div>
-
         <div className="mb-5">
           <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-            Call outcome
-            <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              (optional but recommended)
-            </span>
+            Call outcome <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>(optional)</span>
           </label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            className="input"
-            rows={3}
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} className="input" rows={3}
             placeholder={
               pendingStatus === 'answering_machine' ? 'Left voicemail. Will call again tomorrow...'
               : pendingStatus === 'no_answer'       ? 'No answer. Will retry in 2 hours...'
-              : pendingStatus === 'completed'       ? 'Spoke with customer. Resolved / booked...'
-              : 'Add notes about this call...'
-            }
-            autoFocus
-          />
+              : 'Spoke with customer. Resolved / booked...'
+            } autoFocus />
         </div>
-
         <div className="flex justify-end gap-3">
-          <button
-            onClick={() => submit(false)}
-            disabled={saving}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+          <button onClick={() => submit(false)} disabled={saving}
+            className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
             Skip
           </button>
-          <button
-            onClick={() => submit(true)}
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+          <button onClick={() => submit(true)} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
             style={{ background: 'var(--gradient-sidebar)' }}>
-            {saving
-              ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            {saving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
               : <CheckCircle size={14} />}
             Save & Submit
           </button>
@@ -140,6 +135,7 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
     customer_phone: callback?.customer_phone || '',
     customer_email: callback?.customer_email || '',
     notes:          callback?.notes          || '',
+    priority:       callback?.priority       || 'Medium',
     callback_at:    callback?.callback_at
       ? toLocalInputValue(callback.callback_at)
       : toLocalInputValue(Date.now() + 30 * 60000),
@@ -177,7 +173,6 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
       <div className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -188,7 +183,7 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
               {isEdit ? 'Edit Callback' : 'Schedule Callback'}
             </h3>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-bg-secondary transition-colors">
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-bg-secondary">
             <X size={16} style={{ color: 'var(--color-text-tertiary)' }} />
           </button>
         </div>
@@ -197,74 +192,85 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
           style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>{err}</div>}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                Customer Name <span className="text-red-500">*</span>
-              </label>
-              <input value={form.customer_name} onChange={e => setForm(p => ({...p, customer_name: e.target.value}))}
-                className="input" placeholder="John Smith" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Phone</label>
-                <input value={form.customer_phone} onChange={e => setForm(p => ({...p, customer_phone: e.target.value}))}
-                  className="input" placeholder="(555) 000-0000" type="tel" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Email</label>
-                <input value={form.customer_email} onChange={e => setForm(p => ({...p, customer_email: e.target.value}))}
-                  className="input" placeholder="john@email.com" type="email" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                Callback Date & Time <span className="text-red-500">*</span>
-              </label>
-              <input value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
-                className="input" type="datetime-local" required />
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {[
-                  { label: '+5 min',   ms: 5  * 60 * 1000 },
-                  { label: '+10 min',  ms: 10 * 60 * 1000 },
-                  { label: '+15 min',  ms: 15 * 60 * 1000 },
-                  { label: '+1 hour',  ms: 60 * 60 * 1000 },
-                  { label: 'Tomorrow', ms: 24 * 60 * 60 * 1000 },
-                ].map(({ label, ms }) => (
-                  <button key={label} type="button"
-                    onClick={() => setForm(p => ({ ...p, callback_at: toLocalInputValue(Date.now() + ms) }))}
-                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Notes</label>
-              <textarea value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))}
-                className="input" rows={2} placeholder="What to discuss…" />
-            </div>
-            {isEdit && (
-              <div>
-                <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Status</label>
-                <select value={form.status} onChange={e => setForm(p => ({...p, status: e.target.value}))} className="input">
-                  {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                    <option key={k} value={k}>{v.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+              Customer Name <span className="text-red-500">*</span>
+            </label>
+            <input value={form.customer_name} onChange={e => setForm(p => ({...p, customer_name: e.target.value}))}
+              className="input" placeholder="John Smith" />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Phone</label>
+              <input value={form.customer_phone} onChange={e => setForm(p => ({...p, customer_phone: e.target.value}))}
+                className="input" placeholder="(555) 000-0000" type="tel" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Priority</label>
+              <select value={form.priority} onChange={e => setForm(p => ({...p, priority: e.target.value}))} className="input">
+                <option value="High">🔴 High</option>
+                <option value="Medium">🟡 Medium</option>
+                <option value="Low">🔵 Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Email</label>
+            <input value={form.customer_email} onChange={e => setForm(p => ({...p, customer_email: e.target.value}))}
+              className="input" placeholder="john@email.com" type="email" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+              Callback Date & Time <span className="text-red-500">*</span>
+            </label>
+            <input value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
+              className="input" type="datetime-local" required />
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                { label: '+5 min',   ms: 5  * 60 * 1000 },
+                { label: '+10 min',  ms: 10 * 60 * 1000 },
+                { label: '+15 min',  ms: 15 * 60 * 1000 },
+                { label: '+1 hour',  ms: 60 * 60 * 1000 },
+                { label: 'Tomorrow', ms: 24 * 60 * 60 * 1000 },
+              ].map(({ label, ms }) => (
+                <button key={label} type="button"
+                  onClick={() => setForm(p => ({ ...p, callback_at: toLocalInputValue(Date.now() + ms) }))}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Notes</label>
+            <textarea value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))}
+              className="input" rows={2} placeholder="What to discuss…" />
+          </div>
+
+          {isEdit && (
+            <div>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Status</label>
+              <select value={form.status} onChange={e => setForm(p => ({...p, status: e.target.value}))} className="input">
+                {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                  <option key={k} value={k}>{v.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose}
-              className="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
               style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
               Cancel
             </button>
             <button type="submit" disabled={saving}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
               style={{ background: 'var(--gradient-sidebar)' }}>
               {saving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Phone size={14} />}
               {isEdit ? 'Save Changes' : 'Schedule'}
@@ -272,6 +278,137 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
           </div>
         </form>
       </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Detail Drawer ────────────────────────────────────────────────────────────
+const CallbackDrawer = ({ callback: cb, onEdit, onDelete, onStatusChange, deleting, onClose }) => {
+  if (!cb) return null;
+  const past = isPast(cb.callback_at) && cb.status === 'pending';
+  const soon = isDueSoon(cb.callback_at);
+
+  return (
+    <div className="fixed inset-0 z-40 flex" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ml-auto w-full max-w-sm h-full overflow-y-auto shadow-2xl flex flex-col"
+        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
+
+        {/* Drawer header */}
+        <div className="flex items-center justify-between p-4 border-b"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              <Phone size={14} className="text-white" />
+            </div>
+            <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Callback Detail</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary">
+            <X size={15} style={{ color: 'var(--color-text-tertiary)' }} />
+          </button>
+        </div>
+
+        <div className="flex-1 p-4 space-y-4">
+          {/* Urgency flags */}
+          {past && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl text-sm font-semibold"
+              style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
+              <AlertTriangle size={14} /> Overdue
+            </div>
+          )}
+          {soon && !past && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl text-sm font-semibold"
+              style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>
+              <Clock size={14} /> Due in &lt;30 min
+            </div>
+          )}
+
+          {/* Name + badges */}
+          <div>
+            <p className="font-bold text-lg leading-tight mb-2" style={{ color: 'var(--color-text)' }}>
+              {cb.customer_name}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <PriorityBadge priority={cb.priority} />
+              <StatusBadge status={cb.status} />
+            </div>
+          </div>
+
+          {/* Details grid */}
+          <div className="space-y-2.5">
+            {cb.customer_phone && (
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
+                <Phone size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+                {cb.customer_phone}
+              </div>
+            )}
+            {cb.customer_email && (
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
+                <span style={{ color: 'var(--color-text-tertiary)' }}>✉</span>
+                {cb.customer_email}
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
+              <Calendar size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+              {formatDateTime(cb.callback_at)}
+            </div>
+            {cb.user_name && (
+              <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                Scheduled by: {cb.user_name}
+              </div>
+            )}
+          </div>
+
+          {cb.notes && (
+            <div className="p-3 rounded-xl text-sm"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>NOTES</p>
+              {cb.notes}
+            </div>
+          )}
+
+          {/* Quick status actions */}
+          {cb.status === 'pending' && (
+            <div>
+              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-tertiary)' }}>MARK AS</p>
+              <div className="flex flex-col gap-1.5">
+                <button onClick={() => onStatusChange(cb.id, 'completed', cb.customer_name)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
+                  style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                  <CheckCircle size={13} /> Done
+                </button>
+                <button onClick={() => onStatusChange(cb.id, 'no_answer', cb.customer_name)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
+                  style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
+                  <PhoneOff size={13} /> No Answer
+                </button>
+                <button onClick={() => onStatusChange(cb.id, 'answering_machine', cb.customer_name)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
+                  style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+                  <Voicemail size={13} /> Answering Machine
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="p-4 border-t flex gap-2" style={{ borderColor: 'var(--color-border)' }}>
+          <button onClick={() => { onClose(); onEdit(cb); }}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold border transition-colors hover:bg-bg-secondary"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+            <Edit2 size={13} /> Edit
+          </button>
+          <button onClick={() => { onClose(); onDelete(cb.id); }} disabled={deleting === cb.id}
+            className="flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-sm font-semibold transition-colors hover:bg-red-50 disabled:opacity-50"
+            style={{ color: '#dc2626', border: '1px solid #fca5a5' }}>
+            {deleting === cb.id
+              ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-red-500" />
+              : <Trash2 size={13} />}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -289,8 +426,8 @@ const PushBanner = ({ onEnable, onDismiss, loading, alreadyGranted }) => (
         </p>
         <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
           {alreadyGranted
-            ? 'Your notification subscription was reset. Click Enable to receive Windows notifications when a callback is due.'
-            : 'Get Windows/browser notifications when a callback is due — even when the tab is in the background.'}
+            ? 'Your notification subscription was reset. Click Enable to receive notifications.'
+            : 'Get browser notifications when a callback is due — even when the tab is in the background.'}
         </p>
       </div>
     </div>
@@ -301,7 +438,7 @@ const PushBanner = ({ onEnable, onDismiss, loading, alreadyGranted }) => (
         {loading ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <Bell size={12} />}
         Enable
       </button>
-      <button onClick={onDismiss} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">
+      <button onClick={onDismiss} className="p-1.5 rounded-lg hover:bg-bg-secondary">
         <X size={13} style={{ color: 'var(--color-text-tertiary)' }} />
       </button>
     </div>
@@ -314,9 +451,9 @@ const CallbacksPage = ({ user }) => {
   const [loading,      setLoading]      = useState(false);
   const [filter,       setFilter]       = useState('pending');
   const [modal,        setModal]        = useState(null);
+  const [drawerCb,     setDrawerCb]     = useState(null);
   const [deleting,     setDeleting]     = useState(null);
   const [showPushBanner, setShowPushBanner] = useState(false);
-  // { id, status, customerName } — pending outcome-notes prompt
   const [outcomeModal, setOutcomeModal] = useState(null);
 
   const { permission, subscribed, loading: pushLoading, isSupported, subscribe } =
@@ -353,7 +490,10 @@ const CallbacksPage = ({ user }) => {
 
   const handleSave = (cb, action) => {
     if (action === 'create') setCallbacks(prev => [cb, ...prev]);
-    if (action === 'edit')   setCallbacks(prev => prev.map(x => x.id === cb.id ? cb : x));
+    if (action === 'edit') {
+      setCallbacks(prev => prev.map(x => x.id === cb.id ? cb : x));
+      if (drawerCb?.id === cb.id) setDrawerCb(cb);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -362,10 +502,10 @@ const CallbacksPage = ({ user }) => {
     try {
       await client.delete(`callbacks/${id}`);
       setCallbacks(prev => prev.filter(x => x.id !== id));
+      if (drawerCb?.id === id) setDrawerCb(null);
     } catch {} finally { setDeleting(null); }
   };
 
-  // Called from outcome modal — submits status + optional notes
   const handleStatusConfirm = async (status, notes) => {
     if (!outcomeModal) return;
     const { id } = outcomeModal;
@@ -374,11 +514,11 @@ const CallbacksPage = ({ user }) => {
       if (notes) payload.notes = notes;
       const res = await client.put(`callbacks/${id}`, payload);
       setCallbacks(prev => prev.map(x => x.id === id ? res.data.callback : x));
+      if (drawerCb?.id === id) setDrawerCb(res.data.callback);
     } catch {}
     setOutcomeModal(null);
   };
 
-  // Quick-status buttons open the outcome modal instead of firing immediately
   const handleStatusQuick = (id, status, customerName) => {
     setOutcomeModal({ id, status, customerName });
   };
@@ -401,14 +541,13 @@ const CallbacksPage = ({ user }) => {
             )}
           </h2>
           <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            Schedule and track customer callbacks. You'll be notified when it's time.
+            Schedule and track customer callbacks. Click any row for details.
           </p>
         </div>
         <button onClick={() => setModal('create')}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:-translate-y-0.5"
           style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-          <Plus size={16} />
-          Schedule Callback
+          <Plus size={16} /> Schedule Callback
         </button>
       </div>
 
@@ -423,18 +562,17 @@ const CallbacksPage = ({ user }) => {
 
       {subscribed && (
         <div className="mb-4 flex items-center gap-2 text-xs font-medium" style={{ color: '#10b981' }}>
-          <Bell size={13} />
-          Browser notifications enabled
+          <Bell size={13} /> Browser notifications enabled
         </div>
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-1 mb-5 p-1 rounded-xl w-fit"
+      <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit"
         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {[
-          { key: 'pending',   label: 'Pending'   },
-          { key: 'all',       label: 'All'        },
-          { key: 'completed', label: 'Completed'  },
+          { key: 'pending',   label: 'Pending'  },
+          { key: 'all',       label: 'All'       },
+          { key: 'completed', label: 'Completed' },
         ].map(f => (
           <button key={f.key} onClick={() => setFilter(f.key)}
             className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all"
@@ -448,7 +586,7 @@ const CallbacksPage = ({ user }) => {
         ))}
       </div>
 
-      {/* List */}
+      {/* Compact list */}
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
@@ -468,75 +606,86 @@ const CallbacksPage = ({ user }) => {
           </button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {callbacks.map(cb => {
+        <div className="rounded-2xl border overflow-hidden"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+          {callbacks.map((cb, idx) => {
             const past = isPast(cb.callback_at) && cb.status === 'pending';
             const soon = isDueSoon(cb.callback_at);
+            const isLast = idx === callbacks.length - 1;
             return (
               <div key={cb.id}
-                className="rounded-2xl border p-4 transition-all duration-150 hover:shadow-md group"
+                onClick={() => setDrawerCb(cb)}
+                className="flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-bg-secondary group"
                 style={{
-                  borderColor: past ? '#fca5a5' : soon ? '#fde68a' : 'var(--color-border)',
-                  backgroundColor: past ? '#fff5f5' : soon ? '#fffbeb' : 'var(--color-surface)',
+                  borderBottom: isLast ? 'none' : '1px solid var(--color-border)',
+                  backgroundColor: past ? 'rgba(254,242,242,0.5)' : soon ? 'rgba(255,251,235,0.5)' : undefined,
                 }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <p className="font-bold text-text truncate">{cb.customer_name}</p>
-                      <StatusBadge status={cb.status} />
-                      {past && <span className="text-xs font-bold text-red-600">Overdue</span>}
-                      {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
-                    </div>
-                    <div className="flex flex-wrap gap-x-3 text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
-                      {cb.customer_email && <span>✉ {cb.customer_email}</span>}
-                    </div>
-                    <div className="flex items-center gap-1 text-xs mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                      <Calendar size={11} />
-                      {formatDateTime(cb.callback_at)}
-                    </div>
-                    {cb.notes && <p className="text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>{cb.notes}</p>}
-                  </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-col gap-1.5 flex-shrink-0 items-end">
-                    {cb.status === 'pending' && (
-                      <>
-                        <button onClick={() => handleStatusQuick(cb.id, 'completed', cb.customer_name)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105"
-                          style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
-                          <CheckCircle size={12} /> Done
-                        </button>
-                        <button onClick={() => handleStatusQuick(cb.id, 'no_answer', cb.customer_name)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105"
-                          style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
-                          <PhoneOff size={12} /> No Answer
-                        </button>
-                        <button onClick={() => handleStatusQuick(cb.id, 'answering_machine', cb.customer_name)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105"
-                          style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
-                          <Voicemail size={12} /> Ans. Machine
-                        </button>
-                      </>
-                    )}
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setModal(cb)}
-                        className="p-1.5 rounded-lg transition-colors hover:bg-primary-100" title="Edit">
-                        <Edit2 size={13} style={{ color: 'var(--color-primary-600)' }} />
-                      </button>
-                      <button onClick={() => handleDelete(cb.id)} disabled={deleting === cb.id}
-                        className="p-1.5 rounded-lg transition-colors hover:bg-red-100" title="Delete">
-                        {deleting === cb.id
-                          ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
-                          : <Trash2 size={13} style={{ color: '#ef4444' }} />}
-                      </button>
-                    </div>
+                {/* Priority dot */}
+                <span className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: PRIORITY_CONFIG[cb.priority]?.dot || '#f59e0b' }} />
+
+                {/* Main info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm truncate" style={{ color: 'var(--color-text)' }}>
+                      {cb.customer_name}
+                    </span>
+                    <PriorityBadge priority={cb.priority} />
+                    <StatusBadge status={cb.status} />
+                    {past  && <span className="text-xs font-bold text-red-600">Overdue</span>}
+                    {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <span className="flex items-center gap-1">
+                      <Calendar size={10} /> {formatDateTime(cb.callback_at)}
+                    </span>
+                    {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                   </div>
                 </div>
+
+                {/* Quick actions (pending only, shown on hover) */}
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                  onClick={e => e.stopPropagation()}>
+                  {cb.status === 'pending' && (
+                    <>
+                      <button onClick={() => handleStatusQuick(cb.id, 'completed', cb.customer_name)}
+                        className="px-2 py-1 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                        style={{ backgroundColor: '#d1fae5', color: '#065f46' }} title="Done">
+                        <CheckCircle size={12} />
+                      </button>
+                      <button onClick={() => handleStatusQuick(cb.id, 'no_answer', cb.customer_name)}
+                        className="px-2 py-1 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                        style={{ backgroundColor: '#f3f4f6', color: '#374151' }} title="No Answer">
+                        <PhoneOff size={12} />
+                      </button>
+                      <button onClick={() => handleStatusQuick(cb.id, 'answering_machine', cb.customer_name)}
+                        className="px-2 py-1 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                        style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }} title="Ans. Machine">
+                        <Voicemail size={12} />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <ChevronRight size={14} className="flex-shrink-0 opacity-30 group-hover:opacity-70 transition-opacity"
+                  style={{ color: 'var(--color-text-secondary)' }} />
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Detail Drawer */}
+      {drawerCb && (
+        <CallbackDrawer
+          callback={drawerCb}
+          onEdit={(cb) => setModal(cb)}
+          onDelete={handleDelete}
+          onStatusChange={handleStatusQuick}
+          deleting={deleting}
+          onClose={() => setDrawerCb(null)}
+        />
       )}
 
       {/* Create/Edit Modal */}

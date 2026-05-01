@@ -18,6 +18,23 @@ const STATUS_CONFIG = {
   answering_machine: { label: 'Answering Machine', color: '#8b5cf6', bg: '#ede9fe', icon: Voicemail    },
 };
 
+const PRIORITY_CONFIG = {
+  High:   { color: '#dc2626', bg: '#fee2e2', dot: '#ef4444' },
+  Medium: { color: '#d97706', bg: '#fef3c7', dot: '#f59e0b' },
+  Low:    { color: '#2563eb', bg: '#dbeafe', dot: '#3b82f6' },
+};
+
+const PriorityBadge = ({ priority }) => {
+  const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.Medium;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+      style={{ backgroundColor: cfg.bg, color: cfg.color }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cfg.dot }} />
+      {priority || 'Medium'}
+    </span>
+  );
+};
+
 const StatusBadge = ({ status }) => {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
   const Icon = cfg.icon;
@@ -125,8 +142,9 @@ const CallbacksOverview = ({ user }) => {
   const [loading,      setLoading]      = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [memberFilter, setMemberFilter] = useState('all');
-  const [updatingId,   setUpdatingId]   = useState(null);
-  const [outcomeModal, setOutcomeModal] = useState(null); // { id, status, customerName }
+  const [updatingId,      setUpdatingId]      = useState(null);
+  const [priorityFilter,  setPriorityFilter]  = useState('all');
+  const [outcomeModal,    setOutcomeModal]    = useState(null); // { id, status, customerName }
 
   const members = useCallback(() => {
     const map = {};
@@ -167,7 +185,8 @@ const CallbacksOverview = ({ user }) => {
   };
 
   const visible = callbacks.filter(c =>
-    memberFilter === 'all' || c.user_id === memberFilter
+    (memberFilter   === 'all' || c.user_id  === memberFilter) &&
+    (priorityFilter === 'all' || c.priority === priorityFilter)
   );
 
   const counts = {
@@ -241,6 +260,26 @@ const CallbacksOverview = ({ user }) => {
           ))}
         </div>
 
+        <div className="flex gap-1 p-1 rounded-xl"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {[
+            { key: 'all',    label: 'All Priority' },
+            { key: 'High',   label: '🔴 High'      },
+            { key: 'Medium', label: '🟡 Medium'     },
+            { key: 'Low',    label: '🔵 Low'        },
+          ].map(f => (
+            <button key={f.key} onClick={() => setPriorityFilter(f.key)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                backgroundColor: priorityFilter === f.key ? 'var(--color-surface)' : 'transparent',
+                color: priorityFilter === f.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                boxShadow: priorityFilter === f.key ? 'var(--shadow-sm)' : 'none',
+              }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {members().length > 0 && (
           <div className="flex items-center gap-2">
             <Filter size={14} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -286,6 +325,7 @@ const CallbacksOverview = ({ user }) => {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <p className="font-bold text-text">{cb.customer_name}</p>
                       <StatusBadge status={cb.status} />
+                      <PriorityBadge priority={cb.priority} />
                       {past && <span className="text-xs font-bold text-red-600">Overdue</span>}
                       {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
                     </div>
