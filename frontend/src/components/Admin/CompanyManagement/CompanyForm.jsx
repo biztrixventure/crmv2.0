@@ -8,6 +8,7 @@ import { Button, FormField } from '../../../components/UI';
 const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
   const [formData, setFormData] = useState({
     name: '',
+    slug: '',
     logo_url: '',
     company_type: 'fronter',
   });
@@ -17,8 +18,9 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
   useEffect(() => {
     if (company) {
       setFormData({
-        name: company.name || '',
-        logo_url: company.logo_url || '',
+        name:         company.name         || '',
+        slug:         company.slug         || '',
+        logo_url:     company.logo_url     || '',
         company_type: company.company_type || 'fronter',
       });
     }
@@ -88,6 +90,22 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
           value={formData.name}
           onChange={handleInputChange}
           placeholder="Acme Corporation"
+          className="input"
+        />
+      </FormField>
+
+      {/* Slug */}
+      <FormField
+        label="Company Slug"
+        hint="Short identifier shown to closers when searching transfers (e.g. 'acme' or 'nyc-team')"
+        error={errors.slug}
+      >
+        <input
+          type="text"
+          name="slug"
+          value={formData.slug}
+          onChange={handleInputChange}
+          placeholder="acme-corp"
           className="input"
         />
       </FormField>

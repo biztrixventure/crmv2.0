@@ -18,8 +18,8 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
 import { useFormFields } from "../hooks/useFormFields";
-import { useClosers } from "../hooks/useClosers";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
+import PhoneSearch from "../components/Closer/PhoneSearch";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -65,7 +65,6 @@ const StaffShell = () => {
   const { transfers, loading: tLoading, fetchTransfers, createTransfer } = useTransfers(user?.company_id);
   const { sales, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
-  const { closers, fetchClosers } = useClosers(user?.company_id);
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
 
@@ -138,13 +137,12 @@ const StaffShell = () => {
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData]             = useState({});
-  const [selectedCloser, setSelectedCloser] = useState('');
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
 
   useEffect(() => {
     fetchStats();
-    if (isFronter) { fetchFields(); fetchClosers(); fetchConfigs(); }
+    if (isFronter) { fetchFields(); fetchConfigs(); }
   }, []);
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { if (isCloser) fetchSales({ date_from, date_to }); }, [fetchSales, date_from, date_to, isCloser]);
@@ -281,13 +279,11 @@ const StaffShell = () => {
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
     setTransferError('');
-    if (!selectedCloser) { setTransferError('Please select a closer.'); return; }
     setTransferSubmitting(true);
     try {
-      await createTransfer({ ...formData, assigned_closer_id: selectedCloser });
+      await createTransfer({ ...formData });
       setShowCreateForm(false);
       setFormData({});
-      setSelectedCloser('');
       fetchStats();
       fetchTransfers({ date_from, date_to });
     } catch (err) {
@@ -316,6 +312,8 @@ const StaffShell = () => {
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
+    ...(isCloser
+      ? [{ key: 'phone_search',   label: 'Search by Phone', icon: Phone      }] : []),
   ];
 
   const conversionRate = transfers.length > 0
@@ -388,6 +386,7 @@ const StaffShell = () => {
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
         {activeTab === 'search'          && <SaleSearch />}
+        {activeTab === 'phone_search'    && isCloser && <PhoneSearch onCreateSale={openSaleModal} />}
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'team_transfers' && (
@@ -774,16 +773,9 @@ const StaffShell = () => {
                           );
                         })}
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-text-secondary mb-1">Transfer to Closer <span className="text-error-500">*</span></label>
-                        <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required>
-                          <option value="">— Select a closer —</option>
-                          {closers.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
-                        </select>
-                      </div>
                       {transferError && <p className="text-sm text-error-600">{transferError}</p>}
                       <div className="flex gap-3 pt-4 border-t border-border">
-                        <button type="button" onClick={() => { setShowCreateForm(false); setFormData({}); setSelectedCloser(''); }}
+                        <button type="button" onClick={() => { setShowCreateForm(false); setFormData({}); }}
                           className="flex-1 py-2 rounded-lg border font-semibold text-sm"
                           style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                           Cancel

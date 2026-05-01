@@ -171,6 +171,90 @@ router.get('/closers', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /transfers/search-by-phone
+// Closer searches for all transfers matching a phone number across all fronter
+// companies linked to their closer company. Returns records with company slug
+// and fronter name, ordered most-recent first.
+// ============================================================================
+router.get('/search-by-phone', asyncHandler(async (req, res) => {
+  const { phone } = req.query;
+  if (!phone || phone.trim().length < 3) {
+    return res.status(400).json({ error: 'phone required (min 3 chars)' });
+  }
+
+  const userRole  = req.user.role;
+  const companyId = req.user.company_id;
+  const q         = phone.trim();
+
+  // Resolve which fronter companies this closer can see
+  let fronterCompanyIds = [];
+
+  if (userRole === 'superadmin' || userRole === 'readonly_admin') {
+    // Superadmin sees across all companies
+    const { data: allFronters } = await supabaseAdmin
+      .from('companies')
+      .select('id')
+      .eq('company_type', 'fronter')
+      .eq('is_active', true);
+    fronterCompanyIds = (allFronters || []).map(c => c.id);
+  } else {
+    // Closer (or closer_manager): find fronter companies linked to their company
+    const { data: links } = await supabaseAdmin
+      .from('company_links')
+      .select('fronter_company_id')
+      .eq('closer_company_id', companyId);
+    fronterCompanyIds = (links || []).map(l => l.fronter_company_id);
+  }
+
+  if (!fronterCompanyIds.length) return res.json({ transfers: [] });
+
+  // Search transfers by phone stored in form_data
+  // Supports both field name conventions: customer_phone (standard) and Phone (legacy)
+  const { data, error } = await supabaseAdmin
+    .from('transfers')
+    .select('*')
+    .in('company_id', fronterCompanyIds)
+    .or(`form_data->>'customer_phone'.ilike.%${q}%,form_data->>'Phone'.ilike.%${q}%`)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data?.length) return res.json({ transfers: [] });
+
+  // Fetch company names + slugs in one query
+  const companyIds = [...new Set(data.map(t => t.company_id).filter(Boolean))];
+  const { data: companies } = await supabaseAdmin
+    .from('companies')
+    .select('id, name, slug')
+    .in('id', companyIds);
+  const companyMap = Object.fromEntries((companies || []).map(c => [c.id, c]));
+
+  // Fetch fronter profiles in one query
+  const creatorIds = [...new Set(data.map(t => t.created_by).filter(Boolean))];
+  let profileMap = {};
+  if (creatorIds.length > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id, first_name, last_name')
+      .in('user_id', creatorIds);
+    (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
+  }
+
+  const transfers = data.map(t => {
+    const co      = companyMap[t.company_id] || {};
+    const profile = profileMap[t.created_by] || {};
+    return {
+      ...t,
+      company_name: co.name || 'Unknown',
+      company_slug: co.slug || co.name || 'Unknown',
+      fronter_name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unknown',
+    };
+  });
+
+  res.json({ transfers });
+}));
+
+// ============================================================================
 // POST /transfers — fronter creates + directly assigns to a closer
 // ============================================================================
 router.post('/', [

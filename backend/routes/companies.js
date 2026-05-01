@@ -21,7 +21,7 @@ router.get(
       if (req.user.role === "superadmin") {
         const { data, error } = await supabaseAdmin
           .from("companies")
-          .select("id, name, logo_url, is_active, company_type, created_at")
+          .select("id, name, slug, logo_url, is_active, company_type, created_at")
           .order("name");
 
         if (error) {
@@ -56,7 +56,7 @@ router.get(
         // SuperAdmin sees all active companies
         const { data, error } = await supabaseAdmin
           .from('companies')
-          .select('id, name, is_active, company_type')
+          .select('id, name, slug, is_active, company_type')
           .eq('is_active', true)
           .order('name');
 
@@ -81,7 +81,7 @@ router.get(
 
       const { data, error } = await supabaseAdmin
         .from('companies')
-        .select('id, name, is_active, company_type')
+        .select('id, name, slug, is_active, company_type')
         .eq('id', userCompanyId)
         .eq('is_active', true)
         .single();
@@ -110,6 +110,7 @@ router.post(
   "/",
   [
     body("name").trim().isLength({ min: 1 }),
+    body("slug").trim().optional({ nullable: true }),
     body("logo_url").trim().custom(value => {
       // Allow empty string or null
       if (!value) return true;
@@ -129,7 +130,7 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { name, logo_url, company_type } = req.body;
+    const { name, slug, logo_url, company_type } = req.body;
     const userId = req.user.id;
 
     try {
@@ -142,9 +143,10 @@ router.post(
         .from("companies")
         .insert({
           name,
-          logo_url: logo_url || null,
-          created_by: userId,
-          is_active: true,
+          slug:         slug         || null,
+          logo_url:     logo_url     || null,
+          created_by:   userId,
+          is_active:    true,
           company_type: company_type || 'fronter',
         })
         .select()
@@ -176,7 +178,7 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("companies")
-        .select("id, name, logo_url, is_active, company_type, created_at")
+        .select("id, name, slug, logo_url, is_active, company_type, created_at")
         .eq("id", id)
         .single();
 
@@ -207,6 +209,7 @@ router.put(
   "/:id",
   [
     body("name").trim().isLength({ min: 1 }).optional(),
+    body("slug").trim().optional({ nullable: true }),
     body("logo_url").trim().custom(value => {
       // Allow empty string, null, or undefined
       if (!value) return true;
@@ -228,7 +231,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { name, logo_url, is_active, company_type } = req.body;
+    const { name, slug, logo_url, is_active, company_type } = req.body;
     const userId = req.user.id;
 
     try {
@@ -239,9 +242,10 @@ router.put(
       }
 
       const updateData = {};
-      if (name) updateData.name = name;
-      if (logo_url !== undefined) updateData.logo_url = logo_url;
-      if (is_active !== undefined) updateData.is_active = is_active;
+      if (name)                  updateData.name         = name;
+      if (slug !== undefined)    updateData.slug         = slug || null;
+      if (logo_url !== undefined) updateData.logo_url    = logo_url;
+      if (is_active !== undefined) updateData.is_active  = is_active;
       if (company_type !== undefined) updateData.company_type = company_type;
 
       const { data, error } = await supabaseAdmin
@@ -450,7 +454,7 @@ router.get('/:id/links', asyncHandler(async (req, res) => {
       .eq('fronter_company_id', id);
     if (rawLinks?.length) {
       const cids = rawLinks.map(l => l.closer_company_id);
-      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, company_type').in('id', cids);
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, slug, company_type').in('id', cids);
       const coMap = Object.fromEntries((cos || []).map(c => [c.id, c]));
       links = rawLinks.map(l => ({ link_id: l.id, created_at: l.created_at, ...coMap[l.closer_company_id] }));
     }
@@ -461,7 +465,7 @@ router.get('/:id/links', asyncHandler(async (req, res) => {
       .eq('closer_company_id', id);
     if (rawLinks?.length) {
       const cids = rawLinks.map(l => l.fronter_company_id);
-      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, company_type').in('id', cids);
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, slug, company_type').in('id', cids);
       const coMap = Object.fromEntries((cos || []).map(c => [c.id, c]));
       links = rawLinks.map(l => ({ link_id: l.id, created_at: l.created_at, ...coMap[l.fronter_company_id] }));
     }
