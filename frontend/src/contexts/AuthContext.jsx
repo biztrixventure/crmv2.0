@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import client from "../api/client";
+import { setRealtimeAuth } from "../api/supabase";
 
 export const AuthContext = createContext(null);
 
@@ -33,6 +34,7 @@ export const AuthProvider = ({ children }) => {
       refreshTokRef.current = newRT;
       localStorage.setItem("token", newToken);
       localStorage.setItem("refresh_token", newRT);
+      setRealtimeAuth(newToken);
     } catch {
       // Refresh failed — clear everything and send to login
       setUser(null);
@@ -69,6 +71,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem("user",          JSON.stringify(userData));
     localStorage.setItem("token",         accessToken);
     if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    setRealtimeAuth(accessToken);
     scheduleRefresh(accessToken);
   }, [scheduleRefresh]);
 
@@ -116,6 +119,7 @@ export const AuthProvider = ({ children }) => {
 
     // Token still valid — schedule refresh then fetch fresh user data
     if (exp) scheduleRefresh(token);
+    setRealtimeAuth(token);
     setIsRefreshing(true);
     client.get("auth/me")
       .then(res => { setUser(res.data); localStorage.setItem("user", JSON.stringify(res.data)); })

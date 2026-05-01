@@ -17,7 +17,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import client from '../api/client';
-import { supabase } from '../api/supabase';
+import { supabase, setRealtimeAuth } from '../api/supabase';
 
 // Tiny sound via Web Audio API (shared with usePushNotifications)
 export function playNotificationSound() {
@@ -114,6 +114,9 @@ export const useNotifications = () => {
     })();
     if (!uid) return;
     userIdRef.current = uid;
+
+    // Authenticate Realtime WebSocket so RLS allows postgres_changes events
+    setRealtimeAuth(localStorage.getItem('token'));
 
     // Supabase Realtime — instant delivery without waiting for next poll
     const channel = supabase
