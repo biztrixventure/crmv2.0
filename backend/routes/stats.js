@@ -53,30 +53,38 @@ router.get(
       stats.assignedTransfers = (transfers || []).filter(t => t.status === 'assigned').length;
       stats.completedTransfers = (transfers || []).filter(t => t.status === 'completed').length;
 
-      // Sales stats — expand scope for fronter company users to include linked closer companies
-      let salesQuery = supabaseAdmin
-        .from('sales')
-        .select('id, status', { count: 'exact' });
+      // Sales stats — scoped to transfers owned by this user/company so fronters
+      // only see sales on THEIR transfers, not all sales from linked closer companies.
+      let sales = [];
+      const transferIds = (transfers || []).map(t => t.id).filter(Boolean);
 
-      if (companyId) {
-        let saleScopeIds = [companyId];
-        if (userRole !== 'closer') {
-          const { data: co } = await supabaseAdmin.from('companies').select('company_type').eq('id', companyId).single();
-          if (co?.company_type === 'fronter') {
-            const { data: lnks } = await supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', companyId);
-            const linked = (lnks || []).map(l => l.closer_company_id).filter(Boolean);
-            if (linked.length > 0) saleScopeIds = [...saleScopeIds, ...linked];
-          }
+      if (transferIds.length > 0) {
+        let salesQuery = supabaseAdmin
+          .from('sales')
+          .select('id, status')
+          .in('transfer_id', transferIds);
+
+        if (userRole === 'closer') {
+          salesQuery = salesQuery.eq('closer_id', userId);
         }
-        if (saleScopeIds.length > 1) salesQuery = salesQuery.in('company_id', saleScopeIds);
-        else salesQuery = salesQuery.eq('company_id', saleScopeIds[0]);
+
+        const { data: salesData } = await salesQuery;
+        sales = salesData || [];
+      } else if (userRole === 'closer' || (userRole !== 'fronter' && companyId)) {
+        // Closer/manager with no transfers yet — still fetch their own sales
+        let salesQuery = supabaseAdmin
+          .from('sales')
+          .select('id, status');
+        if (userRole === 'closer') {
+          salesQuery = salesQuery.eq('closer_id', userId);
+        } else if (companyId) {
+          salesQuery = salesQuery.eq('company_id', companyId);
+        }
+        const { data: salesData } = await salesQuery;
+        sales = salesData || [];
       }
 
-      if (userRole === 'closer') {
-        salesQuery = salesQuery.eq('closer_id', userId);
-      }
-
-      const { data: sales, count: salesCount } = await salesQuery;
+      const salesCount = sales.length;
 
       stats.totalSales = salesCount || 0;
       stats.openSales = (sales || []).filter(s => s.status === 'open').length;
