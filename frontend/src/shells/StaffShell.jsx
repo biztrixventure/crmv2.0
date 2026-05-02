@@ -39,7 +39,7 @@ const SALE_BADGE = {
   pending_review: 'warning', needs_revision: 'error',
 };
 const SALE_LABEL = {
-  open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up',
+  open: 'Sale Open', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up',
   closed_won: 'Approved', closed_lost: 'Lost',
   pending_review: 'In Review', needs_revision: 'Needs Revision',
 };
@@ -829,7 +829,10 @@ const StaffShell = () => {
                     }).map(t => (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
                         className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        style={{
+                          borderColor: t.sale_status === 'needs_revision' ? 'var(--color-error-300)' : 'var(--color-border)',
+                          backgroundColor: t.sale_status === 'needs_revision' ? 'var(--color-error-50)' : 'var(--color-bg)',
+                        }}>
                         <div className="flex items-start justify-between mb-1">
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-text truncate">
@@ -840,8 +843,22 @@ const StaffShell = () => {
                               <p className="text-xs text-error-600 mt-0.5">Rejected: {t.rejection_reason}</p>
                             )}
                           </div>
-                          <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                            {t.sale_status && (
+                              <Badge variant={SALE_BADGE[t.sale_status] || 'secondary'} size="sm">
+                                {SALE_LABEL[t.sale_status] || t.sale_status}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
+                        {t.sale_status === 'needs_revision' && t.sale_compliance_note && (
+                          <div className="mt-2 flex items-start gap-1.5 px-2 py-1.5 rounded-lg"
+                            style={{ backgroundColor: 'var(--color-error-100)', border: '1px solid var(--color-error-200)' }}>
+                            <AlertTriangle size={12} className="text-error-600 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-error-600">{t.sale_compliance_note}</p>
+                          </div>
+                        )}
                         <p className="text-xs text-text-tertiary mt-2">{new Date(t.created_at).toLocaleDateString()}</p>
                       </div>
                     ))}

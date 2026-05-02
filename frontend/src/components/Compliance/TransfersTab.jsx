@@ -1,5 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, AlertTriangle } from 'lucide-react';
+
+const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
+const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
 import { Badge } from '../UI';
 import client from '../../api/client';
 import ExportModal from './ExportModal';
@@ -89,7 +92,8 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                   <Th>Created By</Th>
                   <Th>Assigned Closer</Th>
                   <Th>Company</Th>
-                  <Th>Status</Th>
+                  <Th>Transfer Status</Th>
+                  <Th>Sale Status</Th>
                   <Th>Date</Th>
                 </tr>
               </thead>
@@ -120,6 +124,22 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                         {STATUS_LABEL[t.status] || t.status?.replace(/_/g,' ')}
                       </Badge>
                     </td>
+                    <td className="px-4 py-3">
+                      {t.sale_status
+                        ? (
+                          <div>
+                            <Badge variant={SALE_BADGE_MAP[t.sale_status] || 'secondary'} size="sm">
+                              {SALE_LABEL_MAP[t.sale_status] || t.sale_status}
+                            </Badge>
+                            {t.sale_status === 'needs_revision' && t.sale_compliance_note && (
+                              <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--color-error-600)' }}>
+                                <AlertTriangle size={10} />{t.sale_compliance_note.slice(0, 40)}{t.sale_compliance_note.length > 40 ? '…' : ''}
+                              </p>
+                            )}
+                          </div>
+                        )
+                        : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                    </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                       {fmtDate(t.created_at)}
                     </td>
@@ -144,7 +164,24 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                   style={{ color: 'var(--color-text-secondary)' }}>Trace Info</p>
                 <div className="grid grid-cols-2 gap-3">
                   <InfoTile label="Record ID"       value={detail.id} />
-                  <InfoTile label="Status"          value={<Badge variant={STATUS_BADGE[detail.status] || 'secondary'} size="sm">{STATUS_LABEL[detail.status] || detail.status}</Badge>} />
+                  <InfoTile label="Transfer Status"  value={<Badge variant={STATUS_BADGE[detail.status] || 'secondary'} size="sm">{STATUS_LABEL[detail.status] || detail.status}</Badge>} />
+                  {detail.sale_status && (
+                    <InfoTile label="Sale Status" value={
+                      <div>
+                        <Badge variant={SALE_BADGE_MAP[detail.sale_status] || 'secondary'} size="sm">
+                          {SALE_LABEL_MAP[detail.sale_status] || detail.sale_status}
+                        </Badge>
+                        {detail.sale_reference_no && (
+                          <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Ref: {detail.sale_reference_no}</p>
+                        )}
+                        {detail.sale_status === 'needs_revision' && detail.sale_compliance_note && (
+                          <p className="text-xs mt-0.5 flex items-start gap-1" style={{ color: 'var(--color-error-600)' }}>
+                            <AlertTriangle size={10} style={{ marginTop: 2, flexShrink: 0 }} />{detail.sale_compliance_note}
+                          </p>
+                        )}
+                      </div>
+                    } />
+                  )}
                   <InfoTile label="Company"         value={detail.company_name} />
                   <InfoTile label="Created By"      value={detail.created_by_name} />
                   <InfoTile label="Assigned Closer" value={detail.assigned_closer_name} />

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Phone, DollarSign, Clock } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
 
@@ -9,6 +9,29 @@ const TRANSFER_BADGE = {
   completed: 'success',
   cancelled: 'error',
   rejected:  'error',
+};
+
+const SALE_CONFIG = {
+  open:             { label: 'Sale Open',       color: '#2563eb', bg: '#dbeafe',  icon: Clock        },
+  sold:             { label: 'Sold',            color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
+  pending_review:   { label: 'In Review',       color: '#d97706', bg: '#fef3c7',  icon: Clock        },
+  needs_revision:   { label: 'Needs Revision',  color: '#dc2626', bg: '#fee2e2',  icon: AlertTriangle},
+  closed_won:       { label: 'Approved',        color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
+  closed_lost:      { label: 'Lost',            color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
+  follow_up:        { label: 'Follow Up',       color: '#8b5cf6', bg: '#ede9fe',  icon: Clock        },
+  cancelled:        { label: 'Cancelled',       color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
+};
+
+const SaleStatusBadge = ({ status }) => {
+  const cfg = SALE_CONFIG[status] || { label: status, color: '#6b7280', bg: '#f3f4f6', icon: Clock };
+  const Icon = cfg.icon;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+      style={{ backgroundColor: cfg.bg, color: cfg.color }}>
+      <Icon size={10} />
+      {cfg.label}
+    </span>
+  );
 };
 
 const TransferCard = ({ transfer, onCreateSale }) => {
@@ -23,9 +46,17 @@ const TransferCard = ({ transfer, onCreateSale }) => {
     .filter(([k, v]) => v && !skipKeys.has(k))
     .slice(0, 4);
 
+  const hasSale = transfer.has_sale;
+  const saleStatus = transfer.sale_status;
+  const isFinalised = hasSale && ['closed_won', 'sold', 'closed_lost', 'cancelled'].includes(saleStatus);
+  const needsRevision = hasSale && saleStatus === 'needs_revision';
+
   return (
     <div className="rounded-xl border px-3 py-2.5 animate-fade-in"
-      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+      style={{
+        borderColor: needsRevision ? 'var(--color-error-300)' : hasSale ? 'var(--color-success-300)' : 'var(--color-border)',
+        backgroundColor: needsRevision ? 'var(--color-error-50)' : hasSale ? 'var(--color-success-50, #f0fdf4)' : 'var(--color-bg)',
+      }}>
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
           {/* Company + status row */}
@@ -43,6 +74,7 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             <Badge variant={TRANSFER_BADGE[transfer.status] || 'secondary'} size="sm">
               {transfer.status}
             </Badge>
+            {hasSale && <SaleStatusBadge status={saleStatus} />}
             <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
               {new Date(transfer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
@@ -70,18 +102,44 @@ const TransferCard = ({ transfer, onCreateSale }) => {
               By: {transfer.fronter_name}
             </p>
           )}
+
+          {/* Sale reference + closer info */}
+          {hasSale && transfer.sale_reference_no && (
+            <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
+              Ref: {transfer.sale_reference_no}
+              {transfer.sale_closer_name && ` · Closer: ${transfer.sale_closer_name}`}
+            </p>
+          )}
+
+          {/* Compliance note if needs revision */}
+          {needsRevision && transfer.sale_compliance_note && (
+            <div className="mt-1.5 px-2 py-1 rounded-lg flex items-start gap-1.5"
+              style={{ backgroundColor: 'var(--color-error-100)', border: '1px solid var(--color-error-200)' }}>
+              <AlertTriangle size={11} style={{ color: 'var(--color-error-600)', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-xs" style={{ color: 'var(--color-error-700)' }}>
+                {transfer.sale_compliance_note}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Create Sale action */}
+        {/* Action */}
         <div className="flex-shrink-0">
-          <button
-            onClick={() => onCreateSale(transfer)}
-            className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
-                       hover:scale-[1.03] transition-all"
-            style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap' }}
-          >
-            <DollarSign size={12} /> Sale
-          </button>
+          {hasSale ? (
+            <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
+              <DollarSign size={11} /> Already Sold
+            </span>
+          ) : (
+            <button
+              onClick={() => onCreateSale(transfer)}
+              className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
+                         hover:scale-[1.03] transition-all"
+              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap' }}
+            >
+              <DollarSign size={12} /> Sale
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -110,6 +168,9 @@ const PhoneSearch = ({ onCreateSale }) => {
       setLoading(false);
     }
   };
+
+  const alreadySoldCount = (results || []).filter(t => t.has_sale).length;
+  const availableCount   = (results || []).filter(t => !t.has_sale).length;
 
   return (
     <Card className="p-4">
@@ -156,9 +217,23 @@ const PhoneSearch = ({ onCreateSale }) => {
           </p>
         ) : (
           <div className="mt-3 space-y-2">
-            <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              {results.length} record{results.length !== 1 ? 's' : ''} — most recent first
-            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                {results.length} record{results.length !== 1 ? 's' : ''} found
+              </p>
+              {alreadySoldCount > 0 && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
+                  {alreadySoldCount} already sold
+                </span>
+              )}
+              {availableCount > 0 && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>
+                  {availableCount} available
+                </span>
+              )}
+            </div>
             {results.map(t => (
               <TransferCard key={t.id} transfer={t} onCreateSale={onCreateSale} />
             ))}

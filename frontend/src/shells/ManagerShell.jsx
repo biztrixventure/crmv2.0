@@ -453,7 +453,7 @@ const ManagerShell = () => {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-border">
-                          {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
+                          {['Customer', 'Phone', 'Status', 'Sale', 'Closer', 'Date', 'Action'].map(h => (
                             <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                           ))}
                         </tr>
@@ -467,6 +467,11 @@ const ManagerShell = () => {
                             </td>
                             <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
                             <td className="py-3 px-3"><Badge variant={XFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
+                            <td className="py-3 px-3">
+                              {t.sale_status
+                                ? <Badge variant={SALE_BADGE[t.sale_status] || 'secondary'} size="sm">{SALE_LABEL[t.sale_status] || t.sale_status}</Badge>
+                                : <span className="text-xs text-text-tertiary">—</span>}
+                            </td>
                             <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
                             <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                             <td className="py-3 px-3">

@@ -85,12 +85,32 @@ router.get('/', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
+  // Enrich completed transfers with linked sale data (status, compliance note, reference)
+  const transferIds = (data || []).map(t => t.id).filter(Boolean);
+  let saleMap = {};
+  if (transferIds.length > 0) {
+    const { data: sales } = await supabaseAdmin
+      .from('sales')
+      .select('id, transfer_id, status, compliance_note, reference_no, closer_id, closer_name, created_at')
+      .in('transfer_id', transferIds);
+    (sales || []).forEach(s => { saleMap[s.transfer_id] = s; });
+  }
+
   const transfers = (data || []).map(t => {
     const profile = profileMap[t.created_by];
     const fronter_name = profile
       ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
       : null;
-    return { ...t, user_profiles: profile || null, fronter_name: fronter_name || 'Unknown' };
+    const sale = saleMap[t.id] || null;
+    return {
+      ...t,
+      user_profiles: profile || null,
+      fronter_name: fronter_name || 'Unknown',
+      sale_id: sale?.id || null,
+      sale_status: sale?.status || null,
+      sale_compliance_note: sale?.compliance_note || null,
+      sale_reference_no: sale?.reference_no || null,
+    };
   });
 
   res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
@@ -243,14 +263,32 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
+  // Fetch existing sales linked to these transfers (to show "already sold" state)
+  const tIds = data.map(t => t.id);
+  let phoneSaleMap = {};
+  if (tIds.length > 0) {
+    const { data: linkedSales } = await supabaseAdmin
+      .from('sales')
+      .select('id, transfer_id, status, compliance_note, reference_no, closer_name, created_at')
+      .in('transfer_id', tIds);
+    (linkedSales || []).forEach(s => { phoneSaleMap[s.transfer_id] = s; });
+  }
+
   const transfers = data.map(t => {
     const co      = companyMap[t.company_id] || {};
     const profile = profileMap[t.created_by] || {};
+    const sale    = phoneSaleMap[t.id] || null;
     return {
       ...t,
       company_name: co.name || 'Unknown',
       company_slug: co.slug || co.name || 'Unknown',
       fronter_name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unknown',
+      has_sale: !!sale,
+      sale_id: sale?.id || null,
+      sale_status: sale?.status || null,
+      sale_compliance_note: sale?.compliance_note || null,
+      sale_reference_no: sale?.reference_no || null,
+      sale_closer_name: sale?.closer_name || null,
     };
   });
 

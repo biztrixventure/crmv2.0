@@ -1,6 +1,17 @@
-import { X, User, Phone, Mail, MapPin, Calendar, Clock, AlertTriangle, ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { X, User, Phone, Mail, MapPin, Calendar, Clock, AlertTriangle, ChevronDown, ChevronUp, Send, DollarSign, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
+
+const SALE_STATUS_CONFIG = {
+  open:           { label: 'Sale Open',      color: '#2563eb', bg: '#dbeafe',  icon: Clock        },
+  sold:           { label: 'Sold',           color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
+  pending_review: { label: 'In Review',      color: '#d97706', bg: '#fef3c7',  icon: Clock        },
+  needs_revision: { label: 'Needs Revision', color: '#dc2626', bg: '#fee2e2',  icon: AlertTriangle},
+  closed_won:     { label: 'Approved',       color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
+  closed_lost:    { label: 'Lost',           color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
+  follow_up:      { label: 'Follow Up',      color: '#8b5cf6', bg: '#ede9fe',  icon: Clock        },
+  cancelled:      { label: 'Cancelled',      color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
+};
 
 const XFER_BADGE = {
   pending: 'warning', assigned: 'info',
@@ -146,6 +157,38 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
               ))}
             </Section>
           )}
+
+          {/* Sale Status — shown when a sale is linked to this transfer */}
+          {transfer.sale_status && (() => {
+            const cfg = SALE_STATUS_CONFIG[transfer.sale_status] || { label: transfer.sale_status, color: '#6b7280', bg: '#f3f4f6', icon: Clock };
+            const Icon = cfg.icon;
+            return (
+              <div className="mb-5">
+                <p className="text-xs font-bold uppercase tracking-widest mb-2"
+                  style={{ color: 'var(--color-primary-600)' }}>
+                  <DollarSign size={11} className="inline mr-1" />Sale
+                </p>
+                <div className="rounded-xl px-4 py-3"
+                  style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.color}40` }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={14} style={{ color: cfg.color }} />
+                    <span className="text-sm font-bold" style={{ color: cfg.color }}>{cfg.label}</span>
+                    {transfer.sale_reference_no && (
+                      <span className="text-xs font-mono ml-auto" style={{ color: cfg.color }}>
+                        {transfer.sale_reference_no}
+                      </span>
+                    )}
+                  </div>
+                  {transfer.sale_status === 'needs_revision' && transfer.sale_compliance_note && (
+                    <div className="mt-2 flex items-start gap-1.5">
+                      <AlertTriangle size={12} style={{ color: '#dc2626', marginTop: 1, flexShrink: 0 }} />
+                      <p className="text-xs" style={{ color: '#dc2626' }}>{transfer.sale_compliance_note}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* People */}
           <Section title="People">

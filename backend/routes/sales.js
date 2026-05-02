@@ -222,10 +222,13 @@ router.post(
         .from('sales').select('id').eq('transfer_id', transfer_id).single();
       if (existingSale) return res.status(409).json({ error: 'A sale already exists for this transfer' });
 
-      // Auto-complete the transfer
-      await supabaseAdmin.from('transfers')
-        .update({ status: 'completed', updated_at: new Date().toISOString() })
-        .eq('id', transfer_id);
+      // Auto-complete the transfer; if unassigned, claim it for the closer
+      const transferUpdates = { status: 'completed', updated_at: new Date().toISOString() };
+      if (!transfer.assigned_closer_id) {
+        transferUpdates.assigned_closer_id = userId;
+        transferUpdates.assigned_to        = userId;
+      }
+      await supabaseAdmin.from('transfers').update(transferUpdates).eq('id', transfer_id);
     }
 
     const refNo = reference_no || generateReferenceNo();
