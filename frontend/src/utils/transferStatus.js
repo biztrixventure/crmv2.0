@@ -3,8 +3,8 @@
 // TransferDetailDrawer, ComplianceShell TransfersTab.
 
 const BARE = {
-  pending:   { label: 'Pending',   variant: 'warning' },
-  assigned:  { label: 'Assigned',  variant: 'info'    },
+  pending:   { label: 'Open',      variant: 'info'    },
+  assigned:  { label: 'Open',      variant: 'info'    },
   completed: { label: 'Completed', variant: 'success' },
   cancelled: { label: 'Cancelled', variant: 'error'   },
   rejected:  { label: 'Rejected',  variant: 'error'   },

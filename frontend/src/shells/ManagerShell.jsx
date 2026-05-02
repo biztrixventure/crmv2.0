@@ -279,8 +279,8 @@ const ManagerShell = () => {
     }
   };
 
-  const pendingTransfers  = transfers.filter(t => ['pending', 'rejected'].includes(t.status));
-  const approvedSales     = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
+  const awaitingCompliance = sales.filter(s => s.status === 'pending_review').length;
+  const approvedSales      = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
   const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
@@ -343,10 +343,10 @@ const ManagerShell = () => {
             {/* Stats cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               {[
-                { label: 'Total Transfers', value: transfers.length,          icon: Send,        color: 'info'    },
-                { label: 'Total Sales',     value: sales.length,              icon: DollarSign,  color: 'success' },
-                { label: 'Approved Sales',  value: approvedSales,             icon: CheckCircle, color: 'success' },
-                { label: 'Pending',         value: pendingTransfers.length,   icon: Clock,       color: 'warning' },
+                { label: 'Total Transfers',   value: transfers.length,     icon: Send,        color: 'info'    },
+                { label: 'Total Sales',       value: sales.length,         icon: DollarSign,  color: 'success' },
+                { label: 'Approved Sales',    value: approvedSales,        icon: CheckCircle, color: 'success' },
+                { label: 'Awaiting Review',   value: awaitingCompliance,   icon: Clock,       color: 'warning' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <Card key={label} className="p-6">
                   <div className="flex items-start justify-between">
@@ -361,37 +361,6 @@ const ManagerShell = () => {
                 </Card>
               ))}
             </div>
-
-            {/* Pending transfers alert */}
-            {pendingTransfers.length > 0 && hasPermission('reassign_transfer') && (
-              <Card className="p-6">
-                <h3 className="text-lg font-bold mb-4 text-text flex items-center gap-2">
-                  <AlertCircle size={20} className="text-warning-600" /> Pending / Rejected Transfers ({pendingTransfers.length})
-                </h3>
-                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                  {pendingTransfers.slice(0, 10).map(t => (
-                    <div key={t.id} onClick={() => setDetailTransfer(t)}
-                      className="flex items-center justify-between p-3 rounded-xl border cursor-pointer hover:shadow-md transition-all"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
-                      <div>
-                        <p className="font-semibold text-text text-sm">
-                          {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
-                        </p>
-                        {t.rejection_reason && <p className="text-xs text-error-600 mt-0.5">Reason: {t.rejection_reason}</p>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={XFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
-                        <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                          style={{ background: 'var(--gradient-sidebar)' }}>
-                          Reassign
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
 
             {/* Leaderboards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

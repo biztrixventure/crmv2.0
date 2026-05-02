@@ -323,10 +323,6 @@ const StaffShell = () => {
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
   ];
 
-  const conversionRate = transfers.length > 0
-    ? Math.round((transfers.filter(t => t.status === 'completed').length / transfers.length) * 100)
-    : 0;
-
   return (
     <div className="min-h-screen bg-bg">
       {updateAvailable && <UpdateBanner />}
@@ -481,10 +477,10 @@ const StaffShell = () => {
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
               {[
-                { label: 'My Sales',   value: stats.totalSales || 0,        icon: DollarSign, color: 'success' },
-                { label: 'Approved',   value: stats.closedWon  || 0,        icon: CheckCircle,color: 'success' },
-                { label: 'Conversion', value: `${stats.conversionRate || 0}%`, icon: Target,  color: 'info'    },
-                { label: 'Assigned',   value: stats.assignedTransfers || 0, icon: Clock,      color: 'warning' },
+                { label: 'My Sales',        value: stats.totalSales || 0,          icon: DollarSign, color: 'success' },
+                { label: 'Approved',        value: stats.closedWon || 0,           icon: CheckCircle,color: 'success' },
+                { label: 'Awaiting Review', value: stats.awaitingCompliance || 0,  icon: Clock,      color: 'warning' },
+                { label: 'Conversion',      value: `${stats.conversionRate || 0}%`,icon: Target,     color: 'info'    },
               ].map(({ label, value, icon: Icon, color }) => (
                 <Card key={label} className="p-6">
                   <div className="flex items-start justify-between">
@@ -711,10 +707,10 @@ const StaffShell = () => {
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Total Leads', value: stats.totalTransfers || 0,   color: 'info',    icon: Send         },
-                { label: 'Assigned',    value: stats.assignedTransfers || 0, color: 'success', icon: CheckCircle },
-                { label: 'Converted',   value: transfers.filter(t => t.status === 'completed').length, color: 'primary', icon: DollarSign },
-                { label: 'Conversion',  value: `${conversionRate}%`,         color: 'warning', icon: Target      },
+                { label: 'Total Leads',       value: stats.totalTransfers || 0,       color: 'info',    icon: Send         },
+                { label: 'Approved Sales',    value: stats.closedWon || 0,            color: 'success', icon: CheckCircle  },
+                { label: 'Awaiting Review',   value: stats.awaitingCompliance || 0,   color: 'warning', icon: Clock        },
+                { label: 'Conversion',        value: `${stats.conversionRate || 0}%`, color: 'primary', icon: Target       },
               ].map(({ label, value, color, icon: Icon }) => (
                 <Card key={label} className="p-5">
                   <div className="flex items-start justify-between">

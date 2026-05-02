@@ -82,10 +82,11 @@ router.get(
       stats.openSales = (sales || []).filter(s => s.status === 'open').length;
       stats.closedWon = (sales || []).filter(s => s.status === 'closed_won').length;
       stats.closedLost = (sales || []).filter(s => s.status === 'closed_lost').length;
+      stats.awaitingCompliance = (sales || []).filter(s => s.status === 'pending_review').length;
 
-      // Conversion rate
+      // Conversion rate: compliance-approved sales / total transfers
       stats.conversionRate = stats.totalTransfers > 0
-        ? Math.round((stats.completedTransfers / stats.totalTransfers) * 100)
+        ? Math.round((stats.closedWon / stats.totalTransfers) * 100)
         : 0;
 
       // Admin-level stats
