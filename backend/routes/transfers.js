@@ -91,7 +91,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (transferIds.length > 0) {
     const { data: sales } = await supabaseAdmin
       .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, closer_id, closer_name, created_at')
+      .select('id, transfer_id, status, compliance_note, reference_no, closer_id, created_at')
       .in('transfer_id', transferIds);
     (sales || []).forEach(s => { saleMap[s.transfer_id] = s; });
   }

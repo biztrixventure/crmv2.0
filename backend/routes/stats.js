@@ -53,34 +53,28 @@ router.get(
       stats.assignedTransfers = (transfers || []).filter(t => t.status === 'assigned').length;
       stats.completedTransfers = (transfers || []).filter(t => t.status === 'completed').length;
 
-      // Sales stats — scoped to transfers owned by this user/company so fronters
-      // only see sales on THEIR transfers, not all sales from linked closer companies.
+      // Sales stats — role-scoped to avoid leaking cross-company data.
       let sales = [];
       const transferIds = (transfers || []).map(t => t.id).filter(Boolean);
 
-      if (transferIds.length > 0) {
-        let salesQuery = supabaseAdmin
-          .from('sales')
-          .select('id, status')
-          .in('transfer_id', transferIds);
-
-        if (userRole === 'closer') {
-          salesQuery = salesQuery.eq('closer_id', userId);
-        }
-
-        const { data: salesData } = await salesQuery;
+      if (['superadmin', 'readonly_admin'].includes(userRole)) {
+        // Global view — all sales
+        const { data: salesData } = await supabaseAdmin.from('sales').select('id, status');
         sales = salesData || [];
-      } else if (userRole === 'closer' || (userRole !== 'fronter' && companyId)) {
-        // Closer/manager with no transfers yet — still fetch their own sales
-        let salesQuery = supabaseAdmin
-          .from('sales')
-          .select('id, status');
-        if (userRole === 'closer') {
-          salesQuery = salesQuery.eq('closer_id', userId);
-        } else if (companyId) {
-          salesQuery = salesQuery.eq('company_id', companyId);
-        }
-        const { data: salesData } = await salesQuery;
+      } else if (userRole === 'closer') {
+        // Closer sees only their own sales
+        const { data: salesData } = await supabaseAdmin
+          .from('sales').select('id, status').eq('closer_id', userId);
+        sales = salesData || [];
+      } else if (isCloserSide && companyId) {
+        // Closer-side managers / compliance: all sales in their (closer) company
+        const { data: salesData } = await supabaseAdmin
+          .from('sales').select('id, status').eq('company_id', companyId);
+        sales = salesData || [];
+      } else if (transferIds.length > 0) {
+        // Fronter / fronter managers: only sales linked to their company's transfers
+        const { data: salesData } = await supabaseAdmin
+          .from('sales').select('id, status').in('transfer_id', transferIds);
         sales = salesData || [];
       }
 

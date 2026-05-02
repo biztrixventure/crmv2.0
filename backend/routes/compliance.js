@@ -121,7 +121,24 @@ router.get('/sales', asyncHandler(async (req, res) => {
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  if (company_id) query = query.eq('company_id', company_id);
+  // If filtering by a fronter company, translate to transfer_id scope
+  // (sales are stored under the closer company, not the fronter company).
+  if (company_id) {
+    const { data: co } = await supabaseAdmin
+      .from('companies').select('company_type').eq('id', company_id).single();
+    if (co?.company_type === 'fronter') {
+      const { data: xfers } = await supabaseAdmin
+        .from('transfers').select('id').eq('company_id', company_id);
+      const xferIds = (xfers || []).map(t => t.id).filter(Boolean);
+      if (xferIds.length === 0) {
+        return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+      }
+      query = query.in('transfer_id', xferIds);
+    } else {
+      query = query.eq('company_id', company_id);
+    }
+  }
+
   if (user_ids) {
     const ids = user_ids.split(',').filter(Boolean);
     if (ids.length) query = query.in('closer_id', ids);
