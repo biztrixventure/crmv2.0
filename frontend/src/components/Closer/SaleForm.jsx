@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Users, Calendar, Hash, FileText } from 'lucide-react';
+import { DollarSign, Users, Calendar, Hash, FileText, Building2 } from 'lucide-react';
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
@@ -286,6 +286,33 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
 
   return (
     <form onSubmit={handleSubmit} className="space-y-1">
+
+      {/* Lead source banner — shown only when creating from a transfer */}
+      {transfer && (transfer.fronter_name || transfer.company_slug || transfer.company_name) && (
+        <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
+          style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
+          <Building2 size={16} style={{ color: 'var(--color-primary-600)', flexShrink: 0 }} />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-primary-600)' }}>
+              Lead Source
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              {transfer.fronter_name && (
+                <span className="text-sm text-text">
+                  <span className="text-text-secondary">Fronter: </span>
+                  <span className="font-semibold">{transfer.fronter_name}</span>
+                </span>
+              )}
+              {(transfer.company_slug || transfer.company_name) && (
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg"
+                  style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                  {transfer.company_slug || transfer.company_name}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {fieldsLoading ? (
         <div className="flex justify-center py-6">

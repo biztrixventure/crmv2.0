@@ -63,7 +63,7 @@ const StaffShell = () => {
   const [activeNav, setActiveNav] = useState('dashboard');
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
-  const { transfers, loading: tLoading, fetchTransfers, createTransfer } = useTransfers(user?.company_id);
+  const { transfers, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
   const { sales, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
@@ -355,13 +355,6 @@ const StaffShell = () => {
               <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>
             </p>
           </div>
-          {isCloser && hasPermission('create_sale') && (
-            <button onClick={() => openSaleModal(null)}
-              className="flex items-center gap-2 py-3 px-6 rounded-xl font-bold text-white transition-all duration-200 hover:scale-105"
-              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-              <Plus size={20} /> New Sale
-            </button>
-          )}
         </div>
 
         {/* Tab bar */}
@@ -572,16 +565,9 @@ const StaffShell = () => {
                 {sLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : sales.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-text-secondary mb-3">No sales yet.</p>
-                    {hasPermission('create_sale') && (
-                      <button onClick={() => openSaleModal(null)}
-                        className="py-2 px-4 rounded-lg text-sm font-semibold text-white"
-                        style={{ background: 'var(--gradient-sidebar)' }}>
-                        Create your first sale
-                      </button>
-                    )}
-                  </div>
+                  <p className="text-text-secondary text-center py-8">
+                    No sales yet. Use phone search above to find a lead and create a sale.
+                  </p>
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {sales.slice(0, 15).map(s => (
@@ -856,7 +842,24 @@ const StaffShell = () => {
                             <p className="text-xs text-error-600">{t.sale_compliance_note}</p>
                           </div>
                         )}
-                        <p className="text-xs text-text-tertiary mt-2">{new Date(t.created_at).toLocaleDateString()}</p>
+                        <div className="flex items-center justify-between mt-2">
+                          <p className="text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</p>
+                          {t.status !== 'completed' && !t.sale_id && (
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                if (window.confirm('Delete this lead? This cannot be undone.')) {
+                                  deleteTransfer(t.id).catch(err =>
+                                    alert(err.response?.data?.error || err.message || 'Failed to delete')
+                                  );
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all hover:bg-error-50"
+                              style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+                              <Trash2 size={11} /> Delete
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

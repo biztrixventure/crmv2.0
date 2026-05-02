@@ -60,7 +60,7 @@ export const useTransfers = (companyId = null) => {
     setError(null);
     try {
       const response = await client.put(`transfers/${transferId}`, updates);
-      await fetchTransfers(lastFilters.current); // Refresh with current date filters
+      await fetchTransfers(lastFilters.current);
       return response.data.transfer;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to update transfer';
@@ -71,6 +71,17 @@ export const useTransfers = (companyId = null) => {
     }
   }, [fetchTransfers]);
 
+  const deleteTransfer = useCallback(async (transferId) => {
+    try {
+      await client.delete(`transfers/${transferId}`);
+      setTransfers(prev => prev.filter(t => t.id !== transferId));
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to delete transfer';
+      setError(errorMsg);
+      throw err;
+    }
+  }, []);
+
   return {
     transfers,
     total,
@@ -79,5 +90,6 @@ export const useTransfers = (companyId = null) => {
     fetchTransfers,
     createTransfer,
     updateTransfer,
+    deleteTransfer,
   };
 };

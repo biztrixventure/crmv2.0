@@ -87,6 +87,15 @@ router.get('/', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
+  // Fetch company names + slugs
+  const companyIds = [...new Set((data || []).map(t => t.company_id).filter(Boolean))];
+  let companyMap = {};
+  if (companyIds.length > 0) {
+    const { data: companies } = await supabaseAdmin
+      .from('companies').select('id, name, slug').in('id', companyIds);
+    (companies || []).forEach(c => { companyMap[c.id] = c; });
+  }
+
   // Enrich completed transfers with linked sale data (status, compliance note, reference)
   const transferIds = (data || []).map(t => t.id).filter(Boolean);
   let saleMap = {};
@@ -101,6 +110,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const transfers = (data || []).map(t => {
     const profile = profileMap[t.created_by];
     const closerProfile = profileMap[t.assigned_closer_id];
+    const co = companyMap[t.company_id] || {};
     const fronter_name = profile
       ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
       : null;
@@ -109,6 +119,8 @@ router.get('/', asyncHandler(async (req, res) => {
       ...t,
       user_profiles: profile || null,
       fronter_name: fronter_name || 'Unknown',
+      company_name: co.name || null,
+      company_slug: co.slug || co.name || null,
       closer: closerProfile ? { first_name: closerProfile.first_name, last_name: closerProfile.last_name } : null,
       sale_id: sale?.id || null,
       sale_status: sale?.status || null,
