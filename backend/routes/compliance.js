@@ -179,7 +179,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
 router.get('/transfers', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, date_from, date_to, search, page = 1, limit = 50 } = req.query;
+  const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50 } = req.query;
 
   let query = supabaseAdmin
     .from('transfers')
@@ -191,6 +191,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     const ids = user_ids.split(',').filter(Boolean);
     if (ids.length) query = query.in('created_by', ids);
   }
+  if (closer_id)  query = query.eq('assigned_closer_id', closer_id);
   if (status)    query = query.eq('status', status);
   if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
   if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
