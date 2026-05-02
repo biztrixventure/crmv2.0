@@ -215,12 +215,30 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     : {};
   const companyMap = await enrichCompanies(data || [], t => t.company_id);
 
-  const enriched = (data || []).map(t => ({
-    ...t,
-    created_by_name:       profileName(profileMap, t.created_by),
-    assigned_closer_name:  profileName(profileMap, t.assigned_closer_id),
-    company_name:          companyMap[t.company_id]?.name || null,
-  }));
+  // Enrich with linked sale data so getTransferDisplayStatus() works for compliance too
+  const transferIds = (data || []).map(t => t.id).filter(Boolean);
+  let saleMap = {};
+  if (transferIds.length > 0) {
+    const { data: sales } = await supabaseAdmin
+      .from('sales')
+      .select('id, transfer_id, status, compliance_note, reference_no')
+      .in('transfer_id', transferIds);
+    (sales || []).forEach(s => { saleMap[s.transfer_id] = s; });
+  }
+
+  const enriched = (data || []).map(t => {
+    const sale = saleMap[t.id] || null;
+    return {
+      ...t,
+      created_by_name:       profileName(profileMap, t.created_by),
+      assigned_closer_name:  profileName(profileMap, t.assigned_closer_id),
+      company_name:          companyMap[t.company_id]?.name || null,
+      sale_id:               sale?.id || null,
+      sale_status:           sale?.status || null,
+      sale_compliance_note:  sale?.compliance_note || null,
+      sale_reference_no:     sale?.reference_no || null,
+    };
+  });
 
   res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
