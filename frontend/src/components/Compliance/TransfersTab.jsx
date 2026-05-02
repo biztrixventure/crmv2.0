@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { ArrowRight, AlertTriangle } from 'lucide-react';
+import { getTransferDisplayStatus } from '../../utils/transferStatus';
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
 const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
@@ -120,9 +121,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                       {t.company_name || '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant={STATUS_BADGE[t.status] || 'secondary'} size="sm">
-                        {STATUS_LABEL[t.status] || t.status?.replace(/_/g,' ')}
-                      </Badge>
+                      {(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}
                     </td>
                     <td className="px-4 py-3">
                       {t.sale_status
@@ -164,7 +163,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                   style={{ color: 'var(--color-text-secondary)' }}>Trace Info</p>
                 <div className="grid grid-cols-2 gap-3">
                   <InfoTile label="Record ID"       value={detail.id} />
-                  <InfoTile label="Transfer Status"  value={<Badge variant={STATUS_BADGE[detail.status] || 'secondary'} size="sm">{STATUS_LABEL[detail.status] || detail.status}</Badge>} />
+                  <InfoTile label="Transfer Status"  value={(() => { const ds = getTransferDisplayStatus(detail); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()} />
                   {detail.sale_status && (
                     <InfoTile label="Sale Status" value={
                       <div>

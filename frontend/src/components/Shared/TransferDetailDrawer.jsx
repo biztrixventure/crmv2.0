@@ -1,6 +1,7 @@
 import { X, User, Phone, Mail, MapPin, Calendar, Clock, AlertTriangle, ChevronDown, ChevronUp, Send, DollarSign, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
+import { getTransferDisplayStatus } from '../../utils/transferStatus';
 
 const SALE_STATUS_CONFIG = {
   open:           { label: 'Sale Open',      color: '#2563eb', bg: '#dbeafe',  icon: Clock        },
@@ -99,15 +100,18 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
         </div>
 
         {/* Status bar */}
-        <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-          <Badge variant={XFER_BADGE[transfer.status] || 'secondary'}>
-            {transfer.status?.toUpperCase()}
-          </Badge>
-          <span className="text-xs text-text-tertiary ml-auto">
-            {new Date(transfer.created_at).toLocaleString()}
-          </span>
-        </div>
+        {(() => {
+          const ds = getTransferDisplayStatus(transfer);
+          return (
+            <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
+              style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+              <Badge variant={ds.variant}>{ds.label.toUpperCase()}</Badge>
+              <span className="text-xs text-text-tertiary ml-auto">
+                {new Date(transfer.created_at).toLocaleString()}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Rejection banner */}
         {transfer.status === 'rejected' && transfer.rejection_reason && (

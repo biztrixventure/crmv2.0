@@ -20,6 +20,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useFormFields } from "../hooks/useFormFields";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import PhoneSearch from "../components/Closer/PhoneSearch";
+import { getTransferDisplayStatus } from "../utils/transferStatus";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -417,7 +418,7 @@ const StaffShell = () => {
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
-                          <td className="py-3 px-3"><Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
+                          <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || t.closer_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                         </tr>
@@ -849,12 +850,7 @@ const StaffShell = () => {
                             )}
                           </div>
                           <div className="flex flex-col items-end gap-1">
-                            <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
-                            {t.sale_status && (
-                              <Badge variant={SALE_BADGE[t.sale_status] || 'secondary'} size="sm">
-                                {SALE_LABEL[t.sale_status] || t.sale_status}
-                              </Badge>
-                            )}
+                            {(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}
                           </div>
                         </div>
                         {t.sale_status === 'needs_revision' && t.sale_compliance_note && (
