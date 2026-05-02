@@ -40,7 +40,7 @@ const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">
-                {existingSale ? 'Edit Sale' : transfer ? 'Convert Transfer to Sale' : 'Create New Sale'}
+                {existingSale ? 'Edit Sale' : transfer ? 'Submit Lead to Compliance' : 'Submit to Compliance'}
               </h2>
               {(existingSale?.customer_name || transfer?.form_data?.customer_name) && (
                 <p className="text-sm text-white/70">

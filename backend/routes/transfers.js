@@ -263,21 +263,40 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
-  // Fetch existing sales linked to these transfers (to show "already sold" state)
+  // Fetch existing sales — two pass:
+  // 1. by transfer_id (direct link)
+  // 2. by customer_phone (cross-company: same number sold via a different transfer)
   const tIds = data.map(t => t.id);
-  let phoneSaleMap = {};
+  let saleByTransferId = {};
+  let saleByPhone      = {};
+
   if (tIds.length > 0) {
     const { data: linkedSales } = await supabaseAdmin
       .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, closer_name, created_at')
+      .select('id, transfer_id, status, compliance_note, reference_no, closer_name, customer_phone, created_at')
       .in('transfer_id', tIds);
-    (linkedSales || []).forEach(s => { phoneSaleMap[s.transfer_id] = s; });
+    (linkedSales || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
+  }
+
+  // Collect distinct phone values from all found transfers
+  const phoneValues = [...new Set(
+    data.flatMap(t => [t.form_data?.customer_phone, t.form_data?.Phone].filter(Boolean))
+  )];
+  if (phoneValues.length > 0) {
+    const { data: phoneSales } = await supabaseAdmin
+      .from('sales')
+      .select('id, transfer_id, status, compliance_note, reference_no, closer_name, customer_phone, created_at')
+      .in('customer_phone', phoneValues);
+    (phoneSales || []).forEach(s => {
+      if (s.customer_phone && !saleByPhone[s.customer_phone]) saleByPhone[s.customer_phone] = s;
+    });
   }
 
   const transfers = data.map(t => {
     const co      = companyMap[t.company_id] || {};
     const profile = profileMap[t.created_by] || {};
-    const sale    = phoneSaleMap[t.id] || null;
+    const tPhone  = t.form_data?.customer_phone || t.form_data?.Phone;
+    const sale    = saleByTransferId[t.id] || (tPhone && saleByPhone[tPhone]) || null;
     return {
       ...t,
       company_name: co.name || 'Unknown',

@@ -132,7 +132,17 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             </span>
           ) : (
             <button
-              onClick={() => onCreateSale(transfer)}
+              onClick={() => {
+                // Inject resolved name/phone so SaleForm always has customer_name & customer_phone
+                onCreateSale({
+                  ...transfer,
+                  form_data: {
+                    ...transfer.form_data,
+                    customer_name:  customerName !== 'Unknown' ? customerName : (transfer.form_data?.customer_name || ''),
+                    customer_phone: phone !== '—' ? phone : (transfer.form_data?.customer_phone || ''),
+                  },
+                });
+              }}
               className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
                          hover:scale-[1.03] transition-all"
               style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap' }}

@@ -163,11 +163,16 @@ const StaffShell = () => {
     setSaleLoading(true);
     setSaleError('');
     try {
-      await createSale(formData);
+      const newSale = await createSale(formData);
+      // Auto-submit for compliance review immediately after creation
+      if (newSale?.id) {
+        await client.post(`sales/${newSale.id}/submit-review`);
+      }
       setModalOpen(false);
-      setSaleSuccess('Sale created!');
+      setSaleSuccess('Sale submitted to compliance!');
       fetchStats();
       fetchTransfers({ date_from, date_to });
+      fetchSales({ date_from, date_to });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');

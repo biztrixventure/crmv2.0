@@ -320,9 +320,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
             justifyContent: 'center',
           }}>
           {isLoading ? (
-            <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" /> {existingSale ? 'Updating…' : 'Saving…'}</>
+            <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" /> {existingSale ? 'Updating…' : 'Submitting…'}</>
           ) : (
-            <><DollarSign size={18} /> {existingSale ? 'Update Sale' : 'Save Sale'}</>
+            <><DollarSign size={18} /> {existingSale ? 'Update Sale' : 'Send to Compliance'}</>
           )}
         </button>
       </div>
