@@ -74,14 +74,16 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Enrich with creator names via separate query (user_profiles.user_id = auth user id)
+  // Enrich with fronter + closer names via single profile query
   const creatorIds = [...new Set((data || []).map(t => t.created_by).filter(Boolean))];
+  const closerIds  = [...new Set((data || []).map(t => t.assigned_closer_id).filter(Boolean))];
+  const allProfileIds = [...new Set([...creatorIds, ...closerIds])];
   let profileMap = {};
-  if (creatorIds.length > 0) {
+  if (allProfileIds.length > 0) {
     const { data: profiles } = await supabaseAdmin
       .from('user_profiles')
       .select('user_id, first_name, last_name')
-      .in('user_id', creatorIds);
+      .in('user_id', allProfileIds);
     (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
   }
 
@@ -98,6 +100,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const transfers = (data || []).map(t => {
     const profile = profileMap[t.created_by];
+    const closerProfile = profileMap[t.assigned_closer_id];
     const fronter_name = profile
       ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
       : null;
@@ -106,6 +109,7 @@ router.get('/', asyncHandler(async (req, res) => {
       ...t,
       user_profiles: profile || null,
       fronter_name: fronter_name || 'Unknown',
+      closer: closerProfile ? { first_name: closerProfile.first_name, last_name: closerProfile.last_name } : null,
       sale_id: sale?.id || null,
       sale_status: sale?.status || null,
       sale_compliance_note: sale?.compliance_note || null,
@@ -272,9 +276,21 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   if (tIds.length > 0) {
     const { data: linkedSales } = await supabaseAdmin
       .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, created_at')
+      .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at')
       .in('transfer_id', tIds);
     (linkedSales || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
+
+    // Enrich sales with closer names
+    const saleCloserIds = [...new Set((linkedSales || []).map(s => s.closer_id).filter(Boolean))];
+    if (saleCloserIds.length > 0) {
+      const { data: saleCloserProfiles } = await supabaseAdmin
+        .from('user_profiles').select('user_id, first_name, last_name').in('user_id', saleCloserIds);
+      const saleCloserMap = Object.fromEntries((saleCloserProfiles || []).map(p => [p.user_id, p]));
+      Object.values(saleByTransferId).forEach(s => {
+        const cp = saleCloserMap[s.closer_id];
+        s.closer_name = cp ? `${cp.first_name || ''} ${cp.last_name || ''}`.trim() || null : null;
+      });
+    }
   }
 
   const transfers = data.map(t => {

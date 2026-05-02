@@ -81,7 +81,25 @@ router.get(
       .order('created_at', { ascending: false });
 
     if (['superadmin', 'readonly_admin'].includes(userRole)) {
-      // No filter — global view
+      // Apply company filter only when admin explicitly passes company_id param
+      if (req.query.company_id) {
+        const { data: co } = await supabaseAdmin
+          .from('companies').select('company_type').eq('id', req.query.company_id).single();
+        if (co?.company_type === 'fronter') {
+          query = query.eq('company_id', req.query.company_id);
+        } else {
+          const { data: coUsers } = await supabaseAdmin
+            .from('user_company_roles').select('user_id')
+            .eq('company_id', req.query.company_id).eq('is_active', true);
+          const closerUserIds = (coUsers || []).map(u => u.user_id);
+          if (closerUserIds.length > 0) {
+            query = query.in('closer_id', closerUserIds);
+          } else {
+            return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+          }
+        }
+      }
+      // else: no filter — global view
     } else if (userRole === 'closer') {
       // Closer: their own sales only, regardless of which company_id the sale has
       query = query.eq('closer_id', userId);
