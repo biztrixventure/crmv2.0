@@ -168,7 +168,7 @@ router.post(
     body('customer_name').trim().notEmpty().withMessage('Customer name is required'),
     body('customer_phone').trim().notEmpty().withMessage('Phone number is required'),
     body('customer_phone_2').trim().optional(),
-    body('customer_email').isEmail().optional({ nullable: true, checkFalsy: true }),
+    body('customer_email').trim().optional({ nullable: true, checkFalsy: true }),
     body('customer_address').trim().optional(),
     // Vehicle info
     body('car_year').isInt({ min: 1900, max: 2100 }).optional({ nullable: true, checkFalsy: true }),

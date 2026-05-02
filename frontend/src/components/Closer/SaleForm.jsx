@@ -39,19 +39,36 @@ const STATUSES = [
 
 // Maps known form field names to sales table columns for search indexing
 function mapToSaleColumns(formData) {
-  const firstName = (formData.FirstName || '').trim();
-  const lastName  = (formData.LastName  || '').trim();
+  const firstName = (formData.FirstName || formData.first_name || '').trim();
+  const lastName  = (formData.LastName  || formData.last_name  || '').trim();
+  const fullName  = [firstName, lastName].filter(Boolean).join(' ')
+    || formData.customer_name || formData.Name || formData.name || formData.FullName || formData.fullname || '';
+
+  const phone = formData.Phone || formData.phone || formData.customer_phone
+    || formData.PhoneNumber || formData.phone_number || formData.Mobile || formData.CellPhone || '';
+
+  const phone2 = formData.Phone2 || formData.phone2 || formData.customer_phone_2 || '';
+
+  const email  = formData.Email || formData.email || formData.customer_email || formData.EmailAddress || '';
+
+  const carYear  = formData.CarYear  || formData.car_year  || formData.Year  || null;
+  const carMake  = formData.CarMake  || formData.car_make  || formData.Make  || null;
+  const carModel = formData.CarModel || formData.car_model || formData.Model || null;
+  const carMiles = formData.CarMiles || formData.car_miles || formData.Mileage || null;
+  const carVin   = formData.CarVin   || formData.car_vin   || formData.VIN   || null;
+
   return {
-    customer_name:    [firstName, lastName].filter(Boolean).join(' ') || formData.customer_name || '',
-    customer_phone:   formData.Phone    || formData.customer_phone   || '',
-    customer_phone_2: formData.Phone2   || formData.customer_phone_2 || '',
-    customer_email:   formData.Email    || formData.customer_email   || '',
-    customer_address: [formData.Address, formData.City, formData.State, formData.Zip].filter(Boolean).join(', ') || formData.customer_address || '',
-    car_year:   formData.CarYear  ? parseInt(formData.CarYear)  : null,
-    car_make:   formData.CarMake  || null,
-    car_model:  formData.CarModel || null,
-    car_miles:  formData.CarMiles ? parseInt(formData.CarMiles) : null,
-    car_vin:    formData.CarVin   ? formData.CarVin.toUpperCase() : null,
+    customer_name:    fullName,
+    customer_phone:   phone,
+    customer_phone_2: phone2,
+    customer_email:   email,
+    customer_address: [formData.Address, formData.City, formData.State, formData.Zip].filter(Boolean).join(', ')
+      || formData.customer_address || '',
+    car_year:   carYear  ? parseInt(carYear)  || null : null,
+    car_make:   carMake  || null,
+    car_model:  carModel || null,
+    car_miles:  carMiles ? parseInt(carMiles) || null : null,
+    car_vin:    carVin   ? String(carVin).toUpperCase() : null,
   };
 }
 

@@ -133,14 +133,16 @@ const TransferCard = ({ transfer, onCreateSale }) => {
           ) : (
             <button
               onClick={() => {
-                // Inject resolved name/phone so SaleForm always has customer_name & customer_phone
+                const fd = transfer.form_data || {};
+                // Best-effort name: try all common field name patterns
+                const resolvedName = customerName !== 'Unknown'
+                  ? customerName
+                  : (fd.customer_name || fd.Name || fd.name || fd.FullName || fd.fullname
+                     || Object.values(fd).find(v => typeof v === 'string' && v.length > 1 && !/\d{5,}/.test(v)) || '');
+                const resolvedPhone = phone !== '—' ? phone : (fd.customer_phone || fd.Phone || fd.phone || '');
                 onCreateSale({
                   ...transfer,
-                  form_data: {
-                    ...transfer.form_data,
-                    customer_name:  customerName !== 'Unknown' ? customerName : (transfer.form_data?.customer_name || ''),
-                    customer_phone: phone !== '—' ? phone : (transfer.form_data?.customer_phone || ''),
-                  },
+                  form_data: { ...fd, customer_name: resolvedName, customer_phone: resolvedPhone },
                 });
               }}
               className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
