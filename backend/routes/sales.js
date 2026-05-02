@@ -75,43 +75,38 @@ router.get(
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
-    // Resolve which company IDs to include.
-    // For users in a fronter company, also pull in linked closer company sales
-    // so fronter managers can see outcomes of their transfers.
-    let scopeIds = companyId ? [companyId] : [];
-    if (companyId && userRole !== 'closer') {
-      const { data: company } = await supabaseAdmin
-        .from('companies').select('company_type').eq('id', companyId).single();
-      if (company?.company_type === 'fronter') {
-        const { data: links } = await supabaseAdmin
-          .from('company_links').select('closer_company_id').eq('fronter_company_id', companyId);
-        const linked = (links || []).map(l => l.closer_company_id).filter(Boolean);
-        if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
-        logger.info('GET_SALES', `Fronter company — including ${linked.length} linked closer companies`);
-      }
-    }
-
     let query = supabaseAdmin
       .from('sales')
-      .select(`
-        *,
-        transfers (
-          id,
-          form_data,
-          status,
-          created_by
-        )
-      `, { count: 'exact' })
+      .select(`*, transfers(id, form_data, status, created_by)`, { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    if (scopeIds.length > 1) {
-      query = query.in('company_id', scopeIds);
-    } else if (scopeIds.length === 1) {
-      query = query.eq('company_id', scopeIds[0]);
-    }
-
-    if (userRole === 'closer') {
+    if (['superadmin', 'readonly_admin'].includes(userRole)) {
+      // No filter — global view
+    } else if (userRole === 'closer') {
+      // Closer: their own sales only, regardless of which company_id the sale has
       query = query.eq('closer_id', userId);
+    } else if (companyId) {
+      // Detect company type to determine scoping strategy
+      const { data: co } = await supabaseAdmin
+        .from('companies').select('company_type').eq('id', companyId).single();
+
+      if (co?.company_type === 'fronter') {
+        // Fronter-side: sales whose company_id matches the fronter company
+        // (sales created from this company's transfers inherit its company_id)
+        query = query.eq('company_id', companyId);
+      } else {
+        // Closer-side (closer_manager, ops_manager, company_admin, compliance_manager):
+        // scope by closer_id across all users in this company
+        const { data: coUsers } = await supabaseAdmin
+          .from('user_company_roles').select('user_id')
+          .eq('company_id', companyId).eq('is_active', true);
+        const closerUserIds = (coUsers || []).map(u => u.user_id);
+        if (closerUserIds.length > 0) {
+          query = query.in('closer_id', closerUserIds);
+        } else {
+          return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+        }
+      }
     }
 
     if (status)    query = query.eq('status', status);
@@ -195,7 +190,9 @@ router.post(
     }
 
     const userId = req.user.id;
-    const companyId = req.body.company_id || req.user.company_id;
+    // company_id comes from the TRANSFER (fronter company) if linked,
+    // otherwise from the closer's own company (for direct sales)
+    let companyId = req.body.company_id || req.user.company_id;
 
     if (!companyId) {
       return res.status(400).json({ error: 'Company ID is required' });
@@ -221,6 +218,9 @@ router.post(
       const { data: existingSale } = await supabaseAdmin
         .from('sales').select('id').eq('transfer_id', transfer_id).single();
       if (existingSale) return res.status(409).json({ error: 'A sale already exists for this transfer' });
+
+      // Sale inherits the FRONTER company's company_id so it appears in their records
+      if (transfer.company_id) companyId = transfer.company_id;
 
       // Auto-complete the transfer; if unassigned, claim it for the closer
       const transferUpdates = { status: 'completed', updated_at: new Date().toISOString() };
@@ -298,30 +298,21 @@ router.get('/compliance', asyncHandler(async (req, res) => {
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  // Superadmin can pass company_id param; compliance_manager is locked to own company
-  const effectiveCompanyId = userRole === 'superadmin' ? (req.query.company_id || companyId) : companyId;
-
-  // Expand scope to include linked companies for compliance manager.
-  // Compliance managers live in closer companies; also include sales from
-  // any fronter companies linked to their closer company (bidirectional visibility).
-  let scopeIds = effectiveCompanyId ? [effectiveCompanyId] : [];
-  if (effectiveCompanyId && userRole === 'compliance_manager') {
-    const [fronterLinks, closerLinks] = await Promise.all([
-      supabaseAdmin.from('company_links').select('fronter_company_id').eq('closer_company_id', effectiveCompanyId),
-      supabaseAdmin.from('company_links').select('closer_company_id').eq('fronter_company_id', effectiveCompanyId),
-    ]);
-    const linked = [
-      ...((fronterLinks.data || []).map(l => l.fronter_company_id)),
-      ...((closerLinks.data  || []).map(l => l.closer_company_id)),
-    ].filter(Boolean);
-    if (linked.length > 0) scopeIds = [...scopeIds, ...linked];
+  // Superadmin sees everything. Compliance_manager scopes by closer_id IN [company users]
+  // because sales from the fronter pipeline now carry the fronter company's company_id,
+  // not the closer company's — so company_id filtering would miss them.
+  if (userRole === 'compliance_manager' && companyId) {
+    const { data: coUsers } = await supabaseAdmin
+      .from('user_company_roles').select('user_id')
+      .eq('company_id', companyId).eq('is_active', true);
+    const closerUserIds = (coUsers || []).map(u => u.user_id);
+    if (closerUserIds.length > 0) {
+      query = query.in('closer_id', closerUserIds);
+    } else {
+      return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+    }
   }
-
-  if (scopeIds.length > 1) {
-    query = query.in('company_id', scopeIds);
-  } else if (scopeIds.length === 1) {
-    query = query.eq('company_id', scopeIds[0]);
-  }
+  // superadmin: no filter
 
   if (status)     query = query.eq('status', status);
   if (date_from)  query = query.gte('created_at', date_from);

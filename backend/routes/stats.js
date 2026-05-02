@@ -67,10 +67,18 @@ router.get(
           .from('sales').select('id, status').eq('closer_id', userId);
         sales = salesData || [];
       } else if (isCloserSide && companyId) {
-        // Closer-side managers / compliance: all sales in their (closer) company
-        const { data: salesData } = await supabaseAdmin
-          .from('sales').select('id, status').eq('company_id', companyId);
-        sales = salesData || [];
+        // Closer-side managers / compliance: scope by closer_id across all company users.
+        // Sales from the fronter pipeline have the fronter company's company_id,
+        // so company_id = closerCompanyId would miss them. Use closer_id instead.
+        const { data: coUsers } = await supabaseAdmin
+          .from('user_company_roles').select('user_id')
+          .eq('company_id', companyId).eq('is_active', true);
+        const closerUserIds = (coUsers || []).map(u => u.user_id);
+        if (closerUserIds.length > 0) {
+          const { data: salesData } = await supabaseAdmin
+            .from('sales').select('id, status').in('closer_id', closerUserIds);
+          sales = salesData || [];
+        }
       } else if (transferIds.length > 0) {
         // Fronter / fronter managers: only sales linked to their company's transfers
         const { data: salesData } = await supabaseAdmin

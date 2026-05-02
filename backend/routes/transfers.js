@@ -272,7 +272,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   if (tIds.length > 0) {
     const { data: linkedSales } = await supabaseAdmin
       .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, closer_name, customer_phone, created_at')
+      .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, created_at')
       .in('transfer_id', tIds);
     (linkedSales || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
   }
