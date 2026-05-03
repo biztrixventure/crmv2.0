@@ -1,93 +1,92 @@
 import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Search, Filter } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
 import CompanyList from './CompanyList';
 import CompanyModal from './CompanyModal';
 import CompanyDetail from './CompanyDetail';
 
-/**
- * CompanyManagement Component
- * Main container for company management features
- * Handles CRUD operations for companies
- */
+const FILTER_BTN = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border';
+
 const CompanyManagement = () => {
   const { companies, loading, error, fetchCompanies, createCompany, updateCompany, deleteCompany, activateCompany, hardDeleteCompany } = useCompanies();
-  const [showModal, setShowModal]         = useState(false);
+  const [showModal, setShowModal]             = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const [detailCompany, setDetailCompany] = useState(null);
-  const [searchTerm, setSearchTerm]       = useState('');
+  const [detailCompany, setDetailCompany]     = useState(null);
+  const [searchTerm, setSearchTerm]           = useState('');
+  const [typeFilter, setTypeFilter]           = useState('all');
+  const [statusFilter, setStatusFilter]       = useState('all');
 
-  // Fetch companies on component mount
-  useEffect(() => {
-    fetchCompanies();
-  }, []);
+  useEffect(() => { fetchCompanies(); }, []);
 
-  // Handle add company button click
-  const handleAddCompany = () => {
-    setSelectedCompany(null);
-    setShowModal(true);
-  };
+  const handleAddCompany    = () => { setSelectedCompany(null); setShowModal(true); };
+  const handleEditCompany   = (c) => { setSelectedCompany(c); setShowModal(true); };
+  const handleDeleteCompany = async (id) => { try { await deleteCompany(id); } catch {} };
+  const handleActivateCompany  = async (id) => { try { await activateCompany(id); } catch {} };
+  const handleHardDeleteCompany = async (id) => { try { await hardDeleteCompany(id); } catch {} };
 
-  // Handle edit company
-  const handleEditCompany = (company) => {
-    setSelectedCompany(company);
-    setShowModal(true);
-  };
-
-  // Soft deactivate
-  const handleDeleteCompany = async (companyId) => {
-    try {
-      await deleteCompany(companyId);
-    } catch { /* handled in hook */ }
-  };
-
-  // Re-activate
-  const handleActivateCompany = async (companyId) => {
-    try {
-      await activateCompany(companyId);
-    } catch { /* handled in hook */ }
-  };
-
-  // Hard delete (permanent)
-  const handleHardDeleteCompany = async (companyId) => {
-    try {
-      await hardDeleteCompany(companyId);
-    } catch { /* handled in hook */ }
-  };
-
-  // Handle modal save
   const handleSaveCompany = async (formData) => {
     try {
       if (selectedCompany) {
         await updateCompany(selectedCompany.id, {
-          name: formData.name,
-          slug: formData.slug || null,
-          logo_url: formData.logo_url,
-          company_type: formData.company_type,
+          name: formData.name, slug: formData.slug || null,
+          logo_url: formData.logo_url, company_type: formData.company_type,
         });
       } else {
         await createCompany(formData.name, formData.slug, formData.logo_url, formData.company_type);
       }
       setShowModal(false);
       setSelectedCompany(null);
-      // Refetch companies list
       await fetchCompanies();
-    } catch (err) {
-      // Error handled in hook and will be displayed in parent
-    }
+    } catch {}
   };
 
-  // Filter companies based on search term
-  const filteredCompanies = companies.filter((c) => {
-    const matchesSearch =
-      !searchTerm ||
-      c.name.toLowerCase().includes(searchTerm.toLowerCase());
-
-    return matchesSearch;
+  const filteredCompanies = companies.filter(c => {
+    if (searchTerm && !c.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (typeFilter !== 'all' && c.company_type !== typeFilter) return false;
+    if (statusFilter === 'active'   && !c.is_active) return false;
+    if (statusFilter === 'inactive' &&  c.is_active) return false;
+    return true;
   });
 
-  // Show company detail view when a company is selected
+  const counts = {
+    all:      companies.length,
+    fronter:  companies.filter(c => c.company_type === 'fronter').length,
+    closer:   companies.filter(c => c.company_type === 'closer').length,
+    active:   companies.filter(c => c.is_active).length,
+    inactive: companies.filter(c => !c.is_active).length,
+  };
+
+  const typeBtn = (val, label) => {
+    const active = typeFilter === val;
+    return (
+      <button key={val} onClick={() => setTypeFilter(val)}
+        className={FILTER_BTN}
+        style={{
+          backgroundColor: active ? 'var(--color-primary-600)' : 'var(--color-surface)',
+          color: active ? '#fff' : 'var(--color-text-secondary)',
+          borderColor: active ? 'var(--color-primary-600)' : 'var(--color-border)',
+        }}>
+        {label} <span className="ml-1 opacity-70">{counts[val]}</span>
+      </button>
+    );
+  };
+
+  const statusBtn = (val, label) => {
+    const active = statusFilter === val;
+    return (
+      <button key={val} onClick={() => setStatusFilter(val)}
+        className={FILTER_BTN}
+        style={{
+          backgroundColor: active ? 'var(--color-primary-600)' : 'var(--color-surface)',
+          color: active ? '#fff' : 'var(--color-text-secondary)',
+          borderColor: active ? 'var(--color-primary-600)' : 'var(--color-border)',
+        }}>
+        {label} {val !== 'all' && <span className="ml-1 opacity-70">{counts[val]}</span>}
+      </button>
+    );
+  };
+
   if (detailCompany) {
     return <CompanyDetail company={detailCompany} onBack={() => setDetailCompany(null)} />;
   }
@@ -95,49 +94,63 @@ const CompanyManagement = () => {
   return (
     <div>
       {/* Header */}
-      <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-        <h2 className="text-3xl font-bold text-text">Companies</h2>
-        <Button
-          onClick={handleAddCompany}
-          variant="primary"
-          size="md"
-          className="flex items-center gap-2"
-        >
-          <Plus size={20} />
-          <span>Add Company</span>
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-text">Companies</h2>
+          <p className="text-xs text-text-secondary mt-0.5">{filteredCompanies.length} of {companies.length} companies</p>
+        </div>
+        <Button onClick={handleAddCompany} variant="primary" size="sm" className="flex items-center gap-1.5">
+          <Plus size={15} /> Add Company
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="flex gap-4 mb-6 flex-wrap items-center">
-        <input
-          type="text"
-          placeholder="Search by company name..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input flex-1 min-w-64"
-        />
+      {/* Filters row */}
+      <div className="rounded-xl border p-3 mb-4 space-y-2.5"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+
+        {/* Search */}
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by company name..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-8 pr-3 text-sm rounded-lg border bg-bg text-text placeholder-text-secondary outline-none focus:ring-1"
+            style={{ height: 32, borderColor: 'var(--color-border)', focusRingColor: 'var(--color-primary-600)' }}
+          />
+        </div>
+
+        {/* Type + Status filters */}
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-1">
+            <Filter size={11} className="text-text-secondary" />
+            <span className="text-xs text-text-secondary font-medium">Type:</span>
+            <div className="flex gap-1 ml-1">
+              {typeBtn('all', 'All')}
+              {typeBtn('fronter', 'Fronter')}
+              {typeBtn('closer', 'Closer')}
+            </div>
+          </div>
+          <div className="w-px h-4 bg-border hidden sm:block" />
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-text-secondary font-medium">Status:</span>
+            <div className="flex gap-1 ml-1">
+              {statusBtn('all', 'All')}
+              {statusBtn('active', 'Active')}
+              {statusBtn('inactive', 'Inactive')}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Error message */}
-      {error && (
-        <Alert
-          type="error"
-          title="Error"
-          message={error}
-          className="mb-6"
-        />
-      )}
+      {error && <Alert type="error" title="Error" message={error} className="mb-4" />}
 
-      {/* Loading state */}
-      {loading && (
+      {loading ? (
         <div className="flex justify-center items-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
         </div>
-      )}
-
-      {/* Company list */}
-      {!loading && (
+      ) : (
         <CompanyList
           companies={filteredCompanies}
           onView={setDetailCompany}
@@ -148,14 +161,10 @@ const CompanyManagement = () => {
         />
       )}
 
-      {/* Company modal */}
       {showModal && (
         <CompanyModal
           company={selectedCompany}
-          onClose={() => {
-            setShowModal(false);
-            setSelectedCompany(null);
-          }}
+          onClose={() => { setShowModal(false); setSelectedCompany(null); }}
           onSave={handleSaveCompany}
         />
       )}
