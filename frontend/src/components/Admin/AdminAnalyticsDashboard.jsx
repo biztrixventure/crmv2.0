@@ -9,7 +9,7 @@ import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
   ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
-  RefreshCw, X, Filter, Search, TrendingUp,
+  RefreshCw, X, Filter, Search, TrendingUp, Download,
 } from 'lucide-react';
 
 // ─── Sort icon ───────────────────────────────────────────────────────────────
@@ -23,6 +23,16 @@ const SortIcon = ({ col, sort }) => {
 const SALE_BADGE  = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', pending_review:'warning', needs_revision:'error' };
 const SALE_LABEL  = { open:'Open', sold:'Sold', cancelled:'Cancelled', follow_up:'Follow Up', closed_won:'Approved', closed_lost:'Lost', pending_review:'In Review', needs_revision:'Needs Revision' };
 const XFER_BADGE  = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
+
+const downloadCSV = (rows, headers, filename) => {
+  const csv = [headers, ...rows]
+    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 const Th = ({ col, sort, onSort, children }) => (
   <th onClick={() => onSort(col)}
@@ -267,6 +277,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const [todaySales, setTodaySales]         = useState(0);
   const [todayXfers, setTodayXfers]         = useState(0);
   const [todayLoading, setTodayLoading]     = useState(true);
+  const [exportLoading, setExportLoading]   = useState(false);
   const debounceRef = useRef(null);
 
   // Bootstrap
@@ -343,6 +354,65 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const handleDateRangeChange = (range) => {
     setDateRange({ date_from: range.date_from || null, date_to: range.date_to || null });
     setPage(1);
+  };
+
+  const handleExport = async () => {
+    setExportLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      if (dataTab === 'sales') {
+        const params = {
+          limit: 5000, page: 1,
+          ...(filters.companyId && { company_id: filters.companyId }),
+          ...(filters.closerId  && { user_ids: filters.closerId }),
+          ...(filters.status    && { status: filters.status }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
+          ...(filters.search    && { search: filters.search }),
+        };
+        const r = await client.get('compliance/sales', { params });
+        const rows = (r.data.sales || []).map(s => [
+          s.customer_name || '', s.customer_phone || '', s.customer_email || '',
+          s.reference_no || '',
+          SALE_LABEL[s.status] || s.status || '',
+          s.closer_name || (s.user_profiles ? `${s.user_profiles.first_name||''} ${s.user_profiles.last_name||''}`.trim() : '') || '',
+          s.companies?.name || '',
+          s.plan || '',
+          s.monthly_payment ? `$${s.monthly_payment}` : '',
+          s.sale_date ? new Date(s.sale_date).toLocaleDateString() : '',
+          new Date(s.created_at).toLocaleDateString(),
+        ]);
+        downloadCSV(rows,
+          ['Customer','Phone','Email','Reference','Status','Closer','Company','Plan','Monthly','Sale Date','Created'],
+          `sales_export_${today}.csv`);
+      } else {
+        const params = {
+          limit: 5000, page: 1,
+          ...(filters.companyId && { company_id: filters.companyId }),
+          ...(filters.closerId  && { closer_id: filters.closerId }),
+          ...(filters.status    && { status: filters.status }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
+        };
+        const r = await client.get('compliance/transfers', { params });
+        const rows = (r.data.transfers || []).map(t => {
+          const fd = t.form_data || {};
+          const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName||''}`.trim() : '') || '';
+          const phone = fd.customer_phone || fd.Phone || '';
+          return [
+            name, phone, t.status || '', t.sale_status || '',
+            t.created_by_name || '', t.assigned_closer_name || '',
+            t.company_name || '', t.sale_reference_no || '',
+            new Date(t.created_at).toLocaleDateString(),
+          ];
+        });
+        downloadCSV(rows,
+          ['Customer','Phone','Transfer Status','Sale Status','Fronter','Closer','Company','Sale Ref','Created'],
+          `transfers_export_${today}.csv`);
+      }
+    } catch { /* silent — user retries */ } finally {
+      setExportLoading(false);
+    }
   };
 
   const metrics = [
@@ -555,6 +625,17 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               {total.toLocaleString()} record{total!==1?'s':''}
               {total > LIMIT ? ` · p${page}/${totalPages}` : ''}
             </span>
+            {total > 0 && (
+              <button
+                onClick={handleExport}
+                disabled={exportLoading}
+                title="Export to CSV"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all hover:scale-105 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-success-50)', color: 'var(--color-success-700)', border: '1px solid var(--color-success-200)' }}>
+                <Download size={11} className={exportLoading ? 'animate-spin' : ''} />
+                {exportLoading ? 'Exporting…' : 'CSV'}
+              </button>
+            )}
           </div>
         </div>
 

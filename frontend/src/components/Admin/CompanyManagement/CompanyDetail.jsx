@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
-  Calendar, BarChart3, Search, RefreshCw, Settings,
+  Calendar, BarChart3, Search, RefreshCw, Settings, Download,
   PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react';
@@ -46,6 +46,16 @@ const PriorityBadge = ({ priority }) => {
   );
 };
 
+const downloadCSV = (rows, headers, filename) => {
+  const csv = [headers, ...rows]
+    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 const SortTh = ({ col, sort, onSort, children }) => {
   const Icon = sort.col !== col ? ChevronsUpDown : sort.dir === 'asc' ? ChevronUp : ChevronDown;
   return (
@@ -68,8 +78,9 @@ const RecordsPanel = ({ companyId, type }) => {
   const [companyUsers, setCompanyUsers] = useState([]);
   const [sort, setSort]               = useState({ col: type === 'callbacks' ? 'callback_at' : 'created_at', dir: 'asc' });
   const [page, setPage]               = useState(1);
-  const [selected, setSelected]       = useState(null);
-  const [phoneDrawer, setPhoneDrawer] = useState(null);
+  const [selected, setSelected]         = useState(null);
+  const [phoneDrawer, setPhoneDrawer]   = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const statuses = type === 'sales' ? SALE_STATUSES : type === 'transfers' ? TRANSFER_STATUSES : CALLBACK_STATUSES;
 
@@ -102,6 +113,47 @@ const RecordsPanel = ({ companyId, type }) => {
   }, [companyId, type, search, status, priority, userFilter]);
 
   useEffect(() => { load(1); }, [companyId, type]);
+
+  const handleExport = async () => {
+    setExportLoading(true);
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const params = { company_id: companyId, status: status || undefined, limit: 5000, page: 1 };
+      if (type === 'callbacks') {
+        if (priority)   params.priority = priority;
+        if (userFilter) params.user_id  = userFilter;
+      }
+      const res = await client.get(type, { params });
+      const data = res.data[type] || res.data.transfers || res.data.callbacks || [];
+
+      if (type === 'sales') {
+        const rows = data.map(s => [
+          s.customer_name||'', s.customer_phone||'', s.reference_no||'',
+          s.status||'', s.plan||'',
+          s.monthly_payment ? `$${s.monthly_payment}` : '',
+          new Date(s.created_at).toLocaleDateString(),
+        ]);
+        downloadCSV(rows, ['Customer','Phone','Reference','Status','Plan','Monthly','Created'],
+          `${type}_${companyId}_${today}.csv`);
+      } else if (type === 'transfers') {
+        const rows = data.map(t => {
+          const fd = t.form_data || {};
+          const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName||''}`.trim() : '') || '';
+          return [name, fd.Phone||fd.customer_phone||'', t.status||'', new Date(t.created_at).toLocaleDateString()];
+        });
+        downloadCSV(rows, ['Customer','Phone','Status','Created'],
+          `transfers_${companyId}_${today}.csv`);
+      } else {
+        const rows = data.map(cb => [
+          cb.customer_name||'', cb.customer_phone||'', cb.priority||'',
+          cb.user_name||'', cb.status||'',
+          cb.callback_at ? new Date(cb.callback_at).toLocaleString() : '',
+        ]);
+        downloadCSV(rows, ['Customer','Phone','Priority','Agent','Status','Scheduled'],
+          `callbacks_${companyId}_${today}.csv`);
+      }
+    } catch { /* silent */ } finally { setExportLoading(false); }
+  };
 
   const toggleSort = (col) =>
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
@@ -155,6 +207,14 @@ const RecordsPanel = ({ companyId, type }) => {
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
           Search · {total}
         </button>
+        {total > 0 && (
+          <button onClick={handleExport} disabled={exportLoading}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+            style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+            <Download size={13} />
+            {exportLoading ? 'Exporting…' : 'Export CSV'}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -344,11 +404,12 @@ const MembersPanel = ({ companyId }) => {
   const { hasPermission } = useAuth();
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [editUser, setEditUser]     = useState(null);
-  const [viewUser, setViewUser]     = useState(null);
-  const [actionErr, setActionErr]   = useState('');
-  const [confirm, setConfirm]       = useState(null); // { id, name, action: 'delete'|'deactivate' }
+  const [showCreate, setShowCreate]   = useState(false);
+  const [editUser, setEditUser]       = useState(null);
+  const [viewUser, setViewUser]       = useState(null);
+  const [actionErr, setActionErr]     = useState('');
+  const [confirm, setConfirm]         = useState(null); // { id, name, action: 'delete'|'deactivate' }
+  const [exportLoading, setExportLoading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -386,15 +447,40 @@ const MembersPanel = ({ companyId }) => {
     setConfirm(null);
   };
 
+  const handleExportMembers = () => {
+    if (!users.length) return;
+    setExportLoading(true);
+    const today = new Date().toISOString().split('T')[0];
+    const rows = users.map(u => [
+      [u.first_name, u.last_name].filter(Boolean).join(' ') || '',
+      u.email || '',
+      u.role || '',
+      u.role_level?.replace(/_/g, ' ') || '',
+      u.is_active ? 'Active' : 'Inactive',
+    ]);
+    downloadCSV(rows, ['Name', 'Email', 'Role', 'Level', 'Status'], `members_${companyId}_${today}.csv`);
+    setExportLoading(false);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-text-secondary">{users.length} member{users.length !== 1 ? 's' : ''}</p>
-        {hasPermission('create_user') && (
-        <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
-          <PlusCircle size={15} /> Add Member
-        </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {users.length > 0 && (
+            <button onClick={handleExportMembers} disabled={exportLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+              <Download size={12} />
+              {exportLoading ? 'Exporting…' : 'Export CSV'}
+            </button>
+          )}
+          {hasPermission('create_user') && (
+          <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
+            <PlusCircle size={15} /> Add Member
+          </Button>
+          )}
+        </div>
       </div>
 
       {actionErr && <p className="text-sm text-error-600">{actionErr}</p>}

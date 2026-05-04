@@ -40,6 +40,9 @@ async function isFeatureEnabled(featureKey, companyId) {
 function requireFeature(featureKey) {
   return async (req, res, next) => {
     try {
+      // Superadmin bypasses all feature gates
+      if (req.user?.role === 'superadmin') return next();
+
       const companyId = req.user?.company_id || null;
       const enabled   = await isFeatureEnabled(featureKey, companyId);
       if (!enabled) {
