@@ -237,7 +237,7 @@ const CompanyManagement = () => {
   };
 
   return (
-    <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 170px)' }}>
+    <div className="h-full flex flex-col gap-3">
 
       {/* ── page header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-shrink-0">
@@ -345,8 +345,9 @@ const CompanyManagement = () => {
         {/* ──── RIGHT: detail / empty ───────────────────────────────── */}
         <div className="flex-1 min-w-0 overflow-y-auto" style={{ backgroundColor: 'var(--color-bg)' }}>
           {selected ? (
-            <div className="p-6">
+            <div className="p-5">
               <CompanyDetail
+                key={selected.id}
                 company={selected}
                 onBack={() => setSelected(null)}
                 onUpdate={setSelected}

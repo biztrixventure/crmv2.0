@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
-  ArrowLeft, Users, Shield, Send, DollarSign,
+  ArrowLeft, Users, Shield, Send, DollarSign, Building2,
   Calendar, BarChart3, Search, RefreshCw, Settings,
   PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown,
@@ -946,6 +946,17 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [refresh, setRefresh]     = useState(0);
   const [company, setCompany]     = useState(initialCompany);
+  const prevId = useRef(initialCompany.id);
+
+  // Reset panel when a different company is selected (guards against missing key prop)
+  useEffect(() => {
+    if (initialCompany.id !== prevId.current) {
+      prevId.current = initialCompany.id;
+      setActiveTab('overview');
+      setRefresh(0);
+    }
+    setCompany(initialCompany);
+  }, [initialCompany]);
 
   const TABS = [
     { key: 'overview',   label: 'Overview',  icon: BarChart3  },
@@ -965,42 +976,63 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
 
   return (
     <div>
-      {/* header */}
-      <div className="flex items-center gap-2.5 mb-5 flex-wrap">
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          {company.logo_url && (
-            <img src={company.logo_url} alt="" className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
-              onError={e => { e.target.style.display = 'none'; }} />
-          )}
-          <div className="min-w-0">
-            <h2 className="text-xl font-bold text-text leading-tight truncate">{company.name}</h2>
-            {company.slug && <p className="text-xs font-mono text-text-secondary truncate">{company.slug}</p>}
-          </div>
-          <Badge variant={company.is_active ? 'success' : 'secondary'} size="sm">
-            {company.is_active ? 'Active' : 'Inactive'}
-          </Badge>
-          {company.company_type && (
-            <Badge variant={company.company_type === 'fronter' ? 'success' : 'primary'} size="sm">
-              {company.company_type === 'fronter' ? 'Fronter' : 'Closer'}
-            </Badge>
-          )}
+      {/* ── header ─────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 mb-4 pb-4"
+        style={{ borderBottom: '1px solid var(--color-border)' }}>
+
+        {/* logo or icon */}
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden"
+          style={{
+            background: company.logo_url ? 'transparent' : 'var(--gradient-sidebar)',
+            border: `1px solid var(--color-border)`,
+          }}>
+          {company.logo_url
+            ? <img src={company.logo_url} alt="" className="w-full h-full object-cover"
+                onError={e => { e.target.style.display = 'none'; }} />
+            : <Building2 size={16} className="text-white" />
+          }
         </div>
-        <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+
+        {/* name + meta */}
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-bold text-text leading-tight truncate">{company.name}</h2>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            {company.slug && (
+              <span className="text-[11px] font-mono text-text-secondary">{company.slug}</span>
+            )}
+            <Badge variant={company.is_active ? 'success' : 'secondary'} size="sm">
+              {company.is_active ? 'Active' : 'Inactive'}
+            </Badge>
+            {company.company_type && (
+              <Badge variant={company.company_type === 'fronter' ? 'success' : 'primary'} size="sm">
+                {company.company_type === 'fronter' ? 'Fronter' : 'Closer'}
+              </Badge>
+            )}
+            {company.created_at && (
+              <span className="text-[11px] text-text-secondary hidden sm:inline">
+                Since {new Date(company.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* actions */}
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button onClick={() => setRefresh(r => r + 1)}
-            className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors" title="Refresh data">
+            className="p-2 rounded-lg hover:bg-bg-secondary transition-colors" title="Refresh data">
             <RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} />
           </button>
           {onBack && (
             <button onClick={onBack}
-              className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors" title="Close panel">
+              className="p-2 rounded-lg hover:bg-bg-secondary transition-colors" title="Deselect company">
               <ArrowLeft size={14} style={{ color: 'var(--color-text-secondary)' }} />
             </button>
           )}
         </div>
       </div>
 
-      {/* tabs */}
-      <div className="flex gap-1 mb-5 p-1 rounded-xl overflow-x-auto"
+      {/* ── tabs ───────────────────────────────────────────────────────── */}
+      <div className="flex gap-0.5 mb-5 p-1 rounded-xl overflow-x-auto"
         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
