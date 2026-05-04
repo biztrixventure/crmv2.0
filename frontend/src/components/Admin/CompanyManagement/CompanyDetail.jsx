@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign,
   Calendar, BarChart3, Search, RefreshCw, Settings,
   PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
+  AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
@@ -26,6 +27,35 @@ const SALE_STATUSES     = ['open','sold','cancelled','follow_up','closed_won','c
 const TRANSFER_STATUSES = ['pending','assigned','completed','cancelled','rejected'];
 const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
 
+const PRIORITY_CFG = {
+  High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
+  Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: '#d97706' },
+  Low:    { dot: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb' },
+};
+const SORT_PRIORITY = { High: 3, Medium: 2, Low: 1 };
+
+const PriorityBadge = ({ priority }) => {
+  if (!priority) return <span className="text-xs text-text-secondary">—</span>;
+  const cfg = PRIORITY_CFG[priority] || PRIORITY_CFG.Medium;
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-xs font-semibold border"
+      style={{ backgroundColor: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cfg.dot }} />
+      {priority}
+    </span>
+  );
+};
+
+const SortTh = ({ col, sort, onSort, children }) => {
+  const Icon = sort.col !== col ? ChevronsUpDown : sort.dir === 'asc' ? ChevronUp : ChevronDown;
+  return (
+    <th onClick={() => onSort(col)}
+      className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase cursor-pointer select-none whitespace-nowrap hover:text-text transition-colors">
+      <span className="inline-flex items-center gap-1">{children}<Icon size={10} className="opacity-50" /></span>
+    </th>
+  );
+};
+
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type }) => {
   const [rows, setRows]               = useState([]);
@@ -33,38 +63,95 @@ const RecordsPanel = ({ companyId, type }) => {
   const [loading, setLoading]         = useState(false);
   const [search, setSearch]           = useState('');
   const [status, setStatus]           = useState('');
+  const [priority, setPriority]       = useState('');
+  const [userFilter, setUserFilter]   = useState('');
+  const [companyUsers, setCompanyUsers] = useState([]);
+  const [sort, setSort]               = useState({ col: type === 'callbacks' ? 'callback_at' : 'created_at', dir: 'asc' });
   const [page, setPage]               = useState(1);
   const [selected, setSelected]       = useState(null);
   const [phoneDrawer, setPhoneDrawer] = useState(null);
 
   const statuses = type === 'sales' ? SALE_STATUSES : type === 'transfers' ? TRANSFER_STATUSES : CALLBACK_STATUSES;
 
+  // Fetch users for this company (for callbacks agent filter)
+  useEffect(() => {
+    if (type !== 'callbacks') return;
+    client.get('users', { params: { company_id: companyId } })
+      .then(r => setCompanyUsers(r.data.users || []))
+      .catch(() => {});
+  }, [companyId, type]);
+
   const load = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      const res = await client.get(type, {
-        params: { company_id: companyId, search: search || undefined, status: status || undefined, page: p, limit: LIMIT },
-      });
+      const params = {
+        company_id: companyId,
+        search: search || undefined,
+        status: status || undefined,
+        page: p, limit: LIMIT,
+      };
+      if (type === 'callbacks') {
+        if (priority)   params.priority = priority;
+        if (userFilter) params.user_id  = userFilter;
+      }
+      const res = await client.get(type, { params });
       setRows(res.data[type] || res.data.transfers || res.data.callbacks || []);
       setTotal(res.data.total || 0);
       setPage(p);
-    } catch { /* ignore */ } finally { setLoading(false); }
-  }, [companyId, type, search, status]);
+    } catch { } finally { setLoading(false); }
+  }, [companyId, type, search, status, priority, userFilter]);
 
   useEffect(() => { load(1); }, [companyId, type]);
 
+  const toggleSort = (col) =>
+    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+
+  const sorted = useMemo(() => {
+    if (type !== 'callbacks') return rows;
+    return [...rows].sort((a, b) => {
+      const dir = sort.dir === 'asc' ? 1 : -1;
+      switch (sort.col) {
+        case 'priority':    return ((SORT_PRIORITY[b.priority]||0) - (SORT_PRIORITY[a.priority]||0)) * dir;
+        case 'callback_at': return (a.callback_at||'').localeCompare(b.callback_at||'') * dir;
+        case 'customer':    return (a.customer_name||'').localeCompare(b.customer_name||'') * dir;
+        case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
+        case 'agent':       return (a.user_name||'').localeCompare(b.user_name||'') * dir;
+        default: return 0;
+      }
+    });
+  }, [rows, sort, type]);
+
+  const displayRows = type === 'callbacks' ? sorted : rows;
+
   return (
     <div className="space-y-3">
+      {/* Filter bar */}
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
             placeholder="Search…" className="input pl-9 text-sm" />
         </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-44">
+        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
           <option value="">All statuses</option>
           {statuses.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
         </select>
+        {type === 'callbacks' && <>
+          <select value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm w-36">
+            <option value="">All priorities</option>
+            <option value="High">🔴 High</option>
+            <option value="Medium">🟡 Medium</option>
+            <option value="Low">🔵 Low</option>
+          </select>
+          <select value={userFilter} onChange={e => setUserFilter(e.target.value)} className="input text-sm w-40">
+            <option value="">All agents</option>
+            {companyUsers.map(u => (
+              <option key={u.id} value={u.id}>
+                {[u.first_name, u.last_name].filter(Boolean).join(' ') || u.email}
+              </option>
+            ))}
+          </select>
+        </>}
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
           Search · {total}
         </button>
@@ -72,7 +159,7 @@ const RecordsPanel = ({ companyId, type }) => {
 
       {loading ? (
         <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-      ) : rows.length === 0 ? (
+      ) : displayRows.length === 0 ? (
         <p className="text-center text-text-secondary py-8 text-sm">No records.</p>
       ) : (
         <Card className="overflow-hidden">
@@ -85,7 +172,7 @@ const RecordsPanel = ({ companyId, type }) => {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {rows.map(r => (
+                  {displayRows.map(r => (
                     <tr key={r.id} onClick={() => setSelected(r)}
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -109,7 +196,7 @@ const RecordsPanel = ({ companyId, type }) => {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {rows.map(r => (
+                  {displayRows.map(r => (
                     <tr key={r.id} onClick={() => setSelected(r)}
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -127,32 +214,53 @@ const RecordsPanel = ({ companyId, type }) => {
             )}
             {type === 'callbacks' && (
               <table className="w-full text-sm">
-                <thead><tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Customer','Phone','Scheduled','Status'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                  ))}
-                </tr></thead>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+                    <SortTh col="customer"    sort={sort} onSort={toggleSort}>Customer</SortTh>
+                    <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
+                    <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
+                    <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled</SortTh>
+                    <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
+                  </tr>
+                </thead>
                 <tbody>
-                  {rows.map(r => (
-                    <tr key={r.id} onClick={() => setSelected(r)}
-                      className="hover:bg-bg-secondary cursor-pointer transition-colors"
-                      style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      <td className="px-3 py-2.5 font-semibold text-text">{r.customer_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs">
-                        {r.customer_phone ? (
-                          <button
-                            onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: r.customer_phone, customerName: r.customer_name }); }}
-                            className="font-mono hover:underline"
-                            style={{ color: 'var(--color-primary-600)' }}
-                            title="View all callbacks for this number">
-                            {r.customer_phone}
-                          </button>
-                        ) : '—'}
-                      </td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{new Date(r.callback_at).toLocaleString()}</td>
-                      <td className="px-3 py-2.5"><Badge variant={r.status==='pending'?'warning':r.status==='completed'?'success':'error'} size="sm">{r.status}</Badge></td>
-                    </tr>
-                  ))}
+                  {sorted.map(r => {
+                    const isOverdue = r.status === 'pending' && r.callback_at && new Date(r.callback_at) < new Date();
+                    return (
+                      <tr key={r.id} onClick={() => setSelected(r)}
+                        className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                        style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-2.5">
+                          <p className="font-semibold text-text text-sm">{r.customer_name||'—'}</p>
+                          {r.customer_phone ? (
+                            <button onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: r.customer_phone, customerName: r.customer_name }); }}
+                              className="text-xs font-mono hover:underline"
+                              style={{ color: 'var(--color-primary-600)' }}>
+                              {r.customer_phone}
+                            </button>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2.5"><PriorityBadge priority={r.priority} /></td>
+                        <td className="px-3 py-2.5 text-xs text-text-secondary">{r.user_name || '—'}</td>
+                        <td className="px-3 py-2.5 text-xs">
+                          <div className="flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                            {new Date(r.callback_at).toLocaleString()}
+                            {isOverdue && (
+                              <span title="Overdue" className="inline-flex items-center gap-0.5 px-1 py-px rounded text-[10px] font-semibold"
+                                style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+                                <AlertCircle size={9} /> OD
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge variant={r.status==='pending'?'warning':r.status==='completed'?'success':'error'} size="sm">
+                            {r.status?.replace(/_/g,' ')}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

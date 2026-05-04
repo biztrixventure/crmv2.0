@@ -22,14 +22,20 @@ const MANAGER_LEVELS = [
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
-  const status    = req.query.status; // optional filter
+  const status    = req.query.status;
+  const priority  = req.query.priority;
+  const search    = req.query.search;
+  const user_id   = req.query.user_id; // superadmin: filter by specific agent
+  const page      = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit     = Math.min(200, parseInt(req.query.limit) || 50);
+  const offset    = (page - 1) * limit;
 
   const superadmin  = await isSuperAdmin(userId);
   const isManager   = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
   let query = supabaseAdmin
     .from('callbacks')
-    .select('*')
+    .select('*', { count: 'exact' })
     .order('callback_at', { ascending: true });
 
   if (isManager && companyId) {
@@ -38,9 +44,16 @@ router.get('/', asyncHandler(async (req, res) => {
     query = query.eq('user_id', userId);
   }
 
-  if (status) query = query.eq('status', status);
+  // Superadmin can further filter by a specific agent
+  if (superadmin && user_id) query = query.eq('user_id', user_id);
 
-  const { data, error } = await query;
+  if (status)   query = query.eq('status', status);
+  if (priority) query = query.eq('priority', priority);
+  if (search)   query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
+
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
   const callbacks = data || [];
@@ -59,7 +72,7 @@ router.get('/', asyncHandler(async (req, res) => {
     callbacks.forEach(c => { c.user_name = profileMap[c.user_id] || 'Unknown'; });
   }
 
-  res.json({ callbacks });
+  res.json({ callbacks, total: count || 0, page, limit });
 }));
 
 // ============================================================================

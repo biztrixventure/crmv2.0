@@ -1,11 +1,30 @@
-import { X, Phone, Clock, Globe, StickyNote, Bell, User } from 'lucide-react';
+import { X, Phone, Clock, Globe, StickyNote, Bell, User, AlertCircle } from 'lucide-react';
 import { Badge } from '../UI';
 
 const STATUS_BADGE = {
-  pending:   'warning',
-  completed: 'success',
-  cancelled: 'error',
-  no_answer: 'secondary',
+  pending:           'warning',
+  completed:         'success',
+  cancelled:         'error',
+  no_answer:         'secondary',
+  answering_machine: 'secondary',
+};
+
+const PRIORITY_CONFIG = {
+  High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
+  Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: '#d97706' },
+  Low:    { dot: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb' },
+};
+
+const PriorityBadge = ({ priority }) => {
+  if (!priority) return null;
+  const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.Medium;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border"
+      style={{ backgroundColor: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cfg.dot }} />
+      {priority}
+    </span>
+  );
 };
 
 const Row = ({ label, value }) =>
@@ -40,6 +59,9 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
     ? new Date(callback.created_at).toLocaleString()
     : null;
 
+  const isOverdue = callback.callback_at && callback.status === 'pending'
+    && new Date(callback.callback_at) < new Date();
+
   return (
     <>
       <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
@@ -72,12 +94,19 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           </button>
         </div>
 
-        {/* Status bar */}
-        <div className="flex items-center gap-2 px-5 py-3"
+        {/* Status + priority bar */}
+        <div className="flex items-center gap-2 px-5 py-3 flex-wrap"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <Badge variant={STATUS_BADGE[callback.status] || 'secondary'}>
             {(callback.status || 'unknown').replace(/_/g, ' ')}
           </Badge>
+          {callback.priority && <PriorityBadge priority={callback.priority} />}
+          {isOverdue && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border"
+              style={{ backgroundColor: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }}>
+              <AlertCircle size={10} /> Overdue
+            </span>
+          )}
           {callback.notified && (
             <Badge variant="info" size="sm">
               <Bell size={10} className="mr-1" />Notified
@@ -87,8 +116,8 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
 
         {/* Schedule */}
         <Section icon={Clock} title="Schedule">
-          <Row label="Scheduled" value={scheduledTime} />
-          <Row label="Timezone"  value={callback.user_timezone} />
+          <Row label="Scheduled"  value={scheduledTime} />
+          <Row label="Timezone"   value={callback.user_timezone} />
         </Section>
 
         {/* Customer */}
@@ -96,6 +125,14 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           <Row label="Name"  value={callback.customer_name} />
           <Row label="Phone" value={callback.customer_phone} />
         </Section>
+
+        {/* Agent */}
+        {(callback.user_name || callback.company_name) && (
+          <Section icon={User} title="Agent">
+            <Row label="Agent"   value={callback.user_name} />
+            <Row label="Company" value={callback.company_name} />
+          </Section>
+        )}
 
         {/* Notes */}
         {callback.notes && (
@@ -106,7 +143,8 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
 
         {/* Meta */}
         <Section icon={Globe} title="Meta">
-          <Row label="Created"  value={createdTime} />
+          <Row label="Created"   value={createdTime} />
+          <Row label="Source"    value={callback.source} />
           <Row label="Record ID" value={callback.id} />
         </Section>
       </div>
