@@ -44,8 +44,8 @@ router.get('/', asyncHandler(async (req, res) => {
     query = query.eq('user_id', userId);
   }
 
-  // Superadmin can further filter by a specific agent
-  if (superadmin && user_id) query = query.eq('user_id', user_id);
+  // Managers can filter by a specific agent
+  if (isManager && user_id) query = query.eq('user_id', user_id);
 
   if (status)   query = query.eq('status', status);
   if (priority) query = query.eq('priority', priority);

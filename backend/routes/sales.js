@@ -71,7 +71,7 @@ router.get(
     const userId = req.user.id;
     const companyId = req.query.company_id || req.user.company_id;
     const userRole = req.user.role;
-    const { status, page = 1, limit = 50, date_from, date_to } = req.query;
+    const { status, search, page = 1, limit = 50, date_from, date_to } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -130,6 +130,12 @@ router.get(
     if (status)    query = query.eq('status', status);
     if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
     if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
+    if (search)    query = query.or(
+      `customer_name.ilike.%${search}%,` +
+      `customer_phone.ilike.%${search}%,` +
+      `reference_no.ilike.%${search}%,` +
+      `client_name.ilike.%${search}%`
+    );
 
     const offset = (page - 1) * limit;
     query = query.range(offset, offset + parseInt(limit) - 1);

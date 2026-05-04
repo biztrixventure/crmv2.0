@@ -44,7 +44,8 @@ const AdminPanel = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab]     = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const notifHook = useNotifications();
 
   const handleLogout = () => { logout(); navigate("/login"); };
@@ -77,10 +78,12 @@ const AdminPanel = () => {
         onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification}
         onClearNotifications={notifHook.clearAll}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(o => !o)}
       />
 
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
-        <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />
+        {sidebarOpen && <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />}
 
         <main className="flex-1 overflow-auto bg-bg">
           {activeTab === 'forms' ? (

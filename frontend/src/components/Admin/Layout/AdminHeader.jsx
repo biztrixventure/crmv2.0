@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Moon, Sun, LogOut, Settings, ChevronDown } from 'lucide-react';
+import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
 import ProfileModal from '../../Profile/ProfileModal';
@@ -8,6 +8,7 @@ const AdminHeader = ({
   theme, onToggleTheme, onLogout,
   notifications = [], unreadCount = 0,
   onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications,
+  sidebarOpen = true, onToggleSidebar,
 }) => {
   const { user, updateUser } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -27,8 +28,21 @@ const AdminHeader = ({
           boxShadow: 'var(--shadow-sm)',
         }}
       >
-        {/* Left: Logo + Title */}
+        {/* Left: Sidebar toggle + Logo + Title */}
         <div className="flex items-center gap-3">
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105 flex-shrink-0"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+              title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              {sidebarOpen
+                ? <PanelLeftClose size={17} style={{ color: 'var(--color-text-secondary)' }} />
+                : <PanelLeft      size={17} style={{ color: 'var(--color-text-secondary)' }} />
+              }
+            </button>
+          )}
           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
             <Settings size={18} className="text-white" />
