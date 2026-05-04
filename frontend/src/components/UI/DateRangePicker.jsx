@@ -35,13 +35,44 @@ export function getPresetRange(key = '30d') {
   }
 }
 
-const DateRangePicker = ({ onChange, defaultPreset = '30d' }) => {
-  const [open, setOpen]           = useState(false);
-  const [preset, setPreset]       = useState(defaultPreset);
+function fmtDate(iso) {
+  if (!iso) return '';
+  const [, m, d] = iso.split('-');
+  const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${mo[parseInt(m,10)-1]} ${parseInt(d,10)}`;
+}
+
+function matchPreset(range) {
+  if (!range || (!range.date_from && !range.date_to)) return 'all';
+  for (const p of PRESETS) {
+    if (p.key === 'all') continue;
+    const r = getPresetRange(p.key);
+    if (r.date_from === range.date_from && r.date_to === range.date_to) return p.key;
+  }
+  return null;
+}
+
+// value prop (optional): { date_from, date_to } — when set externally, syncs the picker label
+const DateRangePicker = ({ onChange, defaultPreset = '30d', value }) => {
+  const [open, setOpen]             = useState(false);
+  const [preset, setPreset]         = useState(defaultPreset);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo,   setCustomTo]   = useState('');
   const [isCustom,   setIsCustom]   = useState(false);
   const ref = useRef(null);
+
+  // Sync display when value changes externally (e.g. MiniCalendar click)
+  useEffect(() => {
+    if (value === undefined) return;
+    const matched = matchPreset(value);
+    if (matched) {
+      setPreset(matched); setIsCustom(false);
+    } else if (value?.date_from || value?.date_to) {
+      setCustomFrom(value.date_from || '');
+      setCustomTo(value.date_to || '');
+      setIsCustom(true);
+    }
+  }, [value?.date_from, value?.date_to]); // eslint-disable-line
 
   useEffect(() => {
     const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -50,8 +81,7 @@ const DateRangePicker = ({ onChange, defaultPreset = '30d' }) => {
   }, []);
 
   const selectPreset = (key) => {
-    setPreset(key);
-    setIsCustom(false);
+    setPreset(key); setIsCustom(false);
     onChange(getPresetRange(key));
     setOpen(false);
   };
@@ -64,7 +94,9 @@ const DateRangePicker = ({ onChange, defaultPreset = '30d' }) => {
   };
 
   const label = isCustom
-    ? (customFrom && customTo ? `${customFrom} – ${customTo}` : customFrom ? `From ${customFrom}` : 'Custom')
+    ? (customFrom && customTo
+        ? `${fmtDate(customFrom)} – ${fmtDate(customTo)}`
+        : customFrom ? fmtDate(customFrom) : 'Custom range')
     : (PRESETS.find(p => p.key === preset)?.label ?? 'Last 30 days');
 
   return (

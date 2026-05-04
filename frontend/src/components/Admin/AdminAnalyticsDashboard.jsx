@@ -5,10 +5,11 @@ import { useDashboardStats } from '../../hooks/useDashboardStats';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
+import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
-  ChevronUp, ChevronDown, ChevronsUpDown, RefreshCw, X, Filter,
-  Search, ArrowRight, TrendingUp,
+  ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
+  RefreshCw, X, Filter, Search, TrendingUp,
 } from 'lucide-react';
 
 // ─── Sort icon ───────────────────────────────────────────────────────────────
@@ -31,61 +32,195 @@ const Th = ({ col, sort, onSort, children }) => (
   </th>
 );
 
-// ─── Mini calendar with today's stats ────────────────────────────────────────
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DAY_ABBR = ['S','M','T','W','T','F','S'];
+// ─── Interactive MiniCalendar ─────────────────────────────────────────────────
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAY_ABBR    = ['S','M','T','W','T','F','S'];
 
-function MiniCalendar({ todaySales, todayXfers, todayLoading }) {
-  const now   = new Date();
-  const yr    = now.getFullYear();
-  const mo    = now.getMonth();
-  const today = now.getDate();
+function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, selectedTo, onRangeChange }) {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
 
-  const firstDow     = new Date(yr, mo, 1).getDay();
-  const daysInMonth  = new Date(yr, mo + 1, 0).getDate();
+  const [viewYear,  setViewYear]  = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [tempFrom,  setTempFrom]  = useState(null);   // first click of pending range
+  const [hovered,   setHovered]   = useState(null);   // hovered date while selecting range
+
+  const padded = (n) => String(n).padStart(2, '0');
+  const toDateStr = (d) => `${viewYear}-${padded(viewMonth + 1)}-${padded(d)}`;
+
+  const firstDow    = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
+    else setViewMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
+    else setViewMonth(m => m + 1);
+  };
+  const goToday = () => {
+    setViewYear(now.getFullYear());
+    setViewMonth(now.getMonth());
+    setTempFrom(null);
+    onRangeChange({ date_from: todayStr, date_to: todayStr });
+  };
+
+  const handleClick = (d) => {
+    const ds = toDateStr(d);
+    if (!tempFrom) {
+      // First click: apply single-day immediately, then wait for second click
+      setTempFrom(ds);
+      onRangeChange({ date_from: ds, date_to: ds });
+    } else {
+      // Second click: complete range
+      const [f, t] = ds < tempFrom ? [ds, tempFrom] : [tempFrom, ds];
+      setTempFrom(null);
+      setHovered(null);
+      onRangeChange({ date_from: f, date_to: t });
+    }
+  };
+
+  const clearSelection = () => {
+    setTempFrom(null);
+    setHovered(null);
+    onRangeChange({ date_from: null, date_to: null });
+  };
+
+  // Visual range to highlight: pending (tempFrom + hover) or confirmed (selectedFrom/To)
+  const dispFrom = tempFrom ?? selectedFrom ?? null;
+  const dispTo   = tempFrom
+    ? (hovered ?? tempFrom)
+    : (selectedTo ?? selectedFrom ?? null);
+  const rangeMin = dispFrom && dispTo ? (dispFrom < dispTo ? dispFrom : dispTo) : dispFrom;
+  const rangeMax = dispFrom && dispTo ? (dispFrom < dispTo ? dispTo : dispFrom) : dispFrom;
+
+  const inRange    = (ds) => rangeMin && rangeMax && ds >= rangeMin && ds <= rangeMax;
+  const isRangeMin = (ds) => ds === rangeMin;
+  const isRangeMax = (ds) => ds === rangeMax;
+  const isSingle   = rangeMin && rangeMin === rangeMax;
+
+  // Format label for range info bar
+  const fmtShort = (iso) => {
+    if (!iso) return '';
+    const [, m, d] = iso.split('-');
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${mo[parseInt(m,10)-1]} ${parseInt(d,10)}`;
+  };
+
+  const rangeLabel = selectedFrom
+    ? (selectedTo && selectedTo !== selectedFrom
+        ? `${fmtShort(selectedFrom)} – ${fmtShort(selectedTo)}`
+        : fmtShort(selectedFrom))
+    : null;
+
   return (
-    <div className="rounded-xl p-3 h-full flex flex-col"
+    <div className="rounded-xl p-3 h-full flex flex-col select-none"
       style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
 
-      {/* Month header */}
-      <p className="text-xs font-bold text-center mb-2 text-text">
-        {MONTHS[mo]} {yr}
-      </p>
+      {/* Month navigation */}
+      <div className="flex items-center justify-between mb-1.5">
+        <button onClick={prevMonth}
+          className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-bg-secondary transition-colors">
+          <ChevronLeft size={12} style={{ color: 'var(--color-text-secondary)' }} />
+        </button>
+        <button onClick={goToday}
+          className="text-xs font-bold text-text hover:text-primary-600 transition-colors px-1">
+          {MONTH_NAMES[viewMonth].slice(0,3)} {viewYear}
+        </button>
+        <button onClick={nextMonth}
+          className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-bg-secondary transition-colors">
+          <ChevronRight size={12} style={{ color: 'var(--color-text-secondary)' }} />
+        </button>
+      </div>
 
       {/* Day-of-week labels */}
-      <div className="grid grid-cols-7 mb-1">
+      <div className="grid grid-cols-7 mb-0.5">
         {DAY_ABBR.map((d, i) => (
-          <span key={i} className="text-center text-[10px] font-semibold"
+          <span key={i} className="text-center text-[9px] font-bold"
             style={{ color: 'var(--color-text-tertiary)' }}>{d}</span>
         ))}
       </div>
 
       {/* Date grid */}
-      <div className="grid grid-cols-7 gap-px flex-1">
-        {cells.map((d, i) => (
-          <div key={i}
-            className="flex items-center justify-center rounded-md text-[11px] transition-colors"
-            style={{
-              aspectRatio: '1',
-              background: d === today ? 'var(--gradient-sidebar)' : 'transparent',
-              color: d === today ? '#fff' : d ? 'var(--color-text-secondary)' : 'transparent',
-              fontWeight: d === today ? 700 : 400,
-            }}>
-            {d || ''}
-          </div>
-        ))}
+      <div className="grid grid-cols-7">
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} className="aspect-square" />;
+          const ds    = toDateStr(d);
+          const inR   = inRange(ds);
+          const isMin = inR && isRangeMin(ds);
+          const isMax = inR && isRangeMax(ds);
+          const isOne = isSingle && ds === rangeMin;
+          const isToday = ds === todayStr;
+          const isPending = tempFrom && ds === tempFrom && !hovered;
+
+          // Border-radius for range pill shape
+          let br = '5px';
+          if (isOne || isPending) br = '50%';
+          else if (inR) {
+            if (isMin) br = '50% 0 0 50%';
+            else if (isMax) br = '0 50% 50% 0';
+            else br = '0';
+          }
+
+          const bg = (isMin || isMax || isOne || isPending)
+            ? 'var(--gradient-sidebar)'
+            : inR ? 'var(--color-primary-100, #dbeafe)' : 'transparent';
+
+          const color = (isMin || isMax || isOne || isPending) ? '#fff'
+            : isToday && !inR ? 'var(--color-primary-600)'
+            : inR ? 'var(--color-primary-800, #1e3a8a)'
+            : 'var(--color-text-secondary)';
+
+          return (
+            <button key={i}
+              onClick={() => handleClick(d)}
+              onMouseEnter={() => tempFrom && setHovered(ds)}
+              onMouseLeave={() => tempFrom && setHovered(null)}
+              className="aspect-square flex items-center justify-center text-[11px] transition-all cursor-pointer"
+              style={{
+                background: bg,
+                color,
+                borderRadius: br,
+                fontWeight: (isMin || isMax || isOne || isToday) ? 700 : 400,
+                outline: isToday && !inR ? '1px solid var(--color-primary-300)' : 'none',
+                outlineOffset: '-1px',
+              }}>
+              {d}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selection info + clear */}
+      <div className="mt-1.5 flex items-center justify-between min-h-[16px]">
+        {tempFrom ? (
+          <span className="text-[10px]" style={{ color: 'var(--color-primary-600)' }}>
+            Click end date…
+          </span>
+        ) : rangeLabel ? (
+          <span className="text-[10px] text-text-secondary truncate">{rangeLabel}</span>
+        ) : (
+          <span className="text-[10px] text-text-tertiary">Click to filter</span>
+        )}
+        {(selectedFrom || tempFrom) && (
+          <button onClick={clearSelection}
+            className="text-[10px] font-semibold ml-1 flex-shrink-0"
+            style={{ color: 'var(--color-error-500)' }}>
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Divider */}
-      <div className="my-2.5 border-t" style={{ borderColor: 'var(--color-border)' }} />
+      <div className="my-2 border-t" style={{ borderColor: 'var(--color-border)' }} />
 
       {/* Today stats */}
-      <div className="space-y-1.5">
+      <div className="space-y-1">
         <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
           Today · {now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         </p>
@@ -113,20 +248,25 @@ const TODAY = new Date().toISOString().split('T')[0];
 export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
 
-  const [filters, setFilters]       = useState({ dateFrom: '', dateTo: '', companyId: '', closerId: '', status: '', search: '' });
-  const [dataTab, setDataTab]       = useState('sales');
-  const [sort, setSort]             = useState({ col: 'created_at', dir: 'desc' });
-  const [page, setPage]             = useState(1);
-  const [rows, setRows]             = useState([]);
-  const [total, setTotal]           = useState(0);
-  const [loading, setLoading]       = useState(false);
-  const [companies, setCompanies]   = useState([]);
-  const [closers, setClosers]       = useState([]);
-  const [detailSale, setDetailSale]             = useState(null);
-  const [detailTransfer, setDetailTransfer]     = useState(null);
-  const [todaySales, setTodaySales]             = useState(0);
-  const [todayXfers, setTodayXfers]             = useState(0);
-  const [todayLoading, setTodayLoading]         = useState(true);
+  // Date range — shared source of truth for both DateRangePicker and MiniCalendar
+  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const { date_from, date_to } = dateRange;
+
+  // Other filters
+  const [filters, setFilters]     = useState({ companyId: '', closerId: '', status: '', search: '' });
+  const [dataTab, setDataTab]     = useState('sales');
+  const [sort, setSort]           = useState({ col: 'created_at', dir: 'desc' });
+  const [page, setPage]           = useState(1);
+  const [rows, setRows]           = useState([]);
+  const [total, setTotal]         = useState(0);
+  const [loading, setLoading]     = useState(false);
+  const [companies, setCompanies] = useState([]);
+  const [closers, setClosers]     = useState([]);
+  const [detailSale, setDetailSale]         = useState(null);
+  const [detailTransfer, setDetailTransfer] = useState(null);
+  const [todaySales, setTodaySales]         = useState(0);
+  const [todayXfers, setTodayXfers]         = useState(0);
+  const [todayLoading, setTodayLoading]     = useState(true);
   const debounceRef = useRef(null);
 
   // Bootstrap
@@ -137,8 +277,6 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       const all = r.data.users || [];
       setClosers(all.filter(u => ['closer','closer_manager','compliance_manager','company_admin'].includes(u.role_level)));
     }).catch(() => {});
-
-    // Today's counts
     const todayParams = { date_from: TODAY, date_to: TODAY, limit: 1, page: 1 };
     Promise.all([
       client.get('compliance/sales',     { params: todayParams }),
@@ -158,8 +296,8 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { user_ids: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
-          ...(filters.dateFrom  && { date_from: filters.dateFrom }),
-          ...(filters.dateTo    && { date_to: filters.dateTo }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
           ...(filters.search    && { search: filters.search }),
         };
         const r = await client.get('compliance/sales', { params });
@@ -169,20 +307,20 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { closer_id: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
-          ...(filters.dateFrom  && { date_from: filters.dateFrom }),
-          ...(filters.dateTo    && { date_to: filters.dateTo }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
         };
         const r = await client.get('compliance/transfers', { params });
         setRows(r.data.transfers || []); setTotal(r.data.total || 0);
       }
     } catch { setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, [dataTab, filters, page]);
+  }, [dataTab, filters, page, date_from, date_to]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { setPage(1); fetchRows(1); }, filters.search ? 350 : 0);
-  }, [filters, dataTab]);
+  }, [filters, dataTab, date_from, date_to]);
 
   useEffect(() => { fetchRows(); }, [page]);
 
@@ -194,10 +332,18 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     return sort.dir === 'asc' ? cmp : -cmp;
   });
 
-  const setFilter = (k, v) => setFilters(p => ({ ...p, [k]: v }));
-  const clearFilters = () => setFilters({ dateFrom:'', dateTo:'', companyId:'', closerId:'', status:'', search:'' });
-  const hasActiveFilters = Object.values(filters).some(Boolean);
+  const setFilter     = (k, v) => setFilters(p => ({ ...p, [k]: v }));
+  const clearFilters  = () => {
+    setFilters({ companyId: '', closerId: '', status: '', search: '' });
+    setDateRange(getPresetRange('30d'));
+  };
+  const hasActiveFilters = Object.values(filters).some(Boolean) || !!(date_from || date_to);
   const totalPages = Math.ceil(total / LIMIT);
+
+  const handleDateRangeChange = (range) => {
+    setDateRange({ date_from: range.date_from || null, date_to: range.date_to || null });
+    setPage(1);
+  };
 
   const metrics = [
     { icon: Users,       label: 'Users',           value: stats.totalUsers,      accent: '#6366f1' },
@@ -220,13 +366,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     {v:'completed',l:'Completed'},{v:'rejected',l:'Rejected'},{v:'cancelled',l:'Cancelled'},
   ];
 
-  const inp = {
+  const sel = {
     height: 30, padding: '0 8px', borderRadius: 7, fontSize: 12, fontWeight: 500,
     border: '1px solid var(--color-border)',
     backgroundColor: 'var(--color-surface)',
-    color: 'var(--color-text)', outline: 'none',
+    color: 'var(--color-text)', outline: 'none', cursor: 'pointer',
   };
-  const sel = { ...inp, paddingRight: 22, cursor: 'pointer' };
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -254,13 +399,13 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       </div>
 
       {/* ── Metrics + Calendar row ──────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_200px] gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_210px] gap-3">
 
         {/* Metric cards */}
         <div className="grid grid-cols-4 gap-2">
           {metrics.map((m, i) => (
             <div key={i}
-              className="rounded-xl p-3 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-default"
+              className="rounded-xl p-3 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
               style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center"
@@ -277,8 +422,15 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ))}
         </div>
 
-        {/* Mini calendar */}
-        <MiniCalendar todaySales={todaySales} todayXfers={todayXfers} todayLoading={todayLoading} />
+        {/* Interactive mini calendar */}
+        <MiniCalendar
+          todaySales={todaySales}
+          todayXfers={todayXfers}
+          todayLoading={todayLoading}
+          selectedFrom={date_from}
+          selectedTo={date_to}
+          onRangeChange={handleDateRangeChange}
+        />
       </div>
 
       {/* ── Pipeline bar ────────────────────────────────────────────────── */}
@@ -323,10 +475,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         <div className="flex items-center gap-2 flex-wrap">
           <Filter size={12} style={{ color: 'var(--color-primary-600)', flexShrink: 0 }} />
 
-          {/* Date range */}
-          <input type="date" value={filters.dateFrom} onChange={e => setFilter('dateFrom', e.target.value)} style={inp} />
-          <ArrowRight size={10} style={{ color: 'var(--color-text-tertiary)' }} />
-          <input type="date" value={filters.dateTo} onChange={e => setFilter('dateTo', e.target.value)} style={inp} />
+          {/* Date range picker — synced with MiniCalendar */}
+          <DateRangePicker
+            onChange={handleDateRangeChange}
+            defaultPreset="30d"
+            value={dateRange}
+          />
 
           {/* Company */}
           <select value={filters.companyId} onChange={e => setFilter('companyId', e.target.value)}
@@ -348,12 +502,13 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
             {(dataTab==='sales' ? SALE_STATUSES : XFER_STATUSES).map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>
 
-          {/* Search */}
+          {/* Search (sales only) */}
           {dataTab === 'sales' && (
             <div className="relative flex items-center">
               <Search size={11} className="absolute left-2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
               <input type="text" value={filters.search} onChange={e => setFilter('search', e.target.value)}
-                placeholder="Search…" style={{ ...inp, paddingLeft: 22, minWidth: 150 }} />
+                placeholder="Search…"
+                style={{ ...sel, paddingLeft: 22, minWidth: 150, cursor: 'text' }} />
               {filters.search && (
                 <button onClick={() => setFilter('search', '')} className="absolute right-1.5"
                   style={{ color: 'var(--color-text-tertiary)' }}><X size={10} /></button>
@@ -365,7 +520,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
             <button onClick={clearFilters}
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold ml-auto transition-all hover:scale-105"
               style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-              <X size={10} /> Clear
+              <X size={10} /> Clear all
             </button>
           )}
         </div>
