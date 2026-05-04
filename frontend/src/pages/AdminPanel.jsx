@@ -87,18 +87,16 @@ const AdminPanel = () => {
             <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
               <FormBuilder />
             </Suspense>
-          ) : (
-          {activeTab === "companies" ? (
+          ) : activeTab === 'companies' ? (
             <div className="p-4 lg:p-6 h-full">
               <CompanyManagement />
             </div>
           ) : (
-          <div className="p-6 lg:p-8 max-w-7xl">
-            {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
-            {activeTab === "sale-search" && <SaleSearchPanel />}
-            {activeTab === "features"    && <FeatureFlagsManager />}
-          </div>
-          )}
+            <div className="p-6 lg:p-8 max-w-7xl">
+              {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
+              {activeTab === "sale-search" && <SaleSearchPanel />}
+              {activeTab === "features"    && <FeatureFlagsManager />}
+            </div>
           )}
           <DevCredit />
         </main>
