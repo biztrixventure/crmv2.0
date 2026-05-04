@@ -88,13 +88,17 @@ const AdminPanel = () => {
               <FormBuilder />
             </Suspense>
           ) : (
+          {activeTab === "companies" ? (
+            <div className="p-4 lg:p-6 h-full">
+              <CompanyManagement />
+            </div>
+          ) : (
           <div className="p-6 lg:p-8 max-w-7xl">
-
             {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
-            {activeTab === "companies"   && <CompanyManagement />}
             {activeTab === "sale-search" && <SaleSearchPanel />}
             {activeTab === "features"    && <FeatureFlagsManager />}
           </div>
+          )}
           )}
           <DevCredit />
         </main>
