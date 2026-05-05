@@ -224,6 +224,80 @@ router.get(
 );
 
 // ============================================================================
+// POST /users/bulk - Bulk create users (superadmin only)
+// Body: { users: [{first_name,last_name,email,password}], role_id, company_id }
+// ============================================================================
+router.post('/bulk', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Bulk upload requires superadmin role' });
+  }
+
+  const { users, role_id, company_id } = req.body;
+  const requestingUserId = req.user.id;
+
+  if (!Array.isArray(users) || users.length === 0)
+    return res.status(400).json({ error: 'users array is required and must not be empty' });
+  if (!role_id)    return res.status(400).json({ error: 'role_id is required' });
+  if (!company_id) return res.status(400).json({ error: 'company_id is required' });
+  if (users.length > 200)
+    return res.status(400).json({ error: 'Maximum 200 users per batch' });
+
+  // Verify role belongs to company
+  const { data: role, error: roleErr } = await supabaseAdmin
+    .from('custom_roles').select('id,level,name').eq('id', role_id).single();
+  if (roleErr || !role) return res.status(400).json({ error: 'Role not found' });
+
+  const results = [];
+
+  for (const u of users) {
+    const email = (u.email || '').trim().toLowerCase();
+    try {
+      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: u.password,
+        email_confirm: true,
+      });
+
+      if (authError || !authData?.user) {
+        results.push({ email, success: false, error: authError?.message || 'Auth creation failed' });
+        continue;
+      }
+
+      const authUserId = authData.user.id;
+
+      await supabaseAdmin.from('user_profiles').insert({
+        user_id: authUserId,
+        first_name: (u.first_name || '').trim(),
+        last_name:  (u.last_name  || '').trim(),
+        theme_preference: 'light',
+      });
+
+      const { error: assignError } = await supabaseAdmin.from('user_company_roles').insert({
+        user_id:     authUserId,
+        company_id,
+        role_id,
+        assigned_by: requestingUserId,
+        is_active:   true,
+      });
+
+      if (assignError) {
+        results.push({ email, success: false, error: assignError.message });
+      } else {
+        results.push({ email, success: true });
+      }
+    } catch (err) {
+      results.push({ email, success: false, error: err.message });
+    }
+  }
+
+  const succeeded = results.filter(r => r.success).length;
+  const failed    = results.filter(r => !r.success).length;
+
+  logger.info('BULK_CREATE_USERS', `${succeeded} created, ${failed} failed`, { company_id, role_id });
+  res.json({ message: `${succeeded} users created, ${failed} failed`, succeeded, failed, results });
+}));
+
+// ============================================================================
 // POST /users - Create new user (Admin only)
 // ============================================================================
 // require_verification: true  → sends invite email, user must click to activate

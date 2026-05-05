@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
-  Calendar, BarChart3, Search, RefreshCw, Settings, Download,
+  Calendar, BarChart3, Search, RefreshCw, Settings, Download, Upload,
   PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react';
@@ -10,6 +10,7 @@ import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
 import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
+import BulkUploadModal from '../UserManagement/BulkUploadModal';
 import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
 import SaleDetailDrawer              from '../../Shared/SaleDetailDrawer';
@@ -405,6 +406,7 @@ const MembersPanel = ({ companyId }) => {
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate]   = useState(false);
+  const [showBulk,   setShowBulk]     = useState(false);
   const [editUser, setEditUser]       = useState(null);
   const [viewUser, setViewUser]       = useState(null);
   const [actionErr, setActionErr]     = useState('');
@@ -474,6 +476,17 @@ const MembersPanel = ({ companyId }) => {
               <Download size={12} />
               {exportLoading ? 'Exporting…' : 'Export CSV'}
             </button>
+          )}
+          {hasPermission('create_user') && (
+          <button onClick={() => setShowBulk(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
+            style={{
+              border: '1px solid var(--color-border)',
+              backgroundColor: 'var(--color-surface)',
+              color: 'var(--color-text-secondary)',
+            }}>
+            <Upload size={13} /> Bulk Upload
+          </button>
           )}
           {hasPermission('create_user') && (
           <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
@@ -565,6 +578,13 @@ const MembersPanel = ({ companyId }) => {
         onClose={() => setShowCreate(false)}
         companyId={companyId}
         onCreated={() => load()}
+      />
+
+      <BulkUploadModal
+        isOpen={showBulk}
+        onClose={() => setShowBulk(false)}
+        companyId={companyId}
+        onDone={() => load()}
       />
 
       {editUser && (
