@@ -25,33 +25,50 @@ router.get('/', asyncHandler(async (req, res) => {
 
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.
-  const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
-  if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
-
-  switch (userRole) {
-    case 'fronter':
-      query = query.eq('created_by', userId);
-      break;
-    case 'closer':
-      // Only show transfers explicitly assigned to this closer
-      query = query.eq('assigned_closer_id', userId);
-      break;
-    case 'closer_manager':
-    case 'compliance_manager': {
-      // See transfers assigned to any user in their (closer) company
-      const { data: companyUsers } = await supabaseAdmin
-        .from('user_company_roles')
-        .select('user_id')
-        .eq('company_id', companyId)
-        .eq('is_active', true);
-      const closerIds = (companyUsers || []).map(u => u.user_id);
-      if (closerIds.length === 0) {
+  if (['superadmin', 'readonly_admin'].includes(userRole) && req.query.company_id) {
+    // Admin explicitly passed a company — check type to scope correctly
+    const { data: co } = await supabaseAdmin
+      .from('companies').select('company_type').eq('id', req.query.company_id).single();
+    if (co?.company_type === 'fronter') {
+      query = query.eq('company_id', req.query.company_id);
+    } else {
+      // Closer company: transfers don't carry company_id for closer side — filter by assigned_closer_id
+      const { data: coUsers } = await supabaseAdmin
+        .from('user_company_roles').select('user_id')
+        .eq('company_id', req.query.company_id).eq('is_active', true);
+      const assignedIds = (coUsers || []).map(u => u.user_id);
+      if (assignedIds.length === 0) {
         return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
       }
-      query = query.in('assigned_closer_id', closerIds);
-      break;
+      query = query.in('assigned_closer_id', assignedIds);
     }
-    // fronter_manager, operations_manager, superadmin, company_admin — see all transfers for company
+  } else {
+    const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
+    if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
+
+    switch (userRole) {
+      case 'fronter':
+        query = query.eq('created_by', userId);
+        break;
+      case 'closer':
+        query = query.eq('assigned_closer_id', userId);
+        break;
+      case 'closer_manager':
+      case 'compliance_manager': {
+        const { data: companyUsers } = await supabaseAdmin
+          .from('user_company_roles')
+          .select('user_id')
+          .eq('company_id', companyId)
+          .eq('is_active', true);
+        const closerIds = (companyUsers || []).map(u => u.user_id);
+        if (closerIds.length === 0) {
+          return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+        }
+        query = query.in('assigned_closer_id', closerIds);
+        break;
+      }
+      // fronter_manager, operations_manager, company_admin — see all transfers for company
+    }
   }
 
   if (status)    query = query.eq('status', status);

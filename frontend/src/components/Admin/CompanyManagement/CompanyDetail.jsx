@@ -198,7 +198,7 @@ const RecordsPanel = ({ companyId, type }) => {
           <select value={userFilter} onChange={e => setUserFilter(e.target.value)} className="input text-sm w-40">
             <option value="">All agents</option>
             {companyUsers.map(u => (
-              <option key={u.id} value={u.id}>
+              <option key={u.id} value={u.user_id}>
                 {[u.first_name, u.last_name].filter(Boolean).join(' ') || u.email}
               </option>
             ))}
