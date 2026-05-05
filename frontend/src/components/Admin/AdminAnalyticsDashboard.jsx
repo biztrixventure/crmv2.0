@@ -444,7 +444,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   };
 
   return (
-    <div className="animate-fade-in space-y-4">
+    <div className="animate-fade-in space-y-3">
 
       {isReadOnly && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
@@ -457,7 +457,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-text">Good day, {user?.first_name || 'Admin'}</h2>
+          <h2 className="text-base font-bold text-text">Good day, {user?.first_name || 'Admin'}</h2>
           <p className="text-text-secondary text-xs mt-0.5">System overview across all companies</p>
         </div>
         <button onClick={() => { fetchStats(); fetchRows(1); }}

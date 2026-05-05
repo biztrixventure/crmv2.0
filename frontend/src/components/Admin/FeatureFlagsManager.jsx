@@ -225,21 +225,21 @@ const FeatureFlagsManager = () => {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2"
-            style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
-            <Zap size={22} style={{ color: 'var(--color-primary-600)' }} />
+          <h2 className="text-base font-bold flex items-center gap-2"
+            style={{ color: 'var(--color-text)' }}>
+            <Zap size={15} style={{ color: 'var(--color-primary-600)' }} />
             Feature Flags
           </h2>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             Enable or disable features per company. Changes take effect immediately.
           </p>
         </div>
         <button onClick={() => { setShowCreate(true); setEditing(null); }}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105"
-          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
-          <Plus size={15} /> New Flag
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          <Plus size={13} /> New Flag
         </button>
       </div>
 

@@ -237,26 +237,9 @@ const CompanyManagement = () => {
   };
 
   return (
-    <div className="h-full flex flex-col gap-3">
+    <div className="h-full flex flex-col">
 
-      {/* ── page header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-shrink-0">
-        <div>
-          <h2 className="text-2xl font-bold text-text">Companies</h2>
-          <p className="text-xs text-text-secondary mt-0.5">
-            {filtered.length} of {companies.length} companies
-            {selected && <span className="ml-2 font-semibold" style={{ color: 'var(--color-primary-600)' }}>· {selected.name}</span>}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-          style={{ background: 'var(--gradient-sidebar)' }}>
-          <Plus size={14} /> Add Company
-        </button>
-      </div>
-
-      {error && <Alert type="error" title="Error" message={error} className="flex-shrink-0" />}
+      {error && <Alert type="error" title="Error" message={error} className="flex-shrink-0 mb-2" />}
 
       {/* ── split panel ─────────────────────────────────────────────── */}
       <div className="flex gap-0 flex-1 min-h-0 rounded-xl overflow-hidden border"
@@ -270,17 +253,26 @@ const CompanyManagement = () => {
           <div className="p-2.5 flex-shrink-0 space-y-2"
             style={{ borderBottom: '1px solid var(--color-border)' }}>
 
-            {/* search */}
-            <div className="relative">
-              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                style={{ color: 'var(--color-text-secondary)' }} />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search companies…"
-                className="w-full pl-7 pr-2.5 text-xs rounded-lg border bg-surface text-text placeholder-text-secondary outline-none focus:ring-1 focus:ring-primary-400"
-                style={{ height: 28, borderColor: 'var(--color-border)' }}
-              />
+            {/* search + add button */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                  style={{ color: 'var(--color-text-secondary)' }} />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search companies…"
+                  className="w-full pl-7 pr-2.5 text-xs rounded-lg border bg-surface text-text placeholder-text-secondary outline-none focus:ring-1 focus:ring-primary-400"
+                  style={{ height: 28, borderColor: 'var(--color-border)' }}
+                />
+              </div>
+              <button
+                onClick={() => setShowCreate(true)}
+                title="Add Company"
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 transition-opacity hover:opacity-85"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                <Plus size={13} />
+              </button>
             </div>
 
             {/* type filter */}

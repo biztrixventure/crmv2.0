@@ -19,16 +19,16 @@ const SaleSearchPanel = () => {
   const { user } = useAuth();
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text flex items-center gap-2">
-          <Search size={22} style={{ color: 'var(--color-primary-600)' }} />
+      <div className="mb-3">
+        <h2 className="text-base font-bold text-text flex items-center gap-2">
+          <Search size={15} style={{ color: 'var(--color-primary-600)' }} />
           Sale Record Search
         </h2>
-        <p className="text-text-secondary text-sm mt-0.5">
+        <p className="text-text-secondary text-xs mt-0.5">
           Search by customer name, phone, reference no, VIN, or email.
         </p>
       </div>
-      <div className="rounded-2xl border p-6"
+      <div className="rounded-xl border p-4"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
         <SaleSearch companyId={user?.company_id} user={user} />
       </div>
@@ -91,11 +91,11 @@ const AdminPanel = () => {
               <FormBuilder />
             </Suspense>
           ) : activeTab === 'companies' ? (
-            <div className="p-5 lg:p-7 h-full">
+            <div className="p-3 h-full">
               <CompanyManagement />
             </div>
           ) : (
-            <div className="p-6 lg:p-8 max-w-7xl mx-auto w-full">
+            <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
               {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
               {activeTab === "sale-search" && <SaleSearchPanel />}
               {activeTab === "features"    && <FeatureFlagsManager />}
