@@ -26,7 +26,7 @@ const TRANSFER_BADGE = { pending:'warning', assigned:'info', completed:'success'
 const LIMIT = 50;
 const SALE_STATUSES     = ['open','sold','cancelled','follow_up','closed_won','closed_lost','compliance_cancelled','dispute','chargeback'];
 const TRANSFER_STATUSES = ['pending','assigned','completed','cancelled','rejected'];
-const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer'];
+const CALLBACK_STATUSES = ['pending','completed','cancelled','no_answer','answering_machine'];
 
 const PRIORITY_CFG = {
   High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },

@@ -49,7 +49,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (status)   query = query.eq('status', status);
   if (priority) query = query.eq('priority', priority);
-  if (search)   query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
+  if (search)   query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,customer_email.ilike.%${search}%,notes.ilike.%${search}%`);
 
   query = query.range(offset, offset + limit - 1);
 
