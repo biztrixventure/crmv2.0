@@ -49,7 +49,25 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (status)   query = query.eq('status', status);
   if (priority) query = query.eq('priority', priority);
-  if (search)   query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,customer_email.ilike.%${search}%,notes.ilike.%${search}%`);
+  if (search) {
+    // Resolve agent names → user_ids so we can OR on user_id
+    let agentUserIds = [];
+    if (isManager) {
+      const { data: matchedProfiles } = await supabaseAdmin
+        .from('user_profiles')
+        .select('user_id')
+        .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
+      agentUserIds = (matchedProfiles || []).map(p => p.user_id);
+    }
+    const orParts = [
+      `customer_name.ilike.%${search}%`,
+      `customer_phone.ilike.%${search}%`,
+      `customer_email.ilike.%${search}%`,
+      `notes.ilike.%${search}%`,
+    ];
+    if (agentUserIds.length > 0) orParts.push(`user_id.in.(${agentUserIds.join(',')})`);
+    query = query.or(orParts.join(','));
+  }
 
   query = query.range(offset, offset + limit - 1);
 
