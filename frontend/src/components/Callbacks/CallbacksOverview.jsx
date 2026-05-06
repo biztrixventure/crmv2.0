@@ -198,10 +198,10 @@ const CallbacksOverview = ({ user }) => {
   return (
     <div className="animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Phone size={22} style={{ color: 'var(--color-primary-600)' }} />
+          <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+            <Phone size={15} style={{ color: 'var(--color-primary-600)' }} />
             Team Callbacks
             {counts.overdue > 0 && (
               <span className="ml-1 text-xs font-bold px-2 py-0.5 rounded-full text-white"
@@ -210,35 +210,35 @@ const CallbacksOverview = ({ user }) => {
               </span>
             )}
           </h2>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             Scheduled callbacks across your team — when to call and current status.
           </p>
         </div>
         <button onClick={fetchCallbacks} disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-colors hover:bg-bg-secondary"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors hover:bg-bg-secondary"
           style={{ color: 'var(--color-text-secondary)' }}>
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-2 mb-4">
         {[
           { label: 'Pending',   value: counts.pending,   color: '#f59e0b', bg: '#fef3c7' },
           { label: 'Overdue',   value: counts.overdue,   color: '#ef4444', bg: '#fee2e2' },
           { label: 'Completed', value: counts.completed, color: '#10b981', bg: '#d1fae5' },
         ].map(s => (
-          <div key={s.label} className="rounded-2xl p-4 text-center"
+          <div key={s.label} className="rounded-xl p-3 text-center"
             style={{ backgroundColor: s.bg, border: `1px solid ${s.color}30` }}>
-            <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
+            <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
             <p className="text-xs font-semibold mt-0.5" style={{ color: s.color }}>{s.label}</p>
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-5">
+      <div className="flex flex-wrap gap-2 mb-3">
         <div className="flex gap-1 p-1 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
@@ -309,51 +309,58 @@ const CallbacksOverview = ({ user }) => {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {visible.map(cb => {
             const past = isPast(cb.callback_at) && cb.status === 'pending';
             const soon = isDueSoon(cb.callback_at);
             return (
               <div key={cb.id}
-                className="rounded-2xl border p-4 transition-all duration-150 hover:shadow-md"
+                className="rounded-xl border p-3 transition-all duration-150 hover:shadow-md"
                 style={{
                   borderColor: past ? '#fca5a5' : soon ? '#fde68a' : 'var(--color-border)',
                   backgroundColor: past ? '#fff5f5' : soon ? '#fffbeb' : 'var(--color-surface)',
                 }}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <p className="font-bold text-text">{cb.customer_name}</p>
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <p className="font-bold text-sm text-text">{cb.customer_name}</p>
                       <StatusBadge status={cb.status} />
                       <PriorityBadge priority={cb.priority} />
                       {past && <span className="text-xs font-bold text-red-600">Overdue</span>}
                       {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
                     </div>
 
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center"
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <div className="w-4 h-4 rounded-full flex items-center justify-center"
                         style={{ background: 'var(--gradient-sidebar)' }}>
-                        <User size={11} className="text-white" />
+                        <User size={9} className="text-white" />
                       </div>
                       <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
                         {cb.user_name || 'Unknown'}
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-x-3 text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <div className="flex flex-wrap gap-x-3 text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                       {cb.customer_email && <span>✉ {cb.customer_email}</span>}
                     </div>
 
                     <div className="flex items-center gap-1.5 text-xs font-medium"
                       style={{ color: past ? '#dc2626' : soon ? '#b45309' : 'var(--color-text-tertiary)' }}>
-                      <Calendar size={12} />
+                      <Calendar size={11} />
                       <span>Call scheduled: <strong>{fmt(cb.callback_at)}</strong></span>
                     </div>
 
                     {cb.notes && (
-                      <p className="text-xs italic mt-1.5 px-2 py-1 rounded-lg"
-                        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+                      <p className="text-xs italic mt-1 px-2 py-1 rounded-lg"
+                        style={{
+                          backgroundColor: 'var(--color-bg-secondary)',
+                          color: 'var(--color-text-secondary)',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}>
                         {cb.notes}
                       </p>
                     )}

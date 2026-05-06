@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Plus, Search, Building2, ChevronRight,
+  Plus, Search, Building2, MoreVertical,
   Edit2, XCircle, CheckCircle, Trash2,
   ArrowUpDown, ChevronUp, ChevronDown,
 } from 'lucide-react';
@@ -18,6 +19,27 @@ const TYPE = {
 // ── CompanyCard ────────────────────────────────────────────────────────────────
 const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onActivate, onDelete }) => {
   const ts = TYPE[company.company_type] || {};
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos,  setMenuPos]  = useState({ top: 0, left: 0 });
+  const btnRef  = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e) => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const openMenu = (e) => {
+    e.stopPropagation();
+    const rect = btnRef.current.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, left: rect.right - 152 });
+    setMenuOpen(o => !o);
+  };
 
   return (
     <div
@@ -29,9 +51,7 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
         boxShadow: isSelected ? '0 0 0 1px var(--color-primary-500)' : 'none',
       }}
     >
-      {/* top row */}
       <div className="flex items-start gap-2.5 p-2.5">
-        {/* logo / icon */}
         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{ backgroundColor: ts.bg || 'var(--color-bg-secondary)', border: `1px solid ${ts.border || 'var(--color-border)'}` }}>
           {company.logo_url
@@ -64,42 +84,67 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
           )}
         </div>
 
-        <ChevronRight size={13} className="flex-shrink-0 mt-1 transition-transform group-hover:translate-x-0.5"
-          style={{ color: isSelected ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+        <button
+          ref={btnRef}
+          onClick={openMenu}
+          className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-md hover:bg-black/5 transition-colors mt-0.5"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          <MoreVertical size={13} />
+        </button>
       </div>
 
-      {/* action bar */}
-      <div className="flex items-center px-2.5 pb-2" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={() => onEdit(company)}
-          className="flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all hover:bg-primary-50"
-          style={{ color: 'var(--color-primary-600)' }}>
-          <Edit2 size={10} className="inline mr-0.5 mb-px" /> Edit
-        </button>
-        <div className="w-px h-3 mx-0.5" style={{ backgroundColor: 'var(--color-border)' }} />
-        {company.is_active ? (
+      {menuOpen && createPortal(
+        <div
+          ref={menuRef}
+          className="rounded-xl border overflow-hidden py-1"
+          style={{
+            position: 'fixed',
+            top: menuPos.top,
+            left: menuPos.left,
+            zIndex: 9999,
+            width: 152,
+            backgroundColor: 'var(--color-surface)',
+            borderColor: 'var(--color-border)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
           <button
-            onClick={() => { if (window.confirm(`Deactivate "${company.name}"? All users will be deactivated.`)) onDeactivate(company.id); }}
-            className="flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all hover:bg-warning-50"
-            style={{ color: 'var(--color-warning-600)' }}>
-            <XCircle size={10} className="inline mr-0.5 mb-px" /> Deactivate
+            onClick={() => { setMenuOpen(false); onEdit(company); }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-primary-50 transition-colors"
+            style={{ color: 'var(--color-primary-600)' }}
+          >
+            <Edit2 size={11} /> Edit
           </button>
-        ) : (
+          {company.is_active ? (
+            <button
+              onClick={() => { setMenuOpen(false); if (window.confirm(`Deactivate "${company.name}"? All users will be deactivated.`)) onDeactivate(company.id); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-warning-50 transition-colors"
+              style={{ color: 'var(--color-warning-600)' }}
+            >
+              <XCircle size={11} /> Deactivate
+            </button>
+          ) : (
+            <button
+              onClick={() => { setMenuOpen(false); onActivate(company.id); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-success-50 transition-colors"
+              style={{ color: 'var(--color-success-600)' }}
+            >
+              <CheckCircle size={11} /> Activate
+            </button>
+          )}
+          <div className="my-1 mx-3 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
           <button
-            onClick={() => onActivate(company.id)}
-            className="flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all hover:bg-success-50"
-            style={{ color: 'var(--color-success-600)' }}>
-            <CheckCircle size={10} className="inline mr-0.5 mb-px" /> Activate
+            onClick={() => { setMenuOpen(false); if (window.confirm(`PERMANENTLY DELETE "${company.name}"?\n\nThis removes the company and all its users.\n\nThis cannot be undone.`)) onDelete(company.id); }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-error-50 transition-colors"
+            style={{ color: 'var(--color-error-600)' }}
+          >
+            <Trash2 size={11} /> Delete
           </button>
-        )}
-        <div className="w-px h-3 mx-0.5" style={{ backgroundColor: 'var(--color-border)' }} />
-        <button
-          onClick={() => { if (window.confirm(`PERMANENTLY DELETE "${company.name}"?\n\nThis removes the company and all its users.\n\nThis cannot be undone.`)) onDelete(company.id); }}
-          className="flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all hover:bg-error-50"
-          style={{ color: 'var(--color-error-600)' }}>
-          <Trash2 size={10} className="inline mr-0.5 mb-px" /> Delete
-        </button>
-      </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

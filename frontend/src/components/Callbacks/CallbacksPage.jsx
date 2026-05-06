@@ -528,10 +528,10 @@ const CallbacksPage = ({ user }) => {
   return (
     <div className="animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Phone size={22} style={{ color: 'var(--color-primary-600)' }} />
+          <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+            <Phone size={15} style={{ color: 'var(--color-primary-600)' }} />
             Callbacks
             {pendingCount > 0 && (
               <span className="ml-1 text-xs font-bold px-2 py-0.5 rounded-full text-white"
@@ -540,14 +540,14 @@ const CallbacksPage = ({ user }) => {
               </span>
             )}
           </h2>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             Schedule and track customer callbacks. Click any row for details.
           </p>
         </div>
         <button onClick={() => setModal('create')}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:-translate-y-0.5"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl font-bold text-xs text-white transition-all hover:-translate-y-0.5"
           style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-          <Plus size={16} /> Schedule Callback
+          <Plus size={13} /> Schedule Callback
         </button>
       </div>
 
@@ -561,13 +561,13 @@ const CallbacksPage = ({ user }) => {
       )}
 
       {subscribed && (
-        <div className="mb-4 flex items-center gap-2 text-xs font-medium" style={{ color: '#10b981' }}>
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium" style={{ color: '#10b981' }}>
           <Bell size={13} /> Browser notifications enabled
         </div>
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit"
+      <div className="flex gap-1 mb-3 p-1 rounded-xl w-fit"
         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {[
           { key: 'pending',   label: 'Pending'  },
@@ -642,6 +642,12 @@ const CallbacksPage = ({ user }) => {
                     </span>
                     {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                   </div>
+                  {cb.notes && (
+                    <p className="text-[11px] mt-0.5 italic truncate"
+                      style={{ color: 'var(--color-text-tertiary)' }}>
+                      {cb.notes}
+                    </p>
+                  )}
                 </div>
 
                 {/* Quick actions (pending only, shown on hover) */}
