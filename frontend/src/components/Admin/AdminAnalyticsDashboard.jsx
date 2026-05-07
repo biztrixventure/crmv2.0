@@ -9,7 +9,7 @@ import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
   ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
-  RefreshCw, X, Filter, Search, TrendingUp, Download,
+  RefreshCw, X, Filter, Search, TrendingUp, Download, PhoneCall, AlertCircle,
 } from 'lucide-react';
 
 // ─── Sort icon ───────────────────────────────────────────────────────────────
@@ -23,6 +23,32 @@ const SortIcon = ({ col, sort }) => {
 const SALE_BADGE  = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', pending_review:'warning', needs_revision:'error' };
 const SALE_LABEL  = { open:'Open', sold:'Sold', cancelled:'Cancelled', follow_up:'Follow Up', closed_won:'Approved', closed_lost:'Lost', pending_review:'In Review', needs_revision:'Needs Revision' };
 const XFER_BADGE  = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
+const CB_STATUS_BADGE  = { pending:'warning', completed:'success', cancelled:'error', no_answer:'secondary', answering_machine:'info' };
+const CB_STATUS_LABEL  = { pending:'Pending', completed:'Completed', cancelled:'Cancelled', no_answer:'No Answer', answering_machine:'Ans. Machine' };
+const CB_PRIORITY_CFG  = {
+  High:   { dot:'#ef4444', bg:'#fef2f2', border:'#fecaca', text:'#dc2626' },
+  Medium: { dot:'#f59e0b', bg:'#fffbeb', border:'#fde68a', text:'#d97706' },
+  Low:    { dot:'#3b82f6', bg:'#eff6ff', border:'#bfdbfe', text:'#2563eb' },
+};
+const CbPriorityBadge = ({ priority }) => {
+  const cfg = CB_PRIORITY_CFG[priority] || CB_PRIORITY_CFG.Medium;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border"
+      style={{ backgroundColor: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
+      {priority || 'Medium'}
+    </span>
+  );
+};
+const CbOverdueDot = ({ cb }) => {
+  if (cb.status !== 'pending' || !cb.callback_at || new Date(cb.callback_at) >= new Date()) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+      style={{ backgroundColor:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca' }}>
+      <AlertCircle size={9} /> OD
+    </span>
+  );
+};
 
 const downloadCSV = (rows, headers, filename) => {
   const csv = [headers, ...rows]
@@ -263,8 +289,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const { date_from, date_to } = dateRange;
 
   // Other filters
-  const [filters, setFilters]     = useState({ companyId: '', closerId: '', status: '', search: '' });
+  const [filters, setFilters]     = useState({ companyId: '', closerId: '', status: '', search: '', priority: '' });
   const [dataTab, setDataTab]     = useState('sales');
+  const [cbType,  setCbType]      = useState('fronter');
+  const [fronters, setFronters]   = useState([]);
   const [sort, setSort]           = useState({ col: 'created_at', dir: 'desc' });
   const [page, setPage]           = useState(1);
   const [rows, setRows]           = useState([]);
@@ -287,6 +315,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     client.get('compliance/users').then(r => {
       const all = r.data.users || [];
       setClosers(all.filter(u => ['closer','closer_manager','compliance_manager','company_admin'].includes(u.role_level)));
+      setFronters(all.filter(u => ['fronter','fronter_manager'].includes(u.role_level)));
     }).catch(() => {});
     const todayParams = { date_from: TODAY, date_to: TODAY, limit: 1, page: 1 };
     Promise.all([
@@ -313,7 +342,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         };
         const r = await client.get('compliance/sales', { params });
         setRows(r.data.sales || []); setTotal(r.data.total || 0);
-      } else {
+      } else if (dataTab === 'transfers') {
         const params = { page: p, limit: LIMIT,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { closer_id: filters.closerId }),
@@ -323,10 +352,23 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         };
         const r = await client.get('compliance/transfers', { params });
         setRows(r.data.transfers || []); setTotal(r.data.total || 0);
+      } else {
+        const params = { page: p, limit: LIMIT,
+          company_type: filters.companyId ? undefined : cbType,
+          ...(filters.companyId && { company_id: filters.companyId }),
+          ...(filters.closerId  && { user_ids: filters.closerId }),
+          ...(filters.status    && { status: filters.status }),
+          ...(filters.priority  && { priority: filters.priority }),
+          ...(filters.search    && { search: filters.search }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
+        };
+        const r = await client.get('compliance/callbacks', { params });
+        setRows(r.data.callbacks || []); setTotal(r.data.total || 0);
       }
     } catch { setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, [dataTab, filters, page, date_from, date_to]);
+  }, [dataTab, filters, cbType, page, date_from, date_to]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -338,6 +380,11 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const toggleSort = col => setSort(p => ({ col, dir: p.col === col && p.dir === 'desc' ? 'asc' : 'desc' }));
 
   const sorted = [...rows].sort((a, b) => {
+    if (dataTab === 'callbacks' && sort.col === 'priority') {
+      const W = { High: 3, Medium: 2, Low: 1 };
+      const av = W[a.priority] || 0, bv = W[b.priority] || 0;
+      return sort.dir === 'asc' ? av - bv : bv - av;
+    }
     let av = a[sort.col] ?? '', bv = b[sort.col] ?? '';
     const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
     return sort.dir === 'asc' ? cmp : -cmp;
@@ -345,7 +392,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
 
   const setFilter     = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const clearFilters  = () => {
-    setFilters({ companyId: '', closerId: '', status: '', search: '' });
+    setFilters({ companyId: '', closerId: '', status: '', search: '', priority: '' });
     setDateRange(getPresetRange('30d'));
   };
   const hasActiveFilters = Object.values(filters).some(Boolean) || !!(date_from || date_to);
@@ -385,7 +432,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         downloadCSV(rows,
           ['Customer','Phone','Email','Reference','Status','Closer','Company','Plan','Monthly','Sale Date','Created'],
           `sales_export_${today}.csv`);
-      } else {
+      } else if (dataTab === 'transfers') {
         const params = {
           limit: 5000, page: 1,
           ...(filters.companyId && { company_id: filters.companyId }),
@@ -409,6 +456,30 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         downloadCSV(rows,
           ['Customer','Phone','Transfer Status','Sale Status','Fronter','Closer','Company','Sale Ref','Created'],
           `transfers_export_${today}.csv`);
+      } else {
+        const params = {
+          limit: 5000, page: 1,
+          company_type: filters.companyId ? undefined : cbType,
+          ...(filters.companyId && { company_id: filters.companyId }),
+          ...(filters.closerId  && { user_ids: filters.closerId }),
+          ...(filters.status    && { status: filters.status }),
+          ...(filters.priority  && { priority: filters.priority }),
+          ...(filters.search    && { search: filters.search }),
+          ...(date_from         && { date_from }),
+          ...(date_to           && { date_to }),
+        };
+        const r = await client.get('compliance/callbacks', { params });
+        const rows = (r.data.callbacks || []).map(c => [
+          c.customer_name || '', c.customer_phone || '',
+          c.callback_at ? new Date(c.callback_at).toLocaleString() : '',
+          CB_STATUS_LABEL[c.status] || c.status || '',
+          c.priority || 'Medium',
+          c.notes || '', c.user_name || '', c.company_name || '',
+          new Date(c.created_at).toLocaleDateString(),
+        ]);
+        downloadCSV(rows,
+          ['Customer','Phone','Scheduled At','Status','Priority','Notes','Agent','Company','Created'],
+          `callbacks_${cbType}_export_${today}.csv`);
       }
     } catch { /* silent — user retries */ } finally {
       setExportLoading(false);
@@ -434,6 +505,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const XFER_STATUSES = [
     {v:'',l:'All'},{v:'pending',l:'Pending'},{v:'assigned',l:'Assigned'},
     {v:'completed',l:'Completed'},{v:'rejected',l:'Rejected'},{v:'cancelled',l:'Cancelled'},
+  ];
+  const CB_STATUSES_OPTS = [
+    {v:'',l:'All'},{v:'pending',l:'Pending'},{v:'completed',l:'Completed'},
+    {v:'no_answer',l:'No Answer'},{v:'answering_machine',l:'Ans. Machine'},{v:'cancelled',l:'Cancelled'},
   ];
 
   const sel = {
@@ -559,21 +634,52 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
             {companies.map(c => <option key={c.id} value={c.id}>{c.name} ({c.company_type})</option>)}
           </select>
 
-          {/* Closer */}
+          {/* Callbacks: Fronter / Closer toggle */}
+          {dataTab === 'callbacks' && (
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              {[{k:'fronter',l:'Fronters'},{k:'closer',l:'Closers'}].map(t => (
+                <button key={t.k} onClick={() => { setCbType(t.k); setFilter('closerId',''); setPage(1); }}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all"
+                  style={{
+                    background: cbType===t.k ? 'var(--gradient-sidebar)' : 'transparent',
+                    color: cbType===t.k ? 'white' : 'var(--color-text-secondary)',
+                  }}>
+                  {t.l}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Agent / Closer */}
           <select value={filters.closerId} onChange={e => setFilter('closerId', e.target.value)}
             style={{ ...sel, minWidth: 140 }}>
-            <option value="">All Closers</option>
-            {closers.map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} — {u.company_name||'?'}</option>)}
+            <option value="">{dataTab === 'callbacks' ? 'All Agents' : 'All Closers'}</option>
+            {(dataTab === 'callbacks'
+              ? (cbType === 'fronter' ? fronters : closers)
+              : closers
+            ).map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} — {u.company_name||'?'}</option>)}
           </select>
 
           {/* Status */}
           <select value={filters.status} onChange={e => setFilter('status', e.target.value)}
             style={{ ...sel, minWidth: 110 }}>
-            {(dataTab==='sales' ? SALE_STATUSES : XFER_STATUSES).map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+            {(dataTab==='sales' ? SALE_STATUSES : dataTab==='transfers' ? XFER_STATUSES : CB_STATUSES_OPTS)
+              .map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>
 
-          {/* Search (sales only) */}
-          {dataTab === 'sales' && (
+          {/* Priority (callbacks only) */}
+          {dataTab === 'callbacks' && (
+            <select value={filters.priority} onChange={e => setFilter('priority', e.target.value)}
+              style={{ ...sel, minWidth: 100 }}>
+              <option value="">All Priority</option>
+              <option value="High">🔴 High</option>
+              <option value="Medium">🟡 Medium</option>
+              <option value="Low">🔵 Low</option>
+            </select>
+          )}
+
+          {/* Search (sales + callbacks) */}
+          {dataTab !== 'transfers' && (
             <div className="relative flex items-center">
               <Search size={11} className="absolute left-2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
               <input type="text" value={filters.search} onChange={e => setFilter('search', e.target.value)}
@@ -607,9 +713,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
             {[
               { key:'sales',     label:'Sales',     icon: DollarSign },
               { key:'transfers', label:'Transfers', icon: Activity   },
+              { key:'callbacks', label:'Callbacks', icon: PhoneCall  },
             ].map(t => (
               <button key={t.key}
-                onClick={() => { setDataTab(t.key); setPage(1); setSort({col:'created_at',dir:'desc'}); setFilter('status',''); }}
+                onClick={() => { setDataTab(t.key); setPage(1); setSort({col:'created_at',dir:'desc'}); setFilter('status',''); setFilter('priority',''); }}
                 className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all"
                 style={{
                   background: dataTab===t.key ? 'var(--gradient-sidebar)' : 'transparent',
@@ -702,7 +809,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 )}
               </tbody>
             </table>
-          ) : (
+          ) : dataTab === 'transfers' ? (
             <table className="w-full text-xs">
               <thead>
                 <tr style={{ borderBottom:'1px solid var(--color-border)', backgroundColor:'var(--color-bg-secondary)' }}>
@@ -759,6 +866,68 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+          ) : (
+            /* ── Callbacks table ─────────────────────────────────────────── */
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ borderBottom:'1px solid var(--color-border)', backgroundColor:'var(--color-bg-secondary)' }}>
+                  <Th col="customer_name" sort={sort} onSort={toggleSort}>Customer</Th>
+                  <Th col="priority"      sort={sort} onSort={toggleSort}>Priority</Th>
+                  <Th col="callback_at"   sort={sort} onSort={toggleSort}>Scheduled At</Th>
+                  <Th col="user_name"     sort={sort} onSort={toggleSort}>Agent</Th>
+                  <th className="py-2 px-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color:'var(--color-text-secondary)' }}>Company</th>
+                  <Th col="status"        sort={sort} onSort={toggleSort}>Status</Th>
+                  <th className="py-2 px-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color:'var(--color-text-secondary)' }}>Notes</th>
+                  <Th col="created_at"    sort={sort} onSort={toggleSort}>Created</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && rows.length===0 ? (
+                  Array.from({length:8}).map((_,i) => (
+                    <tr key={i} style={{ borderBottom:'1px solid var(--color-border)' }}>
+                      {Array.from({length:8}).map((_,j) => (
+                        <td key={j} className="py-2 px-2.5">
+                          <div className="h-2.5 rounded animate-pulse" style={{ backgroundColor:'var(--color-border)', width:j===0?100:60 }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : sorted.length===0 ? (
+                  <tr><td colSpan={8} className="py-10 text-center text-text-secondary text-xs">No callbacks match the current filters.</td></tr>
+                ) : (
+                  sorted.map(c => (
+                    <tr key={c.id}
+                      className="transition-colors hover:bg-bg-secondary"
+                      style={{ borderBottom:'1px solid var(--color-border)' }}>
+                      <td className="py-2 px-2.5">
+                        <p className="font-semibold text-text leading-tight">{c.customer_name||'—'}</p>
+                        {c.customer_phone && <p className="text-[10px] text-text-tertiary">{c.customer_phone}</p>}
+                      </td>
+                      <td className="py-2 px-2.5">
+                        <CbPriorityBadge priority={c.priority} />
+                      </td>
+                      <td className="py-2 px-2.5 whitespace-nowrap" style={{ color:'var(--color-text-secondary)' }}>
+                        <span className="flex items-center gap-1">
+                          {c.callback_at ? new Date(c.callback_at).toLocaleString() : '—'}
+                          <CbOverdueDot cb={c} />
+                        </span>
+                      </td>
+                      <td className="py-2 px-2.5 text-text-secondary">{c.user_name||'—'}</td>
+                      <td className="py-2 px-2.5 text-text-secondary">{c.company_name||'—'}</td>
+                      <td className="py-2 px-2.5">
+                        <Badge variant={CB_STATUS_BADGE[c.status]||'secondary'} size="sm">
+                          {CB_STATUS_LABEL[c.status]||c.status||'—'}
+                        </Badge>
+                      </td>
+                      <td className="py-2 px-2.5 max-w-[180px] truncate text-text-secondary">{c.notes||'—'}</td>
+                      <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">
+                        {new Date(c.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
