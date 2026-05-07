@@ -71,7 +71,7 @@ router.get(
     const userId = req.user.id;
     const companyId = req.query.company_id || req.user.company_id;
     const userRole = req.user.role;
-    const { status, search, page = 1, limit = 50, date_from, date_to } = req.query;
+    const { status, search, page = 1, limit = 50, date_from, date_to, user_id } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -126,6 +126,10 @@ router.get(
         }
       }
     }
+
+    // Agent filter: managers can scope to a specific closer
+    const isManagerRole = !['closer', 'fronter'].includes(userRole);
+    if (user_id && isManagerRole) query = query.eq('closer_id', user_id);
 
     if (status)    query = query.eq('status', status);
     if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');

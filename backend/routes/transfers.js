@@ -16,7 +16,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
   const userRole  = req.user.role;
-  const { status, page = 1, limit = 50, search, date_from, date_to } = req.query;
+  const { status, page = 1, limit = 50, search, date_from, date_to, user_id } = req.query;
 
   let query = supabaseAdmin
     .from('transfers')
@@ -69,6 +69,11 @@ router.get('/', asyncHandler(async (req, res) => {
       }
       // fronter_manager, operations_manager, company_admin — see all transfers for company
     }
+  }
+
+  // Agent filter: managers can scope to a specific fronter or closer
+  if (user_id && MANAGER_ROLES.includes(userRole)) {
+    query = query.or(`created_by.eq.${user_id},assigned_closer_id.eq.${user_id}`);
   }
 
   if (status)    query = query.eq('status', status);

@@ -123,6 +123,21 @@ const ManagerShell = () => {
   const [activityTotal, setActivityTotal] = useState(0);
   const [activityLoading, setActivityLoading] = useState(false);
 
+  // ── Tab-specific server-side state ────────────────────────────────────────
+  const [xferTabRows,    setXferTabRows]    = useState([]);
+  const [xferTabTotal,   setXferTabTotal]   = useState(0);
+  const [xferTabLoading, setXferTabLoading] = useState(false);
+  const [xferStatus,     setXferStatus]     = useState('');
+  const [xferAgent,      setXferAgent]      = useState('');
+
+  const [salesTabRows,    setSalesTabRows]    = useState([]);
+  const [salesTabTotal,   setSalesTabTotal]   = useState(0);
+  const [salesTabLoading, setSalesTabLoading] = useState(false);
+  const [salesStatus,     setSalesStatus]     = useState('');
+  const [salesAgent,      setSalesAgent]      = useState('');
+
+  const [companyAgents, setCompanyAgents] = useState([]);
+
   // ── Reassign ──────────────────────────────────────────────────────────────
   const [availableClosers, setAvailableClosers] = useState([]);
   const [reassignTarget, setReassignTarget]     = useState(null);
@@ -203,6 +218,32 @@ const ManagerShell = () => {
     }
   }, [companyId, date_from, date_to]);
 
+  const fetchXferTab = useCallback(async () => {
+    if (!companyId) return;
+    setXferTabLoading(true);
+    try {
+      const params = { company_id: companyId, page: xferPage, limit: PAGE_SIZE, date_from, date_to };
+      if (xferStatus) params.status  = xferStatus;
+      if (xferAgent)  params.user_id = xferAgent;
+      const res = await client.get('transfers', { params });
+      setXferTabRows(res.data.transfers || []);
+      setXferTabTotal(res.data.total    || 0);
+    } catch {} finally { setXferTabLoading(false); }
+  }, [companyId, xferPage, xferStatus, xferAgent, date_from, date_to]);
+
+  const fetchSalesTab = useCallback(async () => {
+    if (!companyId) return;
+    setSalesTabLoading(true);
+    try {
+      const params = { company_id: companyId, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
+      if (salesStatus) params.status  = salesStatus;
+      if (salesAgent)  params.user_id = salesAgent;
+      const res = await client.get('sales', { params });
+      setSalesTabRows(res.data.sales || []);
+      setSalesTabTotal(res.data.total || 0);
+    } catch {} finally { setSalesTabLoading(false); }
+  }, [companyId, salesPage, salesStatus, salesAgent, date_from, date_to]);
+
   const loadOverview = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
@@ -245,6 +286,14 @@ const ManagerShell = () => {
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { fetchSales({ date_from, date_to }); },     [fetchSales, date_from, date_to]);
   useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(activityPage); }, [activeTab, fetchActivityLogs, activityPage]);
+  useEffect(() => { if (activeTab === 'transfers')  fetchXferTab();  }, [activeTab, fetchXferTab]);
+  useEffect(() => { if (activeTab === 'team_sales') fetchSalesTab(); }, [activeTab, fetchSalesTab]);
+  useEffect(() => {
+    if (!companyId) return;
+    client.get('users', { params: { company_id: companyId } })
+      .then(r => setCompanyAgents(r.data.users || []))
+      .catch(() => {});
+  }, [companyId]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -414,118 +463,214 @@ const ManagerShell = () => {
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'transfers' && (
           <Card className="p-6">
-            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
-            {xferLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-              : transfers.length === 0 ? <p className="text-text-secondary text-center py-8">No transfers in this period.</p>
-              : (
-                <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
-                            <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pagedTransfers.map(t => (
-                          <tr key={t.id} onClick={() => setDetailTransfer(t)}
-                            className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                            <td className="py-3 px-3 font-semibold text-text">
-                              {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
-                            </td>
-                            <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
-                            <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
-                            <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
-                            <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
-                            <td className="py-3 px-3">
-                              <div className="flex flex-wrap gap-1">
-                                {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
-                                  <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
-                                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                                    style={{ background: 'var(--gradient-sidebar)' }}>
-                                    Reassign
-                                  </button>
-                                )}
-                                {hasPermission('submit_call_review') && (
-                                  <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
-                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                    style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
-                                    <Star size={11} className="inline mr-1" />Rate
-                                  </button>
-                                )}
-                                {hasPermission('submit_call_dispo') && (
-                                  <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
-                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                    style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
-                                    <MessageSquare size={11} className="inline mr-1" />Dispo
-                                  </button>
-                                )}
-                                {hasPermission('delete_transfer') && (
-                                  <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchTransfers({ date_from, date_to })); } }}
-                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                    style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
-                                    <Trash2 size={11} className="inline" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <Pagination page={xferPage} total={transfers.length} pageSize={PAGE_SIZE} onChange={setXferPage} />
-                </>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-xl font-bold text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
+              <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
+            </div>
+
+            {/* Filter bar */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                {[
+                  { k: '',           l: 'All'       },
+                  { k: 'pending',    l: 'Pending'   },
+                  { k: 'assigned',   l: 'Assigned'  },
+                  { k: 'completed',  l: 'Completed' },
+                  { k: 'rejected',   l: 'Rejected'  },
+                  { k: 'cancelled',  l: 'Cancelled' },
+                ].map(({ k, l }) => (
+                  <button key={k} onClick={() => { setXferStatus(k); setXferPage(1); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
+                    style={{
+                      background:  xferStatus === k ? 'var(--gradient-sidebar)' : 'transparent',
+                      color:       xferStatus === k ? 'white' : 'var(--color-text-secondary)',
+                      boxShadow:   xferStatus === k ? 'var(--shadow-sm)' : 'none',
+                    }}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {companyAgents.length > 0 && (
+                <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
+                  className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
+                  <option value="">All agents</option>
+                  {companyAgents.map(a => (
+                    <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
+                  ))}
+                </select>
               )}
+              {(xferStatus || xferAgent) && (
+                <button onClick={() => { setXferStatus(''); setXferAgent(''); setXferPage(1); }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-error-50"
+                  style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+                  <XCircle size={11} /> Clear filters
+                </button>
+              )}
+            </div>
+
+            {xferTabLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : xferTabRows.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No transfers found.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {xferTabRows.map(t => (
+                        <tr key={t.id} onClick={() => setDetailTransfer(t)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                          <td className="py-3 px-3 font-semibold text-text">
+                            {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
+                          </td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                          <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3">
+                            <div className="flex flex-wrap gap-1">
+                              {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
+                                <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                                  style={{ background: 'var(--gradient-sidebar)' }}>
+                                  Reassign
+                                </button>
+                              )}
+                              {hasPermission('submit_call_review') && (
+                                <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
+                                  <Star size={11} className="inline mr-1" />Rate
+                                </button>
+                              )}
+                              {hasPermission('submit_call_dispo') && (
+                                <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
+                                  <MessageSquare size={11} className="inline mr-1" />Dispo
+                                </button>
+                              )}
+                              {hasPermission('delete_transfer') && (
+                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchXferTab()); } }}
+                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                  <Trash2 size={11} className="inline" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={xferPage} total={xferTabTotal} pageSize={PAGE_SIZE} onChange={setXferPage} />
+              </>
+            )}
           </Card>
         )}
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (
           <Card className="p-6">
-            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
-            {salesLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-              : sales.length === 0 ? <p className="text-text-secondary text-center py-8">No sales in this period.</p>
-              : (
-                <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
-                            <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pagedSales.map(s => (
-                          <tr key={s.id} onClick={() => setDetailSale(s)}
-                            className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                            <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
-                            <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
-                            <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
-                            <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
-                            {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                            <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
-                            {hasPermission('delete_sale') && (
-                              <td className="py-3 px-3">
-                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
-                                  className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
-                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
-                                  <Trash2 size={13} />
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <Pagination page={salesPage} total={sales.length} pageSize={PAGE_SIZE} onChange={setSalesPage} />
-                </>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-xl font-bold text-text flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
+              <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
+            </div>
+
+            {/* Filter bar */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                {[
+                  { k: '',                 l: 'All'         },
+                  { k: 'open',             l: 'Pending'     },
+                  { k: 'sold',             l: 'Sold'        },
+                  { k: 'pending_review',   l: 'In Review'   },
+                  { k: 'needs_revision',   l: 'Needs Fix'   },
+                  { k: 'closed_won',       l: 'Approved'    },
+                  { k: 'cancelled',        l: 'Cancelled'   },
+                  { k: 'closed_lost',      l: 'Lost'        },
+                ].map(({ k, l }) => (
+                  <button key={k} onClick={() => { setSalesStatus(k); setSalesPage(1); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
+                    style={{
+                      background: salesStatus === k ? 'var(--gradient-sidebar)' : 'transparent',
+                      color:      salesStatus === k ? 'white' : 'var(--color-text-secondary)',
+                      boxShadow:  salesStatus === k ? 'var(--shadow-sm)' : 'none',
+                    }}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {companyAgents.length > 0 && (
+                <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
+                  className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
+                  <option value="">All agents</option>
+                  {companyAgents.map(a => (
+                    <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
+                  ))}
+                </select>
               )}
+              {(salesStatus || salesAgent) && (
+                <button onClick={() => { setSalesStatus(''); setSalesAgent(''); setSalesPage(1); }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-error-50"
+                  style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+                  <XCircle size={11} /> Clear filters
+                </button>
+              )}
+            </div>
+
+            {salesTabLoading ? (
+              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+            ) : salesTabRows.length === 0 ? (
+              <p className="text-text-secondary text-center py-8">No sales found.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salesTabRows.map(s => (
+                        <tr key={s.id} onClick={() => setDetailSale(s)}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
+                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
+                          <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
+                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
+                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                          {hasPermission('delete_sale') && (
+                            <td className="py-3 px-3">
+                              <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
+                                className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
+                                style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={salesPage} total={salesTabTotal} pageSize={PAGE_SIZE} onChange={setSalesPage} />
+              </>
+            )}
           </Card>
         )}
 
