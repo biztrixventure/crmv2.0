@@ -31,11 +31,6 @@ const Field = ({ label, required, error, hint, children, className = '' }) => (
   </div>
 );
 
-const STATUSES = [
-  { value: 'open',      label: 'OPEN',      color: '#f59e0b' },
-  { value: 'follow_up', label: 'CALLBACK',  color: '#3b82f6' },
-  { value: 'cancelled', label: 'CANCELLED', color: '#ef4444' },
-];
 
 // Maps known form field names to sales table columns for search indexing
 function mapToSaleColumns(formData) {
@@ -135,9 +130,10 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       payment_due_note: dynVal('sale_payment_due_note') || null,
       reference_no:     dynVal('sale_reference_no')     || null,
       client_name:      dynVal('sale_client')           || null,
-      fronter_id:       dynVal('sale_fronter')          || null,
-      sale_date:        dynVal('sale_date')             || new Date().toISOString().split('T')[0],
-      status:           dynVal('sale_status')           || 'open',
+      fronter_id:          dynVal('sale_fronter')     || null,
+      sale_date:           dynVal('sale_date')         || new Date().toISOString().split('T')[0],
+      status:              'open',
+      closer_disposition:  dynVal('sale_disposition') || null,
     });
   };
 
@@ -247,28 +243,13 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       );
     }
-    if (field.field_type === 'sale_status') {
-      const activeStatus = val || 'open';
+    if (field.field_type === 'sale_disposition') {
       return (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {STATUSES.map(s => (
-            <button key={s.value} type="button"
-              onClick={() => setDynField(field.name, s.value)}
-              className="relative py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all duration-150"
-              style={{
-                borderColor:     activeStatus === s.value ? s.color : 'var(--color-border)',
-                backgroundColor: activeStatus === s.value ? s.color + '18' : 'var(--color-surface)',
-                color:           activeStatus === s.value ? s.color : 'var(--color-text-secondary)',
-                transform:       activeStatus === s.value ? 'scale(1.03)' : 'scale(1)',
-              }}>
-              {activeStatus === s.value && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-                  style={{ backgroundColor: s.color }} />
-              )}
-              {s.label}
-            </button>
-          ))}
-        </div>
+        <select value={val} onChange={onChange} required={field.is_required}
+          className={`input ${errClass}`}>
+          <option value="">Select disposition…</option>
+          {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
       );
     }
     const inputType =

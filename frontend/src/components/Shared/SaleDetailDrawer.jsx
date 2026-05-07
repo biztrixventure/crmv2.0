@@ -17,6 +17,7 @@ const SKIP_KEYS = new Set([
   'customer_name', 'customer_phone', 'customer_email', 'customer_address',
   'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
   'CarYear', 'CarMake', 'CarModel', 'CarMiles', 'CarVin',
+  'SaleDisposition',
 ]);
 
 const Row = ({ label, value, mono = false, highlight }) => {
@@ -146,6 +147,10 @@ export default function SaleDetailDrawer({ sale, onClose }) {
             {sale.plan        && <Row label="Plan"    value={sale.plan} />}
             {sale.sale_date   && <Row label="Sale Date" value={new Date(sale.sale_date).toLocaleDateString()} />}
             <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />
+            {sale.closer_disposition && (
+              <Row label="Closer Disposition" value={sale.closer_disposition}
+                highlight="var(--color-primary-600)" />
+            )}
           </Section>
 
           {/* Financial — gated */}

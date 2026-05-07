@@ -49,7 +49,7 @@ const CLOSER_DEAL_FIELDS = [
   { name: 'SaleReferenceNo',    label: 'Reference No',     field_type: 'sale_reference_no',    is_required: false },
   { name: 'SaleFronter',        label: 'Fronter',          field_type: 'sale_fronter',         is_required: false },
   { name: 'SaleDate',           label: 'Sale Date',        field_type: 'sale_date',            is_required: false },
-  { name: 'SaleStatus',         label: 'Sale Status',      field_type: 'sale_status',          is_required: false },
+  { name: 'SaleDisposition', label: 'Closer Disposition', field_type: 'sale_disposition', is_required: false, options: ['Sale', 'No Sale', 'Callback', 'Not Interested', 'Voicemail', 'Other'] },
 ];
 
 const TYPE_ICONS = {
@@ -58,7 +58,7 @@ const TYPE_ICONS = {
   checkbox: CheckSquare, sale_client: Tag, sale_plan: Briefcase,
   sale_down_payment: DollarSign, sale_monthly_payment: DollarSign,
   sale_payment_due_note: AlignLeft, sale_reference_no: Hash,
-  sale_fronter: Users, sale_date: Calendar, sale_status: CheckSquare,
+  sale_fronter: Users, sale_date: Calendar, sale_disposition: List,
 };
 const TYPE_LABELS = {
   text: 'Text', email: 'Email', number: 'Number', tel: 'Phone',
@@ -66,7 +66,7 @@ const TYPE_LABELS = {
   select: 'Select', checkbox: 'Checkbox', sale_client: 'Client', sale_plan: 'Plan',
   sale_down_payment: 'Down Payment', sale_monthly_payment: 'Monthly Payment',
   sale_payment_due_note: 'Payment Due Note', sale_reference_no: 'Reference No',
-  sale_fronter: 'Fronter', sale_date: 'Sale Date', sale_status: 'Sale Status',
+  sale_fronter: 'Fronter', sale_date: 'Sale Date', sale_disposition: 'Closer Disposition',
 };
 const SPAN_LABEL = { 1: '1/3', 2: '2/3', 3: 'Full' };
 const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
@@ -661,13 +661,15 @@ const AddCustomModal = ({ onAdd, onClose }) => {
 const FieldCard = ({
   field, index, isDragging, isDragOver,
   onDragStart, onDragOver, onDrop, onDragEnd,
-  onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel, onConfigureMapping,
+  onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel, onConfigureMapping, onSaveOptions,
 }) => {
-  const [editingLabel, setEditingLabel] = useState(false);
-  const [labelVal, setLabelVal]         = useState(field.label);
+  const [editingLabel,   setEditingLabel]   = useState(false);
+  const [labelVal,       setLabelVal]       = useState(field.label);
+  const [editingOptions, setEditingOptions] = useState(false);
+  const [optionsVal,     setOptionsVal]     = useState((field.options || []).join(', '));
   const inputRef = useRef(null);
   const isSale   = field.field_type === 'sale_client' || field.field_type === 'sale_plan';
-  const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_status'].includes(field.field_type);
+  const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_disposition'].includes(field.field_type);
   const mappingCount = field.field_type === 'sale_plan' && Array.isArray(field.options) ? field.options.length : 0;
 
   const commitLabel = () => {
@@ -788,6 +790,15 @@ const FieldCard = ({
           </button>
         )}
 
+        {/* Edit options button for sale_disposition */}
+        {field.field_type === 'sale_disposition' && !editingOptions && (
+          <button onClick={() => { setOptionsVal((field.options || []).join(', ')); setEditingOptions(true); }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0 hover:opacity-80"
+            style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
+            <List size={9} /> Options ({(field.options || []).length})
+          </button>
+        )}
+
         {/* Span */}
         <div className="flex items-center gap-0.5 ml-auto flex-shrink-0">
           {[1, 2, 3].map(n => (
@@ -808,6 +819,24 @@ const FieldCard = ({
           {TYPE_LABELS[field.field_type] || field.field_type}
         </span>
       </div>
+
+      {/* Inline options editor for sale_disposition */}
+      {field.field_type === 'sale_disposition' && editingOptions && (
+        <div className="px-3 pb-2.5 flex items-center gap-1.5">
+          <input value={optionsVal} onChange={e => setOptionsVal(e.target.value)}
+            placeholder="Sale, No Sale, Callback, …"
+            className="input text-xs py-1 h-auto flex-1" />
+          <button onClick={() => {
+            const opts = optionsVal.split(',').map(s => s.trim()).filter(Boolean);
+            onSaveOptions(index, opts);
+            setEditingOptions(false);
+          }} className="px-2 py-1 rounded text-xs font-bold text-white flex-shrink-0"
+            style={{ background: 'var(--gradient-sidebar)' }}>Save</button>
+          <button onClick={() => setEditingOptions(false)}
+            className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0"
+            style={{ color: 'var(--color-text-secondary)' }}>✕</button>
+        </div>
+      )}
     </div>
   );
 };
@@ -882,7 +911,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
 
   const addCloserDealField = (field) => {
     if (canvasFields.some(f => f.field_type === field.field_type)) return;
-    setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: false, options: null }]);
+    setCanvasFields(prev => [...prev, { ...field, column_span: 1, show_to_fronter: false }]);
   };
 
   const addCustom = (field) => {
@@ -902,6 +931,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const changeSpan     = (i, span) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, column_span: span } : f));
   const editLabel      = (i, label) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, label } : f));
   const saveMapping    = (i, mapping) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, options: mapping } : f));
+  const saveOptions    = (i, opts)    => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, options: opts } : f));
 
   const onDragStart = (e, i) => { dragIndex.current = i; e.dataTransfer.effectAllowed = 'move'; };
   const onDragOver  = (e, i) => { e.preventDefault(); setDragOverIdx(i); };
@@ -1094,6 +1124,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   onToggleFronter={toggleFronter} onChangeSpan={changeSpan}
                   onEditLabel={(label) => editLabel(idx, label)}
                   onConfigureMapping={(i) => setMappingField(i)}
+                  onSaveOptions={(i, opts) => saveOptions(i, opts)}
                 />
               ))}
             </div>
@@ -1140,13 +1171,11 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   <input disabled type="text" placeholder="MBH4220SBN" className="input opacity-70 font-mono uppercase" />
                 ) : field.field_type === 'sale_fronter' ? (
                   <select disabled className="input opacity-70"><option>Select fronter…</option></select>
-                ) : field.field_type === 'sale_status' ? (
-                  <div className="flex gap-2 flex-wrap">
-                    {['SOLD','PENDING','CANCELLED','FOLLOW UP'].map(s => (
-                      <span key={s} className="px-3 py-1.5 rounded-xl border-2 text-xs font-bold opacity-70"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>{s}</span>
-                    ))}
-                  </div>
+                ) : field.field_type === 'sale_disposition' ? (
+                  <select disabled className="input opacity-70">
+                    <option>Select disposition…</option>
+                    {(field.options || []).map(o => <option key={o}>{o}</option>)}
+                  </select>
                 ) : (
                   <input disabled
                     type={field.field_type === 'tel' || field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' || field.field_type === 'sale_payment_due_note' ? 'text' : field.field_type === 'sale_date' ? 'date' : field.field_type}

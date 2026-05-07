@@ -243,10 +243,13 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
 }
 
 async function onSaleApproved({ sale, reviewerName }) {
-  const customerName = sale.customer_name || 'Customer';
-  const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
-  const companyId    = sale.company_id;
-  const hour         = hourBlock();
+  const customerName  = sale.customer_name || 'Customer';
+  const refNo         = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
+  const companyId     = sale.company_id;
+  const hour          = hourBlock();
+  const disposition   = sale.closer_disposition;
+  const dispoSuffix   = disposition ? ` · Disposition: ${disposition}` : '';
+  const dispoData     = disposition ? { closer_disposition: disposition } : {};
 
   const closerId = sale.closer_id || sale.submitted_by;
   if (closerId) {
@@ -255,7 +258,7 @@ async function onSaleApproved({ sale, reviewerName }) {
       type:     'sale_approved',
       title:    'Sale approved by compliance!',
       message:  `${customerName} (Ref: ${refNo}) was approved by ${reviewerName}.`,
-      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
       dedupKey: `sale_approved_${sale.id}_${closerId}_${hour}`,
     });
     sendPushToUser(closerId, {
@@ -271,8 +274,8 @@ async function onSaleApproved({ sale, reviewerName }) {
     companyId,
     type:      'sale_approved',
     title:     `Sale confirmed — ${customerName}`,
-    message:   `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.`,
-    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    message:   `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.${dispoSuffix}`,
+    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
     dedupBase: `sale_approved_mgr_${sale.id}`,
   });
 
@@ -295,13 +298,13 @@ async function onSaleApproved({ sale, reviewerName }) {
       userId: fronterUserId, companyId: fronterCompanyId || companyId,
       type:     'sale_approved',
       title:    'Your lead was confirmed as a sale!',
-      message:  `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
-      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      message:  `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.${dispoSuffix}`,
+      data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
       dedupKey: `sale_approved_${sale.id}_${fronterUserId}_${hour}`,
     });
     sendPushToUser(fronterUserId, {
       title: 'Lead confirmed!',
-      body:  `${customerName} — Ref: ${refNo} closed won`,
+      body:  `${customerName} — Ref: ${refNo} closed won${dispoSuffix}`,
       tag:   'sale_approved',
       data:  { sale_id: sale.id },
     }).catch(() => {});
@@ -311,8 +314,8 @@ async function onSaleApproved({ sale, reviewerName }) {
     await notifyFloorManagers(fronterCompanyId, {
       type:      'sale_approved',
       title:     `Transfer confirmed as sale — ${customerName}`,
-      message:   `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.`,
-      data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+      message:   `${customerName} (Ref: ${refNo}) was approved by compliance — CLOSED WON.${dispoSuffix}`,
+      data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
       dedupBase: `sale_approved_fmgr_${sale.id}`,
     });
   }

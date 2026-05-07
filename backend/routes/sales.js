@@ -210,6 +210,7 @@ router.post(
     body('sale_date').isISO8601().optional({ nullable: true, checkFalsy: true }),
     body('status').isIn(['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost']).optional(),
     body('form_data').isObject().optional(),
+    body('closer_disposition').trim().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -234,7 +235,7 @@ router.post(
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id,
-      sale_date, status, form_data,
+      sale_date, status, form_data, closer_disposition,
     } = req.body;
 
     // If linked to a transfer, validate it
@@ -291,6 +292,7 @@ router.post(
         closer_id: userId,
         sale_date: sale_date || new Date().toISOString().split('T')[0],
         form_data: form_data || null,
+        closer_disposition: closer_disposition || null,
       })
       .select()
       .single();
@@ -452,7 +454,7 @@ router.put(
       status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
-      reference_no, client_name, fronter_id, sale_date, form_data,
+      reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition,
     } = req.body;
 
     const validStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
@@ -481,9 +483,10 @@ router.put(
     if (payment_due_note !== undefined) updates.payment_due_note = payment_due_note;
     if (reference_no !== undefined)    updates.reference_no     = reference_no;
     if (client_name !== undefined)     updates.client_name      = client_name;
-    if (fronter_id !== undefined)      updates.fronter_id       = fronter_id;
-    if (sale_date !== undefined)       updates.sale_date        = sale_date;
-    if (form_data !== undefined)       updates.form_data        = form_data;
+    if (fronter_id !== undefined)          updates.fronter_id          = fronter_id;
+    if (sale_date !== undefined)           updates.sale_date           = sale_date;
+    if (form_data !== undefined)           updates.form_data           = form_data;
+    if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('sales').update(updates).eq('id', id).select().single();
