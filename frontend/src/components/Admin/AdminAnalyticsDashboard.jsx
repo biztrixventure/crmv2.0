@@ -306,7 +306,8 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const [todayXfers, setTodayXfers]         = useState(0);
   const [todayLoading, setTodayLoading]     = useState(true);
   const [exportLoading, setExportLoading]   = useState(false);
-  const debounceRef = useRef(null);
+  const debounceRef  = useRef(null);
+  const dataTableRef = useRef(null);
 
   // Bootstrap
   useEffect(() => {
@@ -486,15 +487,24 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     }
   };
 
+  const jumpToData = (tab, statusFilter = '') => {
+    setDataTab(tab);
+    setFilters({ companyId: '', closerId: '', status: statusFilter, search: '', priority: '' });
+    setPage(1);
+    setSort({ col: 'created_at', dir: 'desc' });
+    setTimeout(() => dataTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  const navToCompanies = () => document.dispatchEvent(new CustomEvent('admin-nav', { detail: 'companies' }));
+
   const metrics = [
-    { icon: Users,       label: 'Users',           value: stats.totalUsers,      accent: '#6366f1' },
-    { icon: Building2,   label: 'Companies',        value: stats.totalCompanies,  accent: '#10b981' },
-    { icon: Activity,    label: 'Transfers',        value: stats.totalTransfers,  accent: '#f59e0b' },
-    { icon: DollarSign,  label: 'Total Sales',      value: stats.totalSales,      accent: '#8b5cf6' },
-    { icon: CheckCircle, label: 'Approved',         value: stats.closedWon,       accent: '#10b981' },
-    { icon: Target,      label: 'Conversion',       value: stats.conversionRate ? `${stats.conversionRate}%` : '0%', accent: '#3b82f6' },
-    { icon: TrendingUp,  label: 'In Review',        value: stats.awaitingCompliance, accent: '#f59e0b' },
-    { icon: Layers,      label: 'Pending Xfers',    value: stats.pendingTransfers, accent: '#ef4444' },
+    { icon: Users,       label: 'Users',         value: stats.totalUsers,         accent: '#6366f1', onClick: navToCompanies,                          hint: 'View all companies & users' },
+    { icon: Building2,   label: 'Companies',     value: stats.totalCompanies,     accent: '#10b981', onClick: navToCompanies,                          hint: 'Manage companies' },
+    { icon: Activity,    label: 'Transfers',     value: stats.totalTransfers,     accent: '#f59e0b', onClick: () => jumpToData('transfers'),            hint: 'View all transfers' },
+    { icon: DollarSign,  label: 'Total Sales',   value: stats.totalSales,         accent: '#8b5cf6', onClick: () => jumpToData('sales'),               hint: 'View all sales' },
+    { icon: CheckCircle, label: 'Approved',      value: stats.closedWon,          accent: '#10b981', onClick: () => jumpToData('sales', 'closed_won'),  hint: 'View approved sales' },
+    { icon: Target,      label: 'Conversion',    value: stats.conversionRate ? `${stats.conversionRate}%` : '0%', accent: '#3b82f6', onClick: () => jumpToData('sales'), hint: 'View sales pipeline' },
+    { icon: TrendingUp,  label: 'In Review',     value: stats.awaitingCompliance, accent: '#f59e0b', onClick: () => jumpToData('sales', 'pending_review'), hint: 'Sales awaiting review' },
+    { icon: Layers,      label: 'Pending Xfers', value: stats.pendingTransfers,   accent: '#ef4444', onClick: () => jumpToData('transfers', 'pending'), hint: 'View pending transfers' },
   ];
 
   const SALE_STATUSES = [
@@ -550,10 +560,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         <div className="grid grid-cols-4 gap-2">
           {metrics.map((m, i) => (
             <div key={i}
-              className="rounded-xl p-3 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+              onClick={m.onClick}
+              title={m.hint}
+              className="rounded-xl p-3 transition-all duration-200 hover:shadow-lg hover:-translate-y-1 cursor-pointer group relative"
               style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex items-center justify-between mb-2">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center"
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center transition-transform duration-200 group-hover:scale-110"
                   style={{ backgroundColor: `${m.accent}18` }}>
                   <m.icon size={13} style={{ color: m.accent }} />
                 </div>
@@ -562,7 +574,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               <p className="text-lg font-bold text-text leading-none mb-0.5">
                 {statsLoading ? <span className="opacity-30">—</span> : (m.value ?? 0)}
               </p>
-              <p className="text-[11px] text-text-secondary truncate">{m.label}</p>
+              <p className="text-[11px] truncate transition-colors duration-200 group-hover:font-semibold"
+                style={{ color: 'var(--color-text-secondary)' }}>{m.label}</p>
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-b-xl scale-x-0 group-hover:scale-x-100 transition-transform duration-200 origin-left"
+                style={{ backgroundColor: m.accent }} />
             </div>
           ))}
         </div>
@@ -588,14 +603,15 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           </div>
           <div className="flex items-center gap-3 text-[11px] flex-shrink-0">
             {[
-              { l:'Won',  v: stats.closedWon  ||0, cls:'bg-success-500', c:'var(--color-success-600)' },
-              { l:'Open', v: stats.openSales  ||0, cls:'bg-info-500',    c:'var(--color-info-600)'    },
-              { l:'Lost', v: stats.closedLost ||0, cls:'bg-error-500',   c:'var(--color-error-600)'   },
+              { l:'Won',  v: stats.closedWon  ||0, cls:'bg-success-500', c:'var(--color-success-600)', status:'closed_won'  },
+              { l:'Open', v: stats.openSales  ||0, cls:'bg-info-500',    c:'var(--color-info-600)',    status:'open'        },
+              { l:'Lost', v: stats.closedLost ||0, cls:'bg-error-500',   c:'var(--color-error-600)',   status:'closed_lost' },
             ].map(s => (
-              <span key={s.l} className="flex items-center gap-1">
+              <button key={s.l} onClick={() => jumpToData('sales', s.status)}
+                className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer">
                 <div className={`w-2 h-2 rounded-full ${s.cls}`} />
                 <span className="text-text-secondary">{s.l} <strong style={{ color: s.c }}>{s.v}</strong></span>
-              </span>
+              </button>
             ))}
           </div>
           <div className="flex-1 h-2 rounded-full overflow-hidden flex gap-px"
@@ -703,7 +719,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       </div>
 
       {/* ── Data table ──────────────────────────────────────────────────── */}
-      <div className="rounded-xl overflow-hidden"
+      <div ref={dataTableRef} className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
 
         {/* Tab bar */}
