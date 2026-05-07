@@ -133,7 +133,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       fronter_id:          dynVal('sale_fronter')     || null,
       sale_date:           dynVal('sale_date')         || new Date().toISOString().split('T')[0],
       status:              'open',
-      closer_disposition:  dynVal('sale_disposition') || null,
+      closer_disposition:  dynVal('sale_disposition') || dynVal('sale_status') || null,
     });
   };
 
@@ -243,12 +243,14 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       );
     }
-    if (field.field_type === 'sale_disposition') {
+    if (field.field_type === 'sale_disposition' || field.field_type === 'sale_status') {
+      const DEFAULT_DISPOS = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
+      const opts = (field.options && field.options.length > 0) ? field.options : DEFAULT_DISPOS;
       return (
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select disposition…</option>
-          {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+          {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
         </select>
       );
     }
