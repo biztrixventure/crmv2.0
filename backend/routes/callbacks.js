@@ -26,6 +26,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const priority  = req.query.priority;
   const search    = req.query.search;
   const user_id   = req.query.user_id; // superadmin: filter by specific agent
+  const overdue   = req.query.overdue === 'true'; // pending callbacks past their callback_at
   const page      = Math.max(1, parseInt(req.query.page)  || 1);
   const limit     = Math.min(200, parseInt(req.query.limit) || 50);
   const offset    = (page - 1) * limit;
@@ -48,6 +49,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (isManager && user_id) query = query.eq('user_id', user_id);
 
   if (status)   query = query.eq('status', status);
+  if (overdue)  query = query.eq('status', 'pending').lt('callback_at', new Date().toISOString());
   if (priority) query = query.eq('priority', priority);
   if (search) {
     // Resolve agent names → user_ids so we can OR on user_id

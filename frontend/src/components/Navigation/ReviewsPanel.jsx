@@ -33,7 +33,8 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
   );
 };
 
-const ReviewsPanel = ({ companyId, agents = [] }) => {
+const ReviewsPanel = ({ companyId }) => {
+  const [agentsList,   setAgentsList]   = useState([]);
   const [reviews,      setReviews]      = useState([]);
   const [dispos,       setDispos]       = useState([]);
   const [reviewTotal,  setReviewTotal]  = useState(0);
@@ -45,6 +46,14 @@ const ReviewsPanel = ({ companyId, agents = [] }) => {
   const [agentFilter,  setAgentFilter]  = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
   const [dispoFilter,  setDispoFilter]  = useState('');
+
+  // Load all company agents once — independent of pagination
+  useEffect(() => {
+    if (!companyId) return;
+    client.get('users', { params: { company_id: companyId } })
+      .then(r => setAgentsList(r.data.users || []))
+      .catch(() => {});
+  }, [companyId]);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -100,11 +109,11 @@ const ReviewsPanel = ({ companyId, agents = [] }) => {
           ))}
         </div>
 
-        {agents.length > 0 && (
+        {agentsList.length > 0 && (
           <select value={agentFilter} onChange={e => handleAgentChange(e.target.value)}
             className={selectCls} style={{ minWidth: 160 }}>
             <option value="">All agents</option>
-            {agents.map(a => (
+            {agentsList.map(a => (
               <option key={a.user_id} value={a.user_id}>
                 {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
               </option>

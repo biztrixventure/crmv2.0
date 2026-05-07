@@ -797,7 +797,7 @@ const ManagerShell = () => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
-        {activeTab === 'callbacks' && <CallbacksOverview user={user} agents={companyAgents} />}
+        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
             {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
@@ -807,7 +807,7 @@ const ManagerShell = () => {
         {activeTab === 'search'    && <SaleSearch />}
         {activeTab === 'team'      && <TeamManagementPanel companyId={companyId} />}
         {activeTab === 'roles'     && <RoleManagementPanel companyId={companyId} />}
-        {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} agents={companyAgents} />}
+        {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} />}
         {activeTab === 'reports'   && <ReportsPanel companyId={companyId} />}
         {activeTab === 'forms'     && (
           <div className="animate-fade-in">

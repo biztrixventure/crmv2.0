@@ -1,7 +1,7 @@
 /**
  * CallbacksOverview — manager/admin read-only team view.
- * Shows all company callbacks with who scheduled them, when, and status.
- * Server-side filtering by status, priority, agent. Server-side pagination.
+ * Self-contained: fetches its own agent list and summary stats.
+ * Server-side filtering + pagination (PAGE_SIZE=25).
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
@@ -166,27 +166,59 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
   );
 };
 
-const CallbacksOverview = ({ user, agents = [] }) => {
-  const [callbacks,       setCallbacks]       = useState([]);
-  const [total,           setTotal]           = useState(0);
-  const [page,            setPage]            = useState(1);
-  const [loading,         setLoading]         = useState(false);
-  const [statusFilter,    setStatusFilter]    = useState('all');
-  const [memberFilter,    setMemberFilter]    = useState('');
-  const [priorityFilter,  setPriorityFilter]  = useState('all');
-  const [updatingId,      setUpdatingId]      = useState(null);
-  const [outcomeModal,    setOutcomeModal]    = useState(null);
+// ── Main Component ───────────────────────────────────────────────────────────
+const CallbacksOverview = ({ user }) => {
+  const [agentsList,     setAgentsList]     = useState([]);
+  const [callbacks,      setCallbacks]      = useState([]);
+  const [total,          setTotal]          = useState(0);
+  const [page,           setPage]           = useState(1);
+  const [loading,        setLoading]        = useState(false);
+  const [statusFilter,   setStatusFilter]   = useState('all');
+  const [memberFilter,   setMemberFilter]   = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [stats,          setStats]          = useState({ pending: 0, overdue: 0, completed: 0 });
+  const [updatingId,     setUpdatingId]     = useState(null);
+  const [outcomeModal,   setOutcomeModal]   = useState(null);
 
   const cid = user?.company_id;
 
+  // Load all company agents once — independent of pagination
+  useEffect(() => {
+    if (!cid) return;
+    client.get('users', { params: { company_id: cid } })
+      .then(r => setAgentsList(r.data.users || []))
+      .catch(() => {});
+  }, [cid]);
+
+  // Fetch accurate total counts (independent of current page / status tab)
+  const fetchStats = useCallback(async () => {
+    if (!cid) return;
+    try {
+      const base = { company_id: cid, limit: 1, page: 1 };
+      if (memberFilter)             base.user_id  = memberFilter;
+      if (priorityFilter !== 'all') base.priority = priorityFilter;
+      const [pRes, cRes, oRes] = await Promise.all([
+        client.get('callbacks', { params: { ...base, status: 'pending' } }),
+        client.get('callbacks', { params: { ...base, status: 'completed' } }),
+        client.get('callbacks', { params: { ...base, overdue: 'true' } }),
+      ]);
+      setStats({
+        pending:   pRes.data.total || 0,
+        completed: cRes.data.total || 0,
+        overdue:   oRes.data.total || 0,
+      });
+    } catch {}
+  }, [cid, memberFilter, priorityFilter]);
+
+  // Fetch paginated callbacks list
   const fetchCallbacks = useCallback(async () => {
     if (!cid) return;
     setLoading(true);
     try {
       const params = { company_id: cid, page, limit: PAGE_SIZE };
       if (statusFilter   !== 'all') params.status   = statusFilter;
-      if (priorityFilter !== 'all') params.priority  = priorityFilter;
-      if (memberFilter)             params.user_id   = memberFilter;
+      if (priorityFilter !== 'all') params.priority = priorityFilter;
+      if (memberFilter)             params.user_id  = memberFilter;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
@@ -194,6 +226,7 @@ const CallbacksOverview = ({ user, agents = [] }) => {
   }, [cid, statusFilter, priorityFilter, memberFilter, page]);
 
   useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
+  useEffect(() => { fetchStats(); },    [fetchStats]);
 
   const handleStatusFilter   = (v) => { setStatusFilter(v);   setPage(1); };
   const handlePriorityFilter = (v) => { setPriorityFilter(v); setPage(1); };
@@ -208,18 +241,13 @@ const CallbacksOverview = ({ user, agents = [] }) => {
       if (notes) payload.notes = notes;
       const res = await client.put(`callbacks/${id}`, payload);
       setCallbacks(prev => prev.map(c => c.id === id ? { ...c, ...res.data.callback } : c));
+      fetchStats(); // refresh totals after status change
     } catch {} finally { setUpdatingId(null); }
     setOutcomeModal(null);
   };
 
   const handleStatusClick = (id, status, customerName) => {
     setOutcomeModal({ id, status, customerName });
-  };
-
-  const counts = {
-    pending:   callbacks.filter(c => c.status === 'pending').length,
-    overdue:   callbacks.filter(c => c.status === 'pending' && isPast(c.callback_at)).length,
-    completed: callbacks.filter(c => c.status === 'completed').length,
   };
 
   return (
@@ -230,10 +258,10 @@ const CallbacksOverview = ({ user, agents = [] }) => {
           <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Phone size={15} style={{ color: 'var(--color-primary-600)' }} />
             Team Callbacks
-            {counts.overdue > 0 && (
+            {stats.overdue > 0 && (
               <span className="ml-1 text-xs font-bold px-2 py-0.5 rounded-full text-white"
                 style={{ backgroundColor: '#ef4444' }}>
-                {counts.overdue} overdue
+                {stats.overdue} overdue
               </span>
             )}
           </h2>
@@ -241,7 +269,7 @@ const CallbacksOverview = ({ user, agents = [] }) => {
             Scheduled callbacks across your team — when to call and current status.
           </p>
         </div>
-        <button onClick={fetchCallbacks} disabled={loading}
+        <button onClick={() => { fetchCallbacks(); fetchStats(); }} disabled={loading}
           className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors hover:bg-bg-secondary"
           style={{ color: 'var(--color-text-secondary)' }}>
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
@@ -249,18 +277,24 @@ const CallbacksOverview = ({ user, agents = [] }) => {
         </button>
       </div>
 
-      {/* Stats row */}
+      {/* Stats row — accurate totals, not page counts */}
       <div className="grid grid-cols-3 gap-2 mb-4">
         {[
-          { label: 'Pending',   value: counts.pending,   color: '#f59e0b', bg: '#fef3c7' },
-          { label: 'Overdue',   value: counts.overdue,   color: '#ef4444', bg: '#fee2e2' },
-          { label: 'Completed', value: counts.completed, color: '#10b981', bg: '#d1fae5' },
+          { label: 'Pending',   value: stats.pending,   color: '#f59e0b', bg: '#fef3c7', key: 'pending'   },
+          { label: 'Overdue',   value: stats.overdue,   color: '#ef4444', bg: '#fee2e2', key: 'overdue'   },
+          { label: 'Completed', value: stats.completed, color: '#10b981', bg: '#d1fae5', key: 'completed' },
         ].map(s => (
-          <div key={s.label} className="rounded-xl p-3 text-center"
-            style={{ backgroundColor: s.bg, border: `1px solid ${s.color}30` }}>
+          <button key={s.key} onClick={() => s.key !== 'overdue' && handleStatusFilter(statusFilter === s.key ? 'all' : s.key)}
+            className="rounded-xl p-3 text-center transition-all"
+            style={{
+              backgroundColor: s.bg,
+              border: `1px solid ${s.color}${statusFilter === s.key ? 'cc' : '30'}`,
+              boxShadow: statusFilter === s.key ? `0 0 0 2px ${s.color}40` : 'none',
+              cursor: s.key !== 'overdue' ? 'pointer' : 'default',
+            }}>
             <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
             <p className="text-xs font-semibold mt-0.5" style={{ color: s.color }}>{s.label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -275,6 +309,7 @@ const CallbacksOverview = ({ user, agents = [] }) => {
             { key: 'completed',         label: 'Completed'    },
             { key: 'no_answer',         label: 'No Answer'    },
             { key: 'answering_machine', label: 'Ans. Machine' },
+            { key: 'cancelled',         label: 'Cancelled'    },
           ].map(f => (
             <button key={f.key} onClick={() => handleStatusFilter(f.key)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
@@ -309,20 +344,29 @@ const CallbacksOverview = ({ user, agents = [] }) => {
           ))}
         </div>
 
-        {/* Agent dropdown */}
-        {agents.length > 0 && (
+        {/* Agent dropdown — all company agents, not page-derived */}
+        {agentsList.length > 0 && (
           <div className="flex items-center gap-2">
             <Filter size={14} style={{ color: 'var(--color-text-tertiary)' }} />
             <select value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
               <option value="">All team members</option>
-              {agents.map(a => (
+              {agentsList.map(a => (
                 <option key={a.user_id} value={a.user_id}>
                   {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
                 </option>
               ))}
             </select>
           </div>
+        )}
+
+        {/* Clear filters */}
+        {(statusFilter !== 'all' || priorityFilter !== 'all' || memberFilter) && (
+          <button onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setMemberFilter(''); setPage(1); }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+            style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+            <XCircle size={11} /> Clear filters
+          </button>
         )}
       </div>
 
