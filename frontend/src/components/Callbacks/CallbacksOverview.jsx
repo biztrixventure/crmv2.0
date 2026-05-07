@@ -1,14 +1,17 @@
 /**
  * CallbacksOverview — manager/admin read-only team view.
  * Shows all company callbacks with who scheduled them, when, and status.
- * Filter by team member and status. Managers can update status.
+ * Server-side filtering by status, priority, agent. Server-side pagination.
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
   Calendar, User, Filter, RefreshCw, Voicemail, X,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import client from '../../api/client';
+
+const PAGE_SIZE = 25;
 
 const STATUS_CONFIG = {
   pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
@@ -60,6 +63,32 @@ const isDueSoon = (iso) => {
   if (!iso) return false;
   const diff = new Date(iso) - new Date();
   return diff > 0 && diff < 30 * 60 * 1000;
+};
+
+// ── Pagination ───────────────────────────────────────────────────────────────
+const Pagination = ({ page, total, pageSize, onChange }) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between pt-3 mt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+      <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button onClick={() => onChange(page - 1)} disabled={page <= 1}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronLeft size={14} />
+        </button>
+        <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{page} / {totalPages}</span>
+        <button onClick={() => onChange(page + 1)} disabled={page >= totalPages}
+          className="p-1.5 rounded-lg border disabled:opacity-40 hover:bg-bg-secondary transition-colors"
+          style={{ borderColor: 'var(--color-border)' }}>
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
 };
 
 // ── Outcome Notes Modal ──────────────────────────────────────────────────────
@@ -137,35 +166,38 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
   );
 };
 
-const CallbacksOverview = ({ user }) => {
-  const [callbacks,    setCallbacks]    = useState([]);
-  const [loading,      setLoading]      = useState(false);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [memberFilter, setMemberFilter] = useState('all');
-  const [updatingId,      setUpdatingId]      = useState(null);
+const CallbacksOverview = ({ user, agents = [] }) => {
+  const [callbacks,       setCallbacks]       = useState([]);
+  const [total,           setTotal]           = useState(0);
+  const [page,            setPage]            = useState(1);
+  const [loading,         setLoading]         = useState(false);
+  const [statusFilter,    setStatusFilter]    = useState('all');
+  const [memberFilter,    setMemberFilter]    = useState('');
   const [priorityFilter,  setPriorityFilter]  = useState('all');
-  const [outcomeModal,    setOutcomeModal]    = useState(null); // { id, status, customerName }
+  const [updatingId,      setUpdatingId]      = useState(null);
+  const [outcomeModal,    setOutcomeModal]    = useState(null);
 
-  const members = useCallback(() => {
-    const map = {};
-    callbacks.forEach(c => {
-      if (c.user_id && !map[c.user_id]) map[c.user_id] = c.user_name || 'Unknown';
-    });
-    return Object.entries(map).map(([id, name]) => ({ id, name }));
-  }, [callbacks]);
+  const cid = user?.company_id;
 
   const fetchCallbacks = useCallback(async () => {
-    if (!user?.company_id) return;
+    if (!cid) return;
     setLoading(true);
     try {
-      const params = { company_id: user.company_id };
-      if (statusFilter !== 'all') params.status = statusFilter;
+      const params = { company_id: cid, page, limit: PAGE_SIZE };
+      if (statusFilter   !== 'all') params.status   = statusFilter;
+      if (priorityFilter !== 'all') params.priority  = priorityFilter;
+      if (memberFilter)             params.user_id   = memberFilter;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
+      setTotal(res.data.total || 0);
     } catch {} finally { setLoading(false); }
-  }, [user?.company_id, statusFilter]);
+  }, [cid, statusFilter, priorityFilter, memberFilter, page]);
 
   useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
+
+  const handleStatusFilter   = (v) => { setStatusFilter(v);   setPage(1); };
+  const handlePriorityFilter = (v) => { setPriorityFilter(v); setPage(1); };
+  const handleMemberFilter   = (v) => { setMemberFilter(v);   setPage(1); };
 
   const handleStatusConfirm = async (status, notes) => {
     if (!outcomeModal) return;
@@ -183,11 +215,6 @@ const CallbacksOverview = ({ user }) => {
   const handleStatusClick = (id, status, customerName) => {
     setOutcomeModal({ id, status, customerName });
   };
-
-  const visible = callbacks.filter(c =>
-    (memberFilter   === 'all' || c.user_id  === memberFilter) &&
-    (priorityFilter === 'all' || c.priority === priorityFilter)
-  );
 
   const counts = {
     pending:   callbacks.filter(c => c.status === 'pending').length,
@@ -239,16 +266,17 @@ const CallbacksOverview = ({ user }) => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-3">
+        {/* Status tabs */}
         <div className="flex gap-1 p-1 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
-            { key: 'all',              label: 'All'             },
-            { key: 'pending',          label: 'Pending'         },
-            { key: 'completed',        label: 'Completed'       },
-            { key: 'no_answer',        label: 'No Answer'       },
-            { key: 'answering_machine',label: 'Ans. Machine'    },
+            { key: 'all',               label: 'All'          },
+            { key: 'pending',           label: 'Pending'      },
+            { key: 'completed',         label: 'Completed'    },
+            { key: 'no_answer',         label: 'No Answer'    },
+            { key: 'answering_machine', label: 'Ans. Machine' },
           ].map(f => (
-            <button key={f.key} onClick={() => setStatusFilter(f.key)}
+            <button key={f.key} onClick={() => handleStatusFilter(f.key)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
               style={{
                 backgroundColor: statusFilter === f.key ? 'var(--color-surface)' : 'transparent',
@@ -260,6 +288,7 @@ const CallbacksOverview = ({ user }) => {
           ))}
         </div>
 
+        {/* Priority tabs */}
         <div className="flex gap-1 p-1 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {[
@@ -268,7 +297,7 @@ const CallbacksOverview = ({ user }) => {
             { key: 'Medium', label: '🟡 Medium'     },
             { key: 'Low',    label: '🔵 Low'        },
           ].map(f => (
-            <button key={f.key} onClick={() => setPriorityFilter(f.key)}
+            <button key={f.key} onClick={() => handlePriorityFilter(f.key)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
               style={{
                 backgroundColor: priorityFilter === f.key ? 'var(--color-surface)' : 'transparent',
@@ -280,14 +309,17 @@ const CallbacksOverview = ({ user }) => {
           ))}
         </div>
 
-        {members().length > 0 && (
+        {/* Agent dropdown */}
+        {agents.length > 0 && (
           <div className="flex items-center gap-2">
             <Filter size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-            <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+            <select value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
-              <option value="all">All team members</option>
-              {members().map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+              <option value="">All team members</option>
+              {agents.map(a => (
+                <option key={a.user_id} value={a.user_id}>
+                  {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
+                </option>
               ))}
             </select>
           </div>
@@ -299,7 +331,7 @@ const CallbacksOverview = ({ user }) => {
         <div className="flex justify-center py-16">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
         </div>
-      ) : visible.length === 0 ? (
+      ) : callbacks.length === 0 ? (
         <div className="text-center py-16 rounded-2xl border border-dashed"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
           <Phone size={32} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -309,94 +341,98 @@ const CallbacksOverview = ({ user }) => {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visible.map(cb => {
-            const past = isPast(cb.callback_at) && cb.status === 'pending';
-            const soon = isDueSoon(cb.callback_at);
-            return (
-              <div key={cb.id}
-                className="rounded-xl border p-3 transition-all duration-150 hover:shadow-md"
-                style={{
-                  borderColor: past ? '#fca5a5' : soon ? '#fde68a' : 'var(--color-border)',
-                  backgroundColor: past ? '#fff5f5' : soon ? '#fffbeb' : 'var(--color-surface)',
-                }}>
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <p className="font-bold text-sm text-text">{cb.customer_name}</p>
-                      <StatusBadge status={cb.status} />
-                      <PriorityBadge priority={cb.priority} />
-                      {past && <span className="text-xs font-bold text-red-600">Overdue</span>}
-                      {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <div className="w-4 h-4 rounded-full flex items-center justify-center"
-                        style={{ background: 'var(--gradient-sidebar)' }}>
-                        <User size={9} className="text-white" />
+        <>
+          <div className="space-y-2">
+            {callbacks.map(cb => {
+              const past = isPast(cb.callback_at) && cb.status === 'pending';
+              const soon = isDueSoon(cb.callback_at);
+              return (
+                <div key={cb.id}
+                  className="rounded-xl border p-3 transition-all duration-150 hover:shadow-md"
+                  style={{
+                    borderColor: past ? '#fca5a5' : soon ? '#fde68a' : 'var(--color-border)',
+                    backgroundColor: past ? '#fff5f5' : soon ? '#fffbeb' : 'var(--color-surface)',
+                  }}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <p className="font-bold text-sm text-text">{cb.customer_name}</p>
+                        <StatusBadge status={cb.status} />
+                        <PriorityBadge priority={cb.priority} />
+                        {past && <span className="text-xs font-bold text-red-600">Overdue</span>}
+                        {soon && !past && <span className="text-xs font-bold" style={{ color: '#b45309' }}>Due soon</span>}
                       </div>
-                      <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
-                        {cb.user_name || 'Unknown'}
-                      </span>
+
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <div className="w-4 h-4 rounded-full flex items-center justify-center"
+                          style={{ background: 'var(--gradient-sidebar)' }}>
+                          <User size={9} className="text-white" />
+                        </div>
+                        <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                          {cb.user_name || 'Unknown'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-x-3 text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
+                        {cb.customer_email && <span>✉ {cb.customer_email}</span>}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs font-medium"
+                        style={{ color: past ? '#dc2626' : soon ? '#b45309' : 'var(--color-text-tertiary)' }}>
+                        <Calendar size={11} />
+                        <span>Call scheduled: <strong>{fmt(cb.callback_at)}</strong></span>
+                      </div>
+
+                      {cb.notes && (
+                        <p className="text-xs italic mt-1 px-2 py-1 rounded-lg"
+                          style={{
+                            backgroundColor: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-secondary)',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}>
+                          {cb.notes}
+                        </p>
+                      )}
                     </div>
 
-                    <div className="flex flex-wrap gap-x-3 text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
-                      {cb.customer_email && <span>✉ {cb.customer_email}</span>}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-medium"
-                      style={{ color: past ? '#dc2626' : soon ? '#b45309' : 'var(--color-text-tertiary)' }}>
-                      <Calendar size={11} />
-                      <span>Call scheduled: <strong>{fmt(cb.callback_at)}</strong></span>
-                    </div>
-
-                    {cb.notes && (
-                      <p className="text-xs italic mt-1 px-2 py-1 rounded-lg"
-                        style={{
-                          backgroundColor: 'var(--color-bg-secondary)',
-                          color: 'var(--color-text-secondary)',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                        }}>
-                        {cb.notes}
-                      </p>
+                    {/* Manager status actions */}
+                    {cb.status === 'pending' && (
+                      <div className="flex flex-col gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => handleStatusClick(cb.id, 'completed', cb.customer_name)}
+                          disabled={updatingId === cb.id}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                          style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                          <CheckCircle size={12} /> Mark Done
+                        </button>
+                        <button
+                          onClick={() => handleStatusClick(cb.id, 'no_answer', cb.customer_name)}
+                          disabled={updatingId === cb.id}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                          style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
+                          <PhoneOff size={12} /> No Answer
+                        </button>
+                        <button
+                          onClick={() => handleStatusClick(cb.id, 'answering_machine', cb.customer_name)}
+                          disabled={updatingId === cb.id}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                          style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+                          <Voicemail size={12} /> Ans. Machine
+                        </button>
+                      </div>
                     )}
                   </div>
-
-                  {/* Manager status actions */}
-                  {cb.status === 'pending' && (
-                    <div className="flex flex-col gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={() => handleStatusClick(cb.id, 'completed', cb.customer_name)}
-                        disabled={updatingId === cb.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                        style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
-                        <CheckCircle size={12} /> Mark Done
-                      </button>
-                      <button
-                        onClick={() => handleStatusClick(cb.id, 'no_answer', cb.customer_name)}
-                        disabled={updatingId === cb.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                        style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
-                        <PhoneOff size={12} /> No Answer
-                      </button>
-                      <button
-                        onClick={() => handleStatusClick(cb.id, 'answering_machine', cb.customer_name)}
-                        disabled={updatingId === cb.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                        style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
-                        <Voicemail size={12} /> Ans. Machine
-                      </button>
-                    </div>
-                  )}
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+
+          <Pagination page={page} total={total} pageSize={PAGE_SIZE} onChange={setPage} />
+        </>
       )}
 
       {outcomeModal && (

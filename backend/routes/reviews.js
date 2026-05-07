@@ -151,7 +151,7 @@ router.post('/transfer/:id/dispo',
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
   const userRole  = req.user.role;
-  const { company_id, rating, page = 1, limit = 50, date_from, date_to } = req.query;
+  const { company_id, rating, page = 1, limit = 50, date_from, date_to, closer_id } = req.query;
 
   const scopeAll = ['compliance_manager', 'superadmin'].includes(userRole);
 
@@ -174,6 +174,7 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   if (rating)    query = query.eq('rating', rating);
+  if (closer_id) query = query.eq('closer_id', closer_id);
   if (date_from) query = query.gte('created_at', date_from);
   if (date_to)   query = query.lte('created_at', date_to + 'T23:59:59Z');
 
@@ -211,7 +212,7 @@ router.get('/', asyncHandler(async (req, res) => {
 // ============================================================================
 router.get('/dispositions', asyncHandler(async (req, res) => {
   const userRole  = req.user.role;
-  const { company_id, disposition, page = 1, limit = 50 } = req.query;
+  const { company_id, disposition, page = 1, limit = 50, closer_id } = req.query;
 
   const scopeAll = ['compliance_manager', 'superadmin'].includes(userRole);
 
@@ -231,6 +232,7 @@ router.get('/dispositions', asyncHandler(async (req, res) => {
   }
 
   if (disposition) query = query.eq('disposition', disposition);
+  if (closer_id)   query = query.eq('closer_id', closer_id);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

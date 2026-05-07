@@ -118,10 +118,11 @@ const ManagerShell = () => {
   // ── Pagination ────────────────────────────────────────────────────────────
   const [xferPage, setXferPage]           = useState(1);
   const [salesPage, setSalesPage]         = useState(1);
-  const [activityPage, setActivityPage]   = useState(1);
-  const [activityLogs, setActivityLogs]   = useState([]);
-  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityPage,    setActivityPage]    = useState(1);
+  const [activityLogs,    setActivityLogs]    = useState([]);
+  const [activityTotal,   setActivityTotal]   = useState(0);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [activityAgent,   setActivityAgent]   = useState('');
 
   // ── Tab-specific server-side state ────────────────────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
@@ -204,19 +205,19 @@ const ManagerShell = () => {
     setActivityPage(1);
   };
 
-  const fetchActivityLogs = useCallback(async (page = 1) => {
+  const fetchActivityLogs = useCallback(async () => {
     if (!companyId) return;
     setActivityLoading(true);
     try {
-      const res = await client.get('activity-logs', {
-        params: { company_id: companyId, page, limit: PAGE_SIZE, date_from, date_to },
-      });
+      const params = { company_id: companyId, page: activityPage, limit: PAGE_SIZE, date_from, date_to };
+      if (activityAgent) params.user_id = activityAgent;
+      const res = await client.get('activity-logs', { params });
       setActivityLogs(res.data.logs || []);
       setActivityTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally {
       setActivityLoading(false);
     }
-  }, [companyId, date_from, date_to]);
+  }, [companyId, activityPage, activityAgent, date_from, date_to]);
 
   const fetchXferTab = useCallback(async () => {
     if (!companyId) return;
@@ -285,7 +286,7 @@ const ManagerShell = () => {
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { fetchSales({ date_from, date_to }); },     [fetchSales, date_from, date_to]);
-  useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(activityPage); }, [activeTab, fetchActivityLogs, activityPage]);
+  useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(); }, [activeTab, fetchActivityLogs]);
   useEffect(() => { if (activeTab === 'transfers')  fetchXferTab();  }, [activeTab, fetchXferTab]);
   useEffect(() => { if (activeTab === 'team_sales') fetchSalesTab(); }, [activeTab, fetchSalesTab]);
   useEffect(() => {
@@ -735,7 +736,22 @@ const ManagerShell = () => {
         {/* ── ACTIVITY LOG TAB ── */}
         {activeTab === 'activity_log' && (
           <Card className="p-6">
-            <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h3 className="text-xl font-bold text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
+              {companyAgents.length > 0 && (
+                <select
+                  value={activityAgent}
+                  onChange={e => { setActivityAgent(e.target.value); setActivityPage(1); }}
+                  className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
+                  <option value="">All agents</option>
+                  {companyAgents.map(a => (
+                    <option key={a.user_id} value={a.user_id}>
+                      {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
             {activityLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
             ) : activityLogs.length === 0 ? (
@@ -781,7 +797,7 @@ const ManagerShell = () => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
-        {activeTab === 'callbacks' && <CallbacksOverview user={user} companyId={companyId} />}
+        {activeTab === 'callbacks' && <CallbacksOverview user={user} agents={companyAgents} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
             {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
@@ -791,7 +807,7 @@ const ManagerShell = () => {
         {activeTab === 'search'    && <SaleSearch />}
         {activeTab === 'team'      && <TeamManagementPanel companyId={companyId} />}
         {activeTab === 'roles'     && <RoleManagementPanel companyId={companyId} />}
-        {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} />}
+        {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} agents={companyAgents} />}
         {activeTab === 'reports'   && <ReportsPanel companyId={companyId} />}
         {activeTab === 'forms'     && (
           <div className="animate-fade-in">

@@ -16,8 +16,8 @@ const ReportsPanel = ({ companyId }) => {
     setLoading(true);
     try {
       const [tRes, sRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 200, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 200, date_from, date_to } }),
+        client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
       ]);
 
       const allT = tRes.data.transfers || [];
