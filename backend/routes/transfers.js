@@ -128,7 +128,7 @@ router.get('/', asyncHandler(async (req, res) => {
         .select('id, transfer_id, status, compliance_note, reference_no, closer_id, created_at, closer_disposition')
         .in('transfer_id', transferIds),
       supabaseAdmin.from('disposition_actions')
-        .select('transfer_id, disposition_name, color, note, created_at')
+        .select('transfer_id, disposition_name, color, note, created_at, user_id')
         .in('transfer_id', transferIds)
         .order('created_at', { ascending: false }),
     ]);
@@ -136,6 +136,18 @@ router.get('/', asyncHandler(async (req, res) => {
     (dispoRes.data || []).forEach(d => {
       if (!latestDispoMap[d.transfer_id]) latestDispoMap[d.transfer_id] = d;
     });
+
+    // Resolve setter names for dispositions
+    const dispoSetterIds = [...new Set(Object.values(latestDispoMap).map(d => d.user_id).filter(Boolean))];
+    if (dispoSetterIds.length > 0) {
+      const { data: setterProfiles } = await supabaseAdmin
+        .from('user_profiles').select('user_id, first_name, last_name').in('user_id', dispoSetterIds);
+      const setterMap = Object.fromEntries((setterProfiles || []).map(p => [p.user_id, p]));
+      Object.values(latestDispoMap).forEach(d => {
+        const p = setterMap[d.user_id];
+        d.setter_name = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || null : null;
+      });
+    }
   }
 
   const transfers = (data || []).map(t => {
@@ -325,7 +337,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
         .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at, closer_disposition')
         .in('transfer_id', tIds),
       supabaseAdmin.from('disposition_actions')
-        .select('transfer_id, disposition_name, color, note, created_at')
+        .select('transfer_id, disposition_name, color, note, created_at, user_id')
         .in('transfer_id', tIds)
         .order('created_at', { ascending: false }),
     ]);
@@ -334,16 +346,22 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       if (!latestDispoMapPhone[d.transfer_id]) latestDispoMapPhone[d.transfer_id] = d;
     });
 
-    // Enrich sales with closer names
+    // Resolve setter names for dispositions + closer names for sales in one batch
     const linkedSales = salesRes.data || [];
     const saleCloserIds = [...new Set(linkedSales.map(s => s.closer_id).filter(Boolean))];
-    if (saleCloserIds.length > 0) {
-      const { data: saleCloserProfiles } = await supabaseAdmin
-        .from('user_profiles').select('user_id, first_name, last_name').in('user_id', saleCloserIds);
-      const saleCloserMap = Object.fromEntries((saleCloserProfiles || []).map(p => [p.user_id, p]));
+    const dispoSetterIds = [...new Set(Object.values(latestDispoMapPhone).map(d => d.user_id).filter(Boolean))];
+    const allNameIds = [...new Set([...saleCloserIds, ...dispoSetterIds])];
+    if (allNameIds.length > 0) {
+      const { data: nameProfiles } = await supabaseAdmin
+        .from('user_profiles').select('user_id, first_name, last_name').in('user_id', allNameIds);
+      const nameMap = Object.fromEntries((nameProfiles || []).map(p => [p.user_id, p]));
       Object.values(saleByTransferId).forEach(s => {
-        const cp = saleCloserMap[s.closer_id];
+        const cp = nameMap[s.closer_id];
         s.closer_name = cp ? `${cp.first_name || ''} ${cp.last_name || ''}`.trim() || null : null;
+      });
+      Object.values(latestDispoMapPhone).forEach(d => {
+        const p = nameMap[d.user_id];
+        d.setter_name = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || null : null;
       });
     }
   }

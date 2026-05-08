@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
 
@@ -58,11 +58,13 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
   const existingDispoName = latestDispo?.disposition_name || saleDispoName || null;
 
   // Disposition dropdown state
-  const [dropOpen,      setDropOpen]      = useState(false);
-  const [selectedDispo, setSelectedDispo] = useState(null); // config requiring note
-  const [noteText,      setNoteText]      = useState('');
-  const [submitting,    setSubmitting]    = useState(false);
-  const [submitResult,  setSubmitResult]  = useState(null); // { ok, label, color } | null
+  const [dropOpen,        setDropOpen]        = useState(false);
+  const [selectedDispo,   setSelectedDispo]   = useState(null); // config requiring note
+  const [showCallback,    setShowCallback]    = useState(false); // callback scheduling panel
+  const [callbackAt,      setCallbackAt]      = useState('');
+  const [noteText,        setNoteText]        = useState('');
+  const [submitting,      setSubmitting]      = useState(false);
+  const [submitResult,    setSubmitResult]    = useState(null); // { ok, label, color } | null
   const dropRef = useRef(null);
 
   // Close dropdown on outside click
@@ -106,6 +108,108 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
     }
   };
 
+  const submitCallback = async () => {
+    if (!callbackAt) return;
+    setSubmitting(true);
+    try {
+      await client.post('disposition-configs/submit-callback', {
+        transfer_id: transfer.id,
+        callback_at: new Date(callbackAt).toISOString(),
+        note: noteText.trim() || undefined,
+      });
+      setSubmitResult({ ok: true, label: 'Callback scheduled', color: '#3b82f6' });
+      setDropOpen(false);
+      setShowCallback(false);
+      setCallbackAt('');
+      setNoteText('');
+      setTimeout(() => setSubmitResult(null), 4000);
+    } catch (err) {
+      setSubmitResult({ ok: false, label: err.response?.data?.error || 'Failed', color: '#dc2626' });
+      setTimeout(() => setSubmitResult(null), 4000);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openDrop = () => { setDropOpen(v => !v); setSelectedDispo(null); setShowCallback(false); setNoteText(''); setCallbackAt(''); };
+
+  const dropdownPanel = dropOpen ? (
+    <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-48"
+      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', top: '100%' }}>
+      <div className="px-3 py-2 flex items-center gap-1.5"
+        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+        <MessageSquare size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>Log Outcome</span>
+      </div>
+
+      {selectedDispo ? (
+        <div className="p-3 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedDispo.color }} />
+            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{selectedDispo.name}</span>
+          </div>
+          <textarea autoFocus value={noteText} onChange={e => setNoteText(e.target.value)}
+            placeholder="Note is required…" rows={2} className="input text-xs w-full resize-none" style={{ fontSize: '11px' }} />
+          <div className="flex gap-1.5">
+            <button onClick={() => setSelectedDispo(null)}
+              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Back</button>
+            <button onClick={() => submitDispo(selectedDispo, noteText)} disabled={submitting || !noteText.trim()}
+              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
+              style={{ background: 'var(--gradient-sidebar)' }}>{submitting ? '…' : 'Submit'}</button>
+          </div>
+        </div>
+      ) : showCallback ? (
+        <div className="p-3 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <CalendarPlus size={13} style={{ color: '#3b82f6', flexShrink: 0 }} />
+            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Schedule Callback</span>
+          </div>
+          <input
+            type="datetime-local"
+            value={callbackAt}
+            onChange={e => setCallbackAt(e.target.value)}
+            className="input text-xs w-full"
+            style={{ fontSize: '11px' }}
+            autoFocus
+          />
+          <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
+            placeholder="Note (optional)…" rows={2} className="input text-xs w-full resize-none" style={{ fontSize: '11px' }} />
+          <div className="flex gap-1.5">
+            <button onClick={() => setShowCallback(false)}
+              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Back</button>
+            <button onClick={submitCallback} disabled={submitting || !callbackAt}
+              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg,#3b82f6,#2563eb)' }}>{submitting ? '…' : 'Schedule'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="py-1">
+          {dispositionConfigs.map(cfg => (
+            <button key={cfg.id} onClick={() => handleDispoClick(cfg)} disabled={submitting}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
+              style={{ color: 'var(--color-text)' }}>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
+              <span className="flex-1">{cfg.name}</span>
+              {cfg.requires_note && <MessageSquare size={9} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />}
+            </button>
+          ))}
+          <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 4, paddingTop: 4 }}>
+            <button
+              onClick={() => { setShowCallback(true); setCallbackAt(''); setNoteText(''); }}
+              disabled={submitting}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
+              style={{ color: '#3b82f6' }}>
+              <CalendarPlus size={11} style={{ flexShrink: 0 }} />
+              <span className="flex-1">Schedule Callback</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const resolveSale = () => {
     const resolvedName  = customerName !== 'Unknown' ? customerName
       : (fd.customer_name || fd.Name || fd.name || fd.FullName || fd.fullname
@@ -134,9 +238,11 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
             {hasSale && <SaleStatusBadge status={saleStatus} />}
             {latestDispo && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
-                style={{ backgroundColor: (latestDispo.color || '#6b7280') + '22', color: latestDispo.color || '#6b7280', border: `1px solid ${latestDispo.color || '#6b7280'}44` }}>
+                style={{ backgroundColor: (latestDispo.color || '#6b7280') + '22', color: latestDispo.color || '#6b7280', border: `1px solid ${latestDispo.color || '#6b7280'}44` }}
+                title={latestDispo.setter_name ? `Set by ${latestDispo.setter_name}` : undefined}>
                 <MessageSquare size={9} />
                 {latestDispo.disposition_name}
+                {latestDispo.setter_name && <span style={{ opacity: 0.7 }}>· {latestDispo.setter_name}</span>}
               </span>
             )}
             {!latestDispo && saleDispoName && (
@@ -216,59 +322,15 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
                 <DollarSign size={11} /> Already Sold
               </span>
               {/* Disposition dropdown still accessible after sale */}
-              {dispositionConfigs.length > 0 && (
-                <div className="relative" ref={dropRef}>
-                  <button
-                    onClick={() => { setDropOpen(v => !v); setSelectedDispo(null); setNoteText(''); }}
-                    className="flex items-center py-1.5 px-1.5 rounded-lg font-semibold text-xs hover:scale-[1.03] transition-all"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
-                    title="Log call outcome"
-                  >
-                    <ChevronDown size={12} />
-                  </button>
-                  {dropOpen && (
-                    <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-44"
-                      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', top: '100%' }}>
-                      <div className="px-3 py-2 flex items-center gap-1.5"
-                        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <MessageSquare size={11} style={{ color: 'var(--color-text-tertiary)' }} />
-                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>Log Outcome</span>
-                      </div>
-                      {selectedDispo ? (
-                        <div className="p-3 space-y-2">
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedDispo.color }} />
-                            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{selectedDispo.name}</span>
-                          </div>
-                          <textarea autoFocus value={noteText} onChange={e => setNoteText(e.target.value)}
-                            placeholder="Note is required…" rows={2} className="input text-xs w-full resize-none" style={{ fontSize: '11px' }} />
-                          <div className="flex gap-1.5">
-                            <button onClick={() => setSelectedDispo(null)}
-                              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
-                              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Back</button>
-                            <button onClick={() => submitDispo(selectedDispo, noteText)}
-                              disabled={submitting || !noteText.trim()}
-                              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
-                              style={{ background: 'var(--gradient-sidebar)' }}>{submitting ? '…' : 'Submit'}</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="py-1">
-                          {dispositionConfigs.map(cfg => (
-                            <button key={cfg.id} onClick={() => handleDispoClick(cfg)} disabled={submitting}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
-                              style={{ color: 'var(--color-text)' }}>
-                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
-                              <span className="flex-1">{cfg.name}</span>
-                              {cfg.requires_note && <MessageSquare size={9} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="relative" ref={dropRef}>
+                <button onClick={openDrop}
+                  className="flex items-center py-1.5 px-1.5 rounded-lg font-semibold text-xs hover:scale-[1.03] transition-all"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+                  title="Log call outcome">
+                  <ChevronDown size={12} />
+                </button>
+                {dropdownPanel}
+              </div>
             </>
           ) : (
             <>
@@ -282,85 +344,15 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
               </button>
 
               {/* Disposition dropdown trigger */}
-              {dispositionConfigs.length > 0 && (
-                <div className="relative" ref={dropRef}>
-                  <button
-                    onClick={() => { setDropOpen(v => !v); setSelectedDispo(null); setNoteText(''); }}
-                    className="flex items-center py-1.5 px-1.5 rounded-r-lg font-semibold text-xs text-white hover:scale-[1.03] transition-all"
-                    style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
-                    title="Log call outcome"
-                  >
-                    <ChevronDown size={12} />
-                  </button>
-
-                  {dropOpen && (
-                    <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-44"
-                      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', top: '100%' }}>
-
-                      {/* Header */}
-                      <div className="px-3 py-2 flex items-center gap-1.5"
-                        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <MessageSquare size={11} style={{ color: 'var(--color-text-tertiary)' }} />
-                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                          Log Outcome
-                        </span>
-                      </div>
-
-                      {/* Note input (shown when a config requires_note is selected) */}
-                      {selectedDispo ? (
-                        <div className="p-3 space-y-2">
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedDispo.color }} />
-                            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{selectedDispo.name}</span>
-                          </div>
-                          <textarea
-                            autoFocus
-                            value={noteText}
-                            onChange={e => setNoteText(e.target.value)}
-                            placeholder="Note is required…"
-                            rows={2}
-                            className="input text-xs w-full resize-none"
-                            style={{ fontSize: '11px' }}
-                          />
-                          <div className="flex gap-1.5">
-                            <button
-                              onClick={() => setSelectedDispo(null)}
-                              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
-                              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                              Back
-                            </button>
-                            <button
-                              onClick={() => submitDispo(selectedDispo, noteText)}
-                              disabled={submitting || !noteText.trim()}
-                              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
-                              style={{ background: 'var(--gradient-sidebar)' }}>
-                              {submitting ? '…' : 'Submit'}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        /* Disposition list */
-                        <div className="py-1">
-                          {dispositionConfigs.map(cfg => (
-                            <button
-                              key={cfg.id}
-                              onClick={() => handleDispoClick(cfg)}
-                              disabled={submitting}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
-                              style={{ color: 'var(--color-text)' }}>
-                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
-                              <span className="flex-1">{cfg.name}</span>
-                              {cfg.requires_note && (
-                                <MessageSquare size={9} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="relative" ref={dropRef}>
+                <button onClick={openDrop}
+                  className="flex items-center py-1.5 px-1.5 rounded-r-lg font-semibold text-xs text-white hover:scale-[1.03] transition-all"
+                  style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+                  title="Log call outcome">
+                  <ChevronDown size={12} />
+                </button>
+                {dropdownPanel}
+              </div>
             </>
           )}
         </div>

@@ -838,11 +838,18 @@ const StaffShell = () => {
                               const name  = d?.disposition_name || t.sale_closer_disposition;
                               const color = d?.color || '#6b7280';
                               return (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
-                                  style={{ backgroundColor: color + '22', color, border: `1px solid ${color}44` }}>
-                                  <MessageSquare size={9} />
-                                  {name}
-                                </span>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                                    style={{ backgroundColor: color + '22', color, border: `1px solid ${color}44` }}>
+                                    <MessageSquare size={9} />
+                                    {name}
+                                  </span>
+                                  {d?.setter_name && (
+                                    <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                                      by {d.setter_name}
+                                    </span>
+                                  )}
+                                </div>
                               );
                             })()}
                           </div>

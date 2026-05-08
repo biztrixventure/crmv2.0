@@ -184,4 +184,61 @@ router.post('/submit', async (req, res) => {
   }
 });
 
+// POST /api/disposition-configs/submit-callback
+// Closer: schedule a callback for a transfer. Logs a "Callback Scheduled" disposition action
+// AND creates a callback record so it appears in the closer's callbacks section.
+router.post('/submit-callback', async (req, res) => {
+  const userId    = req.user.id;
+  const companyId = req.user.company_id;
+  try {
+    const { transfer_id, callback_at, note } = req.body;
+    if (!transfer_id)  return res.status(400).json({ error: 'transfer_id required' });
+    if (!callback_at)  return res.status(400).json({ error: 'callback_at required' });
+
+    const { data: transfer, error: tfErr } = await supabaseAdmin
+      .from('transfers')
+      .select('id, company_id, created_by, form_data, assigned_closer_id')
+      .eq('id', transfer_id)
+      .single();
+    if (tfErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
+
+    const fd           = transfer.form_data || {};
+    const customerName = fd.customer_name
+      || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : null)
+      || 'Unknown';
+    const customerPhone = fd.customer_phone || fd.Phone || null;
+
+    const [{ data: action, error: actErr }, { data: callback, error: cbErr }] = await Promise.all([
+      supabaseAdmin.from('disposition_actions').insert({
+        transfer_id,
+        company_id:       companyId,
+        user_id:          userId,
+        disposition_name: 'Callback Scheduled',
+        color:            '#3b82f6',
+        note:             note?.trim() || null,
+      }).select().single(),
+      supabaseAdmin.from('callbacks').insert({
+        user_id:        userId,
+        company_id:     companyId,
+        customer_name:  customerName,
+        customer_phone: customerPhone,
+        notes:          note?.trim() || null,
+        callback_at,
+        priority:       'Medium',
+        status:         'pending',
+        source:         'transfer',
+        source_id:      transfer_id,
+        notified:       false,
+      }).select().single(),
+    ]);
+
+    if (actErr) throw actErr;
+    if (cbErr)  throw cbErr;
+
+    res.status(201).json({ action, callback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
