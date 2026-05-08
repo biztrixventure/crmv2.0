@@ -212,17 +212,27 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const cbIds       = callbacks.map(c => c.id);
   const transferIds = sales.filter(s => s.transfer_id).map(s => s.transfer_id);
 
-  const [linkedTransfersRes, auditRes] = await Promise.all([
+  // All transfer IDs (from both direct transfer matches and sales' linked transfers)
+  const allTransferIds = [...new Set([
+    ...transfers.map(t => t.id),
+    ...transferIds,
+  ])];
+
+  const [linkedTransfersRes, auditRes, dispositionRes] = await Promise.all([
     transferIds.length > 0
       ? supabaseAdmin.from('transfers').select('id, company_id, created_by').in('id', transferIds)
       : { data: [] },
     cbIds.length > 0
       ? supabaseAdmin.from('callback_audit_log').select('*').in('callback_id', cbIds).order('created_at', { ascending: true })
       : { data: [] },
+    allTransferIds.length > 0
+      ? supabaseAdmin.from('disposition_actions').select('*').in('transfer_id', allTransferIds).order('created_at', { ascending: true })
+      : { data: [] },
   ]);
 
-  const linkedTransfers = linkedTransfersRes.data || [];
-  const auditData       = auditRes.data || [];
+  const linkedTransfers   = linkedTransfersRes.data || [];
+  const auditData         = auditRes.data || [];
+  const dispositionData   = dispositionRes.data || [];
 
   // Process linked transfers
   linkedTransfers.forEach(t => {
@@ -234,6 +244,12 @@ router.get('/profile', asyncHandler(async (req, res) => {
 
   // Collect audit log actor IDs so their names resolve in the timeline
   auditData.forEach(l => { if (l.actor_id) userIds.add(l.actor_id); });
+
+  // Collect disposition action actor IDs
+  dispositionData.forEach(d => {
+    if (d.user_id)    userIds.add(d.user_id);
+    if (d.company_id) coIds.add(d.company_id);
+  });
 
   // ── Step 3: Fetch user roles, profiles, companies ─────────────────────────
   const rolesData = userIds.size > 0
@@ -457,6 +473,25 @@ router.get('/profile', asyncHandler(async (req, res) => {
     });
   });
 
+  // 5. Disposition actions (call outcomes logged by closers in phone search)
+  dispositionData.forEach(d => {
+    const agentCo = compOf(d.company_id);
+    timeline.push({
+      id:          `dispo_${d.id}`,
+      type:        'disposition',
+      action:      'disposition',
+      label:       `Call outcome: ${d.disposition_name}`,
+      detail:      d.note ? `Note: "${d.note}"` : '',
+      actor:       nameOf(d.user_id),
+      actor_role:  'Closer',
+      company:     agentCo,
+      occurred_at: d.created_at,
+      entity_id:   d.transfer_id,
+      color:       d.color || '#6b7280',
+      disposition_name: d.disposition_name,
+    });
+  });
+
   timeline.sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at));
 
   // ─── Build graph (OSINT-style relationship graph) ─────────────────────────
@@ -625,7 +660,7 @@ router.get('/profile', asyncHandler(async (req, res) => {
 
   res.json({
     phone, email, name,
-    transfers, sales, callbacks,
+    transfers, sales, callbacks, dispositions: dispositionData,
     profiles, companies,
     timeline,
     graph:    { nodes, edges },

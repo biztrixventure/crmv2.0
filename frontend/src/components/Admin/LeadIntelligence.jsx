@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Phone, Mail, Building2, X, Clock, CheckCircle,
   AlertTriangle, Info, Activity, FileText, Calendar, User,
-  ChevronRight, ArrowRight,
+  ChevronRight, ArrowRight, MessageSquare,
 } from 'lucide-react';
 import client from '../../api/client';
 import LeadGraph from './LeadGraph';
@@ -67,8 +67,9 @@ const EV = {
   scheduled:    { color: '#0891b2', bg: '#cffafe', Icon: Calendar      },
   status_change:{ color: '#7c3aed', bg: '#ede9fe', Icon: Activity      },
   rescheduled:  { color: '#d97706', bg: '#fef3c7', Icon: Clock         },
+  disposition:  { color: '#6b7280', bg: '#f3f4f6', Icon: MessageSquare },
 };
-const TYPE_COLOR  = { transfer: '#2563eb', sale: '#16a34a', callback: '#d97706' };
+const TYPE_COLOR  = { transfer: '#2563eb', sale: '#16a34a', callback: '#d97706', disposition: '#6b7280' };
 const ROLE_CONFIG = {
   Fronter:    { bg: '#dbeafe', color: '#1d4ed8' },
   Closer:     { bg: '#dcfce7', color: '#15803d' },
@@ -363,16 +364,21 @@ const ProfileDrawer = ({ group, onClose }) => {
                       style={{ backgroundColor: 'var(--color-border)' }} />
                     <div className="space-y-3 pl-10">
                       {profile.timeline.map((item) => {
-                        const cfg  = EV[item.action] || EV.updated;
+                        const isDispo = item.type === 'disposition';
+                        const dispoColor = item.color || '#6b7280';
+                        const cfg  = isDispo
+                          ? { color: dispoColor, bg: dispoColor + '18', Icon: MessageSquare }
+                          : (EV[item.action] || EV.updated);
                         const { Icon } = cfg;
-                        const tc      = TYPE_COLOR[item.type] || '#6b7280';
+                        const tc      = isDispo ? dispoColor : (TYPE_COLOR[item.type] || '#6b7280');
                         const roleCfg = ROLE_CONFIG[item.actor_role] || ROLE_CONFIG.Agent;
-                        // Highlight compliance events
                         const isCompliance = item.actor_role === 'Compliance';
-                        const borderStyle  = isCompliance
-                          ? '1px solid #fca5a5'
-                          : '1px solid var(--color-border)';
-                        const bgStyle = isCompliance ? '#fff5f5' : 'var(--color-bg-secondary)';
+                        const borderStyle  = isDispo
+                          ? `1px solid ${dispoColor}30`
+                          : isCompliance ? '1px solid #fca5a5' : '1px solid var(--color-border)';
+                        const bgStyle = isDispo
+                          ? dispoColor + '08'
+                          : isCompliance ? '#fff5f5' : 'var(--color-bg-secondary)';
                         return (
                           <div key={item.id} className="relative">
                             {/* Dot */}
@@ -445,12 +451,13 @@ const ProfileDrawer = ({ group, onClose }) => {
               {/* ── RECORDS ────────────────────────────────────────────────── */}
               {tab === 'records' && (
                 <div>
-                  <div className="flex gap-1 p-1 mb-3 rounded-xl"
+                  <div className="flex gap-1 p-1 mb-3 rounded-xl flex-wrap"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                     {[
-                      { id: 'transfers', label: `Transfers (${profile.transfers.length})` },
-                      { id: 'sales',     label: `Sales (${profile.sales.length})`         },
-                      { id: 'callbacks', label: `Callbacks (${profile.callbacks.length})` },
+                      { id: 'transfers',   label: `Transfers (${profile.transfers.length})`           },
+                      { id: 'sales',       label: `Sales (${profile.sales.length})`                   },
+                      { id: 'callbacks',   label: `Callbacks (${profile.callbacks.length})`           },
+                      { id: 'dispositions',label: `Outcomes (${(profile.dispositions || []).length})` },
                     ].map(t => (
                       <button key={t.id} onClick={() => setRecTab(t.id)}
                         className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all"
@@ -646,6 +653,46 @@ const ProfileDrawer = ({ group, onClose }) => {
                               )}
                               {c.notes && (
                                 <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>"{c.notes}"</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* Dispositions list */}
+                  {recTab === 'dispositions' && (
+                    <div className="space-y-3">
+                      {(profile.dispositions || []).length === 0 ? (
+                        <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No call outcomes logged.</p>
+                      ) : (profile.dispositions || []).map(d => {
+                        const agent   = profile.profiles?.[d.user_id];
+                        const company = profile.companies?.[d.company_id];
+                        const agentName = agent?.name || (d.user_id ? 'Unknown Agent' : '—');
+                        const coName    = company?.name || company?.slug || (d.company_id ? 'Unknown Company' : '—');
+                        const color = d.color || '#6b7280';
+                        return (
+                          <div key={d.id} className="rounded-xl overflow-hidden"
+                            style={{ border: `1px solid ${color}30` }}>
+                            <div className="flex items-center justify-between gap-2 px-3 py-2"
+                              style={{ backgroundColor: color + '15', borderBottom: `1px solid ${color}25` }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                                <span className="font-bold text-sm" style={{ color }}>{d.disposition_name}</span>
+                                <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <Building2 size={10} />{coName}
+                                </span>
+                              </div>
+                              <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
+                                {fmtDate(d.created_at)}
+                              </span>
+                            </div>
+                            <div className="px-3 py-2.5 space-y-1" style={{ backgroundColor: 'var(--color-surface)' }}>
+                              <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                <User size={10} />{agentName}
+                              </span>
+                              {d.note && (
+                                <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>"{d.note}"</p>
                               )}
                             </div>
                           </div>

@@ -15,8 +15,9 @@ import {
   Settings, CheckSquare,
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
   X, Zap, Users, UserX, Tag, Briefcase, Link2,
-  ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight,
+  ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight, MessageSquare,
 } from 'lucide-react';
+import DispositionManager from './DispositionManager';
 import client from '../../../api/client';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
 
@@ -89,9 +90,10 @@ const FB_SIDEBAR = [
   {
     section: 'SALE CONFIG',
     items: [
-      { id: 'clients', label: 'Clients',           icon: Tag         },
-      { id: 'plans',   label: 'Plans',             icon: ListChecks  },
-      { id: 'mapping', label: 'Client → Plans',    icon: ArrowRight  },
+      { id: 'clients',      label: 'Clients',           icon: Tag            },
+      { id: 'plans',        label: 'Plans',             icon: ListChecks     },
+      { id: 'mapping',      label: 'Client → Plans',    icon: ArrowRight     },
+      { id: 'dispositions', label: 'Dispositions',      icon: MessageSquare  },
     ],
   },
 ];
@@ -1263,6 +1265,7 @@ const FormBuilder = () => {
               configLoading={configLoading}
             />
           )}
+          {activeSection === 'dispositions' && <DispositionManager />}
         </div>
       </div>
     </div>

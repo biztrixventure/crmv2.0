@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
 
@@ -34,7 +34,8 @@ const SaleStatusBadge = ({ status }) => {
   );
 };
 
-const TransferCard = ({ transfer, onCreateSale }) => {
+// ── TransferCard ──────────────────────────────────────────────────────────────
+const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, dispositionConfigs }) => {
   const fd           = transfer.form_data || {};
   const customerName = fd.customer_name
     || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : null)
@@ -46,29 +47,74 @@ const TransferCard = ({ transfer, onCreateSale }) => {
     .filter(([k, v]) => v && !skipKeys.has(k))
     .slice(0, 4);
 
-  const hasSale = transfer.has_sale;
-  const saleStatus = transfer.sale_status;
-  const isFinalised = hasSale && ['closed_won', 'sold', 'closed_lost', 'cancelled'].includes(saleStatus);
-  const needsRevision = hasSale && saleStatus === 'needs_revision';
+  const hasSale      = transfer.has_sale;
+  const saleStatus   = transfer.sale_status;
+  const isFinalised  = hasSale && ['closed_won', 'sold', 'closed_lost', 'cancelled'].includes(saleStatus);
+  const needsRevision= hasSale && saleStatus === 'needs_revision';
+
+  // Disposition dropdown state
+  const [dropOpen,      setDropOpen]      = useState(false);
+  const [selectedDispo, setSelectedDispo] = useState(null); // config requiring note
+  const [noteText,      setNoteText]      = useState('');
+  const [submitting,    setSubmitting]    = useState(false);
+  const [submitResult,  setSubmitResult]  = useState(null); // { ok, label, color } | null
+  const dropRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!dropOpen) return;
+    const handler = (e) => {
+      if (dropRef.current && !dropRef.current.contains(e.target)) setDropOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [dropOpen]);
+
+  const handleDispoClick = async (cfg) => {
+    if (cfg.requires_note) {
+      setSelectedDispo(cfg);
+      setNoteText('');
+      return;
+    }
+    await submitDispo(cfg, '');
+  };
+
+  const submitDispo = async (cfg, note) => {
+    setSubmitting(true);
+    try {
+      await onDispositionSubmit(transfer.id, cfg.id, note);
+      setSubmitResult({ ok: true, label: cfg.name, color: cfg.color });
+      setDropOpen(false);
+      setSelectedDispo(null);
+      setTimeout(() => setSubmitResult(null), 4000);
+    } catch (err) {
+      setSubmitResult({ ok: false, label: err.message || 'Failed', color: '#dc2626' });
+      setTimeout(() => setSubmitResult(null), 4000);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resolveSale = () => {
+    const resolvedName  = customerName !== 'Unknown' ? customerName
+      : (fd.customer_name || fd.Name || fd.name || fd.FullName || fd.fullname
+         || Object.values(fd).find(v => typeof v === 'string' && v.length > 1 && !/\d{5,}/.test(v)) || '');
+    const resolvedPhone = phone !== '—' ? phone : (fd.customer_phone || fd.Phone || fd.phone || '');
+    return { ...transfer, form_data: { ...fd, customer_name: resolvedName, customer_phone: resolvedPhone } };
+  };
 
   return (
     <div className="rounded-xl border px-3 py-2.5 animate-fade-in"
       style={{
-        borderColor: needsRevision ? 'var(--color-error-300)' : hasSale ? 'var(--color-success-300)' : 'var(--color-border)',
+        borderColor:     needsRevision ? 'var(--color-error-300)' : hasSale ? 'var(--color-success-300)' : 'var(--color-border)',
         backgroundColor: needsRevision ? 'var(--color-error-50)' : hasSale ? 'var(--color-success-50, #f0fdf4)' : 'var(--color-bg)',
       }}>
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
           {/* Company + status row */}
           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-            <span
-              className="px-1.5 py-0 rounded text-xs font-bold uppercase tracking-wider"
-              style={{
-                backgroundColor: 'var(--color-primary-100)',
-                color: 'var(--color-primary-700)',
-                border: '1px solid var(--color-primary-200)',
-              }}
-            >
+            <span className="px-1.5 py-0 rounded text-xs font-bold uppercase tracking-wider"
+              style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)', border: '1px solid var(--color-primary-200)' }}>
               {transfer.company_slug}
             </span>
             <Badge variant={TRANSFER_BADGE[transfer.status] || 'secondary'} size="sm">
@@ -80,18 +126,19 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             </span>
           </div>
 
-          {/* Name + phone on one line */}
+          {/* Name + phone */}
           <p className="font-semibold text-sm leading-tight" style={{ color: 'var(--color-text)' }}>
             {customerName}
             <span className="font-normal ml-2" style={{ color: 'var(--color-text-secondary)' }}>{phone}</span>
           </p>
 
-          {/* Extra fields compact */}
+          {/* Extra fields */}
           {extraFields.length > 0 && (
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
               {extraFields.map(([key, val]) => (
                 <span key={key} className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                  <span className="capitalize">{key.replace(/_/g, ' ')}</span>: <span style={{ color: 'var(--color-text-secondary)' }}>{String(val)}</span>
+                  <span className="capitalize">{key.replace(/_/g, ' ')}</span>:{' '}
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{String(val)}</span>
                 </span>
               ))}
             </div>
@@ -103,7 +150,6 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             </p>
           )}
 
-          {/* Sale reference + closer info */}
           {hasSale && transfer.sale_reference_no && (
             <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
               Ref: {transfer.sale_reference_no}
@@ -111,7 +157,6 @@ const TransferCard = ({ transfer, onCreateSale }) => {
             </p>
           )}
 
-          {/* Compliance note if needs revision */}
           {needsRevision && transfer.sale_compliance_note && (
             <div className="mt-1.5 px-2 py-1 rounded-lg flex items-start gap-1.5"
               style={{ backgroundColor: 'var(--color-error-100)', border: '1px solid var(--color-error-200)' }}>
@@ -121,36 +166,121 @@ const TransferCard = ({ transfer, onCreateSale }) => {
               </p>
             </div>
           )}
+
+          {/* Disposition result feedback */}
+          {submitResult && (
+            <div className="mt-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold"
+              style={{
+                backgroundColor: submitResult.ok ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${submitResult.ok ? '#bbf7d0' : '#fecaca'}`,
+                color: submitResult.ok ? '#15803d' : '#dc2626',
+              }}>
+              {submitResult.ok
+                ? <><Check size={11} /> Logged: {submitResult.label}</>
+                : <><AlertTriangle size={11} /> {submitResult.label}</>}
+            </div>
+          )}
         </div>
 
-        {/* Action */}
-        <div className="flex-shrink-0">
+        {/* Actions */}
+        <div className="flex-shrink-0 flex items-center gap-1">
           {hasSale ? (
             <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold"
               style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
               <DollarSign size={11} /> Already Sold
             </span>
           ) : (
-            <button
-              onClick={() => {
-                const fd = transfer.form_data || {};
-                // Best-effort name: try all common field name patterns
-                const resolvedName = customerName !== 'Unknown'
-                  ? customerName
-                  : (fd.customer_name || fd.Name || fd.name || fd.FullName || fd.fullname
-                     || Object.values(fd).find(v => typeof v === 'string' && v.length > 1 && !/\d{5,}/.test(v)) || '');
-                const resolvedPhone = phone !== '—' ? phone : (fd.customer_phone || fd.Phone || fd.phone || '');
-                onCreateSale({
-                  ...transfer,
-                  form_data: { ...fd, customer_name: resolvedName, customer_phone: resolvedPhone },
-                });
-              }}
-              className="flex items-center gap-1 py-1.5 px-3 rounded-lg font-semibold text-xs text-white
-                         hover:scale-[1.03] transition-all"
-              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap' }}
-            >
-              <DollarSign size={12} /> Sale
-            </button>
+            <>
+              {/* Sale button */}
+              <button
+                onClick={() => onCreateSale(resolveSale())}
+                className="flex items-center gap-1 py-1.5 px-3 rounded-l-lg font-semibold text-xs text-white hover:scale-[1.03] transition-all"
+                style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap', borderRight: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <DollarSign size={12} /> Sale
+              </button>
+
+              {/* Disposition dropdown trigger */}
+              {dispositionConfigs.length > 0 && (
+                <div className="relative" ref={dropRef}>
+                  <button
+                    onClick={() => { setDropOpen(v => !v); setSelectedDispo(null); setNoteText(''); }}
+                    className="flex items-center py-1.5 px-1.5 rounded-r-lg font-semibold text-xs text-white hover:scale-[1.03] transition-all"
+                    style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+                    title="Log call outcome"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+
+                  {dropOpen && (
+                    <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-44"
+                      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', top: '100%' }}>
+
+                      {/* Header */}
+                      <div className="px-3 py-2 flex items-center gap-1.5"
+                        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        <MessageSquare size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                          Log Outcome
+                        </span>
+                      </div>
+
+                      {/* Note input (shown when a config requires_note is selected) */}
+                      {selectedDispo ? (
+                        <div className="p-3 space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedDispo.color }} />
+                            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{selectedDispo.name}</span>
+                          </div>
+                          <textarea
+                            autoFocus
+                            value={noteText}
+                            onChange={e => setNoteText(e.target.value)}
+                            placeholder="Note is required…"
+                            rows={2}
+                            className="input text-xs w-full resize-none"
+                            style={{ fontSize: '11px' }}
+                          />
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => setSelectedDispo(null)}
+                              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
+                              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                              Back
+                            </button>
+                            <button
+                              onClick={() => submitDispo(selectedDispo, noteText)}
+                              disabled={submitting || !noteText.trim()}
+                              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
+                              style={{ background: 'var(--gradient-sidebar)' }}>
+                              {submitting ? '…' : 'Submit'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Disposition list */
+                        <div className="py-1">
+                          {dispositionConfigs.map(cfg => (
+                            <button
+                              key={cfg.id}
+                              onClick={() => handleDispoClick(cfg)}
+                              disabled={submitting}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
+                              style={{ color: 'var(--color-text)' }}>
+                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
+                              <span className="flex-1">{cfg.name}</span>
+                              {cfg.requires_note && (
+                                <MessageSquare size={9} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -158,11 +288,19 @@ const TransferCard = ({ transfer, onCreateSale }) => {
   );
 };
 
+// ── PhoneSearch ───────────────────────────────────────────────────────────────
 const PhoneSearch = ({ onCreateSale }) => {
-  const [phone,   setPhone]   = useState('');
-  const [results, setResults] = useState(null); // null = not yet searched
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
+  const [phone,              setPhone]              = useState('');
+  const [results,            setResults]            = useState(null);
+  const [loading,            setLoading]            = useState(false);
+  const [error,              setError]              = useState('');
+  const [dispositionConfigs, setDispositionConfigs] = useState([]);
+
+  useEffect(() => {
+    client.get('disposition-configs')
+      .then(res => setDispositionConfigs(res.data.configs || []))
+      .catch(() => {});
+  }, []);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -181,6 +319,14 @@ const PhoneSearch = ({ onCreateSale }) => {
     }
   };
 
+  const handleDispositionSubmit = async (transferId, configId, note) => {
+    await client.post('disposition-configs/submit', {
+      transfer_id:           transferId,
+      disposition_config_id: configId,
+      note:                  note || undefined,
+    });
+  };
+
   const alreadySoldCount = (results || []).filter(t => t.has_sale).length;
   const availableCount   = (results || []).filter(t => !t.has_sale).length;
 
@@ -191,11 +337,7 @@ const PhoneSearch = ({ onCreateSale }) => {
         <Search size={15} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
         <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>Search Lead</span>
         <div className="flex-1 relative">
-          <Phone
-            size={13}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2"
-            style={{ color: 'var(--color-text-tertiary)' }}
-          />
+          <Phone size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input
             type="tel"
             value={phone}
@@ -207,8 +349,7 @@ const PhoneSearch = ({ onCreateSale }) => {
         <button
           type="submit"
           disabled={loading}
-          className="flex items-center gap-1.5 py-2 px-4 rounded-lg font-semibold text-sm text-white disabled:opacity-50
-                     hover:scale-[1.02] transition-all flex-shrink-0"
+          className="flex items-center gap-1.5 py-2 px-4 rounded-lg font-semibold text-sm text-white disabled:opacity-50 hover:scale-[1.02] transition-all flex-shrink-0"
           style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
         >
           {loading
@@ -247,7 +388,13 @@ const PhoneSearch = ({ onCreateSale }) => {
               )}
             </div>
             {results.map(t => (
-              <TransferCard key={t.id} transfer={t} onCreateSale={onCreateSale} />
+              <TransferCard
+                key={t.id}
+                transfer={t}
+                onCreateSale={onCreateSale}
+                onDispositionSubmit={handleDispositionSubmit}
+                dispositionConfigs={dispositionConfigs}
+              />
             ))}
           </div>
         )

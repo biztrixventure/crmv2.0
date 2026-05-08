@@ -366,6 +366,72 @@ async function onComplianceUpdate({ sale, editorName, reason }) {
   });
 }
 
+async function onDispositionSubmitted({ action, transfer, config, submitterId, submitterCompanyId }) {
+  const fd           = transfer.form_data || {};
+  const customerName = fd.customer_name
+    || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : null)
+    || 'Customer';
+
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles').select('first_name, last_name').eq('user_id', submitterId).single();
+  const submitterName = profile
+    ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Closer'
+    : 'Closer';
+
+  const noteStr = action.note ? ` — Note: ${action.note}` : '';
+
+  // Notify roles within closer's company
+  if (config.notify_roles?.length > 0) {
+    const roleIds = await getUserIdsByLevel(submitterCompanyId, config.notify_roles);
+    const filtered = roleIds.filter(id => id !== submitterId);
+    if (filtered.length > 0) {
+      await notifyUsers(filtered, {
+        companyId: submitterCompanyId,
+        type:      'disposition_submitted',
+        title:     `${config.name} — ${customerName}`,
+        message:   `${submitterName} marked ${customerName} as "${config.name}".${noteStr}`,
+        data:      { transfer_id: transfer.id, action_id: action.id, disposition: config.name, color: config.color },
+        dedupBase: `disposition_${action.id}`,
+      });
+    }
+  }
+
+  const fronterCompanyId = transfer.company_id;
+  const fronterUserId    = transfer.created_by;
+
+  if (config.notify_fronter && fronterUserId && fronterUserId !== submitterId) {
+    await createNotification({
+      userId: fronterUserId, companyId: fronterCompanyId,
+      type:     'disposition_submitted',
+      title:    `${config.name} — ${customerName}`,
+      message:  `${submitterName} marked your lead ${customerName} as "${config.name}".${noteStr}`,
+      data:     { transfer_id: transfer.id, action_id: action.id, disposition: config.name, color: config.color },
+      dedupKey: `disposition_${action.id}_${fronterUserId}_${hourBlock()}`,
+    });
+    sendPushToUser(fronterUserId, {
+      title: `Lead outcome: ${config.name}`,
+      body:  `${customerName} — ${config.name}`,
+      tag:   'disposition_submitted',
+      data:  { transfer_id: transfer.id },
+    }).catch(() => {});
+  }
+
+  if (config.notify_fronter_manager && fronterCompanyId) {
+    const mgrIds     = await getUserIdsByLevel(fronterCompanyId, ['manager', 'fronter_manager', 'operations_manager', 'company_admin']);
+    const toNotify   = mgrIds.filter(id => id !== submitterId && id !== fronterUserId);
+    if (toNotify.length > 0) {
+      await notifyUsers(toNotify, {
+        companyId: fronterCompanyId,
+        type:      'disposition_submitted',
+        title:     `${config.name} — ${customerName}`,
+        message:   `${submitterName} marked ${customerName} as "${config.name}".${noteStr}`,
+        data:      { transfer_id: transfer.id, action_id: action.id, disposition: config.name, color: config.color },
+        dedupBase: `disposition_fmgr_${action.id}`,
+      });
+    }
+  }
+}
+
 module.exports = {
   onTransferCreated,
   onTransferRejected,
@@ -374,6 +440,7 @@ module.exports = {
   onSaleApproved,
   onSaleReturned,
   onComplianceUpdate,
+  onDispositionSubmitted,
   notifyManagers,
   notifyFloorManagers,
   getUserIdsByLevel,
