@@ -19,7 +19,7 @@ async function processDueCallbacks() {
 
     const { data: due, error } = await supabaseAdmin
       .from('callbacks')
-      .select('id, user_id, company_id, customer_name, customer_phone, callback_at, notes')
+      .select('id, user_id, company_id, customer_name, customer_phone, callback_at, notes, customer_timezone, customer_state, customer_city')
       .eq('status', 'pending')
       .eq('notified', false)
       .lte('callback_at', soon.toISOString());
@@ -33,13 +33,46 @@ async function processDueCallbacks() {
 
     logger.info('SCHEDULER', `Processing ${due.length} due callback(s)`);
 
+    // Fetch company timezones for all companies in this batch (agent's local time)
+    const companyIds = [...new Set((due || []).map(c => c.company_id).filter(Boolean))];
+    let companyTzMap = {};
+    if (companyIds.length > 0) {
+      const { data: companies } = await supabaseAdmin
+        .from('companies').select('id, internal_timezone').in('id', companyIds);
+      (companies || []).forEach(c => { companyTzMap[c.id] = c.internal_timezone || 'Asia/Karachi'; });
+    }
+
     for (const cb of due) {
       try {
-        const title   = `📞 Callback: ${cb.customer_name}`;
+        // Build dual-timezone time string: customer local + agent local
+        const agentTz    = companyTzMap[cb.company_id] || 'Asia/Karachi';
+        const customerTz = cb.customer_timezone;
+        let timeStr = '';
+        if (cb.callback_at) {
+          const fmtTime = (tz) => new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: true,
+          }).format(new Date(cb.callback_at));
+          const fmtAbbr = (tz) => {
+            const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date(cb.callback_at));
+            return parts.find(p => p.type === 'timeZoneName')?.value || '';
+          };
+          if (customerTz) {
+            const custTime = `${fmtTime(customerTz)} ${fmtAbbr(customerTz)}`;
+            const agentTime = `${fmtTime(agentTz)} ${fmtAbbr(agentTz)}`;
+            timeStr = `${custTime} → ${agentTime} (you)`;
+          } else {
+            timeStr = `${fmtTime(agentTz)} ${fmtAbbr(agentTz)}`;
+          }
+        }
+
+        const locationStr = [cb.customer_city, cb.customer_state].filter(Boolean).join(', ');
+        const title = `📞 Callback: ${cb.customer_name}`;
         const message = [
+          timeStr      || null,
+          locationStr  || null,
           cb.customer_phone || null,
-          cb.notes          || null,
-        ].filter(Boolean).join(' — ') || 'Time for your scheduled callback';
+          cb.notes     || null,
+        ].filter(Boolean).join(' · ') || 'Time for your scheduled callback';
 
         // 1. Create in-app notification
         const { error: notifErr } = await supabaseAdmin.from('notifications').insert({

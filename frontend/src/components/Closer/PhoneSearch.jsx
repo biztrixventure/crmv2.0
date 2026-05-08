@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
+import { formatForInput, convertToUtc, getTzAbbr, formatInTz } from '../../utils/timezone';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -35,7 +36,7 @@ const SaleStatusBadge = ({ status }) => {
 };
 
 // ── TransferCard ──────────────────────────────────────────────────────────────
-const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, dispositionConfigs }) => {
+const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, dispositionConfigs, companyTimezone }) => {
   const fd           = transfer.form_data || {};
   const customerName = fd.customer_name
     || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : null)
@@ -65,7 +66,40 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
   const [noteText,        setNoteText]        = useState('');
   const [submitting,      setSubmitting]      = useState(false);
   const [submitResult,    setSubmitResult]    = useState(null); // { ok, label, color } | null
-  const dropRef = useRef(null);
+  const [zipCbInput,      setZipCbInput]      = useState('');
+  const [zipCbInfo,       setZipCbInfo]       = useState(null); // { city, state, timezone }
+  const [zipCbLoading,    setZipCbLoading]    = useState(false);
+  const [zipCbErr,        setZipCbErr]        = useState('');
+  const dropRef    = useRef(null);
+  const zipCbTimer = useRef(null);
+
+  const fdZip = fd.Zip || fd.zip || fd.ZipCode || fd.zip_code || fd.postal_code || '';
+
+  // Auto-lookup ZIP when callback panel opens
+  useEffect(() => {
+    if (!showCallback || !fdZip || zipCbInfo) return;
+    setZipCbInput(fdZip);
+    setZipCbLoading(true);
+    client.get(`zipcode/${fdZip}`)
+      .then(res => { setZipCbInfo(res.data); setZipCbErr(''); })
+      .catch(() => setZipCbErr('ZIP not found'))
+      .finally(() => setZipCbLoading(false));
+  }, [showCallback]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleZipCbChange = (val) => {
+    setZipCbInput(val);
+    setZipCbErr('');
+    clearTimeout(zipCbTimer.current);
+    if (val.length < 5) { setZipCbInfo(null); return; }
+    zipCbTimer.current = setTimeout(async () => {
+      setZipCbLoading(true);
+      try {
+        const res = await client.get(`zipcode/${val.trim()}`);
+        setZipCbInfo(res.data);
+      } catch { setZipCbErr('ZIP not found'); setZipCbInfo(null); }
+      finally { setZipCbLoading(false); }
+    }, 500);
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -111,17 +145,23 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
   const submitCallback = async () => {
     if (!callbackAt) return;
     setSubmitting(true);
+    const cbTz = zipCbInfo?.timezone || companyTimezone;
     try {
       await client.post('disposition-configs/submit-callback', {
-        transfer_id: transfer.id,
-        callback_at: new Date(callbackAt).toISOString(),
-        note: noteText.trim() || undefined,
+        transfer_id:       transfer.id,
+        callback_at:       cbTz ? convertToUtc(callbackAt, cbTz) : new Date(callbackAt).toISOString(),
+        note:              noteText.trim() || undefined,
+        customer_timezone: zipCbInfo?.timezone || null,
+        customer_state:    zipCbInfo?.state    || null,
+        customer_city:     zipCbInfo?.city     || null,
       });
       setSubmitResult({ ok: true, label: 'Callback scheduled', color: '#3b82f6' });
       setDropOpen(false);
       setShowCallback(false);
       setCallbackAt('');
       setNoteText('');
+      setZipCbInfo(null);
+      setZipCbInput('');
       setTimeout(() => setSubmitResult(null), 4000);
     } catch (err) {
       setSubmitResult({ ok: false, label: err.response?.data?.error || 'Failed', color: '#dc2626' });
@@ -131,7 +171,16 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
     }
   };
 
-  const openDrop = () => { setDropOpen(v => !v); setSelectedDispo(null); setShowCallback(false); setNoteText(''); setCallbackAt(''); };
+  const openDrop = () => {
+    setDropOpen(v => !v);
+    setSelectedDispo(null);
+    setShowCallback(false);
+    setNoteText('');
+    setCallbackAt('');
+    setZipCbInfo(null);
+    setZipCbInput('');
+    setZipCbErr('');
+  };
 
   const dropdownPanel = dropOpen ? (
     <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-48"
@@ -160,19 +209,56 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
           </div>
         </div>
       ) : showCallback ? (
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-2 min-w-56">
           <div className="flex items-center gap-1.5">
             <CalendarPlus size={13} style={{ color: '#3b82f6', flexShrink: 0 }} />
             <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Schedule Callback</span>
           </div>
+
+          {/* ZIP lookup */}
+          <div className="relative">
+            <input value={zipCbInput} onChange={e => handleZipCbChange(e.target.value)}
+              className="input text-xs w-full pr-7" placeholder="Customer ZIP…" maxLength={5}
+              style={{ fontSize: '11px' }} />
+            {zipCbLoading && (
+              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500" />
+              </div>
+            )}
+          </div>
+          {zipCbErr && <p className="text-[10px] text-red-500">{zipCbErr}</p>}
+          {zipCbInfo && (
+            <div className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+              <Globe size={10} />{zipCbInfo.city}, {zipCbInfo.state} · {getTzAbbr(zipCbInfo.timezone)}
+            </div>
+          )}
+
           <input
             type="datetime-local"
             value={callbackAt}
             onChange={e => setCallbackAt(e.target.value)}
             className="input text-xs w-full"
             style={{ fontSize: '11px' }}
-            autoFocus
           />
+
+          {/* Dual-time preview */}
+          {callbackAt && (zipCbInfo?.timezone || companyTimezone) && (() => {
+            const cbTz     = zipCbInfo?.timezone || companyTimezone;
+            const agentTz  = companyTimezone || 'Asia/Karachi';
+            const utcIso   = convertToUtc(callbackAt, cbTz);
+            const custTime = zipCbInfo?.timezone
+              ? `${formatInTz(utcIso, zipCbInfo.timezone, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(zipCbInfo.timezone)}`
+              : null;
+            const agentTime = `${formatInTz(utcIso, agentTz, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(agentTz)}`;
+            return (
+              <div className="rounded-lg p-2 text-[10px]"
+                style={{ backgroundColor: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                {custTime && <div><span style={{ color: '#6366f1', fontWeight: 700 }}>Customer:</span> {custTime}</div>}
+                <div><span style={{ color: '#10b981', fontWeight: 700 }}>You:</span> {agentTime}</div>
+              </div>
+            );
+          })()}
+
           <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
             placeholder="Note (optional)…" rows={2} className="input text-xs w-full resize-none" style={{ fontSize: '11px' }} />
           <div className="flex gap-1.5">
@@ -197,7 +283,12 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
           ))}
           <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 4, paddingTop: 4 }}>
             <button
-              onClick={() => { setShowCallback(true); setCallbackAt(''); setNoteText(''); }}
+              onClick={() => {
+                const tz = zipCbInfo?.timezone || companyTimezone;
+                setCallbackAt(tz ? formatForInput(Date.now() + 30 * 60000, tz) : '');
+                setShowCallback(true);
+                setNoteText('');
+              }}
               disabled={submitting}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
               style={{ color: '#3b82f6' }}>
@@ -362,7 +453,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
 };
 
 // ── PhoneSearch ───────────────────────────────────────────────────────────────
-const PhoneSearch = ({ onCreateSale }) => {
+const PhoneSearch = ({ onCreateSale, companyTimezone }) => {
   const [phone,              setPhone]              = useState('');
   const [results,            setResults]            = useState(null);
   const [loading,            setLoading]            = useState(false);
@@ -467,6 +558,7 @@ const PhoneSearch = ({ onCreateSale }) => {
                 onCreateSale={onCreateSale}
                 onDispositionSubmit={handleDispositionSubmit}
                 dispositionConfigs={dispositionConfigs}
+                companyTimezone={companyTimezone}
               />
             ))}
           </div>

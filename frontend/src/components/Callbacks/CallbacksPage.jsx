@@ -3,15 +3,16 @@
  * Compact list with click-to-drawer for full details.
  * Priority (High / Medium / Low) shown as colored badges.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Phone, Plus, Clock, CheckCircle, XCircle, PhoneOff,
   Trash2, Edit2, Bell, X, Calendar, Voicemail, ChevronRight,
-  AlertTriangle, ArrowRight,
+  AlertTriangle, ArrowRight, MapPin, Globe,
 } from 'lucide-react';
 import client from '../../api/client';
 import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
+import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz } from '../../utils/timezone';
 
 const STATUS_CONFIG = {
   pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
@@ -50,23 +51,19 @@ const PriorityBadge = ({ priority }) => {
   );
 };
 
-const formatDateTime = (iso) => {
+// formatDateTime: shows customer's local time if known, else company/browser time
+const formatDateTime = (iso, customerTz, companyTz) => {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const tz = customerTz || companyTz;
+  if (!tz) return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return `${formatInTz(iso, tz)} ${getTzAbbr(tz)}`;
 };
 
-const isPast   = (iso) => iso && new Date(iso) < new Date();
+const isPast    = (iso) => iso && new Date(iso) < new Date();
 const isDueSoon = (iso) => {
   if (!iso) return false;
   const diff = new Date(iso) - new Date();
   return diff > 0 && diff < 30 * 60 * 1000;
-};
-
-const toLocalInputValue = (utcIso) => {
-  const d = new Date(utcIso);
-  const offsetMs = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
 // ── Outcome Notes Modal ──────────────────────────────────────────────────────
@@ -128,8 +125,24 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
 };
 
 // ── Create / Edit Modal ──────────────────────────────────────────────────────
-const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
-  const isEdit = !!callback;
+const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }) => {
+  const isEdit   = !!callback;
+  const agentTz  = companyTimezone || 'Asia/Karachi';
+
+  const initCustomerTz = callback?.customer_timezone || null;
+
+  const [zipInput,   setZipInput]   = useState('');
+  const [zipInfo,    setZipInfo]    = useState(
+    callback?.customer_state
+      ? { city: callback.customer_city || '', state: callback.customer_state || '', timezone: callback.customer_timezone || '' }
+      : null
+  );
+  const [zipLoading, setZipLoading] = useState(false);
+  const [zipErr,     setZipErr]     = useState('');
+
+  const customerTz = zipInfo?.timezone || initCustomerTz || null;
+  const displayTz  = customerTz || agentTz;
+
   const [form, setForm] = useState({
     customer_name:  callback?.customer_name  || '',
     customer_phone: callback?.customer_phone || '',
@@ -137,22 +150,67 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
     notes:          callback?.notes          || '',
     priority:       callback?.priority       || 'Medium',
     callback_at:    callback?.callback_at
-      ? toLocalInputValue(callback.callback_at)
-      : toLocalInputValue(Date.now() + 30 * 60000),
+      ? formatForInput(callback.callback_at, displayTz)
+      : formatForInput(Date.now() + 30 * 60000, displayTz),
     status: callback?.status || 'pending',
   });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [err,    setErr]      = useState('');
+  const prevTzRef             = useRef(displayTz);
+  const zipTimerRef           = useRef(null);
+
+  // Re-derive input value when customer timezone changes
+  useEffect(() => {
+    if (prevTzRef.current === displayTz) return;
+    if (!form.callback_at) return;
+    const utcIso = convertToUtc(form.callback_at, prevTzRef.current);
+    setForm(p => ({ ...p, callback_at: formatForInput(utcIso, displayTz) }));
+    prevTzRef.current = displayTz;
+  }, [displayTz]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleZipChange = (val) => {
+    setZipInput(val);
+    setZipErr('');
+    clearTimeout(zipTimerRef.current);
+    if (val.length < 5) { setZipInfo(null); return; }
+    zipTimerRef.current = setTimeout(async () => {
+      setZipLoading(true);
+      try {
+        const res = await client.get(`zipcode/${val.trim()}`);
+        setZipInfo(res.data);
+      } catch {
+        setZipErr('ZIP not found');
+        setZipInfo(null);
+      } finally { setZipLoading(false); }
+    }, 500);
+  };
+
+  const quickTime = (ms) =>
+    setForm(p => ({ ...p, callback_at: formatForInput(Date.now() + ms, displayTz) }));
+
+  // Dual-time preview
+  const previewUtc   = form.callback_at ? convertToUtc(form.callback_at, displayTz) : null;
+  const custPreview  = previewUtc && customerTz
+    ? `${formatInTz(previewUtc, customerTz, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(customerTz)}`
+    : null;
+  const agentPreview = previewUtc
+    ? `${formatInTz(previewUtc, agentTz, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(agentTz)}`
+    : null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.customer_name.trim()) return setErr('Customer name required');
+    if (!form.callback_at) return setErr('Callback time required');
     setSaving(true); setErr('');
     try {
+      const utcCallbackAt = convertToUtc(form.callback_at, displayTz);
       const payload = {
         ...form,
-        callback_at: new Date(form.callback_at).toISOString(),
-        user_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        callback_at:       utcCallbackAt,
+        user_timezone:     agentTz,
+        customer_timezone: customerTz || null,
+        customer_state:    zipInfo?.state || null,
+        customer_city:     zipInfo?.city  || null,
       };
       if (isEdit) {
         const res = await client.put(`callbacks/${callback.id}`, payload);
@@ -216,6 +274,32 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
             </div>
           </div>
 
+          {/* ZIP lookup → auto-detect state + timezone */}
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+              <MapPin size={12} className="inline mr-1" />
+              Customer ZIP Code
+            </label>
+            <div className="relative">
+              <input value={zipInput} onChange={e => handleZipChange(e.target.value)}
+                className="input pr-8" placeholder="e.g. 90210" maxLength={5} />
+              {zipLoading && (
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2"
+                    style={{ borderColor: 'var(--color-primary-600)' }} />
+                </div>
+              )}
+            </div>
+            {zipErr && <p className="text-xs mt-1 text-red-500">{zipErr}</p>}
+            {zipInfo && (
+              <div className="mt-1.5 flex items-center gap-2 text-xs font-medium"
+                style={{ color: 'var(--color-text-secondary)' }}>
+                <Globe size={11} />
+                {zipInfo.city}, {zipInfo.state} · {getTzAbbr(zipInfo.timezone)}
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Email</label>
             <input value={form.customer_email} onChange={e => setForm(p => ({...p, customer_email: e.target.value}))}
@@ -224,20 +308,22 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
 
           <div>
             <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-              Callback Date & Time <span className="text-red-500">*</span>
+              Callback Date & Time
+              {customerTz
+                ? <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>customer's time ({getTzAbbr(customerTz)})</span>
+                : <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>your time ({getTzAbbr(agentTz)})</span>}
+              <span className="text-red-500 ml-1">*</span>
             </label>
             <input value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
               className="input" type="datetime-local" required />
             <div className="flex flex-wrap gap-1.5 mt-2">
               {[
                 { label: '+5 min',   ms: 5  * 60 * 1000 },
-                { label: '+10 min',  ms: 10 * 60 * 1000 },
                 { label: '+15 min',  ms: 15 * 60 * 1000 },
                 { label: '+1 hour',  ms: 60 * 60 * 1000 },
                 { label: 'Tomorrow', ms: 24 * 60 * 60 * 1000 },
               ].map(({ label, ms }) => (
-                <button key={label} type="button"
-                  onClick={() => setForm(p => ({ ...p, callback_at: toLocalInputValue(Date.now() + ms) }))}
+                <button key={label} type="button" onClick={() => quickTime(ms)}
                   className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
                   style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
                   {label}
@@ -245,6 +331,42 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
               ))}
             </div>
           </div>
+
+          {/* Dual-time preview */}
+          {previewUtc && (
+            <div className="rounded-xl p-3 grid grid-cols-2 gap-3"
+              style={{ backgroundColor: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#6366f1' }}>
+                  Customer hears
+                </p>
+                <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                  {custPreview || agentPreview}
+                </p>
+                {zipInfo && (
+                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {zipInfo.city}, {zipInfo.state}
+                  </p>
+                )}
+                {customerTz && (
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {nowInTz(customerTz)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>
+                  You get notified at
+                </p>
+                <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                  {agentPreview}
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {nowInTz(agentTz)}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Notes</label>
@@ -284,7 +406,7 @@ const CallbackModal = ({ callback, companyId, onSave, onClose }) => {
 };
 
 // ── Detail Drawer ────────────────────────────────────────────────────────────
-const CallbackDrawer = ({ callback: cb, onEdit, onDelete, onStatusChange, deleting, onClose }) => {
+const CallbackDrawer = ({ callback: cb, companyTimezone, onEdit, onDelete, onStatusChange, deleting, onClose }) => {
   if (!cb) return null;
   const past = isPast(cb.callback_at) && cb.status === 'pending';
   const soon = isDueSoon(cb.callback_at);
@@ -352,8 +474,21 @@ const CallbackDrawer = ({ callback: cb, onEdit, onDelete, onStatusChange, deleti
             )}
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
               <Calendar size={13} style={{ color: 'var(--color-text-tertiary)' }} />
-              {formatDateTime(cb.callback_at)}
+              {formatDateTime(cb.callback_at, cb.customer_timezone, companyTimezone)}
             </div>
+            {cb.customer_timezone && cb.customer_timezone !== companyTimezone && (
+              <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                <Globe size={11} />
+                Customer: {getTzAbbr(cb.customer_timezone)}
+                {companyTimezone && ` · You: ${getTzAbbr(companyTimezone)}`}
+              </div>
+            )}
+            {(cb.customer_city || cb.customer_state) && (
+              <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                <MapPin size={11} />
+                {[cb.customer_city, cb.customer_state].filter(Boolean).join(', ')}
+              </div>
+            )}
             {cb.user_name && (
               <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                 Scheduled by: {cb.user_name}
@@ -638,7 +773,7 @@ const CallbacksPage = ({ user }) => {
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                     <span className="flex items-center gap-1">
-                      <Calendar size={10} /> {formatDateTime(cb.callback_at)}
+                      <Calendar size={10} /> {formatDateTime(cb.callback_at, cb.customer_timezone, user?.company_timezone)}
                     </span>
                     {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                   </div>
@@ -686,6 +821,7 @@ const CallbacksPage = ({ user }) => {
       {drawerCb && (
         <CallbackDrawer
           callback={drawerCb}
+          companyTimezone={user?.company_timezone}
           onEdit={(cb) => setModal(cb)}
           onDelete={handleDelete}
           onStatusChange={handleStatusQuick}
@@ -699,6 +835,7 @@ const CallbacksPage = ({ user }) => {
         <CallbackModal
           callback={modal === 'create' ? null : modal}
           companyId={user?.company_id}
+          companyTimezone={user?.company_timezone}
           onSave={handleSave}
           onClose={() => setModal(null)}
         />

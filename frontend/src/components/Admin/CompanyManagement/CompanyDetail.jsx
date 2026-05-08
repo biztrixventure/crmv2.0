@@ -13,6 +13,7 @@ import CreateUserModal from '../UserManagement/CreateUserModal';
 import BulkUploadModal from '../UserManagement/BulkUploadModal';
 import UserModal from '../UserManagement/UserModal';
 import client from '../../../api/client';
+import { WORLD_TIMEZONES } from '../../../utils/timezone';
 import SaleDetailDrawer              from '../../Shared/SaleDetailDrawer';
 import TransferDetailDrawer          from '../../Shared/TransferDetailDrawer';
 import CallbackDetailDrawer          from '../../Shared/CallbackDetailDrawer';
@@ -754,6 +755,7 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
   const { hasPermission } = useAuth();
   const [name, setName]               = useState(company.name || '');
   const [companyType, setCompanyType] = useState(company.company_type || 'fronter');
+  const [internalTz, setInternalTz]   = useState(company.internal_timezone || 'Asia/Karachi');
   const [saving, setSaving]           = useState(false);
   const [saveErr, setSaveErr]         = useState('');
   const [saveOk, setSaveOk]           = useState(false);
@@ -788,9 +790,9 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
     e.preventDefault();
     setSaving(true); setSaveErr(''); setSaveOk(false);
     try {
-      await client.put(`companies/${company.id}`, { name, company_type: companyType });
+      await client.put(`companies/${company.id}`, { name, company_type: companyType, internal_timezone: internalTz });
       setSaveOk(true);
-      onCompanyUpdated?.({ ...company, name, company_type: companyType });
+      onCompanyUpdated?.({ ...company, name, company_type: companyType, internal_timezone: internalTz });
       setTimeout(() => setSaveOk(false), 3000);
     } catch (err) {
       setSaveErr(err.response?.data?.error || 'Save failed');
@@ -857,6 +859,18 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              Internal Timezone
+              <span className="ml-1.5 text-xs text-text-tertiary">(agent notifications use this time)</span>
+            </label>
+            <select className="input" value={internalTz} onChange={e => setInternalTz(e.target.value)}>
+              {WORLD_TIMEZONES.map(tz => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </select>
           </div>
 
           {saveErr && <p className="text-sm text-error-600">{saveErr}</p>}

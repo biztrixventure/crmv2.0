@@ -464,7 +464,7 @@ const StaffShell = () => {
 
             {/* Phone search — find leads from linked fronter companies by number */}
             <div className="mb-6">
-              <PhoneSearch onCreateSale={openSaleModal} />
+              <PhoneSearch onCreateSale={openSaleModal} companyTimezone={user?.company_timezone} />
             </div>
 
             {/* Stats */}

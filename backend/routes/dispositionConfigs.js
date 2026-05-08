@@ -191,7 +191,7 @@ router.post('/submit-callback', async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.user.company_id;
   try {
-    const { transfer_id, callback_at, note } = req.body;
+    const { transfer_id, callback_at, note, customer_timezone, customer_state, customer_city } = req.body;
     if (!transfer_id)  return res.status(400).json({ error: 'transfer_id required' });
     if (!callback_at)  return res.status(400).json({ error: 'callback_at required' });
 
@@ -218,17 +218,20 @@ router.post('/submit-callback', async (req, res) => {
         note:             note?.trim() || null,
       }).select().single(),
       supabaseAdmin.from('callbacks').insert({
-        user_id:        userId,
-        company_id:     companyId,
-        customer_name:  customerName,
-        customer_phone: customerPhone,
-        notes:          note?.trim() || null,
+        user_id:           userId,
+        company_id:        companyId,
+        customer_name:     customerName,
+        customer_phone:    customerPhone,
+        notes:             note?.trim() || null,
         callback_at,
-        priority:       'Medium',
-        status:         'pending',
-        source:         'transfer',
-        source_id:      transfer_id,
-        notified:       false,
+        priority:          'Medium',
+        status:            'pending',
+        source:            'transfer',
+        source_id:         transfer_id,
+        notified:          false,
+        customer_timezone: customer_timezone || null,
+        customer_state:    customer_state    || null,
+        customer_city:     customer_city     || null,
       }).select().single(),
     ]);
 

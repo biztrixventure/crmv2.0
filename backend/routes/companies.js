@@ -21,7 +21,7 @@ router.get(
       if (req.user.role === "superadmin") {
         const { data, error } = await supabaseAdmin
           .from("companies")
-          .select("id, name, slug, logo_url, is_active, company_type, created_at")
+          .select("id, name, slug, logo_url, is_active, company_type, internal_timezone, created_at")
           .order("name");
 
         if (error) {
@@ -123,6 +123,7 @@ router.post(
       }
     }).optional(),
     body("company_type").isIn(['fronter', 'closer']).optional(),
+    body("internal_timezone").trim().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -130,7 +131,7 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { name, slug, logo_url, company_type } = req.body;
+    const { name, slug, logo_url, company_type, internal_timezone } = req.body;
     const userId = req.user.id;
 
     try {
@@ -143,11 +144,12 @@ router.post(
         .from("companies")
         .insert({
           name,
-          slug:         slug         || null,
-          logo_url:     logo_url     || null,
-          created_by:   userId,
-          is_active:    true,
-          company_type: company_type || 'fronter',
+          slug:              slug              || null,
+          logo_url:          logo_url          || null,
+          created_by:        userId,
+          is_active:         true,
+          company_type:      company_type      || 'fronter',
+          internal_timezone: internal_timezone || 'Asia/Karachi',
         })
         .select()
         .single();
@@ -178,7 +180,7 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("companies")
-        .select("id, name, slug, logo_url, is_active, company_type, created_at")
+        .select("id, name, slug, logo_url, is_active, company_type, internal_timezone, created_at")
         .eq("id", id)
         .single();
 
@@ -223,6 +225,7 @@ router.put(
     }).optional(),
     body("is_active").isBoolean().optional(),
     body("company_type").isIn(['fronter', 'closer']).optional(),
+    body("internal_timezone").trim().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -231,7 +234,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { name, slug, logo_url, is_active, company_type } = req.body;
+    const { name, slug, logo_url, is_active, company_type, internal_timezone } = req.body;
     const userId = req.user.id;
 
     try {
@@ -242,11 +245,12 @@ router.put(
       }
 
       const updateData = {};
-      if (name)                  updateData.name         = name;
-      if (slug !== undefined)    updateData.slug         = slug || null;
-      if (logo_url !== undefined) updateData.logo_url    = logo_url;
-      if (is_active !== undefined) updateData.is_active  = is_active;
-      if (company_type !== undefined) updateData.company_type = company_type;
+      if (name)                          updateData.name              = name;
+      if (slug !== undefined)            updateData.slug              = slug || null;
+      if (logo_url !== undefined)        updateData.logo_url          = logo_url;
+      if (is_active !== undefined)       updateData.is_active         = is_active;
+      if (company_type !== undefined)    updateData.company_type      = company_type;
+      if (internal_timezone !== undefined) updateData.internal_timezone = internal_timezone || 'Asia/Karachi';
 
       const { data, error } = await supabaseAdmin
         .from("companies")
