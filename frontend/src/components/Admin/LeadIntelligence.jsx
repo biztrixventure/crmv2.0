@@ -8,6 +8,8 @@ import client from '../../api/client';
 import LeadGraph from './LeadGraph';
 
 // ── Formatters ────────────────────────────────────────────────────────────────
+const fmtKey = (k) => k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
+
 const fmtDate = (iso) => {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('en-US', {
@@ -60,12 +62,20 @@ const EV = {
   assigned:     { color: '#7c3aed', bg: '#ede9fe', Icon: ArrowRight    },
   updated:      { color: '#6b7280', bg: '#f3f4f6', Icon: Activity      },
   approved:     { color: '#16a34a', bg: '#dcfce7', Icon: CheckCircle   },
-  returned:     { color: '#d97706', bg: '#fef3c7', Icon: AlertTriangle },
+  returned:     { color: '#dc2626', bg: '#fee2e2', Icon: AlertTriangle },
+  submitted:    { color: '#7c3aed', bg: '#ede9fe', Icon: ArrowRight    },
   scheduled:    { color: '#0891b2', bg: '#cffafe', Icon: Calendar      },
   status_change:{ color: '#7c3aed', bg: '#ede9fe', Icon: Activity      },
   rescheduled:  { color: '#d97706', bg: '#fef3c7', Icon: Clock         },
 };
-const TYPE_COLOR = { transfer: '#2563eb', sale: '#16a34a', callback: '#d97706' };
+const TYPE_COLOR  = { transfer: '#2563eb', sale: '#16a34a', callback: '#d97706' };
+const ROLE_CONFIG = {
+  Fronter:    { bg: '#dbeafe', color: '#1d4ed8' },
+  Closer:     { bg: '#dcfce7', color: '#15803d' },
+  Compliance: { bg: '#fee2e2', color: '#dc2626' },
+  Agent:      { bg: '#fef3c7', color: '#b45309' },
+  Manager:    { bg: '#f3f4f6', color: '#374151' },
+};
 
 // ── Result group card ─────────────────────────────────────────────────────────
 const ResultCard = ({ group, onClick }) => {
@@ -355,16 +365,26 @@ const ProfileDrawer = ({ group, onClose }) => {
                       {profile.timeline.map((item) => {
                         const cfg  = EV[item.action] || EV.updated;
                         const { Icon } = cfg;
-                        const tc   = TYPE_COLOR[item.type] || '#6b7280';
+                        const tc      = TYPE_COLOR[item.type] || '#6b7280';
+                        const roleCfg = ROLE_CONFIG[item.actor_role] || ROLE_CONFIG.Agent;
+                        // Highlight compliance events
+                        const isCompliance = item.actor_role === 'Compliance';
+                        const borderStyle  = isCompliance
+                          ? '1px solid #fca5a5'
+                          : '1px solid var(--color-border)';
+                        const bgStyle = isCompliance ? '#fff5f5' : 'var(--color-bg-secondary)';
                         return (
                           <div key={item.id} className="relative">
+                            {/* Dot */}
                             <div className="absolute -left-10 top-2.5 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
                               style={{ backgroundColor: cfg.color }}>
                               <Icon size={8} className="text-white" />
                             </div>
+
                             <div className="rounded-xl p-3"
-                              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                              <div className="flex items-start justify-between gap-2 mb-1 flex-wrap">
+                              style={{ backgroundColor: bgStyle, border: borderStyle }}>
+                              {/* Top row: label + type badge + timestamp */}
+                              <div className="flex items-start justify-between gap-2 flex-wrap mb-1.5">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-xs px-1.5 py-0.5 rounded font-bold"
                                     style={{ backgroundColor: cfg.bg, color: cfg.color }}>
@@ -379,23 +399,38 @@ const ProfileDrawer = ({ group, onClose }) => {
                                   {fmtDate(item.occurred_at)}
                                 </span>
                               </div>
-                              <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
-                                {item.actor}
-                                {item.company && (
-                                  <span className="font-normal ml-1" style={{ color: 'var(--color-text-secondary)' }}>
-                                    @ {item.company}
+
+                              {/* Actor row: name + role badge + company */}
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <User size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                                <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                                  {item.actor}
+                                </span>
+                                {item.actor_role && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded-full font-bold"
+                                    style={{ backgroundColor: roleCfg.bg, color: roleCfg.color }}>
+                                    {item.actor_role}
                                   </span>
                                 )}
-                              </p>
+                                {item.company && (
+                                  <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <Building2 size={10} />
+                                    {item.company}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Detail */}
                               {item.detail && (
-                                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                <p className="text-xs mt-0.5 pl-3.5" style={{ color: 'var(--color-text-secondary)' }}>
                                   {item.detail}
                                 </p>
                               )}
+
                               {item.status && (
-                                <div className="mt-1.5">
+                                <div className="mt-1.5 pl-3.5">
                                   <StatusBadge status={item.status}
-                                    map={{ ...SALE_STATUS, pending: { label: 'Pending', bg: '#fef3c7', color: '#d97706' }, completed: { label: 'Completed', bg: '#dcfce7', color: '#16a34a' } }} />
+                                    map={{ ...SALE_STATUS, pending: { label: 'Pending', bg: '#fef3c7', color: '#d97706' }, completed: { label: 'Completed', bg: '#dcfce7', color: '#16a34a' }, pending_review: { label: 'In Review', bg: '#fef3c7', color: '#d97706' } }} />
                                 </div>
                               )}
                             </div>
@@ -431,32 +466,66 @@ const ProfileDrawer = ({ group, onClose }) => {
 
                   {/* Transfers list */}
                   {recTab === 'transfers' && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {profile.transfers.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No transfers.</p>
                       ) : profile.transfers.map(t => {
-                        const fd   = t.form_data || {};
-                        const tName = fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || 'Unknown';
+                        const fd      = t.form_data || {};
+                        const tName   = fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || 'Unknown';
+                        const agent   = profile.profiles?.[t.created_by];
+                        const company = profile.companies?.[t.company_id];
+                        // All form_data entries except internal/empty
+                        const fdEntries = Object.entries(fd).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '');
                         return (
-                          <div key={t.id} className="p-3 rounded-xl"
-                            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <p className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{tName}</p>
-                                {fd.customer_phone && (
-                                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                    📞 {fd.customer_phone}
-                                  </p>
+                          <div key={t.id} className="rounded-xl overflow-hidden"
+                            style={{ border: '1px solid var(--color-border)' }}>
+                            {/* Header row */}
+                            <div className="flex items-center justify-between gap-2 px-3 py-2"
+                              style={{ backgroundColor: '#dbeafe', borderBottom: '1px solid #bfdbfe' }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-sm truncate" style={{ color: '#1e40af' }}>{tName}</span>
+                                {company && (
+                                  <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#2563eb' }}>
+                                    <Building2 size={10} />{company.name || company.slug}
+                                  </span>
                                 )}
-                                <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
-                                  ID: {t.id.slice(0, 8).toUpperCase()}
-                                </p>
-                                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                                  {fmtDate(t.created_at)}
-                                </p>
                               </div>
                               <StatusBadge status={t.status} map={TRANSFER_STATUS} />
                             </div>
+
+                            {/* Meta row */}
+                            <div className="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1"
+                              style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                              {agent && (
+                                <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <User size={10} />{agent.name}
+                                </span>
+                              )}
+                              <span className="text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
+                                ID: {t.id.slice(0, 8).toUpperCase()}
+                              </span>
+                              <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                                {fmtDate(t.created_at)}
+                              </span>
+                            </div>
+
+                            {/* All form_data fields */}
+                            {fdEntries.length > 0 && (
+                              <div className="px-3 py-2.5" style={{ backgroundColor: 'var(--color-surface)' }}>
+                                <p className="text-xs font-bold uppercase tracking-wide mb-2"
+                                  style={{ color: 'var(--color-text-tertiary)' }}>Form Data</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                                  {fdEntries.map(([k, v]) => (
+                                    <div key={k} className="min-w-0">
+                                      <p className="text-xs font-semibold truncate"
+                                        style={{ color: 'var(--color-text-tertiary)' }}>{fmtKey(k)}</p>
+                                      <p className="text-xs truncate font-medium"
+                                        style={{ color: 'var(--color-text)' }}>{String(v)}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -465,65 +534,119 @@ const ProfileDrawer = ({ group, onClose }) => {
 
                   {/* Sales list */}
                   {recTab === 'sales' && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {profile.sales.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No sales.</p>
-                      ) : profile.sales.map(s => (
-                        <div key={s.id} className="p-3 rounded-xl"
-                          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{s.customer_name}</p>
-                              {s.reference_no && (
-                                <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                                  #{s.reference_no}
-                                </p>
-                              )}
+                      ) : profile.sales.map(s => {
+                        const agent   = profile.profiles?.[s.created_by];
+                        const company = profile.companies?.[s.company_id];
+                        return (
+                          <div key={s.id} className="rounded-xl overflow-hidden"
+                            style={{ border: '1px solid var(--color-border)' }}>
+                            {/* Header */}
+                            <div className="flex items-center justify-between gap-2 px-3 py-2"
+                              style={{ backgroundColor: '#dcfce7', borderBottom: '1px solid #bbf7d0' }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-sm truncate" style={{ color: '#15803d' }}>{s.customer_name || 'Unknown'}</span>
+                                {company && (
+                                  <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#16a34a' }}>
+                                    <Building2 size={10} />{company.name || company.slug}
+                                  </span>
+                                )}
+                              </div>
+                              <StatusBadge status={s.status} map={SALE_STATUS} />
+                            </div>
+
+                            {/* Body */}
+                            <div className="px-3 py-2.5 space-y-1.5" style={{ backgroundColor: 'var(--color-surface)' }}>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                {agent && (
+                                  <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <User size={10} />{agent.name}
+                                  </span>
+                                )}
+                                {s.reference_no && (
+                                  <span className="text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</span>
+                                )}
+                                <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDate(s.created_at)}</span>
+                              </div>
                               {s.plan && (
-                                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                  Plan: {s.plan}
+                                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <span className="font-semibold">Plan:</span> {s.plan}
                                 </p>
                               )}
                               {s.closer_disposition && (
-                                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                  Disposition: {s.closer_disposition}
+                                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <span className="font-semibold">Disposition:</span> {s.closer_disposition}
                                 </p>
                               )}
-                              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                                {fmtDate(s.created_at)}
-                              </p>
+                              {s.customer_phone && (
+                                <p className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <Phone size={10} />{s.customer_phone}
+                                </p>
+                              )}
+                              {s.down_payment && (
+                                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <span className="font-semibold">Down:</span> {s.down_payment}
+                                  {s.monthly_payment && <span className="ml-2"><span className="font-semibold">Monthly:</span> {s.monthly_payment}</span>}
+                                </p>
+                              )}
                             </div>
-                            <StatusBadge status={s.status} map={SALE_STATUS} />
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
                   {/* Callbacks list */}
                   {recTab === 'callbacks' && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {profile.callbacks.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No callbacks.</p>
-                      ) : profile.callbacks.map(c => (
-                        <div key={c.id} className="p-3 rounded-xl"
-                          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{c.customer_name}</p>
-                              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                Scheduled: {fmtDate(c.callback_at)}
-                              </p>
-                              {c.notes && (
-                                <p className="text-xs italic mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                                  "{c.notes}"
+                      ) : profile.callbacks.map(c => {
+                        const agent   = profile.profiles?.[c.created_by || c.agent_id];
+                        const company = profile.companies?.[c.company_id];
+                        return (
+                          <div key={c.id} className="rounded-xl overflow-hidden"
+                            style={{ border: '1px solid var(--color-border)' }}>
+                            {/* Header */}
+                            <div className="flex items-center justify-between gap-2 px-3 py-2"
+                              style={{ backgroundColor: '#fef3c7', borderBottom: '1px solid #fde68a' }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-sm truncate" style={{ color: '#b45309' }}>{c.customer_name || 'Unknown'}</span>
+                                {company && (
+                                  <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#d97706' }}>
+                                    <Building2 size={10} />{company.name || company.slug}
+                                  </span>
+                                )}
+                              </div>
+                              <StatusBadge status={c.status} map={CB_STATUS} />
+                            </div>
+
+                            {/* Body */}
+                            <div className="px-3 py-2.5 space-y-1.5" style={{ backgroundColor: 'var(--color-surface)' }}>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                {agent && (
+                                  <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <User size={10} />{agent.name}
+                                  </span>
+                                )}
+                                <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <Calendar size={10} />{fmtDate(c.callback_at)}
+                                </span>
+                              </div>
+                              {c.customer_phone && (
+                                <p className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <Phone size={10} />{c.customer_phone}
                                 </p>
                               )}
+                              {c.notes && (
+                                <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>"{c.notes}"</p>
+                              )}
                             </div>
-                            <StatusBadge status={c.status} map={CB_STATUS} />
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

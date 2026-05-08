@@ -5,6 +5,8 @@ const { isSuperAdmin, hasPermission } = require('../models/helpers');
 
 const router = express.Router();
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 async function checkAccess(userId, companyId) {
   const sa = await isSuperAdmin(userId);
   if (sa) return { allowed: true, superadmin: true };
@@ -12,8 +14,49 @@ async function checkAccess(userId, companyId) {
   return { allowed: can, superadmin: false };
 }
 
-// Normalize phone: last 10 digits for grouping
+// Scope: superadmin sees all companies, others see only theirs
+const scopeQ = (query, col, companyId, superadmin) =>
+  superadmin ? query : query.eq(col, companyId);
+
+// Extract customer fields from transfer form_data — handles FormBuilder key conventions
+// FormBuilder defaults to "Phone", "FirstName", "LastName", "Email"
+// Some forms use "customer_phone", "customer_name", etc.
+const fdPhone = (fd) =>
+  fd?.customer_phone || fd?.Phone || fd?.phone || fd?.Mobile || fd?.PhoneNumber || fd?.phone_number || fd?.CellPhone || '';
+const fdName = (fd) =>
+  fd?.customer_name || [fd?.FirstName, fd?.LastName].filter(Boolean).join(' ') || fd?.FullName || fd?.Name || fd?.name || '';
+const fdEmail = (fd) =>
+  fd?.customer_email || fd?.Email || fd?.email || fd?.EmailAddress || '';
+
+// Normalized phone for grouping: last 10 digits strips country codes
 const normPhone = (p) => (p || '').replace(/\D/g, '').slice(-10) || null;
+
+// OR filter string for JSONB transfer phone/name/email search
+// Matches existing pattern from backend/routes/transfers.js
+const buildTransferOr = (phone, email, name) => {
+  const parts = [];
+  if (phone) {
+    parts.push(
+      `form_data->>customer_phone.ilike.%${phone}%`,
+      `form_data->>Phone.ilike.%${phone}%`,
+      `form_data->>phone.ilike.%${phone}%`,
+    );
+  }
+  if (email) {
+    parts.push(
+      `form_data->>customer_email.ilike.%${email}%`,
+      `form_data->>Email.ilike.%${email}%`,
+    );
+  }
+  if (name) {
+    parts.push(
+      `form_data->>customer_name.ilike.%${name}%`,
+      `form_data->>FirstName.ilike.%${name}%`,
+      `form_data->>LastName.ilike.%${name}%`,
+    );
+  }
+  return parts.join(',');
+};
 
 // ─── GET /lead-intelligence/search?q= ───────────────────────────────────────
 router.get('/search', asyncHandler(async (req, res) => {
@@ -26,61 +69,44 @@ router.get('/search', asyncHandler(async (req, res) => {
   const { allowed, superadmin } = await checkAccess(userId, companyId);
   if (!allowed) return res.status(403).json({ error: 'Permission denied' });
 
-  const scope = (query, col) => superadmin ? query : query.eq(col, companyId);
+  const sc = (query, col) => scopeQ(query, col, companyId, superadmin);
 
-  // Parallel search across all three tables
-  const [tPhone, tName, sRes, cbRes] = await Promise.all([
-    // Transfers: search by phone in form_data
-    scope(supabaseAdmin.from('transfers')
-      .select('id, form_data, company_id, created_at, status')
-      .filter('form_data->>customer_phone', 'ilike', `%${q}%`)
-      .limit(25), 'company_id'),
+  // Transfers: search across all FormBuilder phone key conventions
+  const tOr = [
+    `form_data->>customer_phone.ilike.%${q}%`,
+    `form_data->>Phone.ilike.%${q}%`,
+    `form_data->>phone.ilike.%${q}%`,
+    `form_data->>customer_name.ilike.%${q}%`,
+    `form_data->>FirstName.ilike.%${q}%`,
+    `form_data->>LastName.ilike.%${q}%`,
+    `form_data->>customer_email.ilike.%${q}%`,
+    `form_data->>Email.ilike.%${q}%`,
+  ].join(',');
 
-    // Transfers: search by name in form_data
-    scope(supabaseAdmin.from('transfers')
-      .select('id, form_data, company_id, created_at, status')
-      .filter('form_data->>customer_name', 'ilike', `%${q}%`)
-      .limit(25), 'company_id'),
+  const [tRes, sRes, cbRes] = await Promise.all([
+    sc(supabaseAdmin.from('transfers')
+      .select('id, form_data, company_id, created_at, status, created_by, assigned_closer_id')
+      .or(tOr)
+      .limit(30), 'company_id'),
 
-    // Sales: search by direct columns
-    scope(supabaseAdmin.from('sales')
+    sc(supabaseAdmin.from('sales')
       .select('id, customer_name, customer_phone, customer_phone_2, customer_email, company_id, created_at, status, reference_no, closer_disposition')
       .or(`customer_phone.ilike.%${q}%,customer_phone_2.ilike.%${q}%,customer_name.ilike.%${q}%,customer_email.ilike.%${q}%,reference_no.ilike.%${q}%`)
       .limit(30), 'company_id'),
 
-    // Callbacks: search by direct columns
-    scope(supabaseAdmin.from('callbacks')
-      .select('id, customer_name, customer_phone, customer_email, company_id, created_at, status, callback_at')
+    sc(supabaseAdmin.from('callbacks')
+      .select('id, customer_name, customer_phone, customer_email, company_id, created_at, status')
       .or(`customer_phone.ilike.%${q}%,customer_name.ilike.%${q}%,customer_email.ilike.%${q}%`)
       .limit(25), 'company_id'),
   ]);
 
-  // Merge transfers (dedup by id)
-  const seenT = new Set();
-  const transfers = [];
-  for (const res of [tPhone, tName]) {
-    for (const t of (res.data || [])) {
-      if (!seenT.has(t.id)) { seenT.add(t.id); transfers.push(t); }
-    }
-  }
-
-  // Group all results by normalized phone (or email, or name as fallback)
+  // Group results by normalized phone (deduplication across companies and record types)
   const groups = {};
 
   const addToGroup = (type, item, phone, email, name) => {
     const key = normPhone(phone) || email || name || item.id;
     if (!groups[key]) {
-      groups[key] = {
-        key,
-        phone:     phone || null,
-        email:     email || null,
-        name:      name  || null,
-        transfers: [],
-        sales:     [],
-        callbacks: [],
-        companies: new Set(),
-        last_activity: null,
-      };
+      groups[key] = { key, phone: phone || null, email: email || null, name: name || null, transfers: [], sales: [], callbacks: [], companies: new Set(), last_activity: null };
     }
     const g = groups[key];
     g[type + 's'].push(item);
@@ -92,19 +118,12 @@ router.get('/search', asyncHandler(async (req, res) => {
     if (ts && (!g.last_activity || ts > g.last_activity)) g.last_activity = ts;
   };
 
-  transfers.forEach(t => {
-    const fd   = t.form_data || {};
-    const phone = fd.customer_phone || fd.Phone || '';
-    const email = fd.customer_email || fd.Email || '';
-    const name  = fd.customer_name  || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || '';
-    addToGroup('transfer', t, phone, email, name);
+  (tRes.data || []).forEach(t => {
+    const fd = t.form_data || {};
+    addToGroup('transfer', t, fdPhone(fd), fdEmail(fd), fdName(fd));
   });
-
-  (sRes.data || []).forEach(s =>
-    addToGroup('sale', s, s.customer_phone, s.customer_email, s.customer_name));
-
-  (cbRes.data || []).forEach(c =>
-    addToGroup('callback', c, c.customer_phone, c.customer_email, c.customer_name));
+  (sRes.data || []).forEach(s  => addToGroup('sale',     s,  s.customer_phone,  s.customer_email,  s.customer_name));
+  (cbRes.data || []).forEach(c => addToGroup('callback', c,  c.customer_phone,  c.customer_email,  c.customer_name));
 
   const result = Object.values(groups)
     .map(g => ({ ...g, companies: [...g.companies], total: g.transfers.length + g.sales.length + g.callbacks.length }))
@@ -126,36 +145,31 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const { allowed, superadmin } = await checkAccess(userId, companyId);
   if (!allowed) return res.status(403).json({ error: 'Permission denied' });
 
-  const scope = (q, col) => superadmin ? q : q.eq(col, companyId);
+  const sc = (query, col) => scopeQ(query, col, companyId, superadmin);
 
-  // Build OR filter for transfers (JSONB)
-  const tParts = [];
-  if (phone) tParts.push(`form_data->>customer_phone.ilike.%${phone}%`);
-  if (email) tParts.push(`form_data->>customer_email.ilike.%${email}%`);
-  if (name)  tParts.push(`form_data->>customer_name.ilike.%${name}%`);
+  // Build JSONB OR filter for transfers (handles all FormBuilder key conventions)
+  const tOr = buildTransferOr(phone, email, name);
 
-  // Build OR filter for sales/callbacks (direct columns)
+  // Sales/callbacks use direct columns
   const sParts = [];
   if (phone) { sParts.push(`customer_phone.ilike.%${phone}%`); sParts.push(`customer_phone_2.ilike.%${phone}%`); }
-  if (email) sParts.push(`customer_email.ilike.%${email}%`);
-  if (name)  sParts.push(`customer_name.ilike.%${name}%`);
+  if (email)  sParts.push(`customer_email.ilike.%${email}%`);
+  if (name)   sParts.push(`customer_name.ilike.%${name}%`);
 
   const cbParts = [];
   if (phone) cbParts.push(`customer_phone.ilike.%${phone}%`);
   if (email) cbParts.push(`customer_email.ilike.%${email}%`);
   if (name)  cbParts.push(`customer_name.ilike.%${name}%`);
 
-  const fetchTransfers = tParts.length > 0
-    ? scope(supabaseAdmin.from('transfers').select('*').or(tParts.join(',')).limit(50), 'company_id')
-    : { data: [] };
-
   const [tRes, sRes, cbRes] = await Promise.all([
-    fetchTransfers,
+    tOr
+      ? sc(supabaseAdmin.from('transfers').select('*').or(tOr).limit(50), 'company_id')
+      : { data: [] },
     sParts.length > 0
-      ? scope(supabaseAdmin.from('sales').select('*').or(sParts.join(',')).limit(50), 'company_id')
+      ? sc(supabaseAdmin.from('sales').select('*').or(sParts.join(',')).limit(50), 'company_id')
       : { data: [] },
     cbParts.length > 0
-      ? scope(supabaseAdmin.from('callbacks').select('*').or(cbParts.join(',')).limit(50), 'company_id')
+      ? sc(supabaseAdmin.from('callbacks').select('*').or(cbParts.join(',')).limit(50), 'company_id')
       : { data: [] },
   ]);
 
@@ -163,27 +177,40 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const sales     = sRes.data || [];
   const callbacks = cbRes.data || [];
 
-  // Collect unique user IDs and company IDs
+  // Collect ALL user IDs and company IDs across all records + compliance edit history
   const userIds = new Set();
   const coIds   = new Set();
 
   transfers.forEach(t => {
-    if (t.created_by)          userIds.add(t.created_by);
-    if (t.assigned_closer_id)  userIds.add(t.assigned_closer_id);
-    if (t.company_id)          coIds.add(t.company_id);
+    if (t.created_by)         userIds.add(t.created_by);
+    if (t.assigned_closer_id) userIds.add(t.assigned_closer_id);
+    if (t.company_id)         coIds.add(t.company_id);
   });
   sales.forEach(s => {
     if (s.closer_id)    userIds.add(s.closer_id);
     if (s.submitted_by) userIds.add(s.submitted_by);
     if (s.fronter_id)   userIds.add(s.fronter_id);
     if (s.company_id)   coIds.add(s.company_id);
+    // Transfer company (fronter) is resolved via transfer_id below
   });
   callbacks.forEach(c => {
     if (c.user_id)    userIds.add(c.user_id);
     if (c.company_id) coIds.add(c.company_id);
   });
 
-  // Fetch profiles and companies
+  // Resolve fronter companies from linked transfers
+  const transferIds = sales.filter(s => s.transfer_id).map(s => s.transfer_id);
+  const linkedTransfers = transferIds.length > 0
+    ? (await supabaseAdmin.from('transfers').select('id, company_id, created_by').in('id', transferIds)).data || []
+    : [];
+  linkedTransfers.forEach(t => {
+    if (t.company_id) coIds.add(t.company_id);
+    if (t.created_by) userIds.add(t.created_by);
+  });
+  const linkedTransferMap = {};
+  linkedTransfers.forEach(t => { linkedTransferMap[t.id] = t; });
+
+  // Fetch profiles and companies in parallel
   const [profilesRes, companiesRes] = await Promise.all([
     userIds.size > 0
       ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', [...userIds])
@@ -201,103 +228,190 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const companies = {};
   (companiesRes.data || []).forEach(c => { companies[c.id] = c; });
 
-  // Fetch callback audit logs for all callbacks
+  // Fetch callback audit logs
   const cbIds = callbacks.map(c => c.id);
   const auditData = cbIds.length > 0
     ? (await supabaseAdmin.from('callback_audit_log').select('*').in('callback_id', cbIds).order('created_at', { ascending: true })).data || []
     : [];
 
-  // ─── Timeline ─────────────────────────────────────────────────────────────
+  const nameOf  = (uid) => profiles[uid]?.name || 'Unknown';
+  const compOf  = (cid) => companies[cid]?.name || companies[cid]?.slug || 'Unknown Company';
+
+  // ─── Build timeline (full journey: fronter → closer → compliance → callback) ──
+
   const timeline = [];
 
+  // 1. Transfers (fronter activity)
   transfers.forEach(t => {
-    const fd = t.form_data || {};
+    const fd           = t.form_data || {};
+    const customerName = fdName(fd) || 'Lead';
+    const fronterName  = nameOf(t.created_by);
+    const fronterCo    = compOf(t.company_id);
+
     timeline.push({
       id:          `t_create_${t.id}`,
       type:        'transfer',
       action:      'created',
-      label:       'Transfer created',
-      detail:      `By ${profiles[t.created_by]?.name || 'Unknown'} → ${companies[t.company_id]?.name || 'Unknown'}`,
-      actor:       profiles[t.created_by]?.name || 'Unknown',
-      company:     companies[t.company_id]?.name || null,
+      label:       'Lead entered by fronter',
+      detail:      `Customer: ${customerName} · Phone: ${fdPhone(fd) || '–'} · Email: ${fdEmail(fd) || '–'}`,
+      actor:       fronterName,
+      actor_role:  'Fronter',
+      company:     fronterCo,
       occurred_at: t.created_at,
       entity_id:   t.id,
       status:      t.status,
     });
-    if (t.assigned_closer_id && t.updated_at && t.updated_at !== t.created_at) {
-      timeline.push({
-        id:          `t_assign_${t.id}`,
-        type:        'transfer',
-        action:      'assigned',
-        label:       'Assigned to closer',
-        detail:      `Closer: ${profiles[t.assigned_closer_id]?.name || 'Unknown'}`,
-        actor:       profiles[t.assigned_closer_id]?.name || 'Unknown',
-        occurred_at: t.updated_at,
-        entity_id:   t.id,
-      });
-    }
-  });
 
-  sales.forEach(s => {
-    const actor = s.closer_id || s.submitted_by;
-    timeline.push({
-      id:          `s_create_${s.id}`,
-      type:        'sale',
-      action:      'created',
-      label:       'Sale created',
-      detail:      `By ${profiles[actor]?.name || 'Unknown'} · Ref: ${s.reference_no || '–'}`,
-      actor:       profiles[actor]?.name || 'Unknown',
-      company:     companies[s.company_id]?.name || null,
-      occurred_at: s.created_at,
-      entity_id:   s.id,
-      status:      s.status,
-      reference_no: s.reference_no,
-    });
-    if (Array.isArray(s.edit_history)) {
-      s.edit_history.forEach((h, i) => {
-        const actionLabel = h.action === 'approved' ? 'Sale approved'
-          : h.action === 'returned' ? 'Sale returned for revision'
-          : 'Sale updated';
+    // Transfer assigned to closer
+    if (t.assigned_closer_id) {
+      const ts = t.updated_at && t.updated_at !== t.created_at ? t.updated_at : null;
+      if (ts) {
         timeline.push({
-          id:          `s_edit_${s.id}_${i}`,
-          type:        'sale',
-          action:      h.action || 'updated',
-          label:       actionLabel,
-          detail:      h.note || h.reason || '',
-          actor:       h.editor_name || 'Unknown',
+          id:          `t_assign_${t.id}`,
+          type:        'transfer',
+          action:      'assigned',
+          label:       'Transfer sent to closer',
+          detail:      `Assigned to closer: ${nameOf(t.assigned_closer_id)}`,
+          actor:       fronterName,
+          actor_role:  'Fronter',
+          company:     fronterCo,
+          occurred_at: ts,
+          entity_id:   t.id,
+        });
+      }
+    }
+
+    // Transfer edit history (if any edits by fronter manager)
+    if (Array.isArray(t.edit_history)) {
+      t.edit_history.forEach((h, i) => {
+        timeline.push({
+          id:          `t_edit_${t.id}_${i}`,
+          type:        'transfer',
+          action:      'updated',
+          label:       'Transfer record edited',
+          detail:      h.reason || h.note || 'Record was updated',
+          actor:       h.editor_name || nameOf(h.editor_id) || 'Unknown',
+          actor_role:  'Manager',
+          company:     fronterCo,
           occurred_at: h.edited_at,
-          entity_id:   s.id,
-          status:      h.new_status,
+          entity_id:   t.id,
         });
       });
     }
   });
 
+  // 2. Sales (closer + compliance activity)
+  sales.forEach(s => {
+    const closerName = nameOf(s.closer_id || s.submitted_by);
+    const closerCo   = compOf(s.company_id);
+
+    // Find associated fronter (via fronter_id or linked transfer)
+    let fronterName = null;
+    let fronterCo   = null;
+    if (s.fronter_id && profiles[s.fronter_id]) {
+      fronterName = nameOf(s.fronter_id);
+    }
+    if (s.transfer_id && linkedTransferMap[s.transfer_id]) {
+      const lt = linkedTransferMap[s.transfer_id];
+      if (!fronterName) fronterName = nameOf(lt.created_by);
+      fronterCo = compOf(lt.company_id);
+    }
+
+    // Sale created
+    timeline.push({
+      id:          `s_create_${s.id}`,
+      type:        'sale',
+      action:      'created',
+      label:       'Sale record created',
+      detail:      `Ref: ${s.reference_no || '–'} · Plan: ${s.plan || '–'} · Disposition: ${s.closer_disposition || '–'}${fronterName ? ` · Fronted by: ${fronterName}` : ''}`,
+      actor:       closerName,
+      actor_role:  'Closer',
+      company:     closerCo,
+      occurred_at: s.created_at,
+      entity_id:   s.id,
+      status:      s.status,
+      reference_no: s.reference_no,
+    });
+
+    // Sale submitted for compliance review
+    if (s.submitted_for_review_at) {
+      timeline.push({
+        id:          `s_submit_${s.id}`,
+        type:        'sale',
+        action:      'submitted',
+        label:       'Submitted for compliance review',
+        detail:      `Ref: ${s.reference_no || '–'} submitted by ${closerName}`,
+        actor:       closerName,
+        actor_role:  'Closer',
+        company:     closerCo,
+        occurred_at: s.submitted_for_review_at,
+        entity_id:   s.id,
+        status:      'pending_review',
+      });
+    }
+
+    // All compliance/edit history events (approved, returned, updated)
+    if (Array.isArray(s.edit_history)) {
+      s.edit_history.forEach((h, i) => {
+        const isApproved  = h.action === 'approved';
+        const isReturned  = h.action === 'returned';
+        const label = isApproved ? 'Compliance approved sale'
+          : isReturned  ? 'Sale returned for revision'
+          : 'Sale record updated';
+        const role  = (isApproved || isReturned) ? 'Compliance' : 'Manager';
+        timeline.push({
+          id:          `s_edit_${s.id}_${i}`,
+          type:        'sale',
+          action:      h.action || 'updated',
+          label,
+          detail:      h.note || h.reason || '',
+          actor:       h.editor_name || 'Unknown',
+          actor_role:  role,
+          company:     closerCo,
+          occurred_at: h.edited_at,
+          entity_id:   s.id,
+          status:      h.new_status || h.previous_status,
+        });
+      });
+    }
+  });
+
+  // 3. Callbacks (agent callback activity)
   callbacks.forEach(c => {
+    const agentName = nameOf(c.user_id);
+    const agentCo   = compOf(c.company_id);
+
     timeline.push({
       id:          `cb_create_${c.id}`,
       type:        'callback',
       action:      'scheduled',
       label:       'Callback scheduled',
-      detail:      `Due: ${c.callback_at ? new Date(c.callback_at).toLocaleString() : '–'}`,
-      actor:       profiles[c.user_id]?.name || 'Unknown',
-      company:     companies[c.company_id]?.name || null,
+      detail:      `Scheduled for ${c.callback_at ? new Date(c.callback_at).toLocaleString() : '–'}${c.notes ? ` · Notes: "${c.notes}"` : ''}`,
+      actor:       agentName,
+      actor_role:  'Agent',
+      company:     agentCo,
       occurred_at: c.created_at,
       entity_id:   c.id,
       status:      c.status,
     });
   });
 
+  // 4. Callback audit log events
   auditData.forEach(l => {
+    const cb       = callbacks.find(c => c.id === l.callback_id);
+    const agentCo  = cb ? compOf(cb.company_id) : null;
     timeline.push({
       id:          `audit_${l.id}`,
       type:        'callback',
       action:      l.action || 'status_change',
-      label:       l.action === 'rescheduled' ? 'Callback rescheduled' : 'Call outcome recorded',
+      label:       l.action === 'rescheduled' ? 'Callback rescheduled'
+        : `Call outcome: ${(l.new_status || '').replace(/_/g, ' ')}`,
       detail:      l.action === 'rescheduled'
-        ? `Rescheduled to ${l.new_callback_at ? new Date(l.new_callback_at).toLocaleString() : '–'}`
-        : `${l.old_status} → ${l.new_status}${l.notes ? ' · ' + l.notes : ''}`,
-      actor:       profiles[l.actor_id]?.name || 'Unknown',
+        ? `Moved to ${l.new_callback_at ? new Date(l.new_callback_at).toLocaleString() : '–'} (was ${l.old_callback_at ? new Date(l.old_callback_at).toLocaleString() : '–'})`
+        : `${l.old_status} → ${l.new_status}${l.notes ? ` · "${l.notes}"` : ''}`,
+      actor:       nameOf(l.actor_id),
+      actor_role:  'Agent',
+      company:     agentCo,
       occurred_at: l.created_at,
       entity_id:   l.callback_id,
     });
@@ -305,7 +419,8 @@ router.get('/profile', asyncHandler(async (req, res) => {
 
   timeline.sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at));
 
-  // ─── Graph ────────────────────────────────────────────────────────────────
+  // ─── Build graph (OSINT-style relationship graph) ─────────────────────────
+
   const nodes   = [];
   const edges   = [];
   const nodeSet = new Set();
@@ -316,88 +431,125 @@ router.get('/profile', asyncHandler(async (req, res) => {
     nodes.push({ data: { id, ...data } });
   };
   const addEdge = (source, target, label) => {
-    const eid = `${source}__${target}__${label}`;
+    const eid = `e_${source}__${target}__${label.replace(/\s/g, '_')}`;
     if (!edges.find(e => e.data.id === eid)) {
       edges.push({ data: { id: eid, source, target, label } });
     }
   };
 
-  const centerId = `lead_${(phone || email || name).replace(/\W/g, '_')}`;
-  addNode(centerId, { label: phone || email || name, type: 'lead' });
+  // Center node: the lead identity
+  const displayLabel = phone || email || name;
+  const centerId     = `lead_${displayLabel.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+  addNode(centerId, { label: (transfers[0] ? fdName(transfers[0].form_data) : sales[0]?.customer_name || displayLabel) + '\n' + (phone || ''), type: 'lead' });
 
+  // Transfer nodes (fronter company side)
   transfers.forEach(t => {
-    const fd  = t.form_data || {};
-    const nid = `transfer_${t.id}`;
-    addNode(nid, { label: `Transfer\n${(fd.customer_name || '').slice(0, 18)}`, type: 'transfer', status: t.status });
+    const fd     = t.form_data || {};
+    const nid    = `transfer_${t.id}`;
+    const tLabel = `Transfer\n${(fdName(fd) || '').slice(0, 16) || t.id.slice(0, 6)}`;
+    addNode(nid, { label: tLabel, type: 'transfer', status: t.status, entity_id: t.id });
     addEdge(centerId, nid, 'transfer');
-    if (t.created_by && profiles[t.created_by]) {
-      const uid = `user_${t.created_by}`;
-      addNode(uid, { label: profiles[t.created_by].name, type: 'agent' });
+
+    // Fronter agent
+    if (t.created_by) {
+      const uid = `agent_${t.created_by}`;
+      addNode(uid, { label: nameOf(t.created_by), type: 'agent', role: 'Fronter' });
       addEdge(uid, nid, 'created by');
     }
-    if (t.company_id && companies[t.company_id]) {
+
+    // Fronter company
+    if (t.company_id) {
       const coid = `company_${t.company_id}`;
-      addNode(coid, { label: companies[t.company_id].name || companies[t.company_id].slug, type: 'company' });
-      addEdge(nid, coid, 'belongs to');
+      addNode(coid, { label: compOf(t.company_id), type: 'fronter_company' });
+      addEdge(nid, coid, 'fronter co.');
+      if (t.created_by) addEdge(`agent_${t.created_by}`, coid, 'works at');
     }
   });
 
+  // Sale nodes (closer + compliance side)
   sales.forEach(s => {
-    const nid = `sale_${s.id}`;
-    addNode(nid, { label: `Sale\nRef: ${s.reference_no || s.id.slice(0, 6)}`, type: 'sale', status: s.status });
+    const nid    = `sale_${s.id}`;
+    const sLabel = `Sale\nRef: ${s.reference_no || s.id.slice(0, 6)}`;
+    addNode(nid, { label: sLabel, type: 'sale', status: s.status, entity_id: s.id });
     addEdge(centerId, nid, 'sale');
-    const actor = s.closer_id || s.submitted_by;
-    if (actor && profiles[actor]) {
-      const uid = `user_${actor}`;
-      addNode(uid, { label: profiles[actor].name, type: 'agent' });
-      addEdge(uid, nid, 'submitted by');
-    }
-    if (s.company_id && companies[s.company_id]) {
-      const coid = `company_${s.company_id}`;
-      addNode(coid, { label: companies[s.company_id].name || companies[s.company_id].slug, type: 'company' });
-      addEdge(nid, coid, 'belongs to');
-    }
+
     // Link transfer → sale
     if (s.transfer_id && nodeSet.has(`transfer_${s.transfer_id}`)) {
       addEdge(`transfer_${s.transfer_id}`, nid, 'converted to');
     }
+
+    // Closer agent
+    const actorId = s.closer_id || s.submitted_by;
+    if (actorId) {
+      const uid = `agent_${actorId}`;
+      addNode(uid, { label: nameOf(actorId), type: 'agent', role: 'Closer' });
+      addEdge(uid, nid, 'submitted');
+    }
+
+    // Closer company
+    if (s.company_id) {
+      const coid = `company_${s.company_id}`;
+      addNode(coid, { label: compOf(s.company_id), type: 'closer_company' });
+      addEdge(nid, coid, 'closer co.');
+      if (actorId) addEdge(`agent_${actorId}`, coid, 'works at');
+    }
+
+    // Fronter (via fronter_id or linked transfer)
+    if (s.fronter_id && profiles[s.fronter_id]) {
+      const uid = `agent_${s.fronter_id}`;
+      addNode(uid, { label: nameOf(s.fronter_id), type: 'agent', role: 'Fronter' });
+      addEdge(uid, nid, 'fronted');
+    }
+
+    // Compliance events from edit_history
+    if (Array.isArray(s.edit_history)) {
+      s.edit_history.filter(h => h.action === 'approved' || h.action === 'returned').forEach((h, i) => {
+        const cmpId = `compliance_${(h.editor_name || 'unknown').replace(/\s+/g, '_')}_${i}`;
+        addNode(cmpId, { label: h.editor_name || 'Compliance', type: 'compliance' });
+        addEdge(cmpId, nid, h.action === 'approved' ? 'approved' : 'returned');
+      });
+    }
   });
 
+  // Callback nodes
   callbacks.forEach(c => {
-    const nid = `callback_${c.id}`;
-    addNode(nid, { label: `Callback\n${c.status}`, type: 'callback', status: c.status });
+    const nid    = `callback_${c.id}`;
+    const cLabel = `Callback\n${(c.status || 'pending').replace(/_/g, ' ')}`;
+    addNode(nid, { label: cLabel, type: 'callback', status: c.status, entity_id: c.id });
     addEdge(centerId, nid, 'callback');
-    if (c.user_id && profiles[c.user_id]) {
-      const uid = `user_${c.user_id}`;
-      addNode(uid, { label: profiles[c.user_id].name, type: 'agent' });
-      addEdge(uid, nid, 'owned by');
+
+    if (c.user_id) {
+      const uid = `agent_${c.user_id}`;
+      addNode(uid, { label: nameOf(c.user_id), type: 'agent', role: 'Agent' });
+      addEdge(uid, nid, 'scheduled');
     }
-    if (c.company_id && companies[c.company_id]) {
+    if (c.company_id) {
       const coid = `company_${c.company_id}`;
-      addNode(coid, { label: companies[c.company_id].name || companies[c.company_id].slug, type: 'company' });
-      addEdge(nid, coid, 'belongs to');
+      addNode(coid, { label: compOf(c.company_id), type: 'fronter_company' });
+      addEdge(nid, coid, 'agent co.');
     }
   });
 
   // ─── Insights ─────────────────────────────────────────────────────────────
+
   const converted    = sales.filter(s => ['closed_won', 'sold'].includes(s.status)).length;
   const convRate     = sales.length > 0 ? Math.round((converted / sales.length) * 100) : 0;
   const allDates     = [...transfers, ...sales, ...callbacks].map(e => e.updated_at || e.created_at).filter(Boolean);
   const lastActivity = allDates.sort().at(-1) || null;
 
   const flags = [];
-  if (transfers.length + sales.length + callbacks.length > 20)
-    flags.push({ type: 'warning', msg: 'High activity volume on this lead' });
-  if (coIds.size > 2)
-    flags.push({ type: 'info', msg: `Appears in ${coIds.size} companies` });
+  if (coIds.size > 1)
+    flags.push({ type: 'info', msg: `Number appears in ${coIds.size} companies (${Object.values(companies).map(c => c.name || c.slug).join(', ')})` });
   if (userIds.size > 4)
-    flags.push({ type: 'warning', msg: `Handled by ${userIds.size} different agents` });
+    flags.push({ type: 'warning', msg: `Handled by ${userIds.size} different agents across companies` });
   const openSales = sales.filter(s => s.status === 'open').length;
   if (openSales > 1)
-    flags.push({ type: 'warning', msg: `${openSales} open/pending sales on this number` });
+    flags.push({ type: 'warning', msg: `${openSales} open/pending sales exist for this number` });
   const totalEdits = sales.reduce((acc, s) => acc + (Array.isArray(s.edit_history) ? s.edit_history.length : 0), 0);
   if (totalEdits > 5)
-    flags.push({ type: 'warning', msg: `${totalEdits} edit events across sale records` });
+    flags.push({ type: 'warning', msg: `${totalEdits} edit/compliance events on sale records` });
+  if (transfers.length + sales.length + callbacks.length > 20)
+    flags.push({ type: 'warning', msg: 'High activity volume — review for duplicates' });
 
   res.json({
     phone, email, name,
