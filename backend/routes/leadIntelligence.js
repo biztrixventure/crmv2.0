@@ -177,38 +177,53 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const sales     = sRes.data || [];
   const callbacks = cbRes.data || [];
 
-  // Collect ALL user IDs and company IDs across all records + compliance edit history
-  const userIds = new Set();
-  const coIds   = new Set();
+  // Collect user IDs and company IDs; also track which companies are fronter vs closer
+  // based on actual record types (transfer company = fronter side, sale company = closer side)
+  const userIds      = new Set();
+  const coIds        = new Set();
+  const fronterCoIds = new Set(); // companies that have transfer records
+  const closerCoIds  = new Set(); // companies that have sale records
 
   transfers.forEach(t => {
     if (t.created_by)         userIds.add(t.created_by);
     if (t.assigned_closer_id) userIds.add(t.assigned_closer_id);
-    if (t.company_id)         coIds.add(t.company_id);
+    if (t.company_id)         { coIds.add(t.company_id); fronterCoIds.add(t.company_id); }
   });
   sales.forEach(s => {
     if (s.closer_id)    userIds.add(s.closer_id);
     if (s.submitted_by) userIds.add(s.submitted_by);
     if (s.fronter_id)   userIds.add(s.fronter_id);
-    if (s.company_id)   coIds.add(s.company_id);
-    // Transfer company (fronter) is resolved via transfer_id below
+    if (s.company_id)   { coIds.add(s.company_id); closerCoIds.add(s.company_id); }
   });
   callbacks.forEach(c => {
     if (c.user_id)    userIds.add(c.user_id);
     if (c.company_id) coIds.add(c.company_id);
   });
 
-  // Resolve fronter companies from linked transfers
+  // Resolve fronter companies from sales.transfer_id chain
   const transferIds = sales.filter(s => s.transfer_id).map(s => s.transfer_id);
   const linkedTransfers = transferIds.length > 0
     ? (await supabaseAdmin.from('transfers').select('id, company_id, created_by').in('id', transferIds)).data || []
     : [];
   linkedTransfers.forEach(t => {
-    if (t.company_id) coIds.add(t.company_id);
+    if (t.company_id) { coIds.add(t.company_id); fronterCoIds.add(t.company_id); }
     if (t.created_by) userIds.add(t.created_by);
   });
   const linkedTransferMap = {};
   linkedTransfers.forEach(t => { linkedTransferMap[t.id] = t; });
+
+  // Fetch each agent's actual company memberships from user_company_roles
+  // This is the source of truth for "works at" — not inferred from records
+  const rolesData = userIds.size > 0
+    ? (await supabaseAdmin.from('user_company_roles').select('user_id, company_id').in('user_id', [...userIds])).data || []
+    : [];
+  const agentCompanyMap = {}; // user_id → Set<company_id>
+  rolesData.forEach(r => {
+    if (!r.company_id) return;
+    if (!agentCompanyMap[r.user_id]) agentCompanyMap[r.user_id] = new Set();
+    agentCompanyMap[r.user_id].add(r.company_id);
+    coIds.add(r.company_id);
+  });
 
   // Fetch profiles and companies in parallel
   const [profilesRes, companiesRes] = await Promise.all([
@@ -227,6 +242,14 @@ router.get('/profile', asyncHandler(async (req, res) => {
 
   const companies = {};
   (companiesRes.data || []).forEach(c => { companies[c.id] = c; });
+
+  // Determine visual type for a company node based on what records it has for this lead
+  // Closer role wins if ambiguous (company can be both if it has transfers AND sales)
+  const getCoType = (cid) => {
+    if (closerCoIds.has(cid))  return 'closer_company';
+    if (fronterCoIds.has(cid)) return 'fronter_company';
+    return 'fronter_company'; // fallback for callback-only companies
+  };
 
   // Fetch callback audit logs
   const cbIds = callbacks.map(c => c.id);
@@ -440,68 +463,71 @@ router.get('/profile', asyncHandler(async (req, res) => {
   // Center node: the lead identity
   const displayLabel = phone || email || name;
   const centerId     = `lead_${displayLabel.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-  addNode(centerId, { label: (transfers[0] ? fdName(transfers[0].form_data) : sales[0]?.customer_name || displayLabel) + '\n' + (phone || ''), type: 'lead' });
+  addNode(centerId, {
+    label: (transfers[0] ? fdName(transfers[0].form_data) : sales[0]?.customer_name || displayLabel) + '\n' + (phone || ''),
+    type: 'lead',
+  });
 
-  // Transfer nodes (fronter company side)
+  // Transfer nodes — fronter side records
   transfers.forEach(t => {
-    const fd     = t.form_data || {};
-    const nid    = `transfer_${t.id}`;
-    const tLabel = `Transfer\n${(fdName(fd) || '').slice(0, 16) || t.id.slice(0, 6)}`;
-    addNode(nid, { label: tLabel, type: 'transfer', status: t.status, entity_id: t.id });
+    const fd  = t.form_data || {};
+    const nid = `transfer_${t.id}`;
+    addNode(nid, { label: `Transfer\n${(fdName(fd) || '').slice(0, 16) || t.id.slice(0, 6)}`, type: 'transfer', status: t.status, entity_id: t.id });
     addEdge(centerId, nid, 'transfer');
 
-    // Fronter agent
     if (t.created_by) {
-      const uid = `agent_${t.created_by}`;
-      addNode(uid, { label: nameOf(t.created_by), type: 'agent', role: 'Fronter' });
-      addEdge(uid, nid, 'created by');
+      addNode(`agent_${t.created_by}`, { label: nameOf(t.created_by), type: 'agent', role: 'Fronter' });
+      addEdge(`agent_${t.created_by}`, nid, 'created');
     }
-
-    // Fronter company
     if (t.company_id) {
-      const coid = `company_${t.company_id}`;
-      addNode(coid, { label: compOf(t.company_id), type: 'fronter_company' });
-      addEdge(nid, coid, 'fronter co.');
-      if (t.created_by) addEdge(`agent_${t.created_by}`, coid, 'works at');
+      addNode(`company_${t.company_id}`, { label: compOf(t.company_id), type: getCoType(t.company_id) });
+      addEdge(nid, `company_${t.company_id}`, 'fronter co.');
     }
   });
 
-  // Sale nodes (closer + compliance side)
+  // Sale nodes — closer + compliance side records
   sales.forEach(s => {
-    const nid    = `sale_${s.id}`;
-    const sLabel = `Sale\nRef: ${s.reference_no || s.id.slice(0, 6)}`;
-    addNode(nid, { label: sLabel, type: 'sale', status: s.status, entity_id: s.id });
+    const nid = `sale_${s.id}`;
+    addNode(nid, { label: `Sale\nRef: ${s.reference_no || s.id.slice(0, 6)}`, type: 'sale', status: s.status, entity_id: s.id });
     addEdge(centerId, nid, 'sale');
 
-    // Link transfer → sale
-    if (s.transfer_id && nodeSet.has(`transfer_${s.transfer_id}`)) {
-      addEdge(`transfer_${s.transfer_id}`, nid, 'converted to');
+    // Link the transfer that originated this sale
+    if (s.transfer_id) {
+      if (nodeSet.has(`transfer_${s.transfer_id}`)) {
+        addEdge(`transfer_${s.transfer_id}`, nid, 'converted to');
+      } else if (linkedTransferMap[s.transfer_id]) {
+        // Transfer not in our result set — add a minimal node
+        const lt = linkedTransferMap[s.transfer_id];
+        addNode(`transfer_${s.transfer_id}`, { label: 'Transfer', type: 'transfer' });
+        addEdge(centerId, `transfer_${s.transfer_id}`, 'transfer');
+        addEdge(`transfer_${s.transfer_id}`, nid, 'converted to');
+        if (lt.company_id) {
+          addNode(`company_${lt.company_id}`, { label: compOf(lt.company_id), type: getCoType(lt.company_id) });
+          addEdge(`transfer_${s.transfer_id}`, `company_${lt.company_id}`, 'fronter co.');
+        }
+      }
     }
 
-    // Closer agent
+    // Closer agent who created/submitted the sale
     const actorId = s.closer_id || s.submitted_by;
     if (actorId) {
-      const uid = `agent_${actorId}`;
-      addNode(uid, { label: nameOf(actorId), type: 'agent', role: 'Closer' });
-      addEdge(uid, nid, 'submitted');
+      addNode(`agent_${actorId}`, { label: nameOf(actorId), type: 'agent', role: 'Closer' });
+      addEdge(`agent_${actorId}`, nid, 'submitted');
     }
 
-    // Closer company
+    // Closer company (the company the sale belongs to)
     if (s.company_id) {
-      const coid = `company_${s.company_id}`;
-      addNode(coid, { label: compOf(s.company_id), type: 'closer_company' });
-      addEdge(nid, coid, 'closer co.');
-      if (actorId) addEdge(`agent_${actorId}`, coid, 'works at');
+      addNode(`company_${s.company_id}`, { label: compOf(s.company_id), type: getCoType(s.company_id) });
+      addEdge(nid, `company_${s.company_id}`, 'closer co.');
     }
 
-    // Fronter (via fronter_id or linked transfer)
+    // Fronter agent listed on the sale record
     if (s.fronter_id && profiles[s.fronter_id]) {
-      const uid = `agent_${s.fronter_id}`;
-      addNode(uid, { label: nameOf(s.fronter_id), type: 'agent', role: 'Fronter' });
-      addEdge(uid, nid, 'fronted');
+      addNode(`agent_${s.fronter_id}`, { label: nameOf(s.fronter_id), type: 'agent', role: 'Fronter' });
+      addEdge(`agent_${s.fronter_id}`, nid, 'fronted');
     }
 
-    // Compliance events from edit_history
+    // Compliance approval/return events from edit_history
     if (Array.isArray(s.edit_history)) {
       s.edit_history.filter(h => h.action === 'approved' || h.action === 'returned').forEach((h, i) => {
         const cmpId = `compliance_${(h.editor_name || 'unknown').replace(/\s+/g, '_')}_${i}`;
@@ -511,23 +537,36 @@ router.get('/profile', asyncHandler(async (req, res) => {
     }
   });
 
-  // Callback nodes
+  // Callback nodes — can be from either fronter or closer company
   callbacks.forEach(c => {
-    const nid    = `callback_${c.id}`;
-    const cLabel = `Callback\n${(c.status || 'pending').replace(/_/g, ' ')}`;
-    addNode(nid, { label: cLabel, type: 'callback', status: c.status, entity_id: c.id });
+    const nid = `callback_${c.id}`;
+    addNode(nid, { label: `Callback\n${(c.status || 'pending').replace(/_/g, ' ')}`, type: 'callback', status: c.status, entity_id: c.id });
     addEdge(centerId, nid, 'callback');
 
     if (c.user_id) {
-      const uid = `agent_${c.user_id}`;
-      addNode(uid, { label: nameOf(c.user_id), type: 'agent', role: 'Agent' });
-      addEdge(uid, nid, 'scheduled');
+      addNode(`agent_${c.user_id}`, { label: nameOf(c.user_id), type: 'agent', role: 'Agent' });
+      addEdge(`agent_${c.user_id}`, nid, 'scheduled');
     }
     if (c.company_id) {
-      const coid = `company_${c.company_id}`;
-      addNode(coid, { label: compOf(c.company_id), type: 'fronter_company' });
-      addEdge(nid, coid, 'agent co.');
+      // Use getCoType so callback companies get the correct fronter/closer visual type
+      addNode(`company_${c.company_id}`, { label: compOf(c.company_id), type: getCoType(c.company_id) });
+      addEdge(nid, `company_${c.company_id}`, 'co.');
     }
+  });
+
+  // ── "works at" edges from real user_company_roles data ────────────────────
+  // Replaces the old record-inferred approach so agents always point to their
+  // actual company, not whichever record they happen to have created.
+  Object.entries(agentCompanyMap).forEach(([uid, coIdSet]) => {
+    const agentNodeId = `agent_${uid}`;
+    if (!nodeSet.has(agentNodeId)) return; // only wire up agents already in the graph
+    coIdSet.forEach(coId => {
+      const coNodeId = `company_${coId}`;
+      // Only draw the edge if that company is relevant to this lead's graph
+      if (nodeSet.has(coNodeId)) {
+        addEdge(agentNodeId, coNodeId, 'works at');
+      }
+    });
   });
 
   // ─── Insights ─────────────────────────────────────────────────────────────
@@ -537,9 +576,16 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const allDates     = [...transfers, ...sales, ...callbacks].map(e => e.updated_at || e.created_at).filter(Boolean);
   const lastActivity = allDates.sort().at(-1) || null;
 
+  // Companies that have actual records for this lead (excludes role-only companies)
+  const recordCoIds = new Set([
+    ...fronterCoIds,
+    ...closerCoIds,
+    ...callbacks.map(c => c.company_id).filter(Boolean),
+  ]);
+
   const flags = [];
-  if (coIds.size > 1)
-    flags.push({ type: 'info', msg: `Number appears in ${coIds.size} companies (${Object.values(companies).map(c => c.name || c.slug).join(', ')})` });
+  if (recordCoIds.size > 1)
+    flags.push({ type: 'info', msg: `Number appears in ${recordCoIds.size} companies (${[...recordCoIds].map(id => companies[id]?.name || companies[id]?.slug || id).join(', ')})` });
   if (userIds.size > 4)
     flags.push({ type: 'warning', msg: `Handled by ${userIds.size} different agents across companies` });
   const openSales = sales.filter(s => s.status === 'open').length;
@@ -564,7 +610,7 @@ router.get('/profile', asyncHandler(async (req, res) => {
       total_contacts:  transfers.length + callbacks.length,
       converted,
       conv_rate:       convRate,
-      companies_count: coIds.size,
+      companies_count: recordCoIds.size,
       agents_count:    userIds.size,
       last_activity:   lastActivity,
     },
