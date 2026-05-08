@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DollarSign, Users, Calendar, Hash, FileText, Building2 } from 'lucide-react';
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
@@ -97,9 +97,35 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     setFormData(prev => ({ ...prev, [fronterField.name]: transfer.created_by }));
   }, [transfer?.created_by, fronters, fields]);
 
+  const [zipLoading, setZipLoading] = useState(false);
+  const [zipInfo,    setZipInfo]    = useState(null);
+  const zipTimer = useRef(null);
+
   const setDynField = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+  };
+
+  const handleZipChange = (fieldName, val) => {
+    setDynField(fieldName, val);
+    clearTimeout(zipTimer.current);
+    if (val.replace(/\D/g, '').length < 5) { setZipInfo(null); return; }
+    zipTimer.current = setTimeout(async () => {
+      setZipLoading(true);
+      try {
+        const res = await client.get(`zipcode/${val.trim()}`);
+        setZipInfo(res.data);
+        setFormData(prev => {
+          const next = { ...prev };
+          const cityF  = fields.find(f => ['City','city','customer_city'].includes(f.name));
+          const stateF = fields.find(f => ['State','state','customer_state'].includes(f.name));
+          if (cityF  && !prev[cityF.name])  next[cityF.name]  = res.data.city;
+          if (stateF && !prev[stateF.name]) next[stateF.name] = res.data.state;
+          return next;
+        });
+      } catch { setZipInfo(null); }
+      finally { setZipLoading(false); }
+    }, 500);
   };
 
   const validate = () => {
@@ -254,9 +280,30 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </select>
       );
     }
+    if (field.field_type === 'zip') {
+      return (
+        <div className="relative">
+          <input type="text" value={val}
+            onChange={e => handleZipChange(field.name, e.target.value)}
+            required={field.is_required} placeholder={ph || 'e.g. 90210'}
+            className={`input pr-8 ${errClass}`} maxLength={10} />
+          {zipLoading && (
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2"
+                style={{ borderColor: 'var(--color-primary-600)' }} />
+            </div>
+          )}
+          {zipInfo && val.replace(/\D/g, '').length >= 5 && (
+            <p className="text-xs mt-1 flex items-center gap-1"
+              style={{ color: 'var(--color-text-secondary)' }}>
+              📍 {zipInfo.city}, {zipInfo.state}
+            </p>
+          )}
+        </div>
+      );
+    }
     const inputType =
       field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
-      : field.field_type === 'zip' ? 'text'
       : field.field_type;
     return (
       <input type={inputType} value={val} onChange={onChange}

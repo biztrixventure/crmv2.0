@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -140,6 +140,9 @@ const StaffShell = () => {
   const [formData, setFormData]             = useState({});
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
+  const [zipFronterLoading, setZipFronterLoading]   = useState(false);
+  const [zipFronterInfo,    setZipFronterInfo]       = useState(null);
+  const zipFronterTimer = useRef(null);
 
   // Local phone filter for fronter's My Leads list
   const [leadSearch, setLeadSearch] = useState('');
@@ -293,6 +296,7 @@ const StaffShell = () => {
       await createTransfer({ ...formData });
       setShowCreateForm(false);
       setFormData({});
+      setZipFronterInfo(null);
       fetchStats();
       fetchTransfers({ date_from, date_to });
     } catch (err) {
@@ -300,6 +304,28 @@ const StaffShell = () => {
     } finally {
       setTransferSubmitting(false);
     }
+  };
+
+  const handleFronterZipChange = (fieldName, val, allFields) => {
+    setFormData(prev => ({ ...prev, [fieldName]: val }));
+    clearTimeout(zipFronterTimer.current);
+    if (val.replace(/\D/g, '').length < 5) { setZipFronterInfo(null); return; }
+    zipFronterTimer.current = setTimeout(async () => {
+      setZipFronterLoading(true);
+      try {
+        const res = await client.get(`zipcode/${val.trim()}`);
+        setZipFronterInfo(res.data);
+        setFormData(prev => {
+          const next = { ...prev };
+          const cityF  = allFields.find(f => ['City','city','customer_city'].includes(f.name));
+          const stateF = allFields.find(f => ['State','state','customer_state'].includes(f.name));
+          if (cityF  && !prev[cityF.name])  next[cityF.name]  = res.data.city;
+          if (stateF && !prev[stateF.name]) next[stateF.name] = res.data.state;
+          return next;
+        });
+      } catch { setZipFronterInfo(null); }
+      finally { setZipFronterLoading(false); }
+    }, 500);
   };
 
   const TABS = [
@@ -757,6 +783,25 @@ const StaffShell = () => {
                                   <option value="">Select plan…</option>
                                   {salePlans.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                                 </select>
+                              ) : field.field_type === 'zip' ? (
+                                <div className="relative">
+                                  <input type="text"
+                                    value={formData[field.name] || ''}
+                                    onChange={e => handleFronterZipChange(field.name, e.target.value, fields)}
+                                    className="input pr-8" required={field.is_required}
+                                    placeholder={field.placeholder || 'e.g. 90210'} maxLength={10} />
+                                  {zipFronterLoading && (
+                                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2"
+                                        style={{ borderColor: 'var(--color-primary-600)' }} />
+                                    </div>
+                                  )}
+                                  {zipFronterInfo && (formData[field.name] || '').replace(/\D/g, '').length >= 5 && (
+                                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                      📍 {zipFronterInfo.city}, {zipFronterInfo.state}
+                                    </p>
+                                  )}
+                                </div>
                               ) : (
                                 <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type}
                                   value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
@@ -768,7 +813,7 @@ const StaffShell = () => {
                       </div>
                       {transferError && <p className="text-sm text-error-600">{transferError}</p>}
                       <div className="flex gap-3 pt-4 border-t border-border">
-                        <button type="button" onClick={() => { setShowCreateForm(false); setFormData({}); }}
+                        <button type="button" onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); }}
                           className="flex-1 py-2 rounded-lg border font-semibold text-sm"
                           style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                           Cancel
