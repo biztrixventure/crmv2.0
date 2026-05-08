@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
   Calendar, User, Filter, RefreshCw, Voicemail, X,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, History, ArrowRight,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -86,6 +86,140 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
           style={{ borderColor: 'var(--color-border)' }}>
           <ChevronRight size={14} />
         </button>
+      </div>
+    </div>
+  );
+};
+
+// ── History Timeline Modal ───────────────────────────────────────────────────
+const ACTION_CONFIG = {
+  created:      { label: 'Created',       color: '#2563eb', bg: '#dbeafe' },
+  status_change:{ label: 'Status Changed',color: '#7c3aed', bg: '#ede9fe' },
+  rescheduled:  { label: 'Rescheduled',   color: '#d97706', bg: '#fef3c7' },
+};
+
+const HistoryModal = ({ callbackId, onClose }) => {
+  const [loading, setLoading]   = useState(true);
+  const [data,    setData]      = useState(null);
+
+  useEffect(() => {
+    client.get(`callbacks/${callbackId}/history`)
+      .then(r => setData(r.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [callbackId]);
+
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto"
+      style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="w-full max-w-lg rounded-2xl shadow-2xl animate-fade-in"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 rounded-t-2xl"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <div className="flex items-center gap-2">
+              <History size={16} className="text-white" />
+              <h3 className="font-bold text-base text-white">
+                Activity History
+                {data?.callback?.customer_name && (
+                  <span className="ml-2 font-normal text-white/80">— {data.callback.customer_name}</span>
+                )}
+              </h3>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
+              <X size={15} className="text-white" />
+            </button>
+          </div>
+
+          <div className="px-5 py-4 max-h-[70vh] overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center py-10">
+                <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" />
+              </div>
+            ) : !data ? (
+              <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>
+                Failed to load history.
+              </p>
+            ) : (
+              <div className="relative">
+                {/* Vertical line */}
+                <div className="absolute left-4 top-2 bottom-2 w-0.5"
+                  style={{ backgroundColor: 'var(--color-border)' }} />
+
+                <div className="space-y-4 pl-10">
+                  {data.timeline.map((item, i) => {
+                    const cfg = ACTION_CONFIG[item.action] || ACTION_CONFIG.status_change;
+                    return (
+                      <div key={i} className="relative">
+                        {/* Dot */}
+                        <div className="absolute -left-10 top-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                          style={{ backgroundColor: cfg.color }}>
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                        </div>
+
+                        <div className="rounded-xl p-3"
+                          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                          <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                              style={{ backgroundColor: cfg.bg, color: cfg.color }}>
+                              {cfg.label}
+                            </span>
+                            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                              {fmt(item.occurred_at)}
+                            </span>
+                          </div>
+
+                          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+                            by {item.actor_name}
+                          </p>
+
+                          {/* Status change */}
+                          {item.action === 'status_change' && item.old_status && (
+                            <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                              <StatusBadge status={item.old_status} />
+                              <ArrowRight size={11} />
+                              <StatusBadge status={item.new_status} />
+                            </div>
+                          )}
+
+                          {/* Created — show scheduled time */}
+                          {item.action === 'created' && item.callback_at && (
+                            <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                              <Calendar size={11} />
+                              <span>Scheduled for <strong>{fmt(item.callback_at)}</strong></span>
+                            </div>
+                          )}
+
+                          {/* Reschedule */}
+                          {item.action === 'rescheduled' && (
+                            <div className="text-xs space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <div className="flex items-center gap-1.5">
+                                <span className="line-through">{fmt(item.old_callback_at)}</span>
+                                <ArrowRight size={10} />
+                                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>
+                                  {fmt(item.new_callback_at)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {item.notes && (
+                            <p className="text-xs italic mt-1.5 px-2 py-1 rounded-lg"
+                              style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                              "{item.notes}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -176,9 +310,12 @@ const CallbacksOverview = ({ user }) => {
   const [statusFilter,   setStatusFilter]   = useState('all');
   const [memberFilter,   setMemberFilter]   = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFrom,       setDateFrom]       = useState('');
+  const [dateTo,         setDateTo]         = useState('');
   const [stats,          setStats]          = useState({ pending: 0, overdue: 0, completed: 0 });
   const [updatingId,     setUpdatingId]     = useState(null);
   const [outcomeModal,   setOutcomeModal]   = useState(null);
+  const [historyId,      setHistoryId]      = useState(null);
 
   const cid = user?.company_id;
 
@@ -195,8 +332,10 @@ const CallbacksOverview = ({ user }) => {
     if (!cid) return;
     try {
       const base = { company_id: cid, limit: 1, page: 1 };
-      if (memberFilter)             base.user_id  = memberFilter;
-      if (priorityFilter !== 'all') base.priority = priorityFilter;
+      if (memberFilter)             base.user_id   = memberFilter;
+      if (priorityFilter !== 'all') base.priority  = priorityFilter;
+      if (dateFrom)                 base.date_from = dateFrom;
+      if (dateTo)                   base.date_to   = dateTo;
       const [pRes, cRes, oRes] = await Promise.all([
         client.get('callbacks', { params: { ...base, status: 'pending' } }),
         client.get('callbacks', { params: { ...base, status: 'completed' } }),
@@ -208,7 +347,7 @@ const CallbacksOverview = ({ user }) => {
         overdue:   oRes.data.total || 0,
       });
     } catch {}
-  }, [cid, memberFilter, priorityFilter]);
+  }, [cid, memberFilter, priorityFilter, dateFrom, dateTo]);
 
   // Fetch paginated callbacks list
   const fetchCallbacks = useCallback(async () => {
@@ -216,14 +355,16 @@ const CallbacksOverview = ({ user }) => {
     setLoading(true);
     try {
       const params = { company_id: cid, page, limit: PAGE_SIZE };
-      if (statusFilter   !== 'all') params.status   = statusFilter;
-      if (priorityFilter !== 'all') params.priority = priorityFilter;
-      if (memberFilter)             params.user_id  = memberFilter;
+      if (statusFilter   !== 'all') params.status    = statusFilter;
+      if (priorityFilter !== 'all') params.priority  = priorityFilter;
+      if (memberFilter)             params.user_id   = memberFilter;
+      if (dateFrom)                 params.date_from = dateFrom;
+      if (dateTo)                   params.date_to   = dateTo;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch {} finally { setLoading(false); }
-  }, [cid, statusFilter, priorityFilter, memberFilter, page]);
+  }, [cid, statusFilter, priorityFilter, memberFilter, dateFrom, dateTo, page]);
 
   useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
   useEffect(() => { fetchStats(); },    [fetchStats]);
@@ -231,6 +372,8 @@ const CallbacksOverview = ({ user }) => {
   const handleStatusFilter   = (v) => { setStatusFilter(v);   setPage(1); };
   const handlePriorityFilter = (v) => { setPriorityFilter(v); setPage(1); };
   const handleMemberFilter   = (v) => { setMemberFilter(v);   setPage(1); };
+  const handleDateFrom       = (v) => { setDateFrom(v);       setPage(1); };
+  const handleDateTo         = (v) => { setDateTo(v);         setPage(1); };
 
   const handleStatusConfirm = async (status, notes) => {
     if (!outcomeModal) return;
@@ -360,9 +503,31 @@ const CallbacksOverview = ({ user }) => {
           </div>
         )}
 
+        {/* Date range filter */}
+        <div className="flex items-center gap-2">
+          <Calendar size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => handleDateFrom(e.target.value)}
+            className="input py-1.5 text-sm h-auto"
+            style={{ minWidth: 140 }}
+            title="From date"
+          />
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => handleDateTo(e.target.value)}
+            className="input py-1.5 text-sm h-auto"
+            style={{ minWidth: 140 }}
+            title="To date"
+          />
+        </div>
+
         {/* Clear filters */}
-        {(statusFilter !== 'all' || priorityFilter !== 'all' || memberFilter) && (
-          <button onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setMemberFilter(''); setPage(1); }}
+        {(statusFilter !== 'all' || priorityFilter !== 'all' || memberFilter || dateFrom || dateTo) && (
+          <button onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setMemberFilter(''); setDateFrom(''); setDateTo(''); setPage(1); }}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
             style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
             <XCircle size={11} /> Clear filters
@@ -443,32 +608,40 @@ const CallbacksOverview = ({ user }) => {
                       )}
                     </div>
 
-                    {/* Manager status actions */}
-                    {cb.status === 'pending' && (
-                      <div className="flex flex-col gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => handleStatusClick(cb.id, 'completed', cb.customer_name)}
-                          disabled={updatingId === cb.id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                          style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
-                          <CheckCircle size={12} /> Mark Done
-                        </button>
-                        <button
-                          onClick={() => handleStatusClick(cb.id, 'no_answer', cb.customer_name)}
-                          disabled={updatingId === cb.id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                          style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
-                          <PhoneOff size={12} /> No Answer
-                        </button>
-                        <button
-                          onClick={() => handleStatusClick(cb.id, 'answering_machine', cb.customer_name)}
-                          disabled={updatingId === cb.id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
-                          style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
-                          <Voicemail size={12} /> Ans. Machine
-                        </button>
-                      </div>
-                    )}
+                    {/* Actions column */}
+                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                      {cb.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleStatusClick(cb.id, 'completed', cb.customer_name)}
+                            disabled={updatingId === cb.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                            style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                            <CheckCircle size={12} /> Mark Done
+                          </button>
+                          <button
+                            onClick={() => handleStatusClick(cb.id, 'no_answer', cb.customer_name)}
+                            disabled={updatingId === cb.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                            style={{ backgroundColor: '#f3f4f6', color: '#374151' }}>
+                            <PhoneOff size={12} /> No Answer
+                          </button>
+                          <button
+                            onClick={() => handleStatusClick(cb.id, 'answering_machine', cb.customer_name)}
+                            disabled={updatingId === cb.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105 disabled:opacity-50"
+                            style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+                            <Voicemail size={12} /> Ans. Machine
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setHistoryId(cb.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                        <History size={12} /> History
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -485,6 +658,13 @@ const CallbacksOverview = ({ user }) => {
           customerName={outcomeModal.customerName}
           onConfirm={handleStatusConfirm}
           onClose={() => setOutcomeModal(null)}
+        />
+      )}
+
+      {historyId && (
+        <HistoryModal
+          callbackId={historyId}
+          onClose={() => setHistoryId(null)}
         />
       )}
     </div>

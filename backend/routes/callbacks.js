@@ -27,6 +27,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const search    = req.query.search;
   const user_id   = req.query.user_id; // superadmin: filter by specific agent
   const overdue   = req.query.overdue === 'true'; // pending callbacks past their callback_at
+  const date_from = req.query.date_from; // ISO date string e.g. "2025-05-01"
+  const date_to   = req.query.date_to;   // ISO date string e.g. "2025-05-07"
   const page      = Math.max(1, parseInt(req.query.page)  || 1);
   const limit     = Math.min(200, parseInt(req.query.limit) || 50);
   const offset    = (page - 1) * limit;
@@ -51,6 +53,8 @@ router.get('/', asyncHandler(async (req, res) => {
   if (status)   query = query.eq('status', status);
   if (overdue)  query = query.eq('status', 'pending').lt('callback_at', new Date().toISOString());
   if (priority) query = query.eq('priority', priority);
+  if (date_from) query = query.gte('callback_at', date_from);
+  if (date_to)   query = query.lte('callback_at', date_to + 'T23:59:59.999Z');
   if (search) {
     // Resolve agent names → user_ids so we can OR on user_id
     let agentUserIds = [];
@@ -198,10 +202,10 @@ router.put('/:id',
     const superadmin = await isSuperAdmin(userId);
     const condition  = superadmin ? { id } : { id, user_id: userId };
 
-    // Fetch current record to capture old_status for audit log
+    // Fetch current record to capture old values for audit log
     const { data: current } = await supabaseAdmin
       .from('callbacks')
-      .select('status, customer_name, customer_phone, company_id')
+      .select('status, callback_at, customer_name, customer_phone, company_id')
       .match(condition)
       .single();
 
@@ -215,23 +219,106 @@ router.put('/:id',
     if (error) return res.status(400).json({ error: error.message });
     if (!data)  return res.status(404).json({ error: 'Callback not found or no access' });
 
-    // Audit log: fire-and-forget on status change
-    if (current && updates.status && updates.status !== current.status) {
-      supabaseAdmin.from('callback_audit_log').insert({
-        callback_id:            id,
-        company_id:             current.company_id,
-        actor_id:               userId,
-        old_status:             current.status,
-        new_status:             updates.status,
-        notes:                  updates.notes || null,
-        customer_name_snapshot: current.customer_name,
+    if (current) {
+      const auditBase = {
+        callback_id:             id,
+        company_id:              current.company_id,
+        actor_id:                userId,
+        notes:                   updates.notes || null,
+        customer_name_snapshot:  current.customer_name,
         customer_phone_snapshot: current.customer_phone || null,
-      }).then(() => {}).catch(() => {});
+      };
+
+      // Log status change
+      if (updates.status && updates.status !== current.status) {
+        supabaseAdmin.from('callback_audit_log').insert({
+          ...auditBase,
+          action:     'status_change',
+          old_status: current.status,
+          new_status: updates.status,
+        }).then(() => {}).catch(() => {});
+      }
+
+      // Log reschedule (callback_at changed, but status not changing to terminal)
+      if (updates.callback_at && updates.callback_at !== current.callback_at) {
+        supabaseAdmin.from('callback_audit_log').insert({
+          ...auditBase,
+          action:          'rescheduled',
+          old_status:      current.status,
+          new_status:      updates.status || current.status,
+          old_callback_at: current.callback_at,
+          new_callback_at: updates.callback_at,
+        }).then(() => {}).catch(() => {});
+      }
     }
 
     res.json({ callback: data });
   })
 );
+
+// ============================================================================
+// GET /callbacks/:id/history — full activity timeline for a callback
+// ============================================================================
+router.get('/:id/history', asyncHandler(async (req, res) => {
+  const { id }  = req.params;
+  const userId  = req.user.id;
+
+  const superadmin = await isSuperAdmin(userId);
+  const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  const condition  = isManager ? { id } : { id, user_id: userId };
+
+  const { data: cb, error: cbErr } = await supabaseAdmin
+    .from('callbacks')
+    .select('*')
+    .match(condition)
+    .single();
+
+  if (cbErr || !cb) return res.status(404).json({ error: 'Callback not found or no access' });
+
+  const { data: logs } = await supabaseAdmin
+    .from('callback_audit_log')
+    .select('*')
+    .eq('callback_id', id)
+    .order('created_at', { ascending: true });
+
+  const auditLogs = logs || [];
+
+  // Enrich actor names
+  const actorIds = [...new Set([cb.user_id, ...auditLogs.map(l => l.actor_id).filter(Boolean)])];
+  const { data: profiles } = await supabaseAdmin
+    .from('user_profiles')
+    .select('user_id, first_name, last_name')
+    .in('user_id', actorIds);
+  const nameMap = {};
+  (profiles || []).forEach(p => {
+    nameMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+  });
+
+  // Build timeline: created event + audit entries
+  const timeline = [
+    {
+      type:         'created',
+      action:       'created',
+      actor_name:   nameMap[cb.user_id] || 'Unknown',
+      occurred_at:  cb.created_at,
+      callback_at:  cb.callback_at,
+      notes:        cb.notes || null,
+    },
+    ...auditLogs.map(l => ({
+      type:            'audit',
+      action:          l.action || 'status_change',
+      actor_name:      nameMap[l.actor_id] || 'Unknown',
+      occurred_at:     l.created_at,
+      old_status:      l.old_status,
+      new_status:      l.new_status,
+      old_callback_at: l.old_callback_at,
+      new_callback_at: l.new_callback_at,
+      notes:           l.notes,
+    })),
+  ];
+
+  res.json({ callback: cb, timeline, agent_name: nameMap[cb.user_id] || 'Unknown' });
+}));
 
 // ============================================================================
 // DELETE /callbacks/:id
