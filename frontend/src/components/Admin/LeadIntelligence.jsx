@@ -604,7 +604,7 @@ const ProfileDrawer = ({ group, onClose }) => {
                       {profile.callbacks.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No callbacks.</p>
                       ) : profile.callbacks.map(c => {
-                        const agent   = profile.profiles?.[c.created_by || c.agent_id];
+                        const agent   = profile.profiles?.[c.user_id];
                         const company = profile.companies?.[c.company_id];
                         return (
                           <div key={c.id} className="rounded-xl overflow-hidden"

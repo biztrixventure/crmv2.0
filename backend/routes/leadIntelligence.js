@@ -194,6 +194,10 @@ router.get('/profile', asyncHandler(async (req, res) => {
     if (s.submitted_by) userIds.add(s.submitted_by);
     if (s.fronter_id)   userIds.add(s.fronter_id);
     if (s.company_id)   { coIds.add(s.company_id); closerCoIds.add(s.company_id); }
+    // edit_history stores editor_id (UUID), not editor_name — collect so profiles can be fetched
+    if (Array.isArray(s.edit_history)) {
+      s.edit_history.forEach(h => { if (h.editor_id) userIds.add(h.editor_id); });
+    }
   });
   callbacks.forEach(c => {
     if (c.user_id)    userIds.add(c.user_id);
@@ -376,20 +380,23 @@ router.get('/profile', asyncHandler(async (req, res) => {
     // All compliance/edit history events (approved, returned, updated)
     if (Array.isArray(s.edit_history)) {
       s.edit_history.forEach((h, i) => {
-        const isApproved  = h.action === 'approved';
-        const isReturned  = h.action === 'returned';
+        const isApproved      = h.action === 'approved';
+        const isReturned      = h.action === 'returned';
+        const isComplianceRole = h.role === 'compliance_manager' || isApproved || isReturned;
         const label = isApproved ? 'Compliance approved sale'
           : isReturned  ? 'Sale returned for revision'
+          : isComplianceRole ? 'Compliance updated sale'
           : 'Sale record updated';
-        const role  = (isApproved || isReturned) ? 'Compliance' : 'Manager';
+        // editor_id is the UUID stored by the backend; editor_name is NOT stored
+        const actorName = nameOf(h.editor_id);
         timeline.push({
           id:          `s_edit_${s.id}_${i}`,
           type:        'sale',
           action:      h.action || 'updated',
           label,
           detail:      h.note || h.reason || '',
-          actor:       h.editor_name || 'Unknown',
-          actor_role:  role,
+          actor:       actorName,
+          actor_role:  isComplianceRole ? 'Compliance' : 'Manager',
           company:     closerCo,
           occurred_at: h.edited_at,
           entity_id:   s.id,
@@ -528,11 +535,12 @@ router.get('/profile', asyncHandler(async (req, res) => {
     }
 
     // Compliance approval/return events from edit_history
+    // Use agent_${editor_id} as node ID so agentCompanyMap can wire the correct company
     if (Array.isArray(s.edit_history)) {
-      s.edit_history.filter(h => h.action === 'approved' || h.action === 'returned').forEach((h, i) => {
-        const cmpId = `compliance_${(h.editor_name || 'unknown').replace(/\s+/g, '_')}_${i}`;
-        addNode(cmpId, { label: h.editor_name || 'Compliance', type: 'compliance' });
-        addEdge(cmpId, nid, h.action === 'approved' ? 'approved' : 'returned');
+      s.edit_history.filter(h => (h.action === 'approved' || h.action === 'returned') && h.editor_id).forEach(h => {
+        const cmpNodeId = `agent_${h.editor_id}`;
+        addNode(cmpNodeId, { label: nameOf(h.editor_id) || 'Compliance', type: 'compliance' });
+        addEdge(cmpNodeId, nid, h.action === 'approved' ? 'approved' : 'returned');
       });
     }
   });
