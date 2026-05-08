@@ -9,32 +9,10 @@ import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useNotifications } from "../hooks/useNotifications";
-import SaleSearch from "../components/Sales/SaleSearch";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
+import LeadIntelligence from "../components/Admin/LeadIntelligence";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
-import { Search } from "lucide-react";
-
-const SaleSearchPanel = () => {
-  const { user } = useAuth();
-  return (
-    <div className="animate-fade-in">
-      <div className="mb-3">
-        <h2 className="text-base font-bold text-text flex items-center gap-2">
-          <Search size={15} style={{ color: 'var(--color-primary-600)' }} />
-          Sale Record Search
-        </h2>
-        <p className="text-text-secondary text-xs mt-0.5">
-          Search by customer name, phone, reference no, VIN, or email.
-        </p>
-      </div>
-      <div className="rounded-xl border p-4"
-        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-        <SaleSearch companyId={user?.company_id} user={user} />
-      </div>
-    </div>
-  );
-};
 
 // ============================================================================
 // AdminPanel — main component
@@ -63,7 +41,7 @@ const AdminPanel = () => {
     { id: "dashboard",   label: "Dashboard"    },
     ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"    }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
-    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Sale Search"  }] : []),
+    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"  }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"     }] : []),
   ];
 
@@ -97,7 +75,7 @@ const AdminPanel = () => {
           ) : (
             <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
               {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
-              {activeTab === "sale-search" && <SaleSearchPanel />}
+              {activeTab === "sale-search" && <LeadIntelligence />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>
