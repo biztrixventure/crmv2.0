@@ -177,24 +177,27 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const sales     = sRes.data || [];
   const callbacks = cbRes.data || [];
 
-  // Collect user IDs and company IDs; also track which companies are fronter vs closer
-  // based on actual record types (transfer company = fronter side, sale company = closer side)
+  // ── Step 1: Collect IDs from primary records ───────────────────────────────
   const userIds      = new Set();
   const coIds        = new Set();
-  const fronterCoIds = new Set(); // companies that have transfer records
-  const closerCoIds  = new Set(); // companies that have sale records
+  const fronterCoIds = new Set();
+  const closerCoIds  = new Set();
 
   transfers.forEach(t => {
     if (t.created_by)         userIds.add(t.created_by);
     if (t.assigned_closer_id) userIds.add(t.assigned_closer_id);
     if (t.company_id)         { coIds.add(t.company_id); fronterCoIds.add(t.company_id); }
+    // Transfer edit_history editors
+    if (Array.isArray(t.edit_history)) {
+      t.edit_history.forEach(h => { if (h.editor_id) userIds.add(h.editor_id); });
+    }
   });
   sales.forEach(s => {
     if (s.closer_id)    userIds.add(s.closer_id);
     if (s.submitted_by) userIds.add(s.submitted_by);
     if (s.fronter_id)   userIds.add(s.fronter_id);
     if (s.company_id)   { coIds.add(s.company_id); closerCoIds.add(s.company_id); }
-    // edit_history stores editor_id (UUID), not editor_name — collect so profiles can be fetched
+    // edit_history stores editor_id (UUID) — collect all editors (compliance + managers)
     if (Array.isArray(s.edit_history)) {
       s.edit_history.forEach(h => { if (h.editor_id) userIds.add(h.editor_id); });
     }
@@ -204,11 +207,24 @@ router.get('/profile', asyncHandler(async (req, res) => {
     if (c.company_id) coIds.add(c.company_id);
   });
 
-  // Resolve fronter companies from sales.transfer_id chain
+  // ── Step 2: Fetch secondary data in parallel (audit logs + linked transfers)
+  // Must happen before profile fetch so audit actor IDs are captured
+  const cbIds       = callbacks.map(c => c.id);
   const transferIds = sales.filter(s => s.transfer_id).map(s => s.transfer_id);
-  const linkedTransfers = transferIds.length > 0
-    ? (await supabaseAdmin.from('transfers').select('id, company_id, created_by').in('id', transferIds)).data || []
-    : [];
+
+  const [linkedTransfersRes, auditRes] = await Promise.all([
+    transferIds.length > 0
+      ? supabaseAdmin.from('transfers').select('id, company_id, created_by').in('id', transferIds)
+      : { data: [] },
+    cbIds.length > 0
+      ? supabaseAdmin.from('callback_audit_log').select('*').in('callback_id', cbIds).order('created_at', { ascending: true })
+      : { data: [] },
+  ]);
+
+  const linkedTransfers = linkedTransfersRes.data || [];
+  const auditData       = auditRes.data || [];
+
+  // Process linked transfers
   linkedTransfers.forEach(t => {
     if (t.company_id) { coIds.add(t.company_id); fronterCoIds.add(t.company_id); }
     if (t.created_by) userIds.add(t.created_by);
@@ -216,8 +232,10 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const linkedTransferMap = {};
   linkedTransfers.forEach(t => { linkedTransferMap[t.id] = t; });
 
-  // Fetch each agent's actual company memberships from user_company_roles
-  // This is the source of truth for "works at" — not inferred from records
+  // Collect audit log actor IDs so their names resolve in the timeline
+  auditData.forEach(l => { if (l.actor_id) userIds.add(l.actor_id); });
+
+  // ── Step 3: Fetch user roles, profiles, companies ─────────────────────────
   const rolesData = userIds.size > 0
     ? (await supabaseAdmin.from('user_company_roles').select('user_id, company_id').in('user_id', [...userIds])).data || []
     : [];
@@ -229,7 +247,6 @@ router.get('/profile', asyncHandler(async (req, res) => {
     coIds.add(r.company_id);
   });
 
-  // Fetch profiles and companies in parallel
   const [profilesRes, companiesRes] = await Promise.all([
     userIds.size > 0
       ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', [...userIds])
@@ -247,19 +264,12 @@ router.get('/profile', asyncHandler(async (req, res) => {
   const companies = {};
   (companiesRes.data || []).forEach(c => { companies[c.id] = c; });
 
-  // Determine visual type for a company node based on what records it has for this lead
-  // Closer role wins if ambiguous (company can be both if it has transfers AND sales)
+  // Closer role wins when a company has both transfer and sale records
   const getCoType = (cid) => {
     if (closerCoIds.has(cid))  return 'closer_company';
     if (fronterCoIds.has(cid)) return 'fronter_company';
-    return 'fronter_company'; // fallback for callback-only companies
+    return 'fronter_company'; // callback-only companies default to fronter visual
   };
-
-  // Fetch callback audit logs
-  const cbIds = callbacks.map(c => c.id);
-  const auditData = cbIds.length > 0
-    ? (await supabaseAdmin.from('callback_audit_log').select('*').in('callback_id', cbIds).order('created_at', { ascending: true })).data || []
-    : [];
 
   const nameOf  = (uid) => profiles[uid]?.name || 'Unknown';
   const compOf  = (cid) => companies[cid]?.name || companies[cid]?.slug || 'Unknown Company';
@@ -534,13 +544,21 @@ router.get('/profile', asyncHandler(async (req, res) => {
       addEdge(`agent_${s.fronter_id}`, nid, 'fronted');
     }
 
-    // Compliance approval/return events from edit_history
-    // Use agent_${editor_id} as node ID so agentCompanyMap can wire the correct company
+    // Compliance/edit history actors — any editor_id in edit_history gets a node.
+    // Use agent_${editor_id} as node ID so agentCompanyMap wires the correct company.
+    // Compliance role gets 'compliance' type (red pentagon); managers get 'agent' type.
     if (Array.isArray(s.edit_history)) {
-      s.edit_history.filter(h => (h.action === 'approved' || h.action === 'returned') && h.editor_id).forEach(h => {
-        const cmpNodeId = `agent_${h.editor_id}`;
-        addNode(cmpNodeId, { label: nameOf(h.editor_id) || 'Compliance', type: 'compliance' });
-        addEdge(cmpNodeId, nid, h.action === 'approved' ? 'approved' : 'returned');
+      s.edit_history.filter(h => h.editor_id).forEach(h => {
+        const nodeId       = `agent_${h.editor_id}`;
+        const isCompliance = h.role === 'compliance_manager' || h.action === 'approved' || h.action === 'returned';
+        // Only set node type on first encounter (addNode skips duplicates)
+        if (!nodeSet.has(nodeId)) {
+          addNode(nodeId, { label: nameOf(h.editor_id) || (isCompliance ? 'Compliance' : 'Manager'), type: isCompliance ? 'compliance' : 'agent' });
+        }
+        const edgeLabel = h.action === 'approved' ? 'approved'
+          : h.action === 'returned' ? 'returned'
+          : 'reviewed';
+        addEdge(nodeId, nid, edgeLabel);
       });
     }
   });

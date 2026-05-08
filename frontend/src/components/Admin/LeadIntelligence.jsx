@@ -538,8 +538,11 @@ const ProfileDrawer = ({ group, onClose }) => {
                       {profile.sales.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No sales.</p>
                       ) : profile.sales.map(s => {
-                        const agent   = profile.profiles?.[s.created_by];
-                        const company = profile.companies?.[s.company_id];
+                        const actorId  = s.closer_id || s.submitted_by;
+                        const agent    = profile.profiles?.[actorId];
+                        const company  = profile.companies?.[s.company_id];
+                        const agentName = agent?.name || (actorId ? 'Unknown Agent' : '—');
+                        const coName    = company?.name || company?.slug || (s.company_id ? 'Unknown Company' : '—');
                         return (
                           <div key={s.id} className="rounded-xl overflow-hidden"
                             style={{ border: '1px solid var(--color-border)' }}>
@@ -548,11 +551,9 @@ const ProfileDrawer = ({ group, onClose }) => {
                               style={{ backgroundColor: '#dcfce7', borderBottom: '1px solid #bbf7d0' }}>
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="font-bold text-sm truncate" style={{ color: '#15803d' }}>{s.customer_name || 'Unknown'}</span>
-                                {company && (
-                                  <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#16a34a' }}>
-                                    <Building2 size={10} />{company.name || company.slug}
-                                  </span>
-                                )}
+                                <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#16a34a' }}>
+                                  <Building2 size={10} />{coName}
+                                </span>
                               </div>
                               <StatusBadge status={s.status} map={SALE_STATUS} />
                             </div>
@@ -560,11 +561,9 @@ const ProfileDrawer = ({ group, onClose }) => {
                             {/* Body */}
                             <div className="px-3 py-2.5 space-y-1.5" style={{ backgroundColor: 'var(--color-surface)' }}>
                               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                                {agent && (
-                                  <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-                                    <User size={10} />{agent.name}
-                                  </span>
-                                )}
+                                <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <User size={10} />{agentName}
+                                </span>
                                 {s.reference_no && (
                                   <span className="text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</span>
                                 )}
@@ -604,33 +603,33 @@ const ProfileDrawer = ({ group, onClose }) => {
                       {profile.callbacks.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>No callbacks.</p>
                       ) : profile.callbacks.map(c => {
-                        const agent   = profile.profiles?.[c.user_id];
-                        const company = profile.companies?.[c.company_id];
+                        const agent      = profile.profiles?.[c.user_id];
+                        const company    = profile.companies?.[c.company_id];
+                        const agentName  = agent?.name || (c.user_id ? 'Unknown Agent' : '—');
+                        const coName     = company?.name || company?.slug || (c.company_id ? 'Unknown Company' : '—');
                         return (
                           <div key={c.id} className="rounded-xl overflow-hidden"
                             style={{ border: '1px solid var(--color-border)' }}>
-                            {/* Header */}
+                            {/* Header — customer name + company + status */}
                             <div className="flex items-center justify-between gap-2 px-3 py-2"
                               style={{ backgroundColor: '#fef3c7', borderBottom: '1px solid #fde68a' }}>
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-bold text-sm truncate" style={{ color: '#b45309' }}>{c.customer_name || 'Unknown'}</span>
-                                {company && (
-                                  <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#d97706' }}>
-                                    <Building2 size={10} />{company.name || company.slug}
-                                  </span>
-                                )}
+                                <span className="font-bold text-sm truncate" style={{ color: '#b45309' }}>
+                                  {c.customer_name || 'Unknown'}
+                                </span>
+                                <span className="text-xs flex items-center gap-1 flex-shrink-0" style={{ color: '#d97706' }}>
+                                  <Building2 size={10} />{coName}
+                                </span>
                               </div>
                               <StatusBadge status={c.status} map={CB_STATUS} />
                             </div>
 
-                            {/* Body */}
+                            {/* Body — agent, schedule, phone, notes */}
                             <div className="px-3 py-2.5 space-y-1.5" style={{ backgroundColor: 'var(--color-surface)' }}>
                               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                                {agent && (
-                                  <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-                                    <User size={10} />{agent.name}
-                                  </span>
-                                )}
+                                <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <User size={10} />{agentName}
+                                </span>
                                 <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
                                   <Calendar size={10} />{fmtDate(c.callback_at)}
                                 </span>
@@ -638,6 +637,11 @@ const ProfileDrawer = ({ group, onClose }) => {
                               {c.customer_phone && (
                                 <p className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
                                   <Phone size={10} />{c.customer_phone}
+                                </p>
+                              )}
+                              {c.priority && c.priority !== 'Medium' && (
+                                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                  <span className="font-semibold">Priority:</span> {c.priority}
                                 </p>
                               )}
                               {c.notes && (
