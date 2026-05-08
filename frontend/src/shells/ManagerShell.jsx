@@ -520,7 +520,7 @@ const ManagerShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Customer', 'Phone', 'Status', 'Closer', 'Date', 'Action'].map(h => (
+                        {['Customer', 'Phone', 'Status', 'Disposition', 'Closer', 'Date', 'Action'].map(h => (
                           <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -534,6 +534,20 @@ const ManagerShell = () => {
                           </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
+                          <td className="py-3 px-3">
+                            {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
+                              const d = t.latest_disposition;
+                              const name  = d?.disposition_name || t.sale_closer_disposition;
+                              const color = d?.color || '#6b7280';
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                                  style={{ backgroundColor: color + '22', color, border: `1px solid ${color}44` }}>
+                                  <MessageSquare size={9} />
+                                  {name}
+                                </span>
+                              );
+                            })() : <span className="text-text-tertiary text-xs">—</span>}
+                          </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-3">

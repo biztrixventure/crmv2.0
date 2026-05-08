@@ -52,6 +52,11 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
   const isFinalised  = hasSale && ['closed_won', 'sold', 'closed_lost', 'cancelled'].includes(saleStatus);
   const needsRevision= hasSale && saleStatus === 'needs_revision';
 
+  // Existing disposition data
+  const latestDispo      = transfer.latest_disposition;     // from disposition_actions
+  const saleDispoName    = transfer.sale_closer_disposition; // from sales.closer_disposition
+  const existingDispoName = latestDispo?.disposition_name || saleDispoName || null;
+
   // Disposition dropdown state
   const [dropOpen,      setDropOpen]      = useState(false);
   const [selectedDispo, setSelectedDispo] = useState(null); // config requiring note
@@ -71,6 +76,12 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
   }, [dropOpen]);
 
   const handleDispoClick = async (cfg) => {
+    if (existingDispoName) {
+      const confirmed = window.confirm(
+        `This transfer already has a disposition: "${existingDispoName}".\n\nOverride with "${cfg.name}"?`
+      );
+      if (!confirmed) return;
+    }
     if (cfg.requires_note) {
       setSelectedDispo(cfg);
       setNoteText('');
@@ -121,6 +132,20 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
               {transfer.status}
             </Badge>
             {hasSale && <SaleStatusBadge status={saleStatus} />}
+            {latestDispo && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                style={{ backgroundColor: (latestDispo.color || '#6b7280') + '22', color: latestDispo.color || '#6b7280', border: `1px solid ${latestDispo.color || '#6b7280'}44` }}>
+                <MessageSquare size={9} />
+                {latestDispo.disposition_name}
+              </span>
+            )}
+            {!latestDispo && saleDispoName && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                style={{ backgroundColor: '#6b728022', color: '#6b7280', border: '1px solid #6b728044' }}>
+                <MessageSquare size={9} />
+                {saleDispoName}
+              </span>
+            )}
             <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
               {new Date(transfer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
@@ -185,10 +210,66 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
         {/* Actions */}
         <div className="flex-shrink-0 flex items-center gap-1">
           {hasSale ? (
-            <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold"
-              style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
-              <DollarSign size={11} /> Already Sold
-            </span>
+            <>
+              <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
+                <DollarSign size={11} /> Already Sold
+              </span>
+              {/* Disposition dropdown still accessible after sale */}
+              {dispositionConfigs.length > 0 && (
+                <div className="relative" ref={dropRef}>
+                  <button
+                    onClick={() => { setDropOpen(v => !v); setSelectedDispo(null); setNoteText(''); }}
+                    className="flex items-center py-1.5 px-1.5 rounded-lg font-semibold text-xs hover:scale-[1.03] transition-all"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+                    title="Log call outcome"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                  {dropOpen && (
+                    <div className="absolute right-0 mt-1.5 rounded-xl shadow-2xl z-50 overflow-hidden min-w-44"
+                      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', top: '100%' }}>
+                      <div className="px-3 py-2 flex items-center gap-1.5"
+                        style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        <MessageSquare size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>Log Outcome</span>
+                      </div>
+                      {selectedDispo ? (
+                        <div className="p-3 space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedDispo.color }} />
+                            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{selectedDispo.name}</span>
+                          </div>
+                          <textarea autoFocus value={noteText} onChange={e => setNoteText(e.target.value)}
+                            placeholder="Note is required…" rows={2} className="input text-xs w-full resize-none" style={{ fontSize: '11px' }} />
+                          <div className="flex gap-1.5">
+                            <button onClick={() => setSelectedDispo(null)}
+                              className="flex-1 py-1 rounded-lg text-xs font-semibold border"
+                              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Back</button>
+                            <button onClick={() => submitDispo(selectedDispo, noteText)}
+                              disabled={submitting || !noteText.trim()}
+                              className="flex-1 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50"
+                              style={{ background: 'var(--gradient-sidebar)' }}>{submitting ? '…' : 'Submit'}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-1">
+                          {dispositionConfigs.map(cfg => (
+                            <button key={cfg.id} onClick={() => handleDispoClick(cfg)} disabled={submitting}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-bg-secondary disabled:opacity-50"
+                              style={{ color: 'var(--color-text)' }}>
+                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
+                              <span className="flex-1">{cfg.name}</span>
+                              {cfg.requires_note && <MessageSquare size={9} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <>
               {/* Sale button */}

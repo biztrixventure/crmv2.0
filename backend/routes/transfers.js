@@ -121,12 +121,21 @@ router.get('/', asyncHandler(async (req, res) => {
   // Enrich completed transfers with linked sale data (status, compliance note, reference)
   const transferIds = (data || []).map(t => t.id).filter(Boolean);
   let saleMap = {};
+  let latestDispoMap = {};
   if (transferIds.length > 0) {
-    const { data: sales } = await supabaseAdmin
-      .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, closer_id, created_at')
-      .in('transfer_id', transferIds);
-    (sales || []).forEach(s => { saleMap[s.transfer_id] = s; });
+    const [salesRes, dispoRes] = await Promise.all([
+      supabaseAdmin.from('sales')
+        .select('id, transfer_id, status, compliance_note, reference_no, closer_id, created_at, closer_disposition')
+        .in('transfer_id', transferIds),
+      supabaseAdmin.from('disposition_actions')
+        .select('transfer_id, disposition_name, color, note, created_at')
+        .in('transfer_id', transferIds)
+        .order('created_at', { ascending: false }),
+    ]);
+    (salesRes.data || []).forEach(s => { saleMap[s.transfer_id] = s; });
+    (dispoRes.data || []).forEach(d => {
+      if (!latestDispoMap[d.transfer_id]) latestDispoMap[d.transfer_id] = d;
+    });
   }
 
   const transfers = (data || []).map(t => {
@@ -148,6 +157,8 @@ router.get('/', asyncHandler(async (req, res) => {
       sale_status: sale?.status || null,
       sale_compliance_note: sale?.compliance_note || null,
       sale_reference_no: sale?.reference_no || null,
+      sale_closer_disposition: sale?.closer_disposition || null,
+      latest_disposition: latestDispoMap[t.id] || null,
     };
   });
 
@@ -306,16 +317,26 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   // the same customer has a different product with a different company.
   const tIds = data.map(t => t.id);
   let saleByTransferId = {};
+  let latestDispoMapPhone = {};
 
   if (tIds.length > 0) {
-    const { data: linkedSales } = await supabaseAdmin
-      .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at')
-      .in('transfer_id', tIds);
-    (linkedSales || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
+    const [salesRes, dispoRes] = await Promise.all([
+      supabaseAdmin.from('sales')
+        .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at, closer_disposition')
+        .in('transfer_id', tIds),
+      supabaseAdmin.from('disposition_actions')
+        .select('transfer_id, disposition_name, color, note, created_at')
+        .in('transfer_id', tIds)
+        .order('created_at', { ascending: false }),
+    ]);
+    (salesRes.data || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
+    (dispoRes.data || []).forEach(d => {
+      if (!latestDispoMapPhone[d.transfer_id]) latestDispoMapPhone[d.transfer_id] = d;
+    });
 
     // Enrich sales with closer names
-    const saleCloserIds = [...new Set((linkedSales || []).map(s => s.closer_id).filter(Boolean))];
+    const linkedSales = salesRes.data || [];
+    const saleCloserIds = [...new Set(linkedSales.map(s => s.closer_id).filter(Boolean))];
     if (saleCloserIds.length > 0) {
       const { data: saleCloserProfiles } = await supabaseAdmin
         .from('user_profiles').select('user_id, first_name, last_name').in('user_id', saleCloserIds);
@@ -342,6 +363,8 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       sale_compliance_note: sale?.compliance_note || null,
       sale_reference_no: sale?.reference_no || null,
       sale_closer_name: sale?.closer_name || null,
+      sale_closer_disposition: sale?.closer_disposition || null,
+      latest_disposition: latestDispoMapPhone[t.id] || null,
     };
   });
 
