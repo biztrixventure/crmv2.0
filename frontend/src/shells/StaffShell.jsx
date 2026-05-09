@@ -742,29 +742,53 @@ const StaffShell = () => {
               {/* Create Lead */}
               {hasPermission('create_transfer') && (
                 <Card className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-text flex items-center gap-2"><Plus size={20} /> New Lead</h3>
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'var(--gradient-sidebar)' }}>
+                        <Plus size={15} className="text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>New Lead</h3>
+                        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Transfer a call to a closer</p>
+                      </div>
+                    </div>
                     {!showCreateForm && (
                       <button onClick={() => setShowCreateForm(true)}
-                        className="py-2 px-4 rounded-lg text-sm font-semibold text-white"
-                        style={{ background: 'var(--gradient-sidebar)' }}>
-                        + Create Lead
+                        className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
+                        style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
+                        <Plus size={14} /> Create Lead
                       </button>
                     )}
                   </div>
                   {showCreateForm ? (
-                    <form onSubmit={handleSubmitTransfer} className="space-y-4 animate-slide-up">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <form onSubmit={handleSubmitTransfer} className="animate-slide-up">
+                      {/* Section header */}
+                      <div className="flex items-center gap-2.5 mb-4">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+                          style={{ background: 'var(--gradient-sidebar)' }}>
+                          <Send size={11} className="text-white" />
+                        </div>
+                        <span className="text-[11px] font-bold uppercase tracking-widest"
+                          style={{ color: 'var(--color-text-secondary)' }}>
+                          Customer Details
+                        </span>
+                        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
                         {fields.filter(f => f.show_to_fronter !== false).sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => {
                           const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3' }[field.column_span] || 'sm:col-span-1';
                           return (
                             <div key={field.id} className={spanClass}>
-                              <label className="block text-sm font-medium text-text-secondary mb-1">
-                                {field.label} {field.is_required && <span className="text-error-500">*</span>}
+                              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"
+                                style={{ color: 'var(--color-text-secondary)' }}>
+                                {field.label}
+                                {field.is_required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
                               </label>
                               {field.field_type === 'textarea' ? (
                                 <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                                  className="input" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
+                                  className="input resize-none" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
                               ) : field.field_type === 'select' ? (
                                 <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
@@ -797,7 +821,8 @@ const StaffShell = () => {
                                     </div>
                                   )}
                                   {zipFronterInfo && (formData[field.name] || '').replace(/\D/g, '').length >= 5 && (
-                                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <p className="text-[11px] mt-1 font-medium flex items-center gap-1"
+                                      style={{ color: 'var(--color-text-secondary)' }}>
                                       📍 {zipFronterInfo.city}, {zipFronterInfo.state}
                                     </p>
                                   )}
@@ -811,24 +836,45 @@ const StaffShell = () => {
                           );
                         })}
                       </div>
-                      {transferError && <p className="text-sm text-error-600">{transferError}</p>}
-                      <div className="flex gap-3 pt-4 border-t border-border">
-                        <button type="button" onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); }}
-                          className="flex-1 py-2 rounded-lg border font-semibold text-sm"
-                          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+
+                      {transferError && (
+                        <div className="mt-4 flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold"
+                          style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5' }}>
+                          <AlertTriangle size={14} /> {transferError}
+                        </div>
+                      )}
+
+                      <div className="flex gap-3 pt-5 mt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <button type="button"
+                          onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); }}
+                          className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors hover:bg-bg-secondary"
+                          style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
                           Cancel
                         </button>
                         <button type="submit" disabled={transferSubmitting}
-                          className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
-                          style={{ background: 'var(--gradient-sidebar)' }}>
-                          {transferSubmitting ? 'Submitting…' : 'Transfer Lead'}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm text-white disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
+                          {transferSubmitting
+                            ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Submitting…</>
+                            : <><Send size={13} /> Transfer Lead</>
+                          }
                         </button>
                       </div>
                     </form>
                   ) : (
-                    <div className="text-center py-8">
-                      <FileText size={48} className="mx-auto mb-4 text-text-tertiary" />
-                      <p className="text-text-secondary">Click "Create Lead" to transfer a call to a closer.</p>
+                    <div className="flex flex-col items-center justify-center py-10 rounded-2xl border-dashed border-2"
+                      style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                        <Send size={22} style={{ color: 'var(--color-text-tertiary)' }} />
+                      </div>
+                      <p className="font-semibold text-sm mb-1" style={{ color: 'var(--color-text)' }}>Ready to transfer?</p>
+                      <p className="text-xs mb-4" style={{ color: 'var(--color-text-tertiary)' }}>Fill customer details to route call to a closer.</p>
+                      <button onClick={() => setShowCreateForm(true)}
+                        className="flex items-center gap-1.5 py-2 px-5 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
+                        style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
+                        <Plus size={14} /> Create Lead
+                      </button>
                     </div>
                   )}
                 </Card>

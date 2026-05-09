@@ -6,14 +6,17 @@ import { useFormFields } from '../../hooks/useFormFields';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
-  <div className="mb-6">
-    <div className="flex items-center gap-2 mb-4 pb-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <div className="p-1.5 rounded-lg" style={{ backgroundColor: 'var(--color-primary-100, #ede9fe)' }}>
-        <Icon size={16} style={{ color: 'var(--color-primary-600)' }} />
+  <div className="mb-5">
+    <div className="flex items-center gap-2.5 mb-4">
+      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ background: 'var(--gradient-sidebar)' }}>
+        <Icon size={12} className="text-white" />
       </div>
-      <h3 className="font-bold text-sm uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+      <span className="text-[11px] font-bold uppercase tracking-widest"
+        style={{ color: 'var(--color-text-secondary)' }}>
         {title}
-      </h3>
+      </span>
+      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
     </div>
     {children}
   </div>
@@ -22,12 +25,19 @@ const Section = ({ icon: Icon, title, children }) => (
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 const Field = ({ label, required, error, hint, children, className = '' }) => (
   <div className={className}>
-    <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-      {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+    <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"
+      style={{ color: error ? '#dc2626' : 'var(--color-text-secondary)' }}>
+      {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
     </label>
     {children}
-    {hint && !error && <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{hint}</p>}
-    {error && <p className="text-xs mt-1 text-red-500">{error}</p>}
+    {hint && !error && (
+      <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{hint}</p>
+    )}
+    {error && (
+      <p className="text-[11px] mt-1 font-semibold flex items-center gap-1" style={{ color: '#dc2626' }}>
+        <span>⚠</span> {error}
+      </p>
+    )}
   </div>
 );
 
@@ -168,7 +178,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     const val = formData[field.name] || '';
     const onChange = e => setDynField(field.name, e.target.value);
     const ph = field.placeholder || `Enter ${field.label.toLowerCase()}`;
-    const errClass = errors[field.name] ? 'border-red-400' : '';
+    const errClass = errors[field.name] ? 'ring-2 ring-red-400/60 border-red-400' : '';
 
     if (field.field_type === 'textarea') {
       return (
@@ -315,26 +325,31 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-1">
+    <form onSubmit={handleSubmit} className="space-y-0">
 
-      {/* Lead source banner — shown only when creating from a transfer */}
+      {/* Lead source banner */}
       {transfer && (transfer.fronter_name || transfer.company_slug || transfer.company_name) && (
-        <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
-          style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
-          <Building2 size={16} style={{ color: 'var(--color-primary-600)', flexShrink: 0 }} />
+        <div className="mb-5 flex items-center gap-3 px-4 py-3 rounded-xl"
+          style={{
+            backgroundColor: 'var(--color-primary-50)',
+            borderLeft: '3px solid var(--color-primary-500)',
+            border: '1px solid var(--color-primary-200)',
+          }}>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <Building2 size={14} className="text-white" />
+          </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-primary-600)' }}>
-              Lead Source
-            </p>
-            <div className="flex items-center gap-3 flex-wrap">
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
+              style={{ color: 'var(--color-primary-600)' }}>Lead Source</p>
+            <div className="flex items-center gap-2 flex-wrap">
               {transfer.fronter_name && (
-                <span className="text-sm text-text">
-                  <span className="text-text-secondary">Fronter: </span>
-                  <span className="font-semibold">{transfer.fronter_name}</span>
+                <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  {transfer.fronter_name}
                 </span>
               )}
               {(transfer.company_slug || transfer.company_name) && (
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg"
+                <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md"
                   style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
                   {transfer.company_slug || transfer.company_name}
                 </span>
@@ -345,12 +360,17 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       )}
 
       {fieldsLoading ? (
-        <div className="flex justify-center py-6">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className={`${i % 3 === 0 ? 'sm:col-span-2' : 'sm:col-span-1'} space-y-1.5 animate-pulse`}>
+              <div className="h-3 w-20 rounded" style={{ backgroundColor: 'var(--color-border)' }} />
+              <div className="h-9 rounded-xl" style={{ backgroundColor: 'var(--color-border)' }} />
+            </div>
+          ))}
         </div>
       ) : sortedFields.length > 0 ? (
         <Section icon={FileText} title="Customer Information">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
             {sortedFields.map(field => {
               const spanClass = {
                 1: 'sm:col-span-1',
@@ -361,11 +381,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
                 <Field
                   key={field.id}
                   label={
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5">
                       {field.label}
                       {field.show_to_fronter === false && (
-                        <span className="text-xs px-1.5 py-0.5 rounded font-semibold"
-                          style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-600)' }}>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
+                          style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-600)' }}>
                           Closer Only
                         </span>
                       )}
@@ -382,21 +402,28 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </Section>
       ) : null}
 
-      {/* ── SUBMIT ───────────────────────────────────────────────────── */}
-      <div className="flex justify-end pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+      {/* ── SUBMIT ── */}
+      <div className="flex items-center justify-between pt-5 mt-2"
+        style={{ borderTop: '1px solid var(--color-border)' }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+          {Object.values(errors).filter(Boolean).length > 0
+            ? <span style={{ color: '#dc2626' }}>⚠ Fix {Object.values(errors).filter(Boolean).length} error(s) above</span>
+            : <span>All fields marked <span style={{ color: '#ef4444' }}>*</span> are required</span>
+          }
+        </p>
         <button type="submit" disabled={isLoading}
-          className="flex items-center gap-2 py-3 px-8 rounded-xl font-bold text-white transition-all duration-200"
+          className="flex items-center gap-2 py-2.5 px-7 rounded-xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
           style={{
-            background:  isLoading ? 'var(--color-disabled-bg)' : 'var(--gradient-sidebar)',
+            background:  isLoading ? 'var(--color-bg-secondary)' : 'var(--gradient-sidebar)',
             boxShadow:   isLoading ? 'none' : 'var(--shadow-md)',
-            cursor:      isLoading ? 'not-allowed' : 'pointer',
-            minWidth:    160,
+            color:       isLoading ? 'var(--color-text-secondary)' : 'white',
+            minWidth:    148,
             justifyContent: 'center',
           }}>
           {isLoading ? (
-            <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" /> {existingSale ? 'Updating…' : 'Submitting…'}</>
+            <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" /> {existingSale ? 'Updating…' : 'Submitting…'}</>
           ) : (
-            <><DollarSign size={18} /> {existingSale ? 'Update Sale' : 'Send to Compliance'}</>
+            <><DollarSign size={15} /> {existingSale ? 'Update Sale' : 'Send to Compliance'}</>
           )}
         </button>
       </div>
