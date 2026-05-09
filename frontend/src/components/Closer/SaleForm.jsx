@@ -129,8 +129,8 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           const next = { ...prev };
           const cityF  = fields.find(f => ['City','city','customer_city'].includes(f.name));
           const stateF = fields.find(f => ['State','state','customer_state'].includes(f.name));
-          if (cityF  && !prev[cityF.name])  next[cityF.name]  = res.data.city;
-          if (stateF && !prev[stateF.name]) next[stateF.name] = res.data.state;
+          if (cityF)  next[cityF.name]  = res.data.city;
+          if (stateF) next[stateF.name] = res.data.state;
           return next;
         });
       } catch { setZipInfo(null); }
@@ -303,10 +303,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
                 style={{ borderColor: 'var(--color-primary-600)' }} />
             </div>
           )}
-          {zipInfo && val.replace(/\D/g, '').length >= 5 && (
-            <p className="text-xs mt-1 flex items-center gap-1"
-              style={{ color: 'var(--color-text-secondary)' }}>
-              📍 {zipInfo.city}, {zipInfo.state}
+          {zipLoading === false && zipInfo && val.replace(/\D/g, '').length >= 5 && (
+            <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+              {zipInfo.city}, {zipInfo.state}
             </p>
           )}
         </div>
@@ -323,6 +322,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   };
 
   const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const maxSpan = sortedFields.reduce((m, f) => Math.max(m, f.column_span || 1), 3);
+  const GRID_COLS = { 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4', 5: 'sm:grid-cols-5' };
+  const gridCls = GRID_COLS[maxSpan] || 'sm:grid-cols-3';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
@@ -360,7 +362,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       )}
 
       {fieldsLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className={`${i % 3 === 0 ? 'sm:col-span-2' : 'sm:col-span-1'} space-y-1.5 animate-pulse`}>
               <div className="h-3 w-20 rounded" style={{ backgroundColor: 'var(--color-border)' }} />
@@ -370,7 +372,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       ) : sortedFields.length > 0 ? (
         <Section icon={FileText} title="Customer Information">
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-5">
+          <div className={`grid grid-cols-1 ${gridCls} gap-x-4 gap-y-5`}>
             {sortedFields.map(field => {
               const spanClass = {
                 1: 'sm:col-span-1',
