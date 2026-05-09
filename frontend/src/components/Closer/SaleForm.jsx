@@ -322,9 +322,6 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   };
 
   const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
-  const maxSpan = sortedFields.reduce((m, f) => Math.max(m, f.column_span || 1), 3);
-  const GRID_COLS = { 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4', 5: 'sm:grid-cols-5' };
-  const gridCls = GRID_COLS[maxSpan] || 'sm:grid-cols-3';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
@@ -372,7 +369,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       ) : sortedFields.length > 0 ? (
         <Section icon={FileText} title="Customer Information">
-          <div className={`grid grid-cols-1 ${gridCls} gap-x-4 gap-y-5`}>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-5">
             {sortedFields.map(field => {
               const spanClass = {
                 1: 'sm:col-span-1',
