@@ -776,9 +776,9 @@ const StaffShell = () => {
                         <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-5">
                         {fields.filter(f => f.show_to_fronter !== false).sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => {
-                          const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3' }[field.column_span] || 'sm:col-span-1';
+                          const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3', 4: 'sm:col-span-4', 5: 'sm:col-span-5' }[field.column_span] || 'sm:col-span-1';
                           return (
                             <div key={field.id} className={spanClass}>
                               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"

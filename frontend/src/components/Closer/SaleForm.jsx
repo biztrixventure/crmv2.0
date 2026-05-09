@@ -360,7 +360,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       )}
 
       {fieldsLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 py-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className={`${i % 3 === 0 ? 'sm:col-span-2' : 'sm:col-span-1'} space-y-1.5 animate-pulse`}>
               <div className="h-3 w-20 rounded" style={{ backgroundColor: 'var(--color-border)' }} />
@@ -370,12 +370,14 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       ) : sortedFields.length > 0 ? (
         <Section icon={FileText} title="Customer Information">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-5">
             {sortedFields.map(field => {
               const spanClass = {
                 1: 'sm:col-span-1',
                 2: 'sm:col-span-2',
                 3: 'sm:col-span-3',
+                4: 'sm:col-span-4',
+                5: 'sm:col-span-5',
               }[field.column_span] || 'sm:col-span-1';
               return (
                 <Field

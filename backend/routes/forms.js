@@ -9,7 +9,7 @@ const ALLOWED_TYPES = [
   'text', 'email', 'number', 'textarea', 'select', 'date', 'phone', 'tel', 'zip', 'checkbox',
   'sale_client', 'sale_plan',
   'sale_down_payment', 'sale_monthly_payment', 'sale_payment_due_note', 'sale_reference_no',
-  'sale_fronter', 'sale_date', 'sale_status',
+  'sale_fronter', 'sale_date', 'sale_status', 'sale_disposition',
 ];
 
 const superadminOnly = (req, res, next) => {
@@ -53,7 +53,7 @@ router.post('/fields', superadminOnly, [
   body('label').trim().notEmpty(),
   body('field_type').isIn(ALLOWED_TYPES),
   body('is_required').isBoolean().optional(),
-  body('column_span').isInt({ min: 1, max: 3 }).optional(),
+  body('column_span').isInt({ min: 1, max: 5 }).optional(),
   body('placeholder').optional().isString(),
   body('options').isArray().optional(),
   body('order').isInt().optional(),
@@ -144,7 +144,7 @@ router.post('/fields/bulk-save', superadminOnly, [
     is_required:     f.is_required     || false,
     options:         f.options         || null,
     order:           i,
-    column_span:     Math.min(Math.max(parseInt(f.column_span) || 1, 1), 3),
+    column_span:     Math.min(Math.max(parseInt(f.column_span) || 1, 1), 5),
     placeholder:     f.placeholder     || null,
     section:         f.section         || 'default',
     default_value:   f.default_value   || null,

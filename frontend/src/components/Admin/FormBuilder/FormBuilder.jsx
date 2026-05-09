@@ -69,8 +69,8 @@ const TYPE_LABELS = {
   sale_payment_due_note: 'Payment Due Note', sale_reference_no: 'Reference No',
   sale_fronter: 'Fronter', sale_date: 'Sale Date', sale_disposition: 'Closer Disposition', sale_status: 'Closer Disposition',
 };
-const SPAN_LABEL = { 1: '1/3', 2: '2/3', 3: 'Full' };
-const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' };
+const SPAN_LABEL = { 1: '1/5', 2: '2/5', 3: '3/5', 4: '4/5', 5: 'Full' };
+const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4', 5: 'col-span-5' };
 
 const FieldIcon = ({ type, size = 14 }) => {
   const Icon = TYPE_ICONS[type] || Type;
@@ -803,7 +803,7 @@ const FieldCard = ({
 
         {/* Span */}
         <div className="flex items-center gap-0.5 ml-auto flex-shrink-0">
-          {[1, 2, 3].map(n => (
+          {[1, 2, 3, 4, 5].map(n => (
             <button key={n} onClick={() => onChangeSpan(index, n)}
               className="px-1.5 py-0.5 rounded text-xs font-bold transition-all"
               style={{
@@ -1110,7 +1110,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
             </div>
           ) : (
             <div
-              className="rounded-2xl p-4 grid grid-cols-3 gap-3 content-start min-h-48"
+              className="rounded-2xl p-4 grid grid-cols-5 gap-3 content-start min-h-48"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
               onDragOver={e => e.preventDefault()}
               onDrop={e => { if (dragOverIdx === null && dragIndex.current !== null) onDrop(e, canvasFields.length - 1); }}>
@@ -1138,7 +1138,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       {showPreview && canvasFields.length > 0 && (
         <div className="rounded-2xl p-6" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <h4 className="text-lg font-bold text-text mb-4 flex items-center gap-2"><Eye size={18} /> Form Preview</h4>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-5 gap-4">
             {canvasFields.map((field, idx) => (
               <div key={idx} className={SPAN_CLASS[field.column_span || 1]}>
                 <label className="block text-sm font-medium text-text-secondary mb-1">
