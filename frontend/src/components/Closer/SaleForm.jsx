@@ -24,7 +24,7 @@ const Section = ({ icon: Icon, title, children }) => (
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 const Field = ({ label, required, error, hint, children, className = '' }) => (
-  <div className={className}>
+  <div className={`self-start ${className}`}>
     <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"
       style={{ color: error ? '#dc2626' : 'var(--color-text-secondary)' }}>
       {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
@@ -321,7 +321,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     );
   };
 
-  const sortedFields = [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
+  // City/State are auto-filled by ZIP lookup — hide from display, keep in formData for submission
+  const ZIP_AUTO_FILL = ['City','city','customer_city','State','state','customer_state'];
+  const sortedFields = [...fields]
+    .filter(f => !ZIP_AUTO_FILL.includes(f.name))
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
@@ -369,7 +373,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       ) : sortedFields.length > 0 ? (
         <Section icon={FileText} title="Customer Information">
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-5 items-start gap-x-4 gap-y-5">
             {sortedFields.map(field => {
               const spanClass = {
                 1: 'sm:col-span-1',
