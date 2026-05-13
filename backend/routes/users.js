@@ -964,7 +964,7 @@ router.post('/:userId/impersonate', asyncHandler(async (req, res) => {
   const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
     type: 'magiclink',
     email,
-    options: { redirectTo: `${frontendUrl}/auth/impersonate` },
+    options: { redirectTo: `${frontendUrl}/impersonate-callback` },
   });
 
   if (linkErr || !linkData?.properties?.action_link) {

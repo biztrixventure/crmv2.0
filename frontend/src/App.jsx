@@ -63,7 +63,7 @@ const AppContent = () => {
           <Route path="/forgot-password"   element={<ForgotPassword />} />
           <Route path="/reset-password"    element={<ResetPassword />} />
           <Route path="/accept-invite"     element={<AcceptInvite />} />
-          <Route path="/auth/impersonate"  element={<ImpersonateCallback />} />
+          <Route path="/impersonate-callback" element={<ImpersonateCallback />} />
 
           {/* Smart redirect */}
           <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
