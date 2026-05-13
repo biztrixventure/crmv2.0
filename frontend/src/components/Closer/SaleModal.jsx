@@ -21,7 +21,7 @@ const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null
       onClick={onBackdrop}
     >
       <div
-        className="relative w-full max-w-3xl my-6 rounded-2xl animate-scale-in"
+        className="relative w-full max-w-5xl my-6 rounded-2xl animate-scale-in"
         style={{
           backgroundColor: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
