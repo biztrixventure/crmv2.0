@@ -327,7 +327,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
               {transfer.status}
             </Badge>
             {hasSale && <SaleStatusBadge status={saleStatus} />}
-            {latestDispo && (
+            {latestDispo ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{ backgroundColor: (latestDispo.color || '#6b7280') + '22', color: latestDispo.color || '#6b7280', border: `1px solid ${latestDispo.color || '#6b7280'}44` }}
                 title={latestDispo.setter_name ? `Set by ${latestDispo.setter_name}` : undefined}>
@@ -335,12 +335,17 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
                 {latestDispo.disposition_name}
                 {latestDispo.setter_name && <span style={{ opacity: 0.7 }}>· {latestDispo.setter_name}</span>}
               </span>
-            )}
-            {!latestDispo && saleDispoName && (
+            ) : saleDispoName ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{ backgroundColor: '#6b728022', color: '#6b7280', border: '1px solid #6b728044' }}>
                 <MessageSquare size={9} />
                 {saleDispoName}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                style={{ backgroundColor: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb' }}>
+                <Clock size={9} />
+                In Progress
               </span>
             )}
             <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -453,12 +458,13 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
 };
 
 // ── PhoneSearch ───────────────────────────────────────────────────────────────
-const PhoneSearch = ({ onCreateSale, companyTimezone }) => {
+const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
   const [phone,              setPhone]              = useState('');
   const [results,            setResults]            = useState(null);
   const [loading,            setLoading]            = useState(false);
   const [error,              setError]              = useState('');
   const [dispositionConfigs, setDispositionConfigs] = useState([]);
+  const lastQuery = useRef('');
 
   useEffect(() => {
     client.get('disposition-configs')
@@ -466,13 +472,9 @@ const PhoneSearch = ({ onCreateSale, companyTimezone }) => {
       .catch(() => {});
   }, []);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    const q = phone.trim();
-    if (q.length < 3) { setError('Enter at least 3 characters.'); return; }
+  const runSearch = useCallback(async (q) => {
+    if (q.length < 3) return;
     setLoading(true);
-    setError('');
-    setResults(null);
     try {
       const res = await client.get('transfers/search-by-phone', { params: { phone: q } });
       setResults(res.data.transfers || []);
@@ -481,14 +483,40 @@ const PhoneSearch = ({ onCreateSale, companyTimezone }) => {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Re-run last search when refreshTrigger increments (e.g. after sale created)
+  useEffect(() => {
+    if (refreshTrigger > 0 && lastQuery.current.length >= 3 && results !== null) {
+      runSearch(lastQuery.current);
+    }
+  }, [refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    const q = phone.trim();
+    if (q.length < 3) { setError('Enter at least 3 characters.'); return; }
+    lastQuery.current = q;
+    setError('');
+    setResults(null);
+    await runSearch(q);
   };
 
   const handleDispositionSubmit = async (transferId, configId, note) => {
-    await client.post('disposition-configs/submit', {
+    const res = await client.post('disposition-configs/submit', {
       transfer_id:           transferId,
       disposition_config_id: configId,
       note:                  note || undefined,
     });
+    // Update local results so the badge refreshes immediately without re-search
+    const action = res.data.action;
+    if (action) {
+      setResults(prev => (prev || []).map(t =>
+        t.id === transferId
+          ? { ...t, latest_disposition: { ...action, setter_name: null } }
+          : t
+      ));
+    }
   };
 
   const alreadySoldCount = (results || []).filter(t => t.has_sale).length;

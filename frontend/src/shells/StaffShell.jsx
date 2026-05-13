@@ -87,11 +87,12 @@ const StaffShell = () => {
   ];
 
   // Sale modal
-  const [modalOpen, setModalOpen]           = useState(false);
-  const [activeTransfer, setActiveTransfer] = useState(null);
-  const [saleLoading, setSaleLoading]       = useState(false);
-  const [saleError, setSaleError]           = useState('');
-  const [saleSuccess, setSaleSuccess]       = useState('');
+  const [modalOpen, setModalOpen]               = useState(false);
+  const [activeTransfer, setActiveTransfer]     = useState(null);
+  const [saleLoading, setSaleLoading]           = useState(false);
+  const [saleError, setSaleError]               = useState('');
+  const [saleSuccess, setSaleSuccess]           = useState('');
+  const [phoneSearchRefresh, setPhoneSearchRefresh] = useState(0);
 
   // Reject modal
   const [rejectTarget, setRejectTarget] = useState(null);
@@ -174,6 +175,7 @@ const StaffShell = () => {
       }
       setModalOpen(false);
       setSaleSuccess('Sale submitted to compliance!');
+      setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to });
       fetchSales({ date_from, date_to });
@@ -490,7 +492,7 @@ const StaffShell = () => {
 
             {/* Phone search — find leads from linked fronter companies by number */}
             <div className="mb-6">
-              <PhoneSearch onCreateSale={openSaleModal} companyTimezone={user?.company_timezone} />
+              <PhoneSearch onCreateSale={openSaleModal} companyTimezone={user?.company_timezone} refreshTrigger={phoneSearchRefresh} />
             </div>
 
             {/* Stats */}
@@ -923,11 +925,11 @@ const StaffShell = () => {
                           </div>
                           <div className="flex flex-col items-end gap-1">
                             {(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}
-                            {(t.latest_disposition || t.sale_closer_disposition) && (() => {
-                              const d = t.latest_disposition;
+                            {(() => {
+                              const d     = t.latest_disposition;
                               const name  = d?.disposition_name || t.sale_closer_disposition;
                               const color = d?.color || '#6b7280';
-                              return (
+                              if (name) return (
                                 <div className="flex flex-col items-end gap-0.5">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                                     style={{ backgroundColor: color + '22', color, border: `1px solid ${color}44` }}>
@@ -940,6 +942,12 @@ const StaffShell = () => {
                                     </span>
                                   )}
                                 </div>
+                              );
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                                  style={{ backgroundColor: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb' }}>
+                                  <Clock size={9} /> In Progress
+                                </span>
                               );
                             })()}
                           </div>

@@ -1,7 +1,9 @@
-import { X, User, Phone, Mail, MapPin, Calendar, Clock, AlertTriangle, ChevronDown, ChevronUp, Send, DollarSign, CheckCircle, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity } from 'lucide-react';
 import { Badge } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
+import client from '../../api/client';
 
 const SALE_STATUS_CONFIG = {
   open:           { label: 'Sale Open',      color: '#2563eb', bg: '#dbeafe',  icon: Clock        },
@@ -46,8 +48,26 @@ const SKIP_KEYS = new Set([
   'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
 ]);
 
+const ROLE_LABELS = {
+  superadmin: 'Super Admin', readonly_admin: 'Admin', compliance_manager: 'Compliance',
+  company_admin: 'Company Admin', operations_manager: 'Operations', closer_manager: 'Closer Mgr',
+  fronter_manager: 'Fronter Mgr', closer: 'Closer', fronter: 'Fronter',
+};
+
 export default function TransferDetailDrawer({ transfer, onClose }) {
   const { hasPermission } = useAuth();
+  const [dispoHistory, setDispoHistory] = useState([]);
+  const [histLoading,  setHistLoading]  = useState(false);
+
+  useEffect(() => {
+    if (!transfer?.id) return;
+    setHistLoading(true);
+    client.get(`disposition-configs/history/${transfer.id}`)
+      .then(res => setDispoHistory(res.data.history || []))
+      .catch(() => setDispoHistory([]))
+      .finally(() => setHistLoading(false));
+  }, [transfer?.id]);
+
   if (!transfer) return null;
 
   const fd = transfer.form_data || {};
@@ -217,6 +237,71 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
               <Row label="Rejected at" value={new Date(transfer.rejected_at).toLocaleString()} />
             )}
           </Section>
+
+          {/* Disposition History */}
+          <div className="mb-5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Activity size={11} style={{ color: 'var(--color-primary-600)' }} />
+              <p className="text-xs font-bold uppercase tracking-widest"
+                style={{ color: 'var(--color-primary-600)' }}>Disposition History</p>
+            </div>
+            {histLoading ? (
+              <div className="space-y-2">
+                {[1,2].map(i => (
+                  <div key={i} className="h-12 rounded-xl animate-pulse"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)' }} />
+                ))}
+              </div>
+            ) : dispoHistory.length === 0 ? (
+              <div className="px-4 py-3 rounded-xl flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#9ca3af' }} />
+                <span className="text-xs font-semibold" style={{ color: '#6b7280' }}>In Progress</span>
+                <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
+              </div>
+            ) : (
+              <div className="relative">
+                {/* Vertical timeline line */}
+                <div className="absolute left-[7px] top-3 bottom-3 w-px"
+                  style={{ backgroundColor: 'var(--color-border)' }} />
+                <div className="space-y-2">
+                  {dispoHistory.map((d, i) => (
+                    <div key={d.id || i} className="flex gap-3">
+                      <div className="w-3.5 h-3.5 rounded-full flex-shrink-0 mt-1 relative z-10 ring-2"
+                        style={{ backgroundColor: d.color || '#6b7280', ringColor: 'var(--color-surface)' }} />
+                      <div className="flex-1 pb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                            {d.disposition_name}
+                          </span>
+                          {d.setter_role && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                              {ROLE_LABELS[d.setter_role] || d.setter_role}
+                            </span>
+                          )}
+                          <span className="text-[10px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
+                            {new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        {d.setter_name && (
+                          <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                            By {d.setter_name}
+                          </p>
+                        )}
+                        {d.note && (
+                          <p className="text-[10px] mt-1 px-2 py-1 rounded-lg italic"
+                            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                            "{d.note}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Edit history */}
           {hist.length > 0 && (

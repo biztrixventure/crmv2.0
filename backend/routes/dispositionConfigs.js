@@ -170,6 +170,7 @@ router.post('/submit', async (req, res) => {
         disposition_name:      config.name,
         color:                 config.color,
         note:                  note?.trim() || null,
+        setter_role:           req.user.role || null,
       })
       .select()
       .single();
@@ -216,6 +217,7 @@ router.post('/submit-callback', async (req, res) => {
         disposition_name: 'Callback Scheduled',
         color:            '#3b82f6',
         note:             note?.trim() || null,
+        setter_role:      req.user.role || null,
       }).select().single(),
       supabaseAdmin.from('callbacks').insert({
         user_id:           userId,
@@ -239,6 +241,46 @@ router.post('/submit-callback', async (req, res) => {
     if (cbErr)  throw cbErr;
 
     res.status(201).json({ action, callback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/disposition-configs/history/:transferId
+// Returns full disposition history for a transfer, enriched with setter name + role.
+// Accessible by any authenticated user who can see the transfer.
+router.get('/history/:transferId', async (req, res) => {
+  try {
+    const { transferId } = req.params;
+
+    const { data: actions, error } = await supabaseAdmin
+      .from('disposition_actions')
+      .select('*')
+      .eq('transfer_id', transferId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    if (!actions || actions.length === 0) return res.json({ history: [] });
+
+    // Resolve user names in one batch
+    const userIds = [...new Set(actions.map(a => a.user_id).filter(Boolean))];
+    let nameMap = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from('user_profiles')
+        .select('user_id, first_name, last_name')
+        .in('user_id', userIds);
+      (profiles || []).forEach(p => {
+        nameMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+      });
+    }
+
+    const history = actions.map(a => ({
+      ...a,
+      setter_name: nameMap[a.user_id] || 'Unknown',
+    }));
+
+    res.json({ history });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
