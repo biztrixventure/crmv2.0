@@ -25,9 +25,9 @@ const Section = ({ icon: Icon, title, children }) => (
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 const Field = ({ label, required, error, hint, children, className = '' }) => (
   <div className={`self-start ${className}`}>
-    <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"
+    <label className="flex items-center gap-1 flex-wrap text-[11px] font-bold uppercase tracking-wide mb-1.5"
       style={{ color: error ? '#dc2626' : 'var(--color-text-secondary)' }}>
-      {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
+      {label}{required && <span style={{ color: '#ef4444' }}>*</span>}
     </label>
     {children}
     {hint && !error && (
