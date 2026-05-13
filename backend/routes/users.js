@@ -942,4 +942,35 @@ router.put('/:id/overrides',
   })
 );
 
+// ============================================================================
+// POST /users/:userId/impersonate — superadmin only
+// Generates a one-time magic link for any user; link is returned to the caller
+// (never sent by email) so the superadmin can open it directly in a browser.
+// ============================================================================
+router.post('/:userId/impersonate', asyncHandler(async (req, res) => {
+  const callerId = req.user.id;
+  const { userId } = req.params;
+
+  const sa = await isSuperAdmin(callerId);
+  if (!sa) return res.status(403).json({ error: 'Superadmin access required' });
+
+  const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (authErr || !authUser?.user) return res.status(404).json({ error: 'User not found' });
+
+  const email = authUser.user.email;
+  if (!email) return res.status(400).json({ error: 'User has no email address' });
+
+  const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+    type: 'magiclink',
+    email,
+  });
+
+  if (linkErr || !linkData?.properties?.action_link) {
+    return res.status(500).json({ error: linkErr?.message || 'Failed to generate login link' });
+  }
+
+  logger.info('IMPERSONATE', `Superadmin ${callerId} generated login link for user ${userId} (${email})`);
+  res.json({ link: linkData.properties.action_link, email });
+}));
+
 module.exports = router;
