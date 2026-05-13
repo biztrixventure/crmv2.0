@@ -543,4 +543,86 @@ router.post(
   })
 );
 
+// ============================================================================
+// POST /auth/exchange
+// Validates a Supabase access_token (from a magic-link hash) and returns the
+// same login payload as POST /auth/login. Used by the /auth/impersonate page
+// so the frontend can establish a session without knowing the user's password.
+// No auth middleware — the token IS the credential.
+// ============================================================================
+router.post('/exchange', asyncHandler(async (req, res) => {
+  const { access_token, refresh_token } = req.body;
+  if (!access_token) return res.status(400).json({ error: 'access_token required' });
+
+  // Validate the token and get the Supabase user
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(access_token);
+  if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
+
+  const userId = user.id;
+  const email  = user.email;
+
+  // Superadmin check
+  const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (user.app_metadata?.role === 'superadmin' || superadminEmails.includes(email.toLowerCase())) {
+    const [{ data: allPerms }, { data: profile }] = await Promise.all([
+      supabaseAdmin.from('permissions').select('name'),
+      supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
+    ]);
+    return res.json({
+      token: access_token,
+      refresh_token: refresh_token || null,
+      user: {
+        id: userId, email, role: 'superadmin', role_name: 'Super Admin',
+        company_id: null, company_name: null,
+        first_name: profile?.first_name, last_name: profile?.last_name,
+        permissions: (allPerms || []).map(p => p.name),
+      },
+    });
+  }
+
+  // Regular user — fetch role + company
+  const [{ data: userRoles }, { data: profile }] = await Promise.all([
+    supabaseAdmin
+      .from('user_company_roles')
+      .select('role_id, company_id, custom_roles(id, name, level), companies(name, logo_url, internal_timezone)')
+      .eq('user_id', userId).eq('is_active', true)
+      .order('created_at', { ascending: false }).limit(1),
+    supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
+  ]);
+
+  if (!userRoles?.length) return res.status(401).json({ error: 'User has no active company assignment' });
+
+  const ur       = userRoles[0];
+  const roleLevel = ur.custom_roles.level;
+
+  let userPermissions = [];
+  const { data: perms } = await supabaseAdmin
+    .from('role_permissions').select('permissions(name)').eq('role_id', ur.role_id);
+  const permSet = new Set((perms || []).map(p => p.permissions.name));
+
+  const { data: overrides } = await supabaseAdmin
+    .from('user_permission_overrides').select('override_type, permissions(name)')
+    .eq('user_id', userId).eq('company_id', ur.company_id);
+  for (const ov of (overrides || [])) {
+    const name = ov.permissions?.name;
+    if (!name) continue;
+    if (ov.override_type === 'grant')  permSet.add(name);
+    if (ov.override_type === 'revoke') permSet.delete(name);
+  }
+  userPermissions = [...permSet];
+
+  res.json({
+    token: access_token,
+    refresh_token: refresh_token || null,
+    user: {
+      id: userId, email, role: roleLevel, role_name: ur.custom_roles.name,
+      company_id: ur.company_id, company_name: ur.companies?.name,
+      company_logo_url: ur.companies?.logo_url || null,
+      company_timezone: ur.companies?.internal_timezone || 'Asia/Karachi',
+      first_name: profile?.first_name, last_name: profile?.last_name,
+      permissions: userPermissions,
+    },
+  });
+}));
+
 module.exports = router;

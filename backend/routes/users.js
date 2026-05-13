@@ -960,9 +960,11 @@ router.post('/:userId/impersonate', asyncHandler(async (req, res) => {
   const email = authUser.user.email;
   if (!email) return res.status(400).json({ error: 'User has no email address' });
 
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://crm.vertexpakistan.com').replace(/\/$/, '');
   const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
     type: 'magiclink',
     email,
+    options: { redirectTo: `${frontendUrl}/auth/impersonate` },
   });
 
   if (linkErr || !linkData?.properties?.action_link) {

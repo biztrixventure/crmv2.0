@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import AcceptInvite from "./pages/AcceptInvite";
+import ImpersonateCallback from "./pages/ImpersonateCallback";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
@@ -58,10 +59,11 @@ const AppContent = () => {
     <Router>
       <Suspense fallback={<PageSpinner />}>
         <Routes>
-          <Route path="/login"          element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password"  element={<ResetPassword />} />
-          <Route path="/accept-invite"   element={<AcceptInvite />} />
+          <Route path="/login"              element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
+          <Route path="/forgot-password"   element={<ForgotPassword />} />
+          <Route path="/reset-password"    element={<ResetPassword />} />
+          <Route path="/accept-invite"     element={<AcceptInvite />} />
+          <Route path="/auth/impersonate"  element={<ImpersonateCallback />} />
 
           {/* Smart redirect */}
           <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
