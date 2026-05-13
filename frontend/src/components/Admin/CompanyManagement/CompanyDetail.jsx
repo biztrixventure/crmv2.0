@@ -4,7 +4,7 @@ import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
   Calendar, BarChart3, Search, RefreshCw, Settings, Download, Upload,
   PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
-  AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown,
+  AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, LogIn, Copy, ExternalLink,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
 import Modal from '../../UI/Modal';
@@ -401,9 +401,97 @@ const OverviewPanel = ({ companyId }) => {
   );
 };
 
+// ── ImpersonateModal ──────────────────────────────────────────────────────────
+const ImpersonateModal = ({ data, onClose }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(data.link);
+    } catch {
+      const el = document.getElementById('imp-link-input');
+      if (el) { el.select(); document.execCommand('copy'); }
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="rounded-2xl shadow-2xl pointer-events-auto w-full max-w-lg"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+
+          <div className="flex items-center justify-between px-5 py-4 rounded-t-2xl"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <div className="flex items-center gap-2">
+              <LogIn size={17} className="text-white" />
+              <div>
+                <p className="text-sm font-bold text-white">Login as User</p>
+                <p className="text-xs text-white/70">{data.email}</p>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">
+              <XCircle size={15} className="text-white" />
+            </button>
+          </div>
+
+          <div className="px-5 py-4 space-y-4">
+            <div className="flex items-start gap-2 p-3 rounded-xl"
+              style={{ backgroundColor: 'var(--color-warning-50)', border: '1px solid var(--color-warning-200)' }}>
+              <AlertCircle size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-warning-600)' }} />
+              <p className="text-xs" style={{ color: 'var(--color-warning-700)' }}>
+                <strong>Single-use link.</strong> Expires after one click. Open in a private/incognito window to avoid conflicting with your superadmin session.
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>One-time login link</p>
+              <input
+                id="imp-link-input"
+                readOnly
+                value={data.link}
+                className="w-full text-xs rounded-lg px-3 py-2 font-mono"
+                style={{
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={handleCopy}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{
+                  backgroundColor: copied ? 'var(--color-success-50)' : 'var(--color-bg-secondary)',
+                  color: copied ? 'var(--color-success-700)' : 'var(--color-text)',
+                  border: `1px solid ${copied ? 'var(--color-success-200)' : 'var(--color-border)'}`,
+                }}>
+                {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied!' : 'Copy Link'}
+              </button>
+              <a href={data.link} target="_blank" rel="noopener noreferrer" onClick={onClose}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                <ExternalLink size={14} />
+                Open in New Tab
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
 // ── MembersPanel ──────────────────────────────────────────────────────────────
 const MembersPanel = ({ companyId }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user: authUser } = useAuth();
+  const isSuperAdmin = authUser?.role === 'superadmin';
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate]   = useState(false);
@@ -413,6 +501,20 @@ const MembersPanel = ({ companyId }) => {
   const [actionErr, setActionErr]     = useState('');
   const [confirm, setConfirm]         = useState(null); // { id, name, action: 'delete'|'deactivate' }
   const [exportLoading, setExportLoading] = useState(false);
+  const [impersonateData,    setImpersonateData]    = useState(null);
+  const [impersonateLoading, setImpersonateLoading] = useState(null);
+
+  const handleImpersonate = async (u) => {
+    setImpersonateLoading(u.user_id);
+    try {
+      const res = await client.post(`users/${u.user_id}/impersonate`);
+      setImpersonateData({ link: res.data.link, email: res.data.email });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to generate login link');
+    } finally {
+      setImpersonateLoading(null);
+    }
+  };
 
   const load = useCallback(() => {
     setLoading(true);
@@ -555,6 +657,18 @@ const MembersPanel = ({ companyId }) => {
                             : <CheckCircle size={15} className="text-success-500" />}
                         </button>
                         )}
+                        {isSuperAdmin && (
+                        <button
+                          onClick={() => handleImpersonate(u)}
+                          title="Login as this user"
+                          disabled={impersonateLoading === u.user_id}
+                          className="p-1 rounded hover:bg-primary-50 transition-colors disabled:opacity-50"
+                        >
+                          {impersonateLoading === u.user_id
+                            ? <RefreshCw size={15} className="animate-spin" style={{ color: 'var(--color-primary-500)' }} />
+                            : <LogIn size={15} style={{ color: 'var(--color-primary-500)' }} />}
+                        </button>
+                        )}
                         {hasPermission('delete_user') && (
                         <button
                           onClick={() => setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email })}
@@ -610,6 +724,10 @@ const MembersPanel = ({ companyId }) => {
       )}
 
       <UserDetailDrawer user={viewUser} onClose={() => setViewUser(null)} />
+
+      {impersonateData && (
+        <ImpersonateModal data={impersonateData} onClose={() => setImpersonateData(null)} />
+      )}
     </div>
   );
 };
