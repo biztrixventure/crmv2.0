@@ -310,9 +310,9 @@ router.post(
         transfer_id,
         company_id:       companyId,
         user_id:          userId,
-        disposition_name: closer_disposition || 'Sent to Compliance',
+        disposition_name: 'Sent to Compliance',
         color:            '#f59e0b',
-        note:             'Sale submitted to compliance',
+        note:             closer_disposition ? `Disposition: ${closer_disposition}` : 'Sale submitted to compliance',
         setter_role:      req.user.role || null,
       }).catch(err => logger.error('DISPO_AUTO', 'sale create dispo log failed', err));
     }

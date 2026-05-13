@@ -219,7 +219,8 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
             <Row label="Closer" value={
               transfer.closer
                 ? `${transfer.closer.first_name || ''} ${transfer.closer.last_name || ''}`.trim()
-                : transfer.assigned_to ? '(assigned)' : 'Unassigned'
+                : transfer.assigned_closer_name
+                  || (transfer.assigned_to ? '(assigned)' : 'Unassigned')
             } />
             {transfer.fronter_name && <Row label="Fronter" value={transfer.fronter_name} />}
             {transfer.rejection_count > 0 && (

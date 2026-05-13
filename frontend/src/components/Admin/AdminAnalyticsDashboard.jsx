@@ -23,6 +23,7 @@ const SortIcon = ({ col, sort }) => {
 const SALE_BADGE  = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', pending_review:'warning', needs_revision:'error' };
 const SALE_LABEL  = { open:'Open', sold:'Sold', cancelled:'Cancelled', follow_up:'Follow Up', closed_won:'Approved', closed_lost:'Lost', pending_review:'In Review', needs_revision:'Needs Revision' };
 const XFER_BADGE  = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
+const XFER_LABEL  = { pending:'Pending', assigned:'Assigned', completed:'Completed', cancelled:'Cancelled', rejected:'Rejected' };
 const CB_STATUS_BADGE  = { pending:'warning', completed:'success', cancelled:'error', no_answer:'secondary', answering_machine:'info' };
 const CB_STATUS_LABEL  = { pending:'Pending', completed:'Completed', cancelled:'Cancelled', no_answer:'No Answer', answering_machine:'Ans. Machine' };
 const CB_PRIORITY_CFG  = {
@@ -832,6 +833,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="form_data"            sort={sort} onSort={toggleSort}>Customer</Th>
                   <Th col="status"               sort={sort} onSort={toggleSort}>Transfer</Th>
                   <Th col="sale_status"          sort={sort} onSort={toggleSort}>Sale</Th>
+                  <Th col="latest_disposition"   sort={sort} onSort={toggleSort}>Disposition</Th>
                   <Th col="created_by_name"      sort={sort} onSort={toggleSort}>Fronter</Th>
                   <Th col="assigned_closer_name" sort={sort} onSort={toggleSort}>Closer</Th>
                   <Th col="company_name"         sort={sort} onSort={toggleSort}>Company</Th>
@@ -843,7 +845,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 {loading && rows.length===0 ? (
                   Array.from({length:8}).map((_,i) => (
                     <tr key={i} style={{ borderBottom:'1px solid var(--color-border)' }}>
-                      {Array.from({length:8}).map((_,j) => (
+                      {Array.from({length:9}).map((_,j) => (
                         <td key={j} className="py-2 px-2.5">
                           <div className="h-2.5 rounded animate-pulse" style={{ backgroundColor:'var(--color-border)', width: j===0?100:60 }} />
                         </td>
@@ -851,7 +853,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={8} className="py-10 text-center text-text-secondary text-xs">No transfers match the current filters.</td></tr>
+                  <tr><td colSpan={9} className="py-10 text-center text-text-secondary text-xs">No transfers match the current filters.</td></tr>
                 ) : (
                   sorted.map(t => {
                     const fd = t.form_data||{};
@@ -867,12 +869,25 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                           {phone && <p className="text-[10px] text-text-tertiary">{phone}</p>}
                         </td>
                         <td className="py-2 px-2.5">
-                          <Badge variant={XFER_BADGE[t.status]||'secondary'} size="sm">{t.status||'—'}</Badge>
+                          <Badge variant={XFER_BADGE[t.status]||'secondary'} size="sm">{XFER_LABEL[t.status]||t.status||'—'}</Badge>
                         </td>
                         <td className="py-2 px-2.5">
                           {t.sale_status
                             ? <Badge variant={ds.variant} size="sm">{ds.label}</Badge>
                             : <span className="text-text-tertiary text-[10px]">—</span>}
+                        </td>
+                        <td className="py-2 px-2.5">
+                          {t.latest_disposition
+                            ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: t.latest_disposition.color || '#9ca3af' }} />
+                                <span className="text-[11px] font-medium text-text-secondary truncate max-w-[120px]">
+                                  {t.latest_disposition.disposition_name}
+                                </span>
+                              </span>
+                            )
+                            : <span className="text-text-tertiary text-[10px]">In Progress</span>}
                         </td>
                         <td className="py-2 px-2.5 text-text-secondary">{t.created_by_name||'—'}</td>
                         <td className="py-2 px-2.5 text-text-secondary">{t.assigned_closer_name||<span className="text-text-tertiary">—</span>}</td>

@@ -216,15 +216,38 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     : {};
   const companyMap = await enrichCompanies(data || [], t => t.company_id);
 
-  // Enrich with linked sale data so getTransferDisplayStatus() works for compliance too
+  // Enrich with linked sale data + latest disposition
   const transferIds = (data || []).map(t => t.id).filter(Boolean);
   let saleMap = {};
+  let latestDispoMap = {};
   if (transferIds.length > 0) {
-    const { data: sales } = await supabaseAdmin
-      .from('sales')
-      .select('id, transfer_id, status, compliance_note, reference_no')
-      .in('transfer_id', transferIds);
-    (sales || []).forEach(s => { saleMap[s.transfer_id] = s; });
+    const [salesRes, dispoRes] = await Promise.all([
+      supabaseAdmin.from('sales')
+        .select('id, transfer_id, status, compliance_note, reference_no')
+        .in('transfer_id', transferIds),
+      supabaseAdmin.from('disposition_actions')
+        .select('transfer_id, disposition_name, color, created_at, user_id, setter_role')
+        .in('transfer_id', transferIds)
+        .order('created_at', { ascending: false }),
+    ]);
+    (salesRes.data || []).forEach(s => { saleMap[s.transfer_id] = s; });
+
+    const setterIds = [...new Set((dispoRes.data || []).map(d => d.user_id).filter(Boolean))];
+    let setterMap = {};
+    if (setterIds.length > 0) {
+      const { data: sp } = await supabaseAdmin
+        .from('user_profiles').select('user_id, first_name, last_name').in('user_id', setterIds);
+      (sp || []).forEach(p => { setterMap[p.user_id] = p; });
+    }
+    (dispoRes.data || []).forEach(d => {
+      if (!latestDispoMap[d.transfer_id]) {
+        const p = setterMap[d.user_id];
+        latestDispoMap[d.transfer_id] = {
+          ...d,
+          setter_name: p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || null : null,
+        };
+      }
+    });
   }
 
   const enriched = (data || []).map(t => {
@@ -238,6 +261,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
       sale_status:           sale?.status || null,
       sale_compliance_note:  sale?.compliance_note || null,
       sale_reference_no:     sale?.reference_no || null,
+      latest_disposition:    latestDispoMap[t.id] || null,
     };
   });
 
