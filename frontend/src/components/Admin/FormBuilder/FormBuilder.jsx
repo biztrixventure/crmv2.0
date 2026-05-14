@@ -16,10 +16,8 @@ import {
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
   X, Zap, Users, UserX, Tag, Briefcase, Link2,
   ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight, MessageSquare,
-  Bookmark, BookOpen, Trash2,
+  Bookmark, BookOpen, Trash2, Pencil, Check,
 } from 'lucide-react';
-
-const TEMPLATES_KEY = 'form_builder_templates';
 import DispositionManager from './DispositionManager';
 import client from '../../../api/client';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
@@ -873,12 +871,6 @@ const PaletteField = ({ field, onAdd, isSale = false }) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // Form Layout Panel
 // ─────────────────────────────────────────────────────────────────────────────
-const loadTemplates = () => {
-  try { return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || '[]'); }
-  catch { return []; }
-};
-const saveTemplates = (tpls) => localStorage.setItem(TEMPLATES_KEY, JSON.stringify(tpls));
-
 const DEFAULT_CANVAS = BASE_FIELDS.map((f, i) => ({
   ...f, column_span: 1, show_to_fronter: true, order: i,
 }));
@@ -893,8 +885,11 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const [showCustom, setShowCustom]     = useState(false);
   const [mappingField, setMappingField] = useState(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [templates, setTemplates]         = useState(loadTemplates);
+  const [templates, setTemplates]         = useState([]);
+  const [tplLoading, setTplLoading]       = useState(false);
   const [tplName, setTplName]             = useState('');
+  const [tplDesc, setTplDesc]             = useState('');
+  const [editingTpl, setEditingTpl]       = useState(null); // { id, name, description }
 
   const dragIndex   = useRef(null);
   const dbSnapshot  = useRef([]);
@@ -979,31 +974,76 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   };
   const onDragEnd = () => { dragIndex.current = null; setDragOverIdx(null); };
 
-  const saveTemplate = () => {
+  const fetchTemplates = useCallback(async () => {
+    setTplLoading(true);
+    try {
+      const res = await client.get('forms/templates');
+      setTemplates(res.data.templates || []);
+    } catch { /* non-critical */ } finally { setTplLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  const saveTemplate = async () => {
     const name = tplName.trim();
     if (!name || !canvasFields.length) return;
-    const tpl = { id: Date.now(), name, savedAt: new Date().toISOString(), fields: canvasFields };
-    const updated = [tpl, ...templates.filter(t => t.name !== name)];
-    saveTemplates(updated);
-    setTemplates(updated);
-    setTplName('');
-    setSavedMsg(`Template "${name}" saved.`);
-    setTimeout(() => setSavedMsg(''), 4000);
+    setTplLoading(true);
+    try {
+      const res = await client.post('forms/templates', {
+        name,
+        description: tplDesc.trim() || null,
+        fields: canvasFields,
+      });
+      setTemplates(prev => [res.data.template, ...prev]);
+      setTplName('');
+      setTplDesc('');
+      setSavedMsg(`Template "${name}" saved.`);
+      setTimeout(() => setSavedMsg(''), 4000);
+    } catch (err) {
+      setSavedMsg(err.response?.data?.error || 'Failed to save template');
+    } finally { setTplLoading(false); }
+  };
+
+  const updateTemplate = async (id, patch) => {
+    try {
+      const res = await client.put(`forms/templates/${id}`, patch);
+      setTemplates(prev => prev.map(t => t.id === id ? res.data.template : t));
+      setEditingTpl(null);
+    } catch (err) {
+      setSavedMsg(err.response?.data?.error || 'Failed to update template');
+    }
+  };
+
+  const overwriteTemplate = async (tpl) => {
+    if (!canvasFields.length) return;
+    setTplLoading(true);
+    try {
+      const res = await client.put(`forms/templates/${tpl.id}`, { fields: canvasFields });
+      setTemplates(prev => prev.map(t => t.id === tpl.id ? res.data.template : t));
+      setSavedMsg(`Template "${tpl.name}" updated with current layout.`);
+      setTimeout(() => setSavedMsg(''), 4000);
+    } catch (err) {
+      setSavedMsg(err.response?.data?.error || 'Failed to overwrite template');
+    } finally { setTplLoading(false); }
   };
 
   const loadTemplate = (tpl) => {
-    const names = new Set(tpl.fields.map(f => f.name));
-    setCanvasFields(tpl.fields);
+    const names = new Set((tpl.fields || []).map(f => f.name));
+    setCanvasFields(tpl.fields || []);
     setPalette(BASE_FIELDS.filter(f => !names.has(f.name)).map(f => ({ ...f, column_span: 1 })));
     setShowTemplates(false);
-    setSavedMsg(`Template "${tpl.name}" loaded — click Save Layout to apply.`);
+    setSavedMsg(`Template "${tpl.name}" loaded — click Save Layout to apply globally.`);
     setTimeout(() => setSavedMsg(''), 6000);
   };
 
-  const deleteTemplate = (id) => {
-    const updated = templates.filter(t => t.id !== id);
-    saveTemplates(updated);
-    setTemplates(updated);
+  const deleteTemplate = async (id, name) => {
+    if (!window.confirm(`Delete template "${name}"?`)) return;
+    try {
+      await client.delete(`forms/templates/${id}`);
+      setTemplates(prev => prev.filter(t => t.id !== id));
+    } catch (err) {
+      setSavedMsg(err.response?.data?.error || 'Failed to delete template');
+    }
   };
 
   const handleSave = async () => {
@@ -1081,53 +1121,122 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
 
       {/* Templates Panel */}
       {showTemplates && (
-        <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="rounded-2xl p-4 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <div className="flex items-center justify-between">
-            <p className="font-bold text-text flex items-center gap-2"><BookOpen size={16} /> Saved Templates</p>
+            <p className="font-bold text-text flex items-center gap-2"><BookOpen size={16} /> Form Templates</p>
             <button onClick={() => setShowTemplates(false)} style={{ color: 'var(--color-text-tertiary)' }}><X size={16} /></button>
           </div>
 
-          {/* Save current as template */}
-          <div className="flex gap-2">
-            <input
-              value={tplName}
-              onChange={e => setTplName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveTemplate()}
-              placeholder="Template name (e.g. Auto Insurance Layout)…"
-              className="input flex-1 text-sm"
-            />
-            <button
-              onClick={saveTemplate}
-              disabled={!tplName.trim() || !canvasFields.length}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              <Bookmark size={14} /> Save
-            </button>
+          {/* Save current canvas as new template */}
+          <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <p className="text-xs font-bold text-text-secondary uppercase tracking-wider">Save Current Layout as Template</p>
+            <div className="flex gap-2">
+              <input
+                value={tplName}
+                onChange={e => setTplName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveTemplate()}
+                placeholder="Template name…"
+                className="input flex-1 text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={tplDesc}
+                onChange={e => setTplDesc(e.target.value)}
+                placeholder="Description (optional)…"
+                className="input flex-1 text-sm"
+              />
+              <button
+                onClick={saveTemplate}
+                disabled={!tplName.trim() || !canvasFields.length || tplLoading}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 shrink-0"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                <Bookmark size={14} /> Save
+              </button>
+            </div>
           </div>
 
           {/* Template list */}
-          {templates.length === 0 ? (
-            <p className="text-sm text-text-tertiary text-center py-3">No templates yet — save your current layout above.</p>
+          {tplLoading && !templates.length ? (
+            <div className="flex justify-center py-4">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" />
+            </div>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-text-tertiary text-center py-3">No templates saved yet.</p>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {templates.map(tpl => (
-                <div key={tpl.id} className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                <div key={tpl.id} className="rounded-xl px-3 py-3 space-y-2"
                   style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                  <div className="min-w-0 mr-3">
-                    <p className="text-sm font-semibold text-text truncate">{tpl.name}</p>
-                    <p className="text-xs text-text-tertiary">{tpl.fields.length} fields · {new Date(tpl.savedAt).toLocaleDateString()}</p>
-                  </div>
-                  <div className="flex gap-1.5 shrink-0">
+
+                  {/* Name row — inline edit */}
+                  {editingTpl?.id === tpl.id ? (
+                    <div className="flex gap-2">
+                      <input
+                        className="input flex-1 text-sm"
+                        value={editingTpl.name}
+                        onChange={e => setEditingTpl(prev => ({ ...prev, name: e.target.value }))}
+                        autoFocus
+                      />
+                      <input
+                        className="input flex-1 text-sm"
+                        value={editingTpl.description || ''}
+                        onChange={e => setEditingTpl(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Description…"
+                      />
+                      <button
+                        onClick={() => updateTemplate(tpl.id, { name: editingTpl.name, description: editingTpl.description })}
+                        disabled={!editingTpl.name.trim()}
+                        className="p-1.5 rounded-lg text-white disabled:opacity-40"
+                        style={{ background: 'var(--gradient-sidebar)' }}>
+                        <Check size={14} />
+                      </button>
+                      <button onClick={() => setEditingTpl(null)} className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-tertiary)' }}>
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-text truncate">{tpl.name}</p>
+                        {tpl.description && <p className="text-xs text-text-secondary truncate">{tpl.description}</p>}
+                        <p className="text-xs text-text-tertiary mt-0.5">
+                          {(tpl.fields || []).length} fields · {new Date(tpl.created_at).toLocaleDateString()}
+                          {tpl.updated_at !== tpl.created_at && ` · updated ${new Date(tpl.updated_at).toLocaleDateString()}`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setEditingTpl({ id: tpl.id, name: tpl.name, description: tpl.description || '' })}
+                        className="p-1.5 rounded-lg shrink-0 hover:bg-primary-50 transition-colors"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                        title="Rename">
+                        <Pencil size={13} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-1.5 flex-wrap">
                     <button
                       onClick={() => loadTemplate(tpl)}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
-                      style={{ background: 'var(--gradient-sidebar)' }}>
-                      Load
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                      style={{ background: 'var(--gradient-sidebar)' }}
+                      title="Load this template onto canvas">
+                      <BookOpen size={12} /> Load
                     </button>
                     <button
-                      onClick={() => deleteTemplate(tpl.id)}
-                      className="p-1.5 rounded-lg transition-colors hover:bg-error-50"
-                      style={{ color: 'var(--color-error-500)' }}>
+                      onClick={() => overwriteTemplate(tpl)}
+                      disabled={!canvasFields.length || tplLoading}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+                      title="Overwrite template with current canvas">
+                      <Save size={12} /> Update with Current
+                    </button>
+                    <button
+                      onClick={() => deleteTemplate(tpl.id, tpl.name)}
+                      className="ml-auto p-1.5 rounded-lg transition-colors hover:bg-red-50"
+                      style={{ color: 'var(--color-error-500)' }}
+                      title="Delete template">
                       <Trash2 size={13} />
                     </button>
                   </div>

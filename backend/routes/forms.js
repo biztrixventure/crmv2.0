@@ -219,4 +219,72 @@ router.post('/fields/reorder', superadminOnly, [body('fields').isArray()], async
   res.json({ message: 'Reordered' });
 }));
 
+// ============================================================================
+// TEMPLATES — named canvas snapshots stored in DB (cross-device)
+// ============================================================================
+
+// GET /forms/templates — list all templates (SuperAdmin)
+router.get('/templates', superadminOnly, asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('form_templates')
+    .select('id, name, description, fields, created_by, created_at, updated_at')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ templates: data || [] });
+}));
+
+// POST /forms/templates — create template (SuperAdmin)
+router.post('/templates', superadminOnly, [
+  body('name').trim().notEmpty().withMessage('name required'),
+  body('fields').isArray({ min: 1 }).withMessage('fields array required'),
+  body('description').optional().isString(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: errs.array()[0].msg });
+
+  const { name, fields, description } = req.body;
+  const { data, error } = await supabaseAdmin
+    .from('form_templates')
+    .insert({ name: name.trim(), fields, description: description || null, created_by: req.user.id })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.message.includes('duplicate') || error.code === '23505')
+      return res.status(400).json({ error: `Template "${name}" already exists` });
+    return res.status(400).json({ error: error.message });
+  }
+  res.status(201).json({ template: data });
+}));
+
+// PUT /forms/templates/:id — update name / description / fields (SuperAdmin)
+router.put('/templates/:id', superadminOnly, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const updates = { updated_at: new Date().toISOString() };
+  if (req.body.name        !== undefined) updates.name        = req.body.name.trim();
+  if (req.body.description !== undefined) updates.description = req.body.description;
+  if (req.body.fields      !== undefined) updates.fields      = req.body.fields;
+
+  const { data, error } = await supabaseAdmin
+    .from('form_templates')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.message.includes('duplicate') || error.code === '23505')
+      return res.status(400).json({ error: 'Template name already exists' });
+    return res.status(400).json({ error: error.message });
+  }
+  res.json({ template: data });
+}));
+
+// DELETE /forms/templates/:id (SuperAdmin)
+router.delete('/templates/:id', superadminOnly, asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('form_templates').delete().eq('id', req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ message: 'Deleted' });
+}));
+
 module.exports = router;
