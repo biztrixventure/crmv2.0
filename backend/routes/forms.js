@@ -158,43 +158,32 @@ router.post('/fields/bulk-save', superadminOnly, [
     show_to_fronter: f.show_to_fronter !== false,
   });
 
-  // Fetch current DB state
+  // Fetch current DB state — need name for accurate DELETE calculation
   const { data: current, error: fetchErr } = await supabaseAdmin
-    .from('form_fields').select('id');
+    .from('form_fields').select('id, name');
   if (fetchErr) return res.status(500).json({ error: fetchErr.message });
 
-  const currentIds  = new Set((current || []).map(f => f.id));
-  const existingIn  = fields.filter(f => f.id && currentIds.has(f.id));
-  const newIn       = fields.filter(f => !f.id || !currentIds.has(f.id));
-  const keepIds     = new Set(existingIn.map(f => f.id));
-  const toDeleteIds = [...currentIds].filter(id => !keepIds.has(id));
+  const keepNames   = new Set(fields.map(f => f.name.toString().trim()));
+  const toDeleteIds = (current || []).filter(r => !keepNames.has(r.name)).map(r => r.id);
 
-  // Safety guard: refuse if this would wipe ALL existing fields with zero replacements coming in
-  if (currentIds.size > 0 && toDeleteIds.length === currentIds.size && newIn.length === 0) {
-    return res.status(400).json({ error: 'Safety guard: payload would delete all fields with no new fields to replace them. No changes made.' });
+  // Safety guard: refuse if all existing fields would be deleted with nothing coming in
+  if ((current || []).length > 0 && toDeleteIds.length === (current || []).length && fields.length === 0) {
+    return res.status(400).json({ error: 'Safety guard: payload would delete all fields with no replacements. No changes made.' });
   }
 
-  // 1. UPDATE existing fields (safe — no deletion yet)
-  for (let i = 0; i < fields.length; i++) {
-    const f = fields[i];
-    if (!f.id || !currentIds.has(f.id)) continue;
-    const { error } = await supabaseAdmin
-      .from('form_fields').update(buildRow(f, i)).eq('id', f.id);
-    if (error) return res.status(500).json({ error: error.message });
-  }
+  // UPSERT all fields by name — handles stale IDs, duplicate names, and new fields in one shot.
+  // If name already exists → UPDATE that row. If not → INSERT.
+  const allRows = fields.map((f, i) => buildRow(f, i));
+  const { error: upsertErr } = await supabaseAdmin
+    .from('form_fields')
+    .upsert(allRows, { onConflict: 'name', ignoreDuplicates: false });
+  if (upsertErr) return res.status(500).json({ error: upsertErr.message });
 
-  // 2. INSERT new fields (safe — only adds)
-  if (newIn.length) {
-    const newRows = newIn.map(f => buildRow(f, fields.indexOf(f)));
-    const { error } = await supabaseAdmin.from('form_fields').insert(newRows);
-    if (error) return res.status(500).json({ error: error.message });
-  }
-
-  // 3. DELETE removed fields LAST — only after updates+inserts succeeded
+  // DELETE fields whose names are no longer in the payload — runs AFTER upsert succeeds
   if (toDeleteIds.length) {
-    const { error } = await supabaseAdmin
+    const { error: delErr } = await supabaseAdmin
       .from('form_fields').delete().in('id', toDeleteIds);
-    if (error) return res.status(500).json({ error: error.message });
+    if (delErr) return res.status(500).json({ error: delErr.message });
   }
 
   const { data: finalFields, error: finalErr } = await supabaseAdmin
