@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { toastError } from '../../../utils/toast';
 import { Edit2, Trash2, LogIn, Copy, ExternalLink, X, CheckCircle } from 'lucide-react';
 import { Badge, Button, Card } from '../../../components/UI';
 import { Table } from '../../../components/UI';
@@ -119,7 +120,7 @@ const UserList = ({ users, onEdit, onDelete }) => {
       const res = await client.post(`users/${row.user_id}/impersonate`);
       setImpersonateData({ link: res.data.link, email: res.data.email, name: row.name });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to generate login link');
+      toastError(err, 'Failed to generate login link');
     } finally {
       setImpersonateLoading(null);
     }

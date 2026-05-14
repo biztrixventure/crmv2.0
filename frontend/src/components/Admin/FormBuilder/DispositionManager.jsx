@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { toast, toastError } from '../../../utils/toast';
 import { Plus, X, Save, Edit3, Bell, BellOff, MessageSquare, GripVertical, Globe, Building2 } from 'lucide-react';
 import client from '../../../api/client';
 
@@ -298,7 +299,7 @@ const DispositionManager = () => {
       await load();
       setShowForm(false);
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      toastError(err, 'Failed to create disposition');
     } finally { setSaving(false); }
   };
 
@@ -308,8 +309,9 @@ const DispositionManager = () => {
       await client.put(`disposition-configs/${editing.id}`, form);
       await load();
       setEditing(null);
+      toast.success('Disposition updated');
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      toastError(err, 'Failed to update disposition');
     } finally { setSaving(false); }
   };
 
@@ -319,8 +321,9 @@ const DispositionManager = () => {
     try {
       await client.delete(`disposition-configs/${id}`);
       await load();
+      toast.success('Disposition deactivated');
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      toastError(err, 'Failed to deactivate disposition');
     } finally { setDeleting(null); }
   };
 

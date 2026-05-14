@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { toastError } from '../../../utils/toast';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
@@ -510,7 +511,7 @@ const MembersPanel = ({ companyId }) => {
       const res = await client.post(`users/${u.user_id}/impersonate`);
       setImpersonateData({ link: res.data.link, email: res.data.email });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to generate login link');
+      toastError(err, 'Failed to generate login link');
     } finally {
       setImpersonateLoading(null);
     }

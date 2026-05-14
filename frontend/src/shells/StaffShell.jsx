@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -967,7 +968,7 @@ const StaffShell = () => {
                                 e.stopPropagation();
                                 if (window.confirm('Delete this lead? This cannot be undone.')) {
                                   deleteTransfer(t.id).catch(err =>
-                                    alert(err.response?.data?.error || err.message || 'Failed to delete')
+                                    toastError(err, 'Failed to delete lead')
                                   );
                                 }
                               }}

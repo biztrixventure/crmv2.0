@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import DispositionManager from './DispositionManager';
 import client from '../../../api/client';
+import { toast, toastError } from '../../../utils/toast';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
 
 // ── Base fields ───────────────────────────────────────────────────────────────
@@ -302,7 +303,6 @@ const MappingPanel = ({ clients, plans, configLoading }) => {
   const [fieldId,   setFieldId]   = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
-  const [savedMsg,  setSavedMsg]  = useState('');
 
   const loadMapping = useCallback(async () => {
     setLoading(true);
@@ -343,10 +343,9 @@ const MappingPanel = ({ clients, plans, configLoading }) => {
         .map(c => ({ client: c.value, plans: [...(mapping[c.value] || [])] }))
         .filter(m => m.plans.length > 0);
       await client.put(`forms/fields/${fieldId}`, { options });
-      setSavedMsg('Mapping saved!');
-      setTimeout(() => setSavedMsg(''), 3000);
+      toast.success('Client → Plan mapping saved');
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Save failed');
+      toastError(err, 'Failed to save mapping');
     } finally { setSaving(false); }
   };
 
@@ -376,17 +375,6 @@ const MappingPanel = ({ clients, plans, configLoading }) => {
           </button>
         )}
       </div>
-
-      {savedMsg && (
-        <div className="mb-5 p-3 rounded-xl text-sm font-medium"
-          style={{
-            backgroundColor: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-50)' : 'var(--color-success-50)',
-            color: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-700)' : 'var(--color-success-700)',
-            border: '1px solid currentColor',
-          }}>
-          {savedMsg}
-        </div>
-      )}
 
       {isLoading ? (
         <div className="flex justify-center py-16">
@@ -907,7 +895,6 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const [palette, setPalette]           = useState([]);
   const [loading, setLoading]           = useState(true);
   const [saving, setSaving]             = useState(false);
-  const [savedMsg, setSavedMsg]         = useState('');
   const [showPreview, setShowPreview]   = useState(false);
   const [showCustom, setShowCustom]     = useState(false);
   const [mappingField, setMappingField] = useState(null);
@@ -1024,10 +1011,9 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       setTemplates(prev => [res.data.template, ...prev]);
       setTplName('');
       setTplDesc('');
-      setSavedMsg(`Template "${name}" saved.`);
-      setTimeout(() => setSavedMsg(''), 4000);
+      toast.success(`Template "${name}" saved`);
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Failed to save template');
+      toastError(err, 'Failed to save template');
     } finally { setTplLoading(false); }
   };
 
@@ -1036,8 +1022,9 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       const res = await client.put(`forms/templates/${id}`, patch);
       setTemplates(prev => prev.map(t => t.id === id ? res.data.template : t));
       setEditingTpl(null);
+      toast.success('Template updated');
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Failed to update template');
+      toastError(err, 'Failed to update template');
     }
   };
 
@@ -1047,10 +1034,9 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     try {
       const res = await client.put(`forms/templates/${tpl.id}`, { fields: canvasFields });
       setTemplates(prev => prev.map(t => t.id === tpl.id ? res.data.template : t));
-      setSavedMsg(`Template "${tpl.name}" updated with current layout.`);
-      setTimeout(() => setSavedMsg(''), 4000);
+      toast.success(`Template "${tpl.name}" updated with current layout`);
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Failed to overwrite template');
+      toastError(err, 'Failed to update template');
     } finally { setTplLoading(false); }
   };
 
@@ -1059,8 +1045,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     setCanvasFields(tpl.fields || []);
     setPalette(BASE_FIELDS.filter(f => !names.has(f.name)).map(f => ({ ...f, column_span: 1 })));
     setShowTemplates(false);
-    setSavedMsg(`Template "${tpl.name}" loaded — click Save Layout to apply globally.`);
-    setTimeout(() => setSavedMsg(''), 6000);
+    toast.info(`Template "${tpl.name}" loaded — click Save Layout to apply globally.`, { duration: 6000 });
   };
 
   const deleteTemplate = async (id, name) => {
@@ -1069,7 +1054,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       await client.delete(`forms/templates/${id}`);
       setTemplates(prev => prev.filter(t => t.id !== id));
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Failed to delete template');
+      toastError(err, 'Failed to delete template');
     }
   };
 
@@ -1080,12 +1065,10 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     setSaving(true);
     try {
       const res = await client.post('forms/fields/bulk-save', { fields: canvasFields });
-      setSavedMsg(`Saved — ${res.data.saved} field${res.data.saved !== 1 ? 's' : ''} applied globally.`);
+      toast.success(`Saved — ${res.data.saved} field${res.data.saved !== 1 ? 's' : ''} applied globally`);
       await loadFields();
-      setTimeout(() => setSavedMsg(''), 5000);
     } catch (err) {
-      const msg = err.response?.data?.error || 'Save failed — your layout has been restored.';
-      setSavedMsg(msg);
+      toastError(err, 'Save failed — your layout has been restored.');
       // Always restore canvas to exactly what user had before clicking Save
       const names = new Set(preCallCanvas.map(f => f.name));
       setCanvasFields(preCallCanvas);
@@ -1132,17 +1115,6 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
           </button>
         </div>
       </div>
-
-      {savedMsg && (
-        <div className="p-3 rounded-xl text-sm font-medium"
-          style={{
-            backgroundColor: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-50)' : 'var(--color-success-50)',
-            color: savedMsg.includes('failed') || savedMsg.includes('error') ? 'var(--color-error-700)' : 'var(--color-success-700)',
-            border: '1px solid currentColor',
-          }}>
-          {savedMsg}
-        </div>
-      )}
 
       {/* Templates Panel */}
       {showTemplates && (
@@ -1485,15 +1457,15 @@ const FormBuilder = () => {
 
   const handleAdd = async (type, value) => {
     setSaving(true);
-    try { await addConfig(type, value); }
-    catch (err) { alert(err.response?.data?.error || err.message); }
+    try { await addConfig(type, value); toast.success('Added successfully'); }
+    catch (err) { toastError(err, 'Failed to add'); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id, type) => {
     setDeleting(id);
-    try { await deleteConfig(id, type); }
-    catch (err) { alert(err.response?.data?.error || err.message); }
+    try { await deleteConfig(id, type); toast.success('Deleted'); }
+    catch (err) { toastError(err, 'Failed to delete'); }
     finally { setDeleting(null); }
   };
 

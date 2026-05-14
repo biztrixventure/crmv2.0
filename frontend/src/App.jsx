@@ -1,9 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useContext } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { ThemeProvider } from "./contexts/ThemeContext";
+import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
 import { FeatureFlagsProvider } from "./contexts/FeatureFlagsContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
+import { Toaster } from "sonner";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -97,11 +98,39 @@ const AppContent = () => {
   );
 };
 
+// Reads current theme so Toaster matches dark/light mode automatically
+const AppToaster = () => {
+  const { theme } = useContext(ThemeContext);
+  return (
+    <Toaster
+      position="top-right"
+      theme={theme}
+      richColors
+      expand={false}
+      gap={8}
+      toastOptions={{
+        style: {
+          fontFamily: 'inherit',
+          fontSize: '14px',
+          borderRadius: '12px',
+          border: '1px solid var(--color-border)',
+        },
+        classNames: {
+          toast:       'shadow-lg',
+          title:       'font-semibold',
+          description: 'text-xs opacity-80',
+        },
+      }}
+    />
+  );
+};
+
 function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
         <FeatureFlagsProvider>
+          <AppToaster />
           <AppContent />
         </FeatureFlagsProvider>
       </AuthProvider>
