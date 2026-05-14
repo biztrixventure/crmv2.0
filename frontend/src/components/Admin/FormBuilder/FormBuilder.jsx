@@ -670,7 +670,23 @@ const FieldCard = ({
   const [labelVal,       setLabelVal]       = useState(field.label);
   const [editingOptions, setEditingOptions] = useState(false);
   const [optionsVal,     setOptionsVal]     = useState((field.options || []).join(', '));
+  const [pendingRemove,  setPendingRemove]  = useState(false);
+  const removeTimer = useRef(null);
   const inputRef = useRef(null);
+
+  const handleRemoveClick = (e) => {
+    e.stopPropagation();
+    if (pendingRemove) {
+      clearTimeout(removeTimer.current);
+      setPendingRemove(false);
+      onRemove(index);
+    } else {
+      setPendingRemove(true);
+      removeTimer.current = setTimeout(() => setPendingRemove(false), 3000);
+    }
+  };
+
+  useEffect(() => () => clearTimeout(removeTimer.current), []);
   const isSale   = field.field_type === 'sale_client' || field.field_type === 'sale_plan';
   const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_disposition','sale_status'].includes(field.field_type);
   const mappingCount = field.field_type === 'sale_plan' && Array.isArray(field.options) ? field.options.length : 0;
@@ -717,11 +733,22 @@ const FieldCard = ({
             {field.label}
           </span>
         )}
-        <button onClick={() => onRemove(index)}
-          className="p-0.5 rounded hover:bg-error-100 flex-shrink-0 transition-colors"
-          title="Remove">
-          <X size={13} style={{ color: 'var(--color-error-500)' }} />
-        </button>
+        {pendingRemove ? (
+          <button
+            onClick={handleRemoveClick}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 animate-pulse"
+            style={{ backgroundColor: 'var(--color-error-600)', color: '#fff' }}
+            title="Click again to confirm remove">
+            <X size={11} /> Remove?
+          </button>
+        ) : (
+          <button
+            onClick={handleRemoveClick}
+            className="p-0.5 rounded hover:bg-error-100 flex-shrink-0 transition-colors"
+            title="Remove field">
+            <X size={13} style={{ color: 'var(--color-error-500)' }} />
+          </button>
+        )}
       </div>
 
       {/* Closer deal field badge */}
@@ -1048,6 +1075,8 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
 
   const handleSave = async () => {
     if (!canvasFields.length) return;
+    // Snapshot what user sees BEFORE touching the network — always restores to this on error
+    const preCallCanvas = canvasFields;
     setSaving(true);
     try {
       const res = await client.post('forms/fields/bulk-save', { fields: canvasFields });
@@ -1055,16 +1084,12 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       await loadFields();
       setTimeout(() => setSavedMsg(''), 5000);
     } catch (err) {
-      const msg = err.response?.data?.error || 'Save failed';
+      const msg = err.response?.data?.error || 'Save failed — your layout has been restored.';
       setSavedMsg(msg);
-      // Restore canvas to last known good DB state so no data appears lost
-      if (dbSnapshot.current.length) {
-        const snapshotNames = new Set(dbSnapshot.current.map(f => f.name));
-        setCanvasFields(dbSnapshot.current);
-        setPalette(BASE_FIELDS.filter(f => !snapshotNames.has(f.name)).map(f => ({ ...f, column_span: 1 })));
-      } else {
-        await loadFields();
-      }
+      // Always restore canvas to exactly what user had before clicking Save
+      const names = new Set(preCallCanvas.map(f => f.name));
+      setCanvasFields(preCallCanvas);
+      setPalette(BASE_FIELDS.filter(f => !names.has(f.name)).map(f => ({ ...f, column_span: 1 })));
     } finally { setSaving(false); }
   };
 

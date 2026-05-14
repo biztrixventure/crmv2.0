@@ -169,6 +169,11 @@ router.post('/fields/bulk-save', superadminOnly, [
   const keepIds     = new Set(existingIn.map(f => f.id));
   const toDeleteIds = [...currentIds].filter(id => !keepIds.has(id));
 
+  // Safety guard: refuse if this would wipe ALL existing fields with zero replacements coming in
+  if (currentIds.size > 0 && toDeleteIds.length === currentIds.size && newIn.length === 0) {
+    return res.status(400).json({ error: 'Safety guard: payload would delete all fields with no new fields to replace them. No changes made.' });
+  }
+
   // 1. UPDATE existing fields (safe — no deletion yet)
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
