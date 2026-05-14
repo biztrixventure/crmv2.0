@@ -880,7 +880,8 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const [showCustom, setShowCustom]     = useState(false);
   const [mappingField, setMappingField] = useState(null);
 
-  const dragIndex = useRef(null);
+  const dragIndex   = useRef(null);
+  const dbSnapshot  = useRef([]);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 
   const loadFields = useCallback(async () => {
@@ -888,13 +889,15 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     try {
       const res = await client.get('forms/fields');
       const dbFields = (res.data.fields || []).sort((a, b) => a.order - b.order);
-      const canvasNames = new Set(dbFields.map(f => f.name));
-      setCanvasFields(dbFields.map(f => ({
+      const mapped = dbFields.map(f => ({
         id: f.id, name: f.name, label: f.label, field_type: f.field_type,
         is_required: f.is_required, column_span: f.column_span || 1,
         placeholder: f.placeholder || '', options: f.options,
         section: f.section || 'default', show_to_fronter: f.show_to_fronter !== false,
-      })));
+      }));
+      dbSnapshot.current = mapped;
+      const canvasNames = new Set(dbFields.map(f => f.name));
+      setCanvasFields(mapped);
       setPalette(BASE_FIELDS.filter(f => !canvasNames.has(f.name)).map(f => ({ ...f, column_span: 1 })));
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, []);
@@ -961,7 +964,16 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       await loadFields();
       setTimeout(() => setSavedMsg(''), 5000);
     } catch (err) {
-      setSavedMsg(err.response?.data?.error || 'Save failed');
+      const msg = err.response?.data?.error || 'Save failed';
+      setSavedMsg(msg);
+      // Restore canvas to last known good DB state so no data appears lost
+      if (dbSnapshot.current.length) {
+        const snapshotNames = new Set(dbSnapshot.current.map(f => f.name));
+        setCanvasFields(dbSnapshot.current);
+        setPalette(BASE_FIELDS.filter(f => !snapshotNames.has(f.name)).map(f => ({ ...f, column_span: 1 })));
+      } else {
+        await loadFields();
+      }
     } finally { setSaving(false); }
   };
 

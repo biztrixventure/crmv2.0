@@ -122,8 +122,9 @@ router.put('/fields/:id', superadminOnly, asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
-// POST /forms/fields/bulk-save — replace entire form layout (SuperAdmin)
-// Accepts array of field objects; replaces all existing fields.
+// POST /forms/fields/bulk-save — safe incremental save (SuperAdmin)
+// Order: validate → UPDATE existing → INSERT new → DELETE removed (last).
+// Never deletes before confirming new data landed — no data loss on failure.
 // ============================================================================
 router.post('/fields/bulk-save', superadminOnly, [
   body('fields').isArray({ min: 1 }),
@@ -133,13 +134,19 @@ router.post('/fields/bulk-save', superadminOnly, [
 
   const { fields } = req.body;
 
-  // Delete all current fields, then re-insert in one shot
-  const { error: delErr } = await supabaseAdmin.from('form_fields').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  if (delErr) return res.status(500).json({ error: delErr.message });
+  // Validate ALL before touching DB
+  for (const f of fields) {
+    if (!f.name?.toString().trim() || !f.label?.toString().trim()) {
+      return res.status(400).json({ error: 'Every field must have a name and label' });
+    }
+    if (!ALLOWED_TYPES.includes(f.field_type)) {
+      return res.status(400).json({ error: `Invalid field_type: ${f.field_type}` });
+    }
+  }
 
-  const rows = fields.map((f, i) => ({
-    name:            f.name,
-    label:           f.label,
+  const buildRow = (f, i) => ({
+    name:            f.name.toString().trim(),
+    label:           f.label.toString().trim(),
     field_type:      ALLOWED_TYPES.includes(f.field_type) ? f.field_type : 'text',
     is_required:     f.is_required     || false,
     options:         f.options         || null,
@@ -149,14 +156,47 @@ router.post('/fields/bulk-save', superadminOnly, [
     section:         f.section         || 'default',
     default_value:   f.default_value   || null,
     show_to_fronter: f.show_to_fronter !== false,
-  }));
+  });
 
-  const { data, error: insertErr } = await supabaseAdmin
-    .from('form_fields').insert(rows).select();
+  // Fetch current DB state
+  const { data: current, error: fetchErr } = await supabaseAdmin
+    .from('form_fields').select('id');
+  if (fetchErr) return res.status(500).json({ error: fetchErr.message });
 
-  if (insertErr) return res.status(500).json({ error: insertErr.message });
+  const currentIds  = new Set((current || []).map(f => f.id));
+  const existingIn  = fields.filter(f => f.id && currentIds.has(f.id));
+  const newIn       = fields.filter(f => !f.id || !currentIds.has(f.id));
+  const keepIds     = new Set(existingIn.map(f => f.id));
+  const toDeleteIds = [...currentIds].filter(id => !keepIds.has(id));
 
-  res.json({ saved: data.length, fields: data });
+  // 1. UPDATE existing fields (safe — no deletion yet)
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    if (!f.id || !currentIds.has(f.id)) continue;
+    const { error } = await supabaseAdmin
+      .from('form_fields').update(buildRow(f, i)).eq('id', f.id);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+
+  // 2. INSERT new fields (safe — only adds)
+  if (newIn.length) {
+    const newRows = newIn.map(f => buildRow(f, fields.indexOf(f)));
+    const { error } = await supabaseAdmin.from('form_fields').insert(newRows);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+
+  // 3. DELETE removed fields LAST — only after updates+inserts succeeded
+  if (toDeleteIds.length) {
+    const { error } = await supabaseAdmin
+      .from('form_fields').delete().in('id', toDeleteIds);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+
+  const { data: finalFields, error: finalErr } = await supabaseAdmin
+    .from('form_fields').select('*').order('order');
+  if (finalErr) return res.status(500).json({ error: finalErr.message });
+
+  res.json({ saved: finalFields.length, fields: finalFields });
 }));
 
 // ============================================================================
