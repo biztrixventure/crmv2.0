@@ -1,17 +1,18 @@
 /**
- * NumberUploadManager — for Fronter Managers and Operations Managers.
+ * NumberUploadManager — Fronter Managers and Operations Managers.
  *
  * Flow:
- *  1. Upload CSV or XLSX file  → parsed client-side → preview table
- *  2. Map columns (phone, name) + set row range
- *  3. Choose fronter + list name
- *  4. Confirm → POST /api/number-lists/bulk
- *  5. View existing lists + delete batches
+ *  1. Upload CSV/XLSX → parse → preview
+ *  2. Map columns: phone + customer name (required) + any transfer form fields
+ *  3. Set row range + choose fronter + list name + assignment day
+ *  4. Confirm → POST /api/number-lists/bulk (mapped_data stored per row)
+ *  5. View / delete existing lists
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Upload, Users, ListChecks, Trash2, ChevronDown, ChevronUp,
-  Phone, X, CheckCircle, Plus, RefreshCw, FileText,
+  Phone, X, CheckCircle, Plus, RefreshCw, Calendar, Map,
+  ArrowRight, Link2,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -23,75 +24,70 @@ const STATUS_COLORS = {
   skip:      { label: 'Skip',      bg: '#f3f4f6', color: '#6b7280' },
 };
 
-// ── Pure-JS CSV parser (handles quoted fields, commas inside quotes) ──────────
 const parseCSV = (text) => {
-  const lines  = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
-  const result = [];
-  for (const line of lines) {
-    const row = [];
-    let field = '';
-    let inQ   = false;
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  return lines.map(line => {
+    const row = []; let field = ''; let inQ = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
-      if (ch === '"') {
-        if (inQ && line[i + 1] === '"') { field += '"'; i++; }
-        else inQ = !inQ;
-      } else if (ch === ',' && !inQ) {
-        row.push(field.trim());
-        field = '';
-      } else {
-        field += ch;
-      }
+      if (ch === '"') { if (inQ && line[i+1] === '"') { field += '"'; i++; } else inQ = !inQ; }
+      else if (ch === ',' && !inQ) { row.push(field.trim()); field = ''; }
+      else field += ch;
     }
     row.push(field.trim());
-    result.push(row);
-  }
-  return result;
+    return row;
+  });
 };
 
-// ── Parse XLSX using SheetJS (xlsx package must be installed) ─────────────────
 const parseXLSX = async (file) => {
   try {
     const XLSX = await import('xlsx');
     const buf  = await file.arrayBuffer();
     const wb   = XLSX.read(buf, { type: 'array' });
     const ws   = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    return rows.map(r => r.map(c => String(c ?? '').trim()));
-  } catch {
-    return null; // xlsx package not installed
-  }
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }).map(r => r.map(c => String(c ?? '').trim()));
+  } catch { return null; }
 };
 
-// ── NumberUploadManager ───────────────────────────────────────────────────────
-const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
-  const fileInputRef  = useRef(null);
-  const companyId     = companyIdProp || user?.company_id;
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
-  // ── Upload / preview state ──
-  const [step,        setStep]        = useState('idle'); // idle | preview | assigning | done
-  const [rawRows,     setRawRows]     = useState([]);     // all parsed rows (including header)
-  const [headers,     setHeaders]     = useState([]);     // column names
+// ─────────────────────────────────────────────────────────────────────────────
+const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
+  const fileInputRef = useRef(null);
+  const companyId    = companyIdProp || user?.company_id;
+
+  // file state
+  const [step,        setStep]        = useState('idle');
+  const [rawRows,     setRawRows]     = useState([]);
+  const [headers,     setHeaders]     = useState([]);
   const [phoneCol,    setPhoneCol]    = useState(0);
-  const [nameCol,     setNameCol]     = useState(-1);     // -1 = none
-  const [rangeFrom,   setRangeFrom]   = useState(1);      // data row start (0-based after header)
+  const [nameCol,     setNameCol]     = useState(-1);
+  // fieldMapping: { [field.name]: colIdx } for extra transfer fields
+  const [fieldMapping,setFieldMapping] = useState({});
+  const [showMapping, setShowMapping]  = useState(false);
+
+  // assignment state
+  const [rangeFrom,   setRangeFrom]   = useState(1);
   const [rangeTo,     setRangeTo]     = useState(50);
   const [listName,    setListName]    = useState('');
+  const [assignDay,   setAssignDay]   = useState(todayISO());
   const [fronters,    setFronters]    = useState([]);
   const [selectedF,   setSelectedF]  = useState('');
   const [assigning,   setAssigning]  = useState(false);
   const [assignErr,   setAssignErr]  = useState('');
   const [parseErr,    setParseErr]   = useState('');
 
-  // ── Existing lists state ──
-  const [lists,       setLists]      = useState([]);
-  const [listsLoad,   setListsLoad]  = useState(false);
-  const [deleting,    setDeleting]   = useState(null);
-  const [expandedList,setExpandedList] = useState(null);
-  const [listNumbers, setListNumbers] = useState({});
-  const [listSearch,  setListSearch]  = useState('');
+  // form fields (for mapping)
+  const [formFields,  setFormFields]  = useState([]);
 
-  // ── Load fronters + existing lists ──
+  // existing lists
+  const [lists,        setLists]       = useState([]);
+  const [listsLoad,    setListsLoad]   = useState(false);
+  const [deleting,     setDeleting]    = useState(null);
+  const [expandedList, setExpandedList] = useState(null);
+  const [listNumbers,  setListNumbers]  = useState({});
+  const [listSearch,   setListSearch]   = useState('');
+
   const loadFronters = useCallback(async () => {
     if (!companyId) return;
     try {
@@ -109,83 +105,100 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
     } catch { /* non-critical */ } finally { setListsLoad(false); }
   }, [companyId]);
 
-  useEffect(() => { loadFronters(); loadLists(); }, [loadFronters, loadLists]);
+  const loadFormFields = useCallback(async () => {
+    try {
+      const res = await client.get('forms/fields');
+      const extras = (res.data.fields || []).filter(f =>
+        !['phone', 'tel', 'mobile', 'name', 'customer_name', 'first_name', 'last_name'].some(k =>
+          f.name?.toLowerCase().includes(k) || f.field_type === 'phone'
+        )
+      );
+      setFormFields(extras);
+    } catch { /* non-critical */ }
+  }, []);
 
-  // ── File handler ──
+  useEffect(() => { loadFronters(); loadLists(); loadFormFields(); }, [loadFronters, loadLists, loadFormFields]);
+
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setParseErr('');
-    setStep('idle');
+    setParseErr(''); setStep('idle');
 
     const ext = file.name.split('.').pop().toLowerCase();
     let rows = null;
 
     if (ext === 'csv' || ext === 'txt') {
-      const text = await file.text();
-      rows = parseCSV(text);
+      rows = parseCSV(await file.text());
     } else if (ext === 'xlsx' || ext === 'xls') {
       rows = await parseXLSX(file);
       if (!rows) {
-        setParseErr('XLSX parsing requires the xlsx package. Run: npm install xlsx   OR  save your file as CSV and upload again.');
+        setParseErr('XLSX parsing requires the xlsx package. Run: npm install xlsx   OR  save as CSV.');
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
     } else {
-      setParseErr('Unsupported file type. Please upload a .csv or .xlsx file.');
+      setParseErr('Unsupported file type. Please upload .csv or .xlsx.');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
-    if (!rows || rows.length < 2) {
-      setParseErr('File appears empty or has only one row.');
-      return;
-    }
+    if (!rows || rows.length < 2) { setParseErr('File appears empty or has only one row.'); return; }
 
     const hdrs = rows[0];
     setHeaders(hdrs);
     setRawRows(rows);
     setRangeTo(Math.min(rows.length - 1, 100));
     setRangeFrom(1);
+    setFieldMapping({});
 
-    // Auto-detect phone column
     const phoneIdx = hdrs.findIndex(h => /phone|mobile|tel|cell|number/i.test(h));
     setPhoneCol(phoneIdx >= 0 ? phoneIdx : 0);
-
-    // Auto-detect name column
-    const nameIdx = hdrs.findIndex(h => /name|customer|client|first/i.test(h));
+    const nameIdx  = hdrs.findIndex(h => /name|customer|client|first/i.test(h));
     setNameCol(nameIdx >= 0 ? nameIdx : -1);
 
     setStep('preview');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ── Selected data rows ──
-  const dataRows = rawRows.slice(1); // without header row
+  const dataRows     = rawRows.slice(1);
   const selectedRows = dataRows.slice(rangeFrom - 1, rangeTo);
+  const previewRows  = selectedRows.slice(0, 6);
 
-  // ── Assign ──
   const handleAssign = async () => {
     setAssignErr('');
-    if (!selectedF)        return setAssignErr('Select a fronter.');
-    if (!listName.trim())  return setAssignErr('Enter a list name.');
+    if (!selectedF)           return setAssignErr('Select a fronter.');
+    if (!listName.trim())     return setAssignErr('Enter a list name.');
     if (!selectedRows.length) return setAssignErr('No rows in selected range.');
 
     const numbers = selectedRows
-      .map(row => ({
-        phone_number:  row[phoneCol]?.toString().trim(),
-        customer_name: nameCol >= 0 ? row[nameCol]?.toString().trim() || null : null,
-      }))
-      .filter(n => n.phone_number);
+      .map(row => {
+        const phone = row[phoneCol]?.toString().trim();
+        if (!phone) return null;
+        // Compute mapped_data for this row: all extra field mappings resolved to actual values
+        const mapped_data = {};
+        Object.entries(fieldMapping).forEach(([fieldName, colIdx]) => {
+          if (colIdx >= 0 && colIdx < row.length) {
+            const val = row[colIdx]?.toString().trim();
+            if (val) mapped_data[fieldName] = val;
+          }
+        });
+        // Also include customer_name from nameCol if mapped separately
+        const customer_name = nameCol >= 0 ? row[nameCol]?.toString().trim() || null : null;
+        if (customer_name) mapped_data['customer_name'] = customer_name;
+        mapped_data['phone_number'] = phone;
+        return { phone_number: phone, customer_name, mapped_data };
+      })
+      .filter(Boolean);
 
     if (!numbers.length) return setAssignErr('No valid phone numbers found in selected range.');
 
     setAssigning(true);
     try {
       await client.post('number-lists/bulk', {
-        company_id: companyId,
-        fronter_id: selectedF,
-        list_name:  listName.trim(),
+        company_id:     companyId,
+        fronter_id:     selectedF,
+        list_name:      listName.trim(),
+        assignment_day: assignDay || null,
         numbers,
       });
       setStep('done');
@@ -196,20 +209,13 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
   };
 
   const handleReset = () => {
-    setStep('idle');
-    setRawRows([]);
-    setHeaders([]);
-    setListName('');
-    setSelectedF('');
-    setAssignErr('');
-    setParseErr('');
+    setStep('idle'); setRawRows([]); setHeaders([]); setListName('');
+    setSelectedF(''); setAssignErr(''); setParseErr(''); setFieldMapping({});
   };
 
-  // ── Expand list → load individual numbers ──
   const toggleList = async (name) => {
     if (expandedList === name) { setExpandedList(null); setListSearch(''); return; }
-    setExpandedList(name);
-    setListSearch('');
+    setExpandedList(name); setListSearch('');
     if (listNumbers[name]) return;
     try {
       const res = await client.get('number-lists', { params: { company_id: companyId, list_name: name } });
@@ -227,24 +233,21 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
     } catch { /* non-critical */ } finally { setDeleting(null); }
   };
 
-  // ── Preview: visible rows for table ──
-  const previewRows = selectedRows.slice(0, 8);
-
   return (
     <div className="animate-fade-in space-y-6">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div>
         <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           <Phone size={22} style={{ color: 'var(--color-primary-600)' }} />
           Number Lists
         </h2>
         <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-          Upload a CSV or XLSX file, select a range, and assign phone numbers to your fronters.
+          Upload CSV / XLSX, map columns to transfer fields, and assign numbers to fronters by day.
         </p>
       </div>
 
-      {/* ── Upload card ── */}
+      {/* Upload card */}
       <div className="rounded-2xl border p-6"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
 
@@ -256,7 +259,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
             </div>
             <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--color-text)' }}>Upload Number List</h3>
             <p className="text-sm mb-5" style={{ color: 'var(--color-text-secondary)' }}>
-              Supports <strong>.csv</strong> and <strong>.xlsx</strong> files. First row should be column headers.
+              Supports <strong>.csv</strong> and <strong>.xlsx</strong>. First row = column headers.
             </p>
             {parseErr && (
               <div className="mb-4 p-3 rounded-xl text-sm text-left"
@@ -278,9 +281,9 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
           <div className="space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-lg" style={{ color: 'var(--color-text)' }}>
-                File Preview
+                Configure Assignment
                 <span className="ml-2 text-sm font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                  {dataRows.length} data rows found
+                  {dataRows.length} rows found
                 </span>
               </h3>
               <button onClick={handleReset} className="p-2 rounded-lg hover:bg-bg-secondary transition-colors">
@@ -288,48 +291,113 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
               </button>
             </div>
 
-            {/* Column mapping */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-xl"
-              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  Phone Number Column <span className="text-red-500">*</span>
-                </label>
-                <select value={phoneCol} onChange={e => setPhoneCol(+e.target.value)} className="input text-sm">
-                  {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                </select>
+            {/* Section 1: Core column mapping */}
+            <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="px-4 py-2.5 flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                <Phone size={14} style={{ color: 'var(--color-primary-600)' }} />
+                <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+                  Core Columns
+                </span>
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  Customer Name Column (optional)
-                </label>
-                <select value={nameCol} onChange={e => setNameCol(+e.target.value)} className="input text-sm">
-                  <option value={-1}>— None —</option>
-                  {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                </select>
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    Phone Number Column <span className="text-red-500">*</span>
+                  </label>
+                  <select value={phoneCol} onChange={e => setPhoneCol(+e.target.value)} className="input text-sm">
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    Customer Name Column
+                  </label>
+                  <select value={nameCol} onChange={e => setNameCol(+e.target.value)} className="input text-sm">
+                    <option value={-1}>— None —</option>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
 
-            {/* Row range */}
-            <div className="grid grid-cols-2 gap-3 p-4 rounded-xl"
-              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  From row
-                </label>
-                <input type="number" min={1} max={dataRows.length}
-                  value={rangeFrom} onChange={e => setRangeFrom(Math.max(1, +e.target.value))}
-                  className="input text-sm" />
+            {/* Section 2: Transfer field mapping (collapsible) */}
+            {formFields.length > 0 && (
+              <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  onClick={() => setShowMapping(v => !v)}
+                  className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-bg-secondary transition-colors"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: showMapping ? '1px solid var(--color-border)' : 'none' }}>
+                  <div className="flex items-center gap-2">
+                    <Map size={14} style={{ color: '#7c3aed' }} />
+                    <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+                      Transfer Field Mapping
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                      style={{ backgroundColor: '#ede9fe', color: '#7c3aed' }}>
+                      {Object.values(fieldMapping).filter(v => v >= 0).length} mapped
+                    </span>
+                  </div>
+                  {showMapping ? <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                               : <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
+                </button>
+                {showMapping && (
+                  <div className="p-4">
+                    <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+                      Map CSV columns to transfer form fields. When a fronter creates a transfer from a number, these fields will be pre-filled automatically.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {formFields.map(field => (
+                        <div key={field.id || field.name}>
+                          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                            {field.label}
+                            <span className="ml-1 font-normal" style={{ color: 'var(--color-text-tertiary)' }}>
+                              → CSV column
+                            </span>
+                          </label>
+                          <select
+                            value={fieldMapping[field.name] ?? -1}
+                            onChange={e => setFieldMapping(prev => ({ ...prev, [field.name]: +e.target.value }))}
+                            className="input text-sm">
+                            <option value={-1}>— None (manual entry) —</option>
+                            {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  To row <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                    ({selectedRows.length} rows selected)
-                  </span>
-                </label>
-                <input type="number" min={rangeFrom} max={dataRows.length}
-                  value={rangeTo} onChange={e => setRangeTo(Math.min(dataRows.length, +e.target.value))}
-                  className="input text-sm" />
+            )}
+
+            {/* Section 3: Row range */}
+            <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="px-4 py-2.5"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+                  Row Range
+                </span>
+              </div>
+              <div className="p-4 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    From row
+                  </label>
+                  <input type="number" min={1} max={dataRows.length}
+                    value={rangeFrom} onChange={e => setRangeFrom(Math.max(1, +e.target.value))}
+                    className="input text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    To row
+                    <span className="ml-1 font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                      ({selectedRows.length} selected)
+                    </span>
+                  </label>
+                  <input type="number" min={rangeFrom} max={dataRows.length}
+                    value={rangeTo} onChange={e => setRangeTo(Math.min(dataRows.length, +e.target.value))}
+                    className="input text-sm" />
+                </div>
               </div>
             </div>
 
@@ -337,20 +405,18 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
             <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
               <div className="px-4 py-2 text-xs font-bold uppercase tracking-wide"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                Preview (first 8 of {selectedRows.length} selected rows)
+                Preview — first {Math.min(6, selectedRows.length)} of {selectedRows.length} selected rows
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                      <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        Phone Number
-                      </th>
-                      {nameCol >= 0 && (
-                        <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                          Customer Name
-                        </th>
-                      )}
+                      <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
+                      {nameCol >= 0 && <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>}
+                      {Object.entries(fieldMapping).filter(([, v]) => v >= 0).map(([fname]) => {
+                        const f = formFields.find(ff => ff.name === fname);
+                        return <th key={fname} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{f?.label || fname}</th>;
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -364,6 +430,11 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                             {row[nameCol] || '—'}
                           </td>
                         )}
+                        {Object.entries(fieldMapping).filter(([, v]) => v >= 0).map(([fname, colIdx]) => (
+                          <td key={fname} className="px-3 py-2 text-xs" style={{ color: 'var(--color-text)' }}>
+                            {row[colIdx] || '—'}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
@@ -371,34 +442,48 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
               </div>
             </div>
 
-            {/* Assign settings */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  Assign to Fronter <span className="text-red-500">*</span>
-                </label>
-                <select value={selectedF} onChange={e => setSelectedF(e.target.value)} className="input text-sm">
-                  <option value="">— Select fronter —</option>
-                  {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                </select>
-                {fronters.length === 0 && (
-                  <p className="text-xs text-warning-600 mt-1">No fronters found in your company.</p>
-                )}
+            {/* Assignment settings */}
+            <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="px-4 py-2.5"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+                  Assignment Details
+                </span>
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  List Name <span className="text-red-500">*</span>
-                </label>
-                <input type="text" value={listName} onChange={e => setListName(e.target.value)}
-                  className="input text-sm" placeholder="e.g. Cold List April Week 1" />
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    Assign to Fronter <span className="text-red-500">*</span>
+                  </label>
+                  <select value={selectedF} onChange={e => setSelectedF(e.target.value)} className="input text-sm">
+                    <option value="">— Select fronter —</option>
+                    {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                  {fronters.length === 0 && (
+                    <p className="text-xs mt-1" style={{ color: '#d97706' }}>No fronters found in your company.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    List Name <span className="text-red-500">*</span>
+                  </label>
+                  <input type="text" value={listName} onChange={e => setListName(e.target.value)}
+                    className="input text-sm" placeholder="e.g. Cold List April Week 1" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    <Calendar size={12} />
+                    Assignment Day
+                  </label>
+                  <input type="date" value={assignDay} onChange={e => setAssignDay(e.target.value)}
+                    className="input text-sm" />
+                </div>
               </div>
             </div>
 
-            {assignErr && (
-              <p className="text-sm text-red-600">{assignErr}</p>
-            )}
+            {assignErr && <p className="text-sm text-red-600">{assignErr}</p>}
 
-            <div className="flex gap-3 pt-2">
+            <div className="flex gap-3 pt-1">
               <button onClick={handleReset}
                 className="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
@@ -424,7 +509,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
             </div>
             <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--color-text)' }}>Numbers Assigned!</h3>
             <p className="text-sm mb-5" style={{ color: 'var(--color-text-secondary)' }}>
-              The selected numbers have been assigned to the fronter.
+              Numbers assigned with transfer data pre-mapped.
             </p>
             <button onClick={handleReset}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white mx-auto"
@@ -435,7 +520,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
         )}
       </div>
 
-      {/* ── Existing Lists ── */}
+      {/* Existing Lists */}
       <div className="rounded-2xl border overflow-hidden"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
         <div className="flex items-center justify-between px-5 py-4"
@@ -467,7 +552,6 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
           <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
             {lists.map(list => (
               <div key={list.list_name}>
-                {/* List row */}
                 <div
                   className="flex items-center justify-between px-5 py-3 hover:bg-bg-secondary transition-colors cursor-pointer group"
                   onClick={() => toggleList(list.list_name)}>
@@ -480,16 +564,20 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                       <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-text)' }}>
                         {list.list_name}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <Users size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                           {list.fronter_name}
                         </span>
+                        {list.assignment_day && (
+                          <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                            <Calendar size={10} />
+                            {new Date(list.assignment_day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    {/* Mini status breakdown */}
                     <div className="hidden sm:flex items-center gap-2">
                       <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
                         style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
@@ -521,29 +609,21 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                   </div>
                 </div>
 
-                {/* Expanded: numbers with search */}
                 {expandedList === list.list_name && (
-                  <div className="px-4 pb-3 pt-1"
-                    style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <div className="px-4 pb-3 pt-1" style={{ backgroundColor: 'var(--color-bg)' }}>
                     {listNumbers[list.list_name] ? (() => {
                       const q = listSearch.trim().toLowerCase();
                       const filtered = q
                         ? listNumbers[list.list_name].filter(n =>
                             n.phone_number?.toLowerCase().includes(q) ||
-                            n.customer_name?.toLowerCase().includes(q)
-                          )
+                            n.customer_name?.toLowerCase().includes(q))
                         : listNumbers[list.list_name];
-                      const visible = filtered.slice(0, 20);
+                      const visible = filtered.slice(0, 25);
                       return (
                         <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={listSearch}
-                            onChange={e => setListSearch(e.target.value)}
-                            placeholder="Search phone or name…"
-                            className="input text-xs w-full"
-                            style={{ maxWidth: 280 }}
-                          />
+                          <input type="text" value={listSearch} onChange={e => setListSearch(e.target.value)}
+                            placeholder="Search phone or name…" className="input text-xs w-full"
+                            style={{ maxWidth: 280 }} />
                           <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
                             <table className="w-full text-xs">
                               <thead>
@@ -551,6 +631,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                                   <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
                                   <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>
                                   <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Status</th>
+                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Transfer</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -560,27 +641,25 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                                     <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{n.customer_name || '—'}</td>
                                     <td className="px-3 py-2">
                                       <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                                        style={{
-                                          backgroundColor: STATUS_COLORS[n.status]?.bg || '#f3f4f6',
-                                          color: STATUS_COLORS[n.status]?.color || '#6b7280',
-                                        }}>
+                                        style={{ backgroundColor: STATUS_COLORS[n.status]?.bg || '#f3f4f6', color: STATUS_COLORS[n.status]?.color || '#6b7280' }}>
                                         {STATUS_COLORS[n.status]?.label || n.status}
                                       </span>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {n.transfer_id
+                                        ? <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#059669' }}><Link2 size={10} /> Transferred</span>
+                                        : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                                     </td>
                                   </tr>
                                 ))}
                                 {visible.length === 0 && (
-                                  <tr>
-                                    <td colSpan={3} className="px-3 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-                                      No numbers match.
-                                    </td>
-                                  </tr>
+                                  <tr><td colSpan={4} className="px-3 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>No numbers match.</td></tr>
                                 )}
                               </tbody>
                             </table>
-                            {filtered.length > 20 && (
+                            {filtered.length > 25 && (
                               <p className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                                + {filtered.length - 20} more numbers
+                                + {filtered.length - 25} more numbers
                               </p>
                             )}
                           </div>

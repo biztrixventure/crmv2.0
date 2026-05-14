@@ -11,35 +11,58 @@ const MANAGER_LEVELS = [
   'superadmin', 'readonly_admin', 'company_admin',
   'fronter_manager', 'closer_manager', 'operations_manager', 'manager',
 ];
+const SUPERADMIN_LEVELS = ['superadmin', 'readonly_admin'];
 
-const isManager = (role) => MANAGER_LEVELS.includes(role);
+const isManager    = (role) => MANAGER_LEVELS.includes(role);
+const isSuperAdmin = (role) => SUPERADMIN_LEVELS.includes(role);
 
-// Helper: enrich rows with fronter names
-const enrichWithNames = async (rows) => {
+// Enrich rows with fronter + assigned_by names and company names
+const enrichWithNames = async (rows, includeCompany = false) => {
   if (!rows.length) return rows;
-  const ids = [...new Set([...rows.map(r => r.fronter_id), ...rows.map(r => r.assigned_by)])];
+
+  const userIds = [...new Set([
+    ...rows.map(r => r.fronter_id).filter(Boolean),
+    ...rows.map(r => r.assigned_by).filter(Boolean),
+  ])];
+
   const { data: profiles } = await supabaseAdmin
     .from('user_profiles')
     .select('user_id, first_name, last_name')
-    .in('user_id', ids);
-  const map = {};
+    .in('user_id', userIds);
+
+  const profileMap = {};
   (profiles || []).forEach(p => {
-    map[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+    profileMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
   });
+
+  let companyMap = {};
+  if (includeCompany) {
+    const companyIds = [...new Set(rows.map(r => r.company_id).filter(Boolean))];
+    if (companyIds.length) {
+      const { data: companies } = await supabaseAdmin
+        .from('companies')
+        .select('id, name, slug')
+        .in('id', companyIds);
+      (companies || []).forEach(c => { companyMap[c.id] = c.name || c.slug; });
+    }
+  }
+
   return rows.map(r => ({
     ...r,
-    fronter_name:     map[r.fronter_id]    || 'Unknown',
-    assigned_by_name: map[r.assigned_by]   || 'Unknown',
+    fronter_name:     profileMap[r.fronter_id]  || 'Unknown',
+    assigned_by_name: profileMap[r.assigned_by] || 'Unknown',
+    ...(includeCompany ? { company_name: companyMap[r.company_id] || 'Unknown' } : {}),
   }));
 };
 
 // ============================================================================
 // GET /number-lists
-// Fronter: own numbers. Manager: filter by fronter_id or all company.
-// Query params: fronter_id, status, list_name
+// Fronter: own numbers. Manager: filter by company/fronter/day.
+// Superadmin: all companies (unless company_id provided).
+// Query params: fronter_id, status, list_name, search, assignment_day, company_id
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
-  const { fronter_id, status, list_name, search } = req.query;
+  const { fronter_id, status, list_name, search, assignment_day } = req.query;
   const companyId = req.query.company_id || req.user.company_id;
   const userId    = req.user.id;
   const userRole  = req.user.role;
@@ -49,53 +72,119 @@ router.get('/', asyncHandler(async (req, res) => {
     .select('*')
     .order('created_at', { ascending: false });
 
-  if (isManager(userRole)) {
+  if (isSuperAdmin(userRole)) {
+    // Superadmin: no forced company filter, but can pass one
+    if (companyId) query = query.eq('company_id', companyId);
+    if (fronter_id) query = query.eq('fronter_id', fronter_id);
+  } else if (isManager(userRole)) {
     if (!companyId) return res.status(400).json({ error: 'company_id required' });
     query = query.eq('company_id', companyId);
     if (fronter_id) query = query.eq('fronter_id', fronter_id);
   } else {
-    // Fronter: only their own numbers
     query = query.eq('fronter_id', userId);
     if (companyId) query = query.eq('company_id', companyId);
   }
 
-  if (status)    query = query.eq('status', status);
-  if (list_name) query = query.eq('list_name', list_name);
-  if (search)    query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  if (status)         query = query.eq('status', status);
+  if (list_name)      query = query.eq('list_name', list_name);
+  if (assignment_day) query = query.eq('assignment_day', assignment_day);
+  if (search)         query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  const enriched = await enrichWithNames(data || []);
+  const includeCompany = isSuperAdmin(userRole) && !companyId;
+  const enriched = await enrichWithNames(data || [], includeCompany);
   res.json({ numbers: enriched, total: enriched.length });
 }));
 
 // ============================================================================
-// GET /number-lists/lists — distinct list names for a company (managers)
+// GET /number-lists/summary — superadmin cross-company summary with filters
+// ============================================================================
+router.get('/summary', asyncHandler(async (req, res) => {
+  if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
+
+  const { company_id, fronter_id, status, date_from, date_to, list_name, search } = req.query;
+
+  let query = supabaseAdmin
+    .from('number_lists')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  if (company_id)  query = query.eq('company_id', company_id);
+  if (fronter_id)  query = query.eq('fronter_id', fronter_id);
+  if (status)      query = query.eq('status', status);
+  if (list_name)   query = query.eq('list_name', list_name);
+  if (date_from)   query = query.gte('assignment_day', date_from);
+  if (date_to)     query = query.lte('assignment_day', date_to);
+  if (search)      query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  const enriched = await enrichWithNames(data || [], true);
+
+  // Compute aggregate stats
+  const total     = enriched.length;
+  const byStatus  = {};
+  const byCompany = {};
+  enriched.forEach(r => {
+    byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    if (!byCompany[r.company_id]) byCompany[r.company_id] = { name: r.company_name, total: 0, transferred: 0 };
+    byCompany[r.company_id].total++;
+    if (r.transfer_id) byCompany[r.company_id].transferred++;
+  });
+
+  res.json({
+    numbers: enriched,
+    total,
+    stats: { by_status: byStatus, by_company: Object.values(byCompany) },
+  });
+}));
+
+// ============================================================================
+// GET /number-lists/lists — grouped list summaries for managers / superadmin
 // ============================================================================
 router.get('/lists', asyncHandler(async (req, res) => {
-  const companyId = req.query.company_id || req.user.company_id;
   if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
-  if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
-  const { data, error } = await supabaseAdmin
+  const companyId = req.query.company_id || req.user.company_id;
+
+  let query = supabaseAdmin
     .from('number_lists')
-    .select('list_name, fronter_id, status, id')
-    .eq('company_id', companyId)
+    .select('list_name, fronter_id, status, id, assignment_day, company_id')
     .order('list_name');
 
+  if (isSuperAdmin(req.user.role)) {
+    if (companyId) query = query.eq('company_id', companyId);
+    // else all companies
+  } else {
+    if (!companyId) return res.status(400).json({ error: 'company_id required' });
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
   // Group by list_name
   const grouped = {};
   (data || []).forEach(r => {
-    if (!grouped[r.list_name]) grouped[r.list_name] = { list_name: r.list_name, fronter_id: r.fronter_id, total: 0, new: 0, called: 0, completed: 0 };
-    grouped[r.list_name].total++;
-    grouped[r.list_name][r.status] = (grouped[r.list_name][r.status] || 0) + 1;
+    const key = r.list_name;
+    if (!grouped[key]) {
+      grouped[key] = {
+        list_name:      key,
+        fronter_id:     r.fronter_id,
+        company_id:     r.company_id,
+        assignment_day: r.assignment_day,
+        total: 0, new: 0, called: 0, completed: 0, callback: 0, skip: 0,
+      };
+    }
+    grouped[key].total++;
+    grouped[key][r.status] = (grouped[key][r.status] || 0) + 1;
   });
 
   const lists = Object.values(grouped);
-  // Enrich with fronter names
   const ids = [...new Set(lists.map(l => l.fronter_id).filter(Boolean))];
   if (ids.length) {
     const { data: profiles } = await supabaseAdmin
@@ -103,6 +192,17 @@ router.get('/lists', asyncHandler(async (req, res) => {
     const map = {};
     (profiles || []).forEach(p => { map[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
     lists.forEach(l => { l.fronter_name = map[l.fronter_id] || 'Unknown'; });
+  }
+
+  // Enrich with company names for superadmin
+  if (isSuperAdmin(req.user.role) && !companyId) {
+    const coIds = [...new Set(lists.map(l => l.company_id).filter(Boolean))];
+    if (coIds.length) {
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name, slug').in('id', coIds);
+      const coMap = {};
+      (cos || []).forEach(c => { coMap[c.id] = c.name || c.slug; });
+      lists.forEach(l => { l.company_name = coMap[l.company_id] || 'Unknown'; });
+    }
   }
 
   res.json({ lists });
@@ -140,14 +240,30 @@ router.get('/fronters', asyncHandler(async (req, res) => {
     profileMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
   });
 
-  const fronters = fronterIds.map(id => ({ id, name: profileMap[id] || 'Unknown' }));
+  res.json({ fronters: fronterIds.map(id => ({ id, name: profileMap[id] || 'Unknown' })) });
+}));
 
-  res.json({ fronters });
+// ============================================================================
+// GET /number-lists/companies — all companies (superadmin only)
+// ============================================================================
+router.get('/companies', asyncHandler(async (req, res) => {
+  if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
+
+  const { data, error } = await supabaseAdmin
+    .from('companies')
+    .select('id, name, slug, company_type')
+    .order('name');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ companies: data || [] });
 }));
 
 // ============================================================================
 // POST /number-lists/bulk — bulk assign numbers to a fronter (managers only)
-// Body: { fronter_id, list_name, numbers: [{phone_number, customer_name?, notes?}] }
+// Body: {
+//   fronter_id, list_name, assignment_day?,
+//   numbers: [{ phone_number, customer_name?, notes?, mapped_data? }]
+// }
 // ============================================================================
 router.post('/bulk', [
   body('fronter_id').isUUID().withMessage('fronter_id required'),
@@ -159,21 +275,23 @@ router.post('/bulk', [
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: errs.array()[0].msg });
 
-  const { fronter_id, list_name, numbers } = req.body;
+  const { fronter_id, list_name, numbers, assignment_day } = req.body;
   const companyId = req.body.company_id || req.user.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
   const rows = numbers
     .filter(n => n.phone_number?.toString().trim())
     .map(n => ({
-      company_id:    companyId,
+      company_id:     companyId,
       fronter_id,
-      assigned_by:   req.user.id,
-      phone_number:  n.phone_number.toString().trim(),
-      customer_name: n.customer_name?.toString().trim() || null,
-      notes:         n.notes?.toString().trim() || null,
-      list_name:     list_name.trim(),
-      status:        'new',
+      assigned_by:    req.user.id,
+      phone_number:   n.phone_number.toString().trim(),
+      customer_name:  n.customer_name?.toString().trim() || null,
+      notes:          n.notes?.toString().trim() || null,
+      list_name:      list_name.trim(),
+      status:         'new',
+      assignment_day: assignment_day || null,
+      mapped_data:    n.mapped_data || {},
     }));
 
   if (!rows.length) return res.status(400).json({ error: 'No valid phone numbers provided' });
@@ -186,7 +304,6 @@ router.post('/bulk', [
 
 // ============================================================================
 // PUT /number-lists/:id — update status / notes
-// Fronter: own numbers. Manager: any in company.
 // ============================================================================
 router.put('/:id', [
   body('status').optional().isIn(['new', 'called', 'callback', 'completed', 'skip']),
@@ -201,10 +318,9 @@ router.put('/:id', [
 
   let query = supabaseAdmin.from('number_lists').update(updates).eq('id', id);
 
-  // Fronter can only update own numbers
   if (!isManager(req.user.role)) {
     query = query.eq('fronter_id', req.user.id);
-  } else {
+  } else if (!isSuperAdmin(req.user.role)) {
     const companyId = req.user.company_id;
     if (companyId) query = query.eq('company_id', companyId);
   }
@@ -217,8 +333,38 @@ router.put('/:id', [
 }));
 
 // ============================================================================
-// DELETE /number-lists/batch — delete by list_name or array of ids (managers)
-// Body: { list_name } OR { ids: [uuid, ...] }
+// PUT /number-lists/:id/transfer — link a transfer after fronter creates one
+// Body: { transfer_id }
+// ============================================================================
+router.put('/:id/transfer', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { transfer_id } = req.body;
+  if (!transfer_id) return res.status(400).json({ error: 'transfer_id required' });
+
+  const updates = {
+    transfer_id,
+    transferred_at: new Date().toISOString(),
+    status:         'completed',
+    updated_at:     new Date().toISOString(),
+  };
+
+  let query = supabaseAdmin.from('number_lists').update(updates).eq('id', id);
+
+  if (!isManager(req.user.role)) {
+    query = query.eq('fronter_id', req.user.id);
+  } else if (!isSuperAdmin(req.user.role)) {
+    if (req.user.company_id) query = query.eq('company_id', req.user.company_id);
+  }
+
+  const { data, error } = await query.select().single();
+  if (error) return res.status(400).json({ error: error.message });
+  if (!data)  return res.status(404).json({ error: 'Not found or no access' });
+
+  res.json({ number: data });
+}));
+
+// ============================================================================
+// DELETE /number-lists/batch — delete by list_name or ids (managers only)
 // ============================================================================
 router.delete('/batch', asyncHandler(async (req, res) => {
   if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
@@ -231,7 +377,8 @@ router.delete('/batch', asyncHandler(async (req, res) => {
   }
 
   let query = supabaseAdmin.from('number_lists').delete();
-  if (companyId) query = query.eq('company_id', companyId);
+
+  if (!isSuperAdmin(req.user.role) && companyId) query = query.eq('company_id', companyId);
 
   if (list_name) {
     query = query.eq('list_name', list_name);

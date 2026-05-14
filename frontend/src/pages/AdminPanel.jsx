@@ -11,6 +11,7 @@ import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useNotifications } from "../hooks/useNotifications";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
+import NumbersIntelligence from "../components/Admin/NumbersIntelligence";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 
@@ -39,10 +40,11 @@ const AdminPanel = () => {
 
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
-    ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"    }] : []),
-    ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder" }] : []),
-    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"  }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"     }] : []),
+    ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
+    ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
+    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 
   return (
@@ -76,6 +78,7 @@ const AdminPanel = () => {
             <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
               {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
               {activeTab === "sale-search" && <LeadIntelligence />}
+              {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>
