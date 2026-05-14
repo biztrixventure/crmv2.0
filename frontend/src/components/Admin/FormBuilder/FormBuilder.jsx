@@ -16,7 +16,10 @@ import {
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
   X, Zap, Users, UserX, Tag, Briefcase, Link2,
   ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight, MessageSquare,
+  Bookmark, BookOpen, Trash2,
 } from 'lucide-react';
+
+const TEMPLATES_KEY = 'form_builder_templates';
 import DispositionManager from './DispositionManager';
 import client from '../../../api/client';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
@@ -870,6 +873,16 @@ const PaletteField = ({ field, onAdd, isSale = false }) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // Form Layout Panel
 // ─────────────────────────────────────────────────────────────────────────────
+const loadTemplates = () => {
+  try { return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || '[]'); }
+  catch { return []; }
+};
+const saveTemplates = (tpls) => localStorage.setItem(TEMPLATES_KEY, JSON.stringify(tpls));
+
+const DEFAULT_CANVAS = BASE_FIELDS.map((f, i) => ({
+  ...f, column_span: 1, show_to_fronter: true, order: i,
+}));
+
 const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const [canvasFields, setCanvasFields] = useState([]);
   const [palette, setPalette]           = useState([]);
@@ -879,6 +892,9 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const [showPreview, setShowPreview]   = useState(false);
   const [showCustom, setShowCustom]     = useState(false);
   const [mappingField, setMappingField] = useState(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates]         = useState(loadTemplates);
+  const [tplName, setTplName]             = useState('');
 
   const dragIndex   = useRef(null);
   const dbSnapshot  = useRef([]);
@@ -889,16 +905,24 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
     try {
       const res = await client.get('forms/fields');
       const dbFields = (res.data.fields || []).sort((a, b) => a.order - b.order);
-      const mapped = dbFields.map(f => ({
-        id: f.id, name: f.name, label: f.label, field_type: f.field_type,
-        is_required: f.is_required, column_span: f.column_span || 1,
-        placeholder: f.placeholder || '', options: f.options,
-        section: f.section || 'default', show_to_fronter: f.show_to_fronter !== false,
-      }));
-      dbSnapshot.current = mapped;
-      const canvasNames = new Set(dbFields.map(f => f.name));
-      setCanvasFields(mapped);
-      setPalette(BASE_FIELDS.filter(f => !canvasNames.has(f.name)).map(f => ({ ...f, column_span: 1 })));
+
+      if (dbFields.length === 0) {
+        // DB empty — seed canvas with defaults so user never sees a blank form
+        dbSnapshot.current = [];
+        setCanvasFields(DEFAULT_CANVAS);
+        setPalette([]);
+      } else {
+        const mapped = dbFields.map(f => ({
+          id: f.id, name: f.name, label: f.label, field_type: f.field_type,
+          is_required: f.is_required, column_span: f.column_span || 1,
+          placeholder: f.placeholder || '', options: f.options,
+          section: f.section || 'default', show_to_fronter: f.show_to_fronter !== false,
+        }));
+        dbSnapshot.current = mapped;
+        const canvasNames = new Set(dbFields.map(f => f.name));
+        setCanvasFields(mapped);
+        setPalette(BASE_FIELDS.filter(f => !canvasNames.has(f.name)).map(f => ({ ...f, column_span: 1 })));
+      }
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, []);
 
@@ -955,6 +979,33 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   };
   const onDragEnd = () => { dragIndex.current = null; setDragOverIdx(null); };
 
+  const saveTemplate = () => {
+    const name = tplName.trim();
+    if (!name || !canvasFields.length) return;
+    const tpl = { id: Date.now(), name, savedAt: new Date().toISOString(), fields: canvasFields };
+    const updated = [tpl, ...templates.filter(t => t.name !== name)];
+    saveTemplates(updated);
+    setTemplates(updated);
+    setTplName('');
+    setSavedMsg(`Template "${name}" saved.`);
+    setTimeout(() => setSavedMsg(''), 4000);
+  };
+
+  const loadTemplate = (tpl) => {
+    const names = new Set(tpl.fields.map(f => f.name));
+    setCanvasFields(tpl.fields);
+    setPalette(BASE_FIELDS.filter(f => !names.has(f.name)).map(f => ({ ...f, column_span: 1 })));
+    setShowTemplates(false);
+    setSavedMsg(`Template "${tpl.name}" loaded — click Save Layout to apply.`);
+    setTimeout(() => setSavedMsg(''), 6000);
+  };
+
+  const deleteTemplate = (id) => {
+    const updated = templates.filter(t => t.id !== id);
+    saveTemplates(updated);
+    setTemplates(updated);
+  };
+
   const handleSave = async () => {
     if (!canvasFields.length) return;
     setSaving(true);
@@ -997,12 +1048,17 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
             Drag fields to reorder · Resize with 1/3 2/3 Full · Double-click label to rename
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setShowPreview(v => !v)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-all"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
             {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
             {showPreview ? 'Hide Preview' : 'Preview'}
+          </button>
+          <button onClick={() => setShowTemplates(v => !v)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-all"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+            <BookOpen size={15} /> Templates {templates.length > 0 && `(${templates.length})`}
           </button>
           <button onClick={handleSave} disabled={saving || !canvasFields.length}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50"
@@ -1020,6 +1076,65 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
             border: '1px solid currentColor',
           }}>
           {savedMsg}
+        </div>
+      )}
+
+      {/* Templates Panel */}
+      {showTemplates && (
+        <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="flex items-center justify-between">
+            <p className="font-bold text-text flex items-center gap-2"><BookOpen size={16} /> Saved Templates</p>
+            <button onClick={() => setShowTemplates(false)} style={{ color: 'var(--color-text-tertiary)' }}><X size={16} /></button>
+          </div>
+
+          {/* Save current as template */}
+          <div className="flex gap-2">
+            <input
+              value={tplName}
+              onChange={e => setTplName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveTemplate()}
+              placeholder="Template name (e.g. Auto Insurance Layout)…"
+              className="input flex-1 text-sm"
+            />
+            <button
+              onClick={saveTemplate}
+              disabled={!tplName.trim() || !canvasFields.length}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              <Bookmark size={14} /> Save
+            </button>
+          </div>
+
+          {/* Template list */}
+          {templates.length === 0 ? (
+            <p className="text-sm text-text-tertiary text-center py-3">No templates yet — save your current layout above.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {templates.map(tpl => (
+                <div key={tpl.id} className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <div className="min-w-0 mr-3">
+                    <p className="text-sm font-semibold text-text truncate">{tpl.name}</p>
+                    <p className="text-xs text-text-tertiary">{tpl.fields.length} fields · {new Date(tpl.savedAt).toLocaleDateString()}</p>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button
+                      onClick={() => loadTemplate(tpl)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
+                      style={{ background: 'var(--gradient-sidebar)' }}>
+                      Load
+                    </button>
+                    <button
+                      onClick={() => deleteTemplate(tpl.id)}
+                      className="p-1.5 rounded-lg transition-colors hover:bg-error-50"
+                      style={{ color: 'var(--color-error-500)' }}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
