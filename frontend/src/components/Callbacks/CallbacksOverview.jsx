@@ -3,11 +3,11 @@
  * Self-contained: fetches its own agent list and summary stats.
  * Server-side filtering + pagination (PAGE_SIZE=25).
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
   Calendar, User, Filter, RefreshCw, Voicemail, X,
-  ChevronLeft, ChevronRight, History, ArrowRight,
+  ChevronLeft, ChevronRight, History, ArrowRight, Search, CalendarDays,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -50,12 +50,19 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+const today = () => new Date().toISOString().split('T')[0];
+
 const fmt = (iso) => {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+};
+
+const fmtDate = (iso) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const isPast    = (iso) => iso && new Date(iso) < new Date();
@@ -310,12 +317,17 @@ const CallbacksOverview = ({ user }) => {
   const [statusFilter,   setStatusFilter]   = useState('all');
   const [memberFilter,   setMemberFilter]   = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [dateFrom,       setDateFrom]       = useState('');
+  const [dateFrom,       setDateFrom]       = useState('');   // filters on callback_at (scheduled)
   const [dateTo,         setDateTo]         = useState('');
-  const [stats,          setStats]          = useState({ pending: 0, overdue: 0, completed: 0 });
+  const [createdFrom,    setCreatedFrom]    = useState('');   // filters on created_at
+  const [createdTo,      setCreatedTo]      = useState('');
+  const [search,         setSearch]         = useState('');
+  const [searchInput,    setSearchInput]    = useState('');
+  const [stats,          setStats]          = useState({ total: 0, pending: 0, overdue: 0, completed: 0 });
   const [updatingId,     setUpdatingId]     = useState(null);
   const [outcomeModal,   setOutcomeModal]   = useState(null);
   const [historyId,      setHistoryId]      = useState(null);
+  const searchTimer = useRef(null);
 
   const cid = user?.company_id;
 
@@ -332,22 +344,27 @@ const CallbacksOverview = ({ user }) => {
     if (!cid) return;
     try {
       const base = { company_id: cid, limit: 1, page: 1 };
-      if (memberFilter)             base.user_id   = memberFilter;
-      if (priorityFilter !== 'all') base.priority  = priorityFilter;
-      if (dateFrom)                 base.date_from = dateFrom;
-      if (dateTo)                   base.date_to   = dateTo;
-      const [pRes, cRes, oRes] = await Promise.all([
+      if (memberFilter)             base.user_id      = memberFilter;
+      if (priorityFilter !== 'all') base.priority     = priorityFilter;
+      if (dateFrom)                 base.date_from    = dateFrom;
+      if (dateTo)                   base.date_to      = dateTo;
+      if (createdFrom)              base.created_from = createdFrom;
+      if (createdTo)                base.created_to   = createdTo;
+      if (search)                   base.search       = search;
+      const [totRes, pRes, cRes, oRes] = await Promise.all([
+        client.get('callbacks', { params: { ...base } }),
         client.get('callbacks', { params: { ...base, status: 'pending' } }),
         client.get('callbacks', { params: { ...base, status: 'completed' } }),
         client.get('callbacks', { params: { ...base, overdue: 'true' } }),
       ]);
       setStats({
-        pending:   pRes.data.total || 0,
-        completed: cRes.data.total || 0,
-        overdue:   oRes.data.total || 0,
+        total:     totRes.data.total || 0,
+        pending:   pRes.data.total   || 0,
+        completed: cRes.data.total   || 0,
+        overdue:   oRes.data.total   || 0,
       });
     } catch {}
-  }, [cid, memberFilter, priorityFilter, dateFrom, dateTo]);
+  }, [cid, memberFilter, priorityFilter, dateFrom, dateTo, createdFrom, createdTo, search]);
 
   // Fetch paginated callbacks list
   const fetchCallbacks = useCallback(async () => {
@@ -355,16 +372,19 @@ const CallbacksOverview = ({ user }) => {
     setLoading(true);
     try {
       const params = { company_id: cid, page, limit: PAGE_SIZE };
-      if (statusFilter   !== 'all') params.status    = statusFilter;
-      if (priorityFilter !== 'all') params.priority  = priorityFilter;
-      if (memberFilter)             params.user_id   = memberFilter;
-      if (dateFrom)                 params.date_from = dateFrom;
-      if (dateTo)                   params.date_to   = dateTo;
+      if (statusFilter   !== 'all') params.status       = statusFilter;
+      if (priorityFilter !== 'all') params.priority     = priorityFilter;
+      if (memberFilter)             params.user_id      = memberFilter;
+      if (dateFrom)                 params.date_from    = dateFrom;
+      if (dateTo)                   params.date_to      = dateTo;
+      if (createdFrom)              params.created_from = createdFrom;
+      if (createdTo)                params.created_to   = createdTo;
+      if (search)                   params.search       = search;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch {} finally { setLoading(false); }
-  }, [cid, statusFilter, priorityFilter, memberFilter, dateFrom, dateTo, page]);
+  }, [cid, statusFilter, priorityFilter, memberFilter, dateFrom, dateTo, createdFrom, createdTo, search, page]);
 
   useEffect(() => { fetchCallbacks(); }, [fetchCallbacks]);
   useEffect(() => { fetchStats(); },    [fetchStats]);
@@ -374,6 +394,36 @@ const CallbacksOverview = ({ user }) => {
   const handleMemberFilter   = (v) => { setMemberFilter(v);   setPage(1); };
   const handleDateFrom       = (v) => { setDateFrom(v);       setPage(1); };
   const handleDateTo         = (v) => { setDateTo(v);         setPage(1); };
+  const handleCreatedFrom    = (v) => { setCreatedFrom(v);    setPage(1); };
+  const handleCreatedTo      = (v) => { setCreatedTo(v);      setPage(1); };
+
+  const handleCreatedToday = () => {
+    const t = today();
+    setCreatedFrom(t);
+    setCreatedTo(t);
+    setPage(1);
+  };
+
+  const handleSearchInput = (v) => {
+    setSearchInput(v);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setSearch(v); setPage(1); }, 400);
+  };
+
+  const clearAllFilters = () => {
+    setStatusFilter('all');
+    setPriorityFilter('all');
+    setMemberFilter('');
+    setDateFrom('');
+    setDateTo('');
+    setCreatedFrom('');
+    setCreatedTo('');
+    setSearch('');
+    setSearchInput('');
+    setPage(1);
+  };
+
+  const hasFilters = statusFilter !== 'all' || priorityFilter !== 'all' || memberFilter || dateFrom || dateTo || createdFrom || createdTo || search;
 
   const handleStatusConfirm = async (status, notes) => {
     if (!outcomeModal) return;
@@ -420,20 +470,22 @@ const CallbacksOverview = ({ user }) => {
         </button>
       </div>
 
-      {/* Stats row — accurate totals, not page counts */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
+      {/* Stats row — 4 cards, all respect active filters */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         {[
+          { label: 'Total',     value: stats.total,     color: '#6366f1', bg: '#e0e7ff', key: null        },
           { label: 'Pending',   value: stats.pending,   color: '#f59e0b', bg: '#fef3c7', key: 'pending'   },
-          { label: 'Overdue',   value: stats.overdue,   color: '#ef4444', bg: '#fee2e2', key: 'overdue'   },
+          { label: 'Overdue',   value: stats.overdue,   color: '#ef4444', bg: '#fee2e2', key: null        },
           { label: 'Completed', value: stats.completed, color: '#10b981', bg: '#d1fae5', key: 'completed' },
-        ].map(s => (
-          <button key={s.key} onClick={() => s.key !== 'overdue' && handleStatusFilter(statusFilter === s.key ? 'all' : s.key)}
+        ].map((s, i) => (
+          <button key={i}
+            onClick={() => s.key && handleStatusFilter(statusFilter === s.key ? 'all' : s.key)}
             className="rounded-xl p-3 text-center transition-all"
             style={{
               backgroundColor: s.bg,
               border: `1px solid ${s.color}${statusFilter === s.key ? 'cc' : '30'}`,
               boxShadow: statusFilter === s.key ? `0 0 0 2px ${s.color}40` : 'none',
-              cursor: s.key !== 'overdue' ? 'pointer' : 'default',
+              cursor: s.key ? 'pointer' : 'default',
             }}>
             <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
             <p className="text-xs font-semibold mt-0.5" style={{ color: s.color }}>{s.label}</p>
@@ -442,97 +494,125 @@ const CallbacksOverview = ({ user }) => {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        {/* Status tabs */}
-        <div className="flex gap-1 p-1 rounded-xl"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {[
-            { key: 'all',               label: 'All'          },
-            { key: 'pending',           label: 'Pending'      },
-            { key: 'completed',         label: 'Completed'    },
-            { key: 'no_answer',         label: 'No Answer'    },
-            { key: 'answering_machine', label: 'Ans. Machine' },
-            { key: 'cancelled',         label: 'Cancelled'    },
-          ].map(f => (
-            <button key={f.key} onClick={() => handleStatusFilter(f.key)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                backgroundColor: statusFilter === f.key ? 'var(--color-surface)' : 'transparent',
-                color: statusFilter === f.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow: statusFilter === f.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Priority tabs */}
-        <div className="flex gap-1 p-1 rounded-xl"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {[
-            { key: 'all',    label: 'All Priority' },
-            { key: 'High',   label: '🔴 High'      },
-            { key: 'Medium', label: '🟡 Medium'     },
-            { key: 'Low',    label: '🔵 Low'        },
-          ].map(f => (
-            <button key={f.key} onClick={() => handlePriorityFilter(f.key)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                backgroundColor: priorityFilter === f.key ? 'var(--color-surface)' : 'transparent',
-                color: priorityFilter === f.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                boxShadow: priorityFilter === f.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Agent dropdown — all company agents, not page-derived */}
-        {agentsList.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Filter size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-            <select value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
-              className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
-              <option value="">All team members</option>
-              {agentsList.map(a => (
-                <option key={a.user_id} value={a.user_id}>
-                  {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
-                </option>
-              ))}
-            </select>
+      <div className="space-y-2 mb-3">
+        {/* Row 1: Status + Priority tabs */}
+        <div className="flex flex-wrap gap-2">
+          <div className="flex gap-1 p-1 rounded-xl"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[
+              { key: 'all',               label: 'All'          },
+              { key: 'pending',           label: 'Pending'      },
+              { key: 'completed',         label: 'Completed'    },
+              { key: 'no_answer',         label: 'No Answer'    },
+              { key: 'answering_machine', label: 'Ans. Machine' },
+              { key: 'cancelled',         label: 'Cancelled'    },
+            ].map(f => (
+              <button key={f.key} onClick={() => handleStatusFilter(f.key)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor: statusFilter === f.key ? 'var(--color-surface)' : 'transparent',
+                  color: statusFilter === f.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow: statusFilter === f.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                {f.label}
+              </button>
+            ))}
           </div>
-        )}
 
-        {/* Date range filter */}
-        <div className="flex items-center gap-2">
-          <Calendar size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={e => handleDateFrom(e.target.value)}
-            className="input py-1.5 text-sm h-auto"
-            style={{ minWidth: 140 }}
-            title="From date"
-          />
-          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={e => handleDateTo(e.target.value)}
-            className="input py-1.5 text-sm h-auto"
-            style={{ minWidth: 140 }}
-            title="To date"
-          />
+          <div className="flex gap-1 p-1 rounded-xl"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[
+              { key: 'all',    label: 'All Priority' },
+              { key: 'High',   label: '🔴 High'      },
+              { key: 'Medium', label: '🟡 Medium'     },
+              { key: 'Low',    label: '🔵 Low'        },
+            ].map(f => (
+              <button key={f.key} onClick={() => handlePriorityFilter(f.key)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor: priorityFilter === f.key ? 'var(--color-surface)' : 'transparent',
+                  color: priorityFilter === f.key ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
+                  boxShadow: priorityFilter === f.key ? 'var(--shadow-sm)' : 'none',
+                }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {hasFilters && (
+            <button onClick={clearAllFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold ml-auto"
+              style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+              <XCircle size={11} /> Clear all
+            </button>
+          )}
         </div>
 
-        {/* Clear filters */}
-        {(statusFilter !== 'all' || priorityFilter !== 'all' || memberFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setMemberFilter(''); setDateFrom(''); setDateTo(''); setPage(1); }}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-            style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-            <XCircle size={11} /> Clear filters
-          </button>
-        )}
+        {/* Row 2: Search + Agent + Member filter */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Search */}
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input
+              value={searchInput}
+              onChange={e => handleSearchInput(e.target.value)}
+              placeholder="Search name, phone, notes…"
+              className="input pl-8 py-1.5 text-sm h-auto"
+              style={{ minWidth: 220 }}
+            />
+          </div>
+
+          {/* Agent dropdown */}
+          {agentsList.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Filter size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+              <select value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
+                className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
+                <option value="">All team members</option>
+                {agentsList.map(a => (
+                  <option key={a.user_id} value={a.user_id}>
+                    {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Row 3: Date filters */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Scheduled date range */}
+          <div className="flex items-center gap-1.5">
+            <Calendar size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Scheduled:</span>
+            <input type="date" value={dateFrom} onChange={e => handleDateFrom(e.target.value)}
+              className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
+            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
+            <input type="date" value={dateTo} onChange={e => handleDateTo(e.target.value)}
+              className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
+          </div>
+
+          {/* Created date range + Today shortcut */}
+          <div className="flex items-center gap-1.5">
+            <CalendarDays size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Created:</span>
+            <button
+              onClick={handleCreatedToday}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+              style={{
+                backgroundColor: createdFrom === today() && createdTo === today() ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+                color:            createdFrom === today() && createdTo === today() ? '#fff'                     : 'var(--color-primary-600)',
+                border:           '1px solid var(--color-primary-300)',
+              }}>
+              Today
+            </button>
+            <input type="date" value={createdFrom} onChange={e => handleCreatedFrom(e.target.value)}
+              className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
+            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
+            <input type="date" value={createdTo} onChange={e => handleCreatedTo(e.target.value)}
+              className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
+          </div>
+        </div>
       </div>
 
       {/* List */}
@@ -590,7 +670,12 @@ const CallbacksOverview = ({ user }) => {
                       <div className="flex items-center gap-1.5 text-xs font-medium"
                         style={{ color: past ? '#dc2626' : soon ? '#b45309' : 'var(--color-text-tertiary)' }}>
                         <Calendar size={11} />
-                        <span>Call scheduled: <strong>{fmt(cb.callback_at)}</strong></span>
+                        <span>Scheduled: <strong>{fmt(cb.callback_at)}</strong></span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                        <CalendarDays size={10} />
+                        <span>Created: {fmtDate(cb.created_at)}</span>
                       </div>
 
                       {cb.notes && (

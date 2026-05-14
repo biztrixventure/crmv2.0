@@ -22,13 +22,15 @@ const MANAGER_LEVELS = [
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
-  const status    = req.query.status;
-  const priority  = req.query.priority;
-  const search    = req.query.search;
-  const user_id   = req.query.user_id; // superadmin: filter by specific agent
-  const overdue   = req.query.overdue === 'true'; // pending callbacks past their callback_at
-  const date_from = req.query.date_from; // ISO date string e.g. "2025-05-01"
-  const date_to   = req.query.date_to;   // ISO date string e.g. "2025-05-07"
+  const status        = req.query.status;
+  const priority      = req.query.priority;
+  const search        = req.query.search;
+  const user_id       = req.query.user_id;      // filter by specific agent
+  const overdue       = req.query.overdue === 'true';
+  const date_from     = req.query.date_from;    // filter on callback_at (scheduled date)
+  const date_to       = req.query.date_to;
+  const created_from  = req.query.created_from; // filter on created_at
+  const created_to    = req.query.created_to;
   const page      = Math.max(1, parseInt(req.query.page)  || 1);
   const limit     = Math.min(200, parseInt(req.query.limit) || 50);
   const offset    = (page - 1) * limit;
@@ -53,8 +55,10 @@ router.get('/', asyncHandler(async (req, res) => {
   if (status)   query = query.eq('status', status);
   if (overdue)  query = query.eq('status', 'pending').lt('callback_at', new Date().toISOString());
   if (priority) query = query.eq('priority', priority);
-  if (date_from) query = query.gte('callback_at', date_from);
-  if (date_to)   query = query.lte('callback_at', date_to + 'T23:59:59.999Z');
+  if (date_from)    query = query.gte('callback_at', date_from);
+  if (date_to)      query = query.lte('callback_at', date_to + 'T23:59:59.999Z');
+  if (created_from) query = query.gte('created_at', created_from);
+  if (created_to)   query = query.lte('created_at', created_to + 'T23:59:59.999Z');
   if (search) {
     // Resolve agent names → user_ids so we can OR on user_id
     let agentUserIds = [];
@@ -205,16 +209,26 @@ router.put('/:id',
     if (updates.callback_at) updates.notified = false;
     updates.updated_at = new Date().toISOString();
 
-    // Only owner or manager can update
     const superadmin = await isSuperAdmin(userId);
-    const condition  = superadmin ? { id } : { id, user_id: userId };
+    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
 
-    // Fetch current record to capture old values for audit log
+    // Fetch current record first (needed for audit log + access check)
     const { data: current } = await supabaseAdmin
       .from('callbacks')
-      .select('status, callback_at, customer_name, customer_phone, company_id')
-      .match(condition)
+      .select('status, callback_at, customer_name, customer_phone, company_id, user_id')
+      .eq('id', id)
       .single();
+
+    if (!current) return res.status(404).json({ error: 'Callback not found' });
+
+    // Access: superadmin sees all; same-company manager; or callback owner
+    const companyMatch = isManager && current.company_id === req.user.company_id;
+    if (!superadmin && !companyMatch && current.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Build match condition for the update
+    const condition = superadmin ? { id } : isManager ? { id, company_id: req.user.company_id } : { id, user_id: userId };
 
     const { data, error } = await supabaseAdmin
       .from('callbacks')
