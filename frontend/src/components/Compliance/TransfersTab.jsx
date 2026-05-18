@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ArrowRight, AlertTriangle } from 'lucide-react';
+import { ArrowRight, AlertTriangle, CalendarDays, X } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
@@ -24,8 +24,20 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
 
-  const [detail, setDetail]   = useState(null);
+  const [detail, setDetail]         = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [todayCount, setTodayCount] = useState(null);
+
+  const today         = new Date().toISOString().split('T')[0];
+  const isTodayActive = dateFrom === today && dateTo === today;
+
+  useEffect(() => {
+    const params = { date_from: today, date_to: today, limit: 1, page: 1 };
+    if (initCompany) params.company_id = initCompany;
+    client.get('compliance/transfers', { params })
+      .then(r => setTodayCount(r.data.total ?? 0))
+      .catch(() => {});
+  }, [initCompany, today]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +78,28 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
         onRefresh={() => { setPage(1); load(); }}
         onExport={() => setExportOpen(true)}
       />
+
+      {/* Today created chip */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button
+          onClick={() => { if (isTodayActive) { setDateFrom(''); setDateTo(''); } else { setDateFrom(today); setDateTo(today); } setPage(1); }}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+          style={{
+            backgroundColor: isTodayActive ? '#eff6ff' : 'var(--color-bg-secondary)',
+            color:            isTodayActive ? '#2563eb' : 'var(--color-text-secondary)',
+            borderColor:      isTodayActive ? '#bfdbfe' : 'var(--color-border)',
+          }}>
+          <CalendarDays size={12} />
+          Created Today
+          {todayCount !== null && (
+            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+              style={{ backgroundColor: isTodayActive ? '#bfdbfe' : 'var(--color-border)', color: isTodayActive ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
+              {todayCount}
+            </span>
+          )}
+          {isTodayActive && <X size={10} />}
+        </button>
+      </div>
 
       <Filters onSubmit={() => { setPage(1); load(); }}>
         <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>

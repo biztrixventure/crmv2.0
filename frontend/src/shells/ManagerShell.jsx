@@ -9,7 +9,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -130,6 +130,8 @@ const ManagerShell = () => {
   const [xferTabLoading, setXferTabLoading] = useState(false);
   const [xferStatus,     setXferStatus]     = useState('');
   const [xferAgent,      setXferAgent]      = useState('');
+  const [xferTodayOnly,  setXferTodayOnly]  = useState(false);
+  const [xferTodayCount, setXferTodayCount] = useState(null);
 
   const [salesTabRows,    setSalesTabRows]    = useState([]);
   const [salesTabTotal,   setSalesTabTotal]   = useState(0);
@@ -219,18 +221,24 @@ const ManagerShell = () => {
     }
   }, [companyId, activityPage, activityAgent, date_from, date_to]);
 
+  const xferToday = new Date().toISOString().split('T')[0];
+
   const fetchXferTab = useCallback(async () => {
     if (!companyId) return;
     setXferTabLoading(true);
     try {
-      const params = { company_id: companyId, page: xferPage, limit: PAGE_SIZE, date_from, date_to };
+      const params = {
+        company_id: companyId, page: xferPage, limit: PAGE_SIZE,
+        date_from: xferTodayOnly ? xferToday : date_from,
+        date_to:   xferTodayOnly ? xferToday : date_to,
+      };
       if (xferStatus) params.status  = xferStatus;
       if (xferAgent)  params.user_id = xferAgent;
       const res = await client.get('transfers', { params });
       setXferTabRows(res.data.transfers || []);
       setXferTabTotal(res.data.total    || 0);
     } catch {} finally { setXferTabLoading(false); }
-  }, [companyId, xferPage, xferStatus, xferAgent, date_from, date_to]);
+  }, [companyId, xferPage, xferStatus, xferAgent, date_from, date_to, xferTodayOnly, xferToday]);
 
   const fetchSalesTab = useCallback(async () => {
     if (!companyId) return;
@@ -293,6 +301,14 @@ const ManagerShell = () => {
     if (!companyId) return;
     client.get('users', { params: { company_id: companyId } })
       .then(r => setCompanyAgents(r.data.users || []))
+      .catch(() => {});
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    const t = new Date().toISOString().split('T')[0];
+    client.get('transfers', { params: { company_id: companyId, date_from: t, date_to: t, limit: 1, page: 1 } })
+      .then(r => setXferTodayCount(r.data.total ?? 0))
       .catch(() => {});
   }, [companyId]);
 
@@ -467,6 +483,28 @@ const ManagerShell = () => {
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
               <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
+            </div>
+
+            {/* Today chip */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <button
+                onClick={() => { setXferTodayOnly(v => !v); setXferPage(1); }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+                style={{
+                  backgroundColor: xferTodayOnly ? '#eff6ff' : 'var(--color-bg-secondary)',
+                  color:            xferTodayOnly ? '#2563eb' : 'var(--color-text-secondary)',
+                  borderColor:      xferTodayOnly ? '#bfdbfe' : 'var(--color-border)',
+                }}>
+                <CalendarDays size={12} />
+                Created Today
+                {xferTodayCount !== null && (
+                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+                    style={{ backgroundColor: xferTodayOnly ? '#bfdbfe' : 'var(--color-border)', color: xferTodayOnly ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
+                    {xferTodayCount}
+                  </span>
+                )}
+                {xferTodayOnly && <XCircle size={10} />}
+              </button>
             </div>
 
             {/* Filter bar */}
