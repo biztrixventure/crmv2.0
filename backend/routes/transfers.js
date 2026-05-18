@@ -180,8 +180,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // ============================================================================
 // GET /transfers/closers — list available closers for a fronter company
-// Uses company_links: finds all closer companies linked to the fronter's company,
-// then returns closers from all of them (with company_name for display).
+// Returns closers from ALL active closer companies (no company_links required).
 // ============================================================================
 router.get('/closers', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
@@ -189,31 +188,22 @@ router.get('/closers', asyncHandler(async (req, res) => {
   logger.info('[closers] companyId=%s userCompanyId=%s queryCompanyId=%s role=%s userId=%s',
     companyId, req.user.company_id, req.query.company_id, req.user.role, req.user.id);
 
-  if (!companyId) return res.status(400).json({ error: 'company_id required' });
-
-  // Step 1: get linked closer company IDs (no FK join — avoids constraint-name issues)
-  const { data: links, error: linkErr } = await supabaseAdmin
-    .from('company_links')
-    .select('closer_company_id')
-    .eq('fronter_company_id', companyId);
-
-  logger.info('[closers] company_links query for fronter_company_id=%s → rows=%d err=%s',
-    companyId, links?.length ?? 0, linkErr?.message ?? 'none');
-
-  if (linkErr) return res.status(500).json({ error: linkErr.message });
-  if (!links || links.length === 0) return res.json({ closers: [], _debug: { companyId, links: [] } });
-
-  const closerCompanyIds = links.map(l => l.closer_company_id);
-  logger.info('[closers] closerCompanyIds=%j', closerCompanyIds);
-
-  // Step 2: fetch company names separately
-  const { data: companies } = await supabaseAdmin
+  // Step 1: get ALL active closer companies (no company_links dependency)
+  const { data: closerCompanies, error: coErr } = await supabaseAdmin
     .from('companies')
     .select('id, name')
-    .in('id', closerCompanyIds);
+    .eq('company_type', 'closer')
+    .eq('is_active', true);
 
-  const companyNameMap = {};
-  (companies || []).forEach(c => { companyNameMap[c.id] = c.name; });
+  logger.info('[closers] closer companies found=%d err=%s', closerCompanies?.length ?? 0, coErr?.message ?? 'none');
+
+  if (coErr) return res.status(500).json({ error: coErr.message });
+  if (!closerCompanies || closerCompanies.length === 0) return res.json({ closers: [] });
+
+  const closerCompanyIds = closerCompanies.map(c => c.id);
+  logger.info('[closers] closerCompanyIds=%j', closerCompanyIds);
+
+  const companyNameMap = Object.fromEntries(closerCompanies.map(c => [c.id, c.name]));
 
   // Step 3: get active users in those companies (no user_profiles join — no FK in schema cache)
   const { data, error } = await supabaseAdmin
@@ -253,7 +243,7 @@ router.get('/closers', asyncHandler(async (req, res) => {
     }));
 
   logger.info('[closers] final closers count=%d', closers.length);
-  res.json({ closers, _debug: { companyId, closerCompanyIds, rawCount: data?.length ?? 0 } });
+  res.json({ closers });
 }));
 
 // ============================================================================
@@ -284,12 +274,13 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       .eq('is_active', true);
     fronterCompanyIds = (allFronters || []).map(c => c.id);
   } else {
-    // Closer (or closer_manager): find fronter companies linked to their company
-    const { data: links } = await supabaseAdmin
-      .from('company_links')
-      .select('fronter_company_id')
-      .eq('closer_company_id', companyId);
-    fronterCompanyIds = (links || []).map(l => l.fronter_company_id);
+    // No company_links required — search across all active fronter companies
+    const { data: allFronters } = await supabaseAdmin
+      .from('companies')
+      .select('id')
+      .eq('company_type', 'fronter')
+      .eq('is_active', true);
+    fronterCompanyIds = (allFronters || []).map(c => c.id);
   }
 
   if (!fronterCompanyIds.length) return res.json({ transfers: [] });
