@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 
 const router = express.Router();
@@ -77,8 +78,8 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
-  if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
+  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   if (search) {
     // PostgREST JSONB text-extraction notation: ->>key (no SQL quotes around key)

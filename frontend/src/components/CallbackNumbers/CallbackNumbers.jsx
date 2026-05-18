@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Card, Badge, Button, Alert } from '../UI';
 import { useCallbackNumbers } from '../../hooks/useCallbackNumbers';
+import { ET_ZONE } from '../../utils/timezone';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,12 +36,20 @@ const CREATOR_LEVELS = ['fronter', 'closer', 'fronter_manager', 'closer_manager'
 
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
+    }).format(new Date(d));
+  } catch { return '—'; }
 }
 
 function fmtDateTime(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(new Date(d));
+  } catch { return '—'; }
 }
 
 function daysLeft(isoDate) {

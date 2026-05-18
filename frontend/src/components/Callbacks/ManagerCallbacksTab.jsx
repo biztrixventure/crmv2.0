@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { todayET } from '../../utils/timezone';
 import { PhoneCall, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
@@ -251,7 +252,7 @@ const ManagerCallbacksTab = ({ user }) => {
   const [phoneDrawer,  setPhoneDrawer]  = useState(null);
   const [todayCount,   setTodayCount]   = useState(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayET();
 
   useEffect(() => {
     if (!companyId) return;
@@ -349,7 +350,7 @@ const ManagerCallbacksTab = ({ user }) => {
       c.user_name || '',
     ]);
     downloadCSV(rows, ['Customer', 'Phone', 'Scheduled At', 'Status', 'Priority', 'Notes', 'Agent'],
-      `callbacks_${new Date().toISOString().split('T')[0]}.csv`);
+      `callbacks_${todayET()}.csv`);
   };
 
   return (

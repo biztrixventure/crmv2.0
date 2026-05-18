@@ -2,6 +2,37 @@
 // All conversion uses native Intl.DateTimeFormat (universal browser support).
 // Storage is always UTC. These helpers handle display and input conversion only.
 
+// ── Eastern Time (Florida / USA) ─────────────────────────────────────────────
+export const ET_ZONE = 'America/New_York';
+
+// Today's date string (YYYY-MM-DD) in Eastern Time
+export function todayET() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+// Format a UTC ISO string as a short date in Eastern Time ("Jan 15, 2024")
+export function fmtDateET(utcIso) {
+  if (!utcIso) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
+    }).format(new Date(utcIso));
+  } catch { return '—'; }
+}
+
+// Format a UTC ISO string as date + time in Eastern Time ("Jan 15, 2:30 PM")
+export function fmtDateTimeET(utcIso) {
+  if (!utcIso) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(utcIso));
+  } catch { return '—'; }
+}
+
 // US state abbreviation → primary IANA timezone
 export const STATE_TIMEZONE = {
   AL: 'America/Chicago',    AK: 'America/Anchorage',  AZ: 'America/Phoenix',

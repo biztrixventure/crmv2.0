@@ -6,6 +6,7 @@ import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
+import { todayET } from '../../utils/timezone';
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
   ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
@@ -75,7 +76,7 @@ const DAY_ABBR    = ['S','M','T','W','T','F','S'];
 
 function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, selectedTo, onRangeChange }) {
   const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = todayET();
 
   const [viewYear,  setViewYear]  = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -279,7 +280,7 @@ function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, sele
 }
 
 const LIMIT = 25;
-const TODAY = new Date().toISOString().split('T')[0];
+const TODAY = todayET();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
@@ -408,7 +409,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const handleExport = async () => {
     setExportLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayET();
       if (dataTab === 'sales') {
         const params = {
           limit: 5000, page: 1,

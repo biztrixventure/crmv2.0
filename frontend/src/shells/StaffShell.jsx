@@ -50,6 +50,7 @@ import { useFormFields } from "../hooks/useFormFields";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import PhoneSearch from "../components/Closer/PhoneSearch";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
+import { fmtDateET } from "../utils/timezone";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -588,7 +589,7 @@ const StaffShell = () => {
                             })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
                               {hasPermission('submit_call_review') && (
@@ -700,7 +701,7 @@ const StaffShell = () => {
                           <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.created_at)}</td>
                           {hasPermission('delete_sale') && (
                             <td className="py-3 px-3">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
@@ -1199,7 +1200,7 @@ const StaffShell = () => {
                           </div>
                         )}
                         <div className="flex items-center justify-between mt-2">
-                          <p className="text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</p>
+                          <p className="text-xs text-text-tertiary">{fmtDateET(t.created_at)}</p>
                           {t.status !== 'completed' && !t.sale_id && (
                             <button
                               onClick={e => {

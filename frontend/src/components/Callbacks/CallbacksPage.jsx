@@ -12,7 +12,7 @@ import {
 import client from '../../api/client';
 import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
-import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz } from '../../utils/timezone';
+import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz, ET_ZONE } from '../../utils/timezone';
 
 const STATUS_CONFIG = {
   pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
@@ -52,10 +52,9 @@ const PriorityBadge = ({ priority }) => {
 };
 
 // formatDateTime: shows customer's local time if known, else company/browser time
-const formatDateTime = (iso, customerTz, companyTz) => {
+const formatDateTime = (iso, customerTz) => {
   if (!iso) return '—';
-  const tz = customerTz || companyTz;
-  if (!tz) return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const tz = customerTz || ET_ZONE;
   return `${formatInTz(iso, tz)} ${getTzAbbr(tz)}`;
 };
 
@@ -127,7 +126,7 @@ const StatusOutcomeModal = ({ pendingStatus, customerName, onConfirm, onClose })
 // ── Create / Edit Modal ──────────────────────────────────────────────────────
 const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }) => {
   const isEdit   = !!callback;
-  const agentTz  = companyTimezone || 'Asia/Karachi';
+  const agentTz  = ET_ZONE;
 
   const initCustomerTz = callback?.customer_timezone || null;
 
@@ -474,7 +473,7 @@ const CallbackDrawer = ({ callback: cb, companyTimezone, onEdit, onDelete, onSta
             )}
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
               <Calendar size={13} style={{ color: 'var(--color-text-tertiary)' }} />
-              {formatDateTime(cb.callback_at, cb.customer_timezone, companyTimezone)}
+              {formatDateTime(cb.callback_at, cb.customer_timezone)}
             </div>
             {cb.customer_timezone && cb.customer_timezone !== companyTimezone && (
               <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -773,7 +772,7 @@ const CallbacksPage = ({ user }) => {
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                     <span className="flex items-center gap-1">
-                      <Calendar size={10} /> {formatDateTime(cb.callback_at, cb.customer_timezone, user?.company_timezone)}
+                      <Calendar size={10} /> {formatDateTime(cb.callback_at, cb.customer_timezone)}
                     </span>
                     {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
                   </div>

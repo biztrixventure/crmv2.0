@@ -33,6 +33,7 @@ import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
+import { fmtDateET, todayET } from "../utils/timezone";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
@@ -214,7 +215,7 @@ const ManagerShell = () => {
     }
   }, [companyId, activityPage, activityAgent, date_from, date_to]);
 
-  const xferToday = new Date().toISOString().split('T')[0];
+  const xferToday = todayET();
 
   const fetchXferTab = useCallback(async () => {
     if (!companyId) return;
@@ -569,7 +570,7 @@ const ManagerShell = () => {
                             })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
                               {user?.role !== 'fronter_manager' && hasPermission('submit_call_review') && (
@@ -681,7 +682,7 @@ const ManagerShell = () => {
                           <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.created_at)}</td>
                           {hasPermission('delete_sale') && (
                             <td className="py-3 px-3">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
@@ -811,7 +812,7 @@ const ManagerShell = () => {
                             )}
                             <span className="font-semibold text-text">{log.new_value?.disposition || '—'}</span>
                           </td>
-                          <td className="py-3 px-3 text-xs text-text-tertiary">{new Date(log.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 text-xs text-text-tertiary">{fmtDateET(log.created_at)}</td>
                         </tr>
                       ))}
                     </tbody>

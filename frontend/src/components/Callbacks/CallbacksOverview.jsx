@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight, History, ArrowRight, Search, CalendarDays,
 } from 'lucide-react';
 import client from '../../api/client';
+import { ET_ZONE, todayET } from '../../utils/timezone';
 
 const PAGE_SIZE = 25;
 
@@ -50,19 +51,25 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => todayET();
 
 const fmt = (iso) => {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(iso));
+  } catch { return '—'; }
 };
 
 const fmtDate = (iso) => {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
+    }).format(new Date(iso));
+  } catch { return '—'; }
 };
 
 const isPast    = (iso) => iso && new Date(iso) < new Date();

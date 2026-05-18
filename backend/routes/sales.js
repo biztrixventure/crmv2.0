@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const { hasPermission, isSuperAdmin } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
@@ -132,8 +133,8 @@ router.get(
     if (user_id && isManagerRole) query = query.eq('closer_id', user_id);
 
     if (status)    query = query.eq('status', status);
-    if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
-    if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
+    if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
+    if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
     if (search)    query = query.or(
       `customer_name.ilike.%${search}%,` +
       `customer_phone.ilike.%${search}%,` +
@@ -358,8 +359,8 @@ router.get('/compliance', asyncHandler(async (req, res) => {
   // superadmin: no filter
 
   if (status)     query = query.eq('status', status);
-  if (date_from)  query = query.gte('created_at', date_from);
-  if (date_to)    query = query.lte('created_at', date_to + 'T23:59:59Z');
+  if (date_from)  query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)    query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   if (search) {
     query = query.or([

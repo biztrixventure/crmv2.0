@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Calendar, ChevronDown } from 'lucide-react';
+import { todayET } from '../../utils/timezone';
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
@@ -11,24 +12,25 @@ const PRESETS = [
 ];
 
 export function getPresetRange(key = '30d') {
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
+  const today = todayET();
+  // Use noon UTC of today to avoid DST edge cases when subtracting days/months
+  const base = new Date(today + 'T12:00:00Z');
   switch (key) {
     case 'today': return { date_from: today, date_to: today };
     case '7d': {
-      const d = new Date(now); d.setDate(d.getDate() - 7);
+      const d = new Date(base); d.setUTCDate(d.getUTCDate() - 7);
       return { date_from: d.toISOString().split('T')[0], date_to: today };
     }
     case '30d': {
-      const d = new Date(now); d.setDate(d.getDate() - 30);
+      const d = new Date(base); d.setUTCDate(d.getUTCDate() - 30);
       return { date_from: d.toISOString().split('T')[0], date_to: today };
     }
     case '3m': {
-      const d = new Date(now); d.setMonth(d.getMonth() - 3);
+      const d = new Date(base); d.setUTCMonth(d.getUTCMonth() - 3);
       return { date_from: d.toISOString().split('T')[0], date_to: today };
     }
     case 'year':
-      return { date_from: `${now.getFullYear()}-01-01`, date_to: today };
+      return { date_from: `${today.slice(0, 4)}-01-01`, date_to: today };
     case 'all':
     default:
       return { date_from: null, date_to: null };

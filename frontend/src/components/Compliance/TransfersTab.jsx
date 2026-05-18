@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { ArrowRight, AlertTriangle, CalendarDays, X } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
+import { todayET } from '../../utils/timezone';
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
 const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
@@ -28,7 +29,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [exportOpen, setExportOpen] = useState(false);
   const [todayCount, setTodayCount] = useState(null);
 
-  const today         = new Date().toISOString().split('T')[0];
+  const today         = todayET();
   const isTodayActive = dateFrom === today && dateTo === today;
 
   useEffect(() => {
@@ -67,7 +68,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       fmtDate(t.created_at),
     ]);
     downloadCSV(rows, ['Customer','Phone','Created By','Assigned Closer','Company','Status','Created'],
-      `transfers_${new Date().toISOString().split('T')[0]}.csv`);
+      `transfers_${todayET()}.csv`);
   };
 
   return (

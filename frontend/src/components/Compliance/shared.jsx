@@ -1,4 +1,5 @@
 import { FileText, RefreshCw, Download } from 'lucide-react';
+import { ET_ZONE } from '../../utils/timezone';
 
 // ── Status maps ───────────────────────────────────────────────────────────────
 
@@ -37,12 +38,20 @@ export const LIMIT = 30;
 
 export const fmtDate = (d) => {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
+    }).format(new Date(d));
+  } catch { return '—'; }
 };
 
 export const fmtDateTime = (d) => {
   if (!d) return '—';
-  return new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: ET_ZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(new Date(d));
+  } catch { return '—'; }
 };
 
 export const timeAgo = (d) => {

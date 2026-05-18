@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { todayET } from '../../utils/timezone';
 import { PhoneCall, ArrowRight, Trash2, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
@@ -281,7 +282,7 @@ const AuditLogView = ({ companyList }) => {
       e.notes || '', e.callback_deleted ? 'Yes' : 'No',
     ]);
     downloadCSV(rows, ['Timestamp','Actor','Customer','Phone','From Status','To Status','Notes','Callback Deleted'],
-      `callback_audit_log_${new Date().toISOString().split('T')[0]}.csv`);
+      `callback_audit_log_${todayET()}.csv`);
   };
 
   return (
@@ -372,7 +373,7 @@ const CallbacksTab = ({ companyList }) => {
   const [sort,        setSort]        = useState({ col: 'callback_at', dir: 'asc' });
   const [todayCount,  setTodayCount]  = useState(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayET();
 
   // User (agent) filter
   const [companyUsers, setCompanyUsers] = useState([]);
@@ -478,7 +479,7 @@ const CallbacksTab = ({ companyList }) => {
       c.notes || '', c.user_name || '', c.company_name || '',
     ]);
     downloadCSV(rows, ['Customer','Phone','Scheduled At','Status','Priority','Notes','Agent','Company'],
-      `callbacks_${cbType}_${new Date().toISOString().split('T')[0]}.csv`);
+      `callbacks_${cbType}_${todayET()}.csv`);
   };
 
   return (

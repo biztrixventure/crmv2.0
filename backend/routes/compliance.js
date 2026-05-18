@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 
 const router = express.Router();
 
@@ -144,8 +145,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
     if (ids.length) query = query.in('closer_id', ids);
   }
   if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
-  if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
+  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
   if (search)    query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,reference_no.ilike.%${search}%`);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -193,8 +194,8 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   }
   if (closer_id)  query = query.eq('assigned_closer_id', closer_id);
   if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', date_from + 'T00:00:00');
-  if (date_to)   query = query.lte('created_at', date_to   + 'T23:59:59');
+  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
   // JSONB search omitted — filter by company/date/status instead
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -300,10 +301,10 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   }
   if (status)       query = query.eq('status', status);
   if (priority)     query = query.eq('priority', priority);
-  if (date_from)    query = query.gte('callback_at', date_from    + 'T00:00:00');
-  if (date_to)      query = query.lte('callback_at', date_to      + 'T23:59:59');
-  if (created_from) query = query.gte('created_at', created_from  + 'T00:00:00');
-  if (created_to)   query = query.lte('created_at', created_to    + 'T23:59:59');
+  if (date_from)    query = query.gte('callback_at', etDateToUtcStart(date_from));
+  if (date_to)      query = query.lte('callback_at', etDateToUtcEnd(date_to));
+  if (created_from) query = query.gte('created_at',  etDateToUtcStart(created_from));
+  if (created_to)   query = query.lte('created_at',  etDateToUtcEnd(created_to));
   if (search)       query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -528,8 +529,8 @@ router.get('/callback-audit-log', asyncHandler(async (req, res) => {
 
   if (company_id) query = query.eq('company_id', company_id);
   if (actor_id)   query = query.eq('actor_id', actor_id);
-  if (date_from)  query = query.gte('created_at', date_from + 'T00:00:00');
-  if (date_to)    query = query.lte('created_at', date_to   + 'T23:59:59');
+  if (date_from)  query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)    query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });

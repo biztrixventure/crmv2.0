@@ -1,6 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 
 const router = express.Router();
 
@@ -33,8 +34,8 @@ router.get('/', asyncHandler(async (req, res) => {
   if (targetCompany) query = query.eq('company_id', targetCompany);
   if (action)       query = query.eq('action', action);
   if (filterUser)   query = query.eq('user_id', filterUser);
-  if (date_from)    query = query.gte('created_at', date_from + 'T00:00:00');
-  if (date_to)      query = query.lte('created_at', date_to + 'T23:59:59');
+  if (date_from)    query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)      query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

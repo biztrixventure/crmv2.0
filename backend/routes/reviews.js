@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { logActivity } = require('../utils/activityLogger');
 const router = express.Router();
 
@@ -175,8 +176,8 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (rating)    query = query.eq('rating', rating);
   if (closer_id) query = query.eq('closer_id', closer_id);
-  if (date_from) query = query.gte('created_at', date_from);
-  if (date_to)   query = query.lte('created_at', date_to + 'T23:59:59Z');
+  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

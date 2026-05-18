@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const logger = require('../utils/logger');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
 
 const router = express.Router();
@@ -57,10 +58,10 @@ router.get('/', asyncHandler(async (req, res) => {
   if (status)   query = query.eq('status', status);
   if (overdue)  query = query.eq('status', 'pending').lt('callback_at', new Date().toISOString());
   if (priority) query = query.eq('priority', priority);
-  if (date_from)    query = query.gte('callback_at', date_from);
-  if (date_to)      query = query.lte('callback_at', date_to + 'T23:59:59.999Z');
-  if (created_from) query = query.gte('created_at', created_from);
-  if (created_to)   query = query.lte('created_at', created_to + 'T23:59:59.999Z');
+  if (date_from)    query = query.gte('callback_at', etDateToUtcStart(date_from));
+  if (date_to)      query = query.lte('callback_at', etDateToUtcEnd(date_to));
+  if (created_from) query = query.gte('created_at',  etDateToUtcStart(created_from));
+  if (created_to)   query = query.lte('created_at',  etDateToUtcEnd(created_to));
   if (search) {
     // Resolve agent names → user_ids so we can OR on user_id
     let agentUserIds = [];
