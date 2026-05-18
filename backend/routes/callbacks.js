@@ -89,18 +89,31 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const callbacks = data || [];
 
-  // Enrich with user display name (team viewers see whose callback it is)
+  // Enrich with user display name + company type (team viewers see whose callback it is)
   if (canViewTeam && callbacks.length > 0) {
-    const userIds = [...new Set(callbacks.map(c => c.user_id))];
-    const { data: profiles } = await supabaseAdmin
-      .from('user_profiles')
-      .select('user_id, first_name, last_name')
-      .in('user_id', userIds);
+    const userIds    = [...new Set(callbacks.map(c => c.user_id).filter(Boolean))];
+    const companyIds = [...new Set(callbacks.map(c => c.company_id).filter(Boolean))];
+
+    const [profilesRes, companiesRes] = await Promise.all([
+      userIds.length
+        ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds)
+        : { data: [] },
+      companyIds.length
+        ? supabaseAdmin.from('companies').select('id, company_type').in('id', companyIds)
+        : { data: [] },
+    ]);
+
     const profileMap = {};
-    (profiles || []).forEach(p => {
+    (profilesRes.data || []).forEach(p => {
       profileMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
     });
-    callbacks.forEach(c => { c.user_name = profileMap[c.user_id] || 'Unknown'; });
+    const companyTypeMap = {};
+    (companiesRes.data || []).forEach(co => { companyTypeMap[co.id] = co.company_type; });
+
+    callbacks.forEach(c => {
+      c.user_name    = profileMap[c.user_id]        || 'Unknown';
+      c.company_type = companyTypeMap[c.company_id] || null;
+    });
   }
 
   res.json({ callbacks, total: count || 0, page, limit });

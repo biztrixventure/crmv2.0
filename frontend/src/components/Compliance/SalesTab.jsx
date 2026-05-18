@@ -104,9 +104,9 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     const rows = (res.data.sales || []).map(s => [
       s.customer_name || '', s.customer_phone || '', s.customer_email || '',
       s.reference_no || '', STATUS_LABEL[s.status] || s.status || '',
-      closerName(s), s.companies?.name || '', fmtDate(s.created_at),
+      s.fronter_name || '', closerName(s), s.companies?.name || '', fmtDate(s.created_at),
     ]);
-    downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Closer','Company','Created'],
+    downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Created'],
       `sales_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
@@ -145,6 +145,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                   <Th>Customer</Th>
                   <Th>Status</Th>
+                  <Th>Fronter</Th>
                   <Th>Closer</Th>
                   <Th>Company</Th>
                   <Th>Date</Th>
@@ -171,6 +172,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                           {STATUS_LABEL[s.status] || s.status?.replace(/_/g,' ')}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDate(s.created_at)}</td>
@@ -215,7 +217,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={6} className="px-5 py-3">
+                        <td colSpan={7} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (

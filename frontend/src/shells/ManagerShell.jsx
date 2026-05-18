@@ -534,7 +534,7 @@ const ManagerShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Customer', 'Phone', 'Status', 'Disposition', 'Closer', 'Date', 'Action'].map(h => (
+                        {['Customer', 'Phone', 'Fronter', 'Closer', 'Status', 'Disposition', 'Date', 'Action'].map(h => (
                           <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -547,6 +547,8 @@ const ManagerShell = () => {
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.fronter_name || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || '—' : '—'}</td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="py-3 px-3">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
@@ -569,7 +571,6 @@ const ManagerShell = () => {
                               );
                             })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
@@ -668,7 +669,7 @@ const ManagerShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Customer', 'Reference', 'Status', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
+                        {['Customer', 'Reference', 'Status', 'Fronter', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
                           <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -680,6 +681,7 @@ const ManagerShell = () => {
                           <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
                           <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
                           <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.fronter_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.created_at)}</td>

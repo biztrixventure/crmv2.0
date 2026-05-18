@@ -305,7 +305,8 @@ const ManagerCallbacksTab = ({ user }) => {
         case 'created_at':  return (a.created_at ||'').localeCompare(b.created_at ||'') * dir;
         case 'customer':    return (a.customer_name||'').toLowerCase().localeCompare((b.customer_name||'').toLowerCase()) * dir;
         case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
-        case 'agent':       return (a.user_name||'').toLowerCase().localeCompare((b.user_name||'').toLowerCase()) * dir;
+        case 'fronter':     return ((a.company_type==='fronter' ? a.user_name : '')||'').toLowerCase().localeCompare(((b.company_type==='fronter' ? b.user_name : '')||'').toLowerCase()) * dir;
+        case 'closer':      return ((a.company_type==='closer'  ? a.user_name : '')||'').toLowerCase().localeCompare(((b.company_type==='closer'  ? b.user_name : '')||'').toLowerCase()) * dir;
         default:            return 0;
       }
     });
@@ -347,9 +348,10 @@ const ManagerCallbacksTab = ({ user }) => {
       STATUS_LABEL[c.status] || c.status || '',
       c.priority || 'Medium',
       c.notes    || '',
-      c.user_name || '',
+      c.company_type === 'fronter' ? (c.user_name || '') : '',
+      c.company_type === 'closer'  ? (c.user_name || '') : '',
     ]);
-    downloadCSV(rows, ['Customer', 'Phone', 'Scheduled At', 'Status', 'Priority', 'Notes', 'Agent'],
+    downloadCSV(rows, ['Customer', 'Phone', 'Scheduled At', 'Status', 'Priority', 'Notes', 'Fronter', 'Closer'],
       `callbacks_${todayET()}.csv`);
   };
 
@@ -425,7 +427,8 @@ const ManagerCallbacksTab = ({ user }) => {
                   <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
                   <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled At</SortTh>
                   <SortTh col="created_at"  sort={sort} onSort={toggleSort}>Created</SortTh>
-                  <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
+                  <SortTh col="fronter"     sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                  <SortTh col="closer"      sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
                   <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Notes</th>
                 </tr>
@@ -463,13 +466,27 @@ const ManagerCallbacksTab = ({ user }) => {
                     </td>
 
                     <td className="px-4 py-3 text-xs">
-                      <button
-                        onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—' }); }}
-                        className="hover:underline font-medium flex items-center gap-1"
-                        style={{ color: 'var(--color-primary-600)' }}>
-                        {c.user_name || '—'}
-                        <BarChart3 size={10} className="opacity-60" />
-                      </button>
+                      {c.company_type === 'fronter' ? (
+                        <button
+                          onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—' }); }}
+                          className="hover:underline font-medium flex items-center gap-1"
+                          style={{ color: 'var(--color-primary-600)' }}>
+                          {c.user_name || '—'}
+                          <BarChart3 size={10} className="opacity-60" />
+                        </button>
+                      ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                    </td>
+
+                    <td className="px-4 py-3 text-xs">
+                      {c.company_type === 'closer' ? (
+                        <button
+                          onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—' }); }}
+                          className="hover:underline font-medium flex items-center gap-1"
+                          style={{ color: 'var(--color-primary-600)' }}>
+                          {c.user_name || '—'}
+                          <BarChart3 size={10} className="opacity-60" />
+                        </button>
+                      ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                     </td>
 
                     <td className="px-4 py-3">

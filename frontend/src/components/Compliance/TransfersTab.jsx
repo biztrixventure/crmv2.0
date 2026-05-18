@@ -67,7 +67,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
       fmtDate(t.created_at),
     ]);
-    downloadCSV(rows, ['Customer','Phone','Created By','Assigned Closer','Company','Status','Created'],
+    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Company','Status','Created'],
       `transfers_${todayET()}.csv`);
   };
 
@@ -125,8 +125,8 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                   <Th>Customer</Th>
-                  <Th>Created By</Th>
-                  <Th>Assigned Closer</Th>
+                  <Th>Fronter</Th>
+                  <Th>Closer</Th>
                   <Th>Company</Th>
                   <Th>Transfer Status</Th>
                   <Th>Sale Status</Th>
@@ -216,9 +216,9 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                       </div>
                     } />
                   )}
-                  <InfoTile label="Company"         value={detail.company_name} />
-                  <InfoTile label="Created By"      value={detail.created_by_name} />
-                  <InfoTile label="Assigned Closer" value={detail.assigned_closer_name} />
+                  <InfoTile label="Company" value={detail.company_name} />
+                  <InfoTile label="Fronter" value={detail.created_by_name} />
+                  <InfoTile label="Closer"  value={detail.assigned_closer_name} />
                   <InfoTile label="Entered At"      value={fmtDateTime(detail.created_at)} />
                   <InfoTile label="Last Updated"    value={fmtDateTime(detail.updated_at)} />
                 </div>

@@ -452,7 +452,8 @@ const CallbacksTab = ({ companyList }) => {
         case 'created_at':   av = a.created_at  || ''; bv = b.created_at  || ''; return av.localeCompare(bv) * dir;
         case 'customer':     av = (a.customer_name||'').toLowerCase(); bv = (b.customer_name||'').toLowerCase(); return av.localeCompare(bv) * dir;
         case 'status':       av = a.status||''; bv = b.status||''; return av.localeCompare(bv) * dir;
-        case 'agent':        av = (a.user_name||'').toLowerCase(); bv = (b.user_name||'').toLowerCase(); return av.localeCompare(bv) * dir;
+        case 'fronter':      av = (a.company_type==='fronter' ? a.user_name||'' : '').toLowerCase(); bv = (b.company_type==='fronter' ? b.user_name||'' : '').toLowerCase(); return av.localeCompare(bv) * dir;
+        case 'closer':       av = (a.company_type==='closer'  ? a.user_name||'' : '').toLowerCase(); bv = (b.company_type==='closer'  ? b.user_name||'' : '').toLowerCase(); return av.localeCompare(bv) * dir;
         default:             return 0;
       }
     });
@@ -476,9 +477,12 @@ const CallbacksTab = ({ companyList }) => {
       fmtDateTime(c.callback_at),
       STATUS_LABEL[c.status] || c.status || '',
       c.priority || 'Medium',
-      c.notes || '', c.user_name || '', c.company_name || '',
+      c.notes || '',
+      c.company_type === 'fronter' ? (c.user_name || '') : '',
+      c.company_type === 'closer'  ? (c.user_name || '') : '',
+      c.company_name || '',
     ]);
-    downloadCSV(rows, ['Customer','Phone','Scheduled At','Status','Priority','Notes','Agent','Company'],
+    downloadCSV(rows, ['Customer','Phone','Scheduled At','Status','Priority','Notes','Fronter','Closer','Company'],
       `callbacks_${cbType}_${todayET()}.csv`);
   };
 
@@ -591,7 +595,8 @@ const CallbacksTab = ({ companyList }) => {
                     <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
                     <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled At</SortTh>
                     <SortTh col="created_at"  sort={sort} onSort={toggleSort}>Created</SortTh>
-                    <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
+                    <SortTh col="fronter"     sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                    <SortTh col="closer"      sort={sort} onSort={toggleSort}>Closer</SortTh>
                     <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Company</th>
                     <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
                     <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Notes</th>
@@ -633,14 +638,29 @@ const CallbacksTab = ({ companyList }) => {
                       </td>
 
                       <td className="px-4 py-3 text-xs">
-                        <button
-                          onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—', companyName: c.company_name }); }}
-                          className="hover:underline font-medium flex items-center gap-1"
-                          style={{ color: 'var(--color-primary-600)' }}
-                          title="View agent report">
-                          {c.user_name || '—'}
-                          <BarChart3 size={10} className="opacity-60" />
-                        </button>
+                        {c.company_type === 'fronter' ? (
+                          <button
+                            onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—', companyName: c.company_name }); }}
+                            className="hover:underline font-medium flex items-center gap-1"
+                            style={{ color: 'var(--color-primary-600)' }}
+                            title="View agent report">
+                            {c.user_name || '—'}
+                            <BarChart3 size={10} className="opacity-60" />
+                          </button>
+                        ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                      </td>
+
+                      <td className="px-4 py-3 text-xs">
+                        {c.company_type === 'closer' ? (
+                          <button
+                            onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—', companyName: c.company_name }); }}
+                            className="hover:underline font-medium flex items-center gap-1"
+                            style={{ color: 'var(--color-primary-600)' }}
+                            title="View agent report">
+                            {c.user_name || '—'}
+                            <BarChart3 size={10} className="opacity-60" />
+                          </button>
+                        ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                       </td>
 
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.company_name || '—'}</td>
@@ -684,7 +704,7 @@ const CallbacksTab = ({ companyList }) => {
                     <InfoTile label="Scheduled At" value={fmtDateTime(detail.callback_at)} />
                     <InfoTile label="Status"   value={<Badge variant={STATUS_BADGE[detail.status] || 'secondary'} size="sm">{STATUS_LABEL[detail.status] || detail.status}</Badge>} />
                     <InfoTile label="Priority" value={<PriorityBadge priority={detail.priority} />} />
-                    <InfoTile label="Agent"    value={
+                    <InfoTile label={detail.company_type === 'closer' ? 'Closer' : 'Fronter'} value={
                       detail.user_name ? (
                         <button onClick={() => { setDetail(null); setAgentStats({ userId: detail.user_id, userName: detail.user_name, companyName: detail.company_name }); }}
                           className="hover:underline text-left flex items-center gap-1"

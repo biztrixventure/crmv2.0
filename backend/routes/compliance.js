@@ -321,7 +321,8 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   const enriched = (data || []).map(c => ({
     ...c,
     user_name:    profileName(profileMap, c.user_id),
-    company_name: companyMap[c.company_id]?.name || null,
+    company_name: companyMap[c.company_id]?.name         || null,
+    company_type: companyMap[c.company_id]?.company_type || null,
   }));
 
   res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
