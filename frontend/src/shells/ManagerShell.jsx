@@ -17,7 +17,7 @@ import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
-import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
+import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
@@ -818,7 +818,7 @@ const ManagerShell = () => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
-        {activeTab === 'callbacks' && <CallbacksOverview user={user} />}
+        {activeTab === 'callbacks' && <ManagerCallbacksTab user={user} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
             {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
