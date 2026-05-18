@@ -77,7 +77,7 @@ const ManagerShell = () => {
   const { transfers, loading: xferLoading, fetchTransfers, updateTransfer } = useTransfers(user?.company_id);
 
   const companyId = user?.company_id;
-  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
   // ── Tab logic ─────────────────────────────────────────────────────────────
@@ -112,9 +112,10 @@ const ManagerShell = () => {
   const [activeNav, setActiveNav] = useState('dashboard');
 
   // ── Overview data ─────────────────────────────────────────────────────────
-  const [fronterLb, setFronterLb] = useState([]);
-  const [closerLb, setCloserLb]   = useState([]);
-  const [loading, setLoading]     = useState(false);
+  const [fronterLb, setFronterLb]       = useState([]);
+  const [closerLb, setCloserLb]         = useState([]);
+  const [loading, setLoading]           = useState(false);
+  const [overviewTotals, setOverviewTotals] = useState({ transfers: 0, sales: 0, approved: 0, pendingReview: 0 });
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const [xferPage, setXferPage]           = useState(1);
@@ -251,13 +252,24 @@ const ManagerShell = () => {
     if (!companyId) return;
     setLoading(true);
     try {
-      const [tRes, sRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 200, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 200, date_from, date_to } }),
+      // Leaderboard data + accurate total counts — all parallel
+      const [tRes, sRes, soldRes, wonRes, pendingRes] = await Promise.all([
+        client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold' } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won' } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review' } }),
       ]);
 
       const allT = tRes.data.transfers || [];
       const allS = sRes.data.sales     || [];
+
+      setOverviewTotals({
+        transfers:     tRes.data.total || 0,
+        sales:         sRes.data.total || 0,
+        approved:      (soldRes.data.total || 0) + (wonRes.data.total || 0),
+        pendingReview: pendingRes.data.total || 0,
+      });
 
       // Fronter leaderboard
       const fronterMap = {};
@@ -321,8 +333,6 @@ const ManagerShell = () => {
     }
   };
 
-  const awaitingCompliance = sales.filter(s => s.status === 'pending_review').length;
-  const approvedSales      = sales.filter(s => ['sold', 'closed_won'].includes(s.status)).length;
   const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
@@ -376,7 +386,7 @@ const ManagerShell = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={handleDateChange} defaultPreset="30d" />
+          <DateRangePicker onChange={handleDateChange} defaultPreset="today" />
         </div>
 
         {/* ── OVERVIEW TAB ── */}
@@ -385,16 +395,19 @@ const ManagerShell = () => {
             {/* Stats cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               {[
-                { label: 'Total Transfers',   value: transfers.length,     icon: Send,        color: 'info'    },
-                { label: 'Total Sales',       value: sales.length,         icon: DollarSign,  color: 'success' },
-                { label: 'Approved Sales',    value: approvedSales,        icon: CheckCircle, color: 'success' },
-                { label: 'Awaiting Review',   value: awaitingCompliance,   icon: Clock,       color: 'warning' },
+                { label: 'Total Transfers',   value: overviewTotals.transfers,     icon: Send,        color: 'info'    },
+                { label: 'Total Sales',       value: overviewTotals.sales,         icon: DollarSign,  color: 'success' },
+                { label: 'Approved Sales',    value: overviewTotals.approved,      icon: CheckCircle, color: 'success' },
+                { label: 'Awaiting Review',   value: overviewTotals.pendingReview, icon: Clock,       color: 'warning' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <Card key={label} className="p-6">
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{value}</p>
+                      {loading
+                        ? <div className="h-9 w-16 rounded-lg animate-pulse mt-1" style={{ backgroundColor: 'var(--color-border)' }} />
+                        : <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{value}</p>
+                      }
                     </div>
                     <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
                       <Icon size={22} className={`text-${color}-600`} />
