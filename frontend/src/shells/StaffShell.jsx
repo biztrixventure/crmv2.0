@@ -168,13 +168,6 @@ const StaffShell = () => {
   // ── Company agents (for agent selector dropdowns) ────────────────────────
   const [companyAgents, setCompanyAgents] = useState([]);
 
-  // ── Reassign transfer ────────────────────────────────────────────────────
-  const [reassignTarget,  setReassignTarget]  = useState(null);
-  const [reassignCloser,  setReassignCloser]  = useState('');
-  const [reassignMsg,     setReassignMsg]     = useState('');
-  const [reassigning,     setReassigning]     = useState(false);
-  const [availableClosers, setAvailableClosers] = useState([]);
-
   // Schedule callback from sale
   const [callbackSale, setCallbackSale]     = useState(null);
   const [callbackAt, setCallbackAt]         = useState('');
@@ -214,13 +207,11 @@ const StaffShell = () => {
   useEffect(() => { if (activeTab === 'team_transfers') fetchXferTab();  }, [activeTab, fetchXferTab]);
   useEffect(() => { if (activeTab === 'team_sales')     fetchSalesTab(); }, [activeTab, fetchSalesTab]);
 
-  // Company agents + available closers for filters / reassign
+  // Company agents for filter dropdowns
   useEffect(() => {
     if (!user?.company_id) return;
     client.get('users', { params: { company_id: user.company_id } })
       .then(r => setCompanyAgents(r.data.users || [])).catch(() => {});
-    client.get('transfers/closers', { params: { company_id: user.company_id } })
-      .then(r => setAvailableClosers(r.data?.closers || [])).catch(() => {});
   }, [user?.company_id]);
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -424,22 +415,6 @@ const StaffShell = () => {
     } catch {} finally { setSalesTabLoading(false); }
   }, [user?.company_id, salesPage, salesStatus, salesAgent, date_from, date_to]);
 
-  const handleReassign = async () => {
-    if (!reassignCloser) { setReassignMsg('Select a closer.'); return; }
-    setReassigning(true);
-    try {
-      await client.put(`transfers/${reassignTarget.id}`, { assigned_closer_id: reassignCloser });
-      setReassignTarget(null);
-      setReassignCloser('');
-      setReassignMsg('');
-      fetchXferTab();
-    } catch (err) {
-      setReassignMsg(err.response?.data?.error || 'Failed to reassign');
-    } finally {
-      setReassigning(false);
-    }
-  };
-
   const TABS = [
     ...((isCloser || hasPermission('view_own_sales')) && isEnabled('sales')
       ? [{ key: 'sales',          label: 'My Sales',        icon: DollarSign }] : []),
@@ -616,13 +591,6 @@ const StaffShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{new Date(t.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
-                              {hasPermission('reassign_transfer') && ['pending', 'rejected'].includes(t.status) && (
-                                <button onClick={e => { e.stopPropagation(); setReassignTarget(t); setReassignCloser(''); setReassignMsg(''); }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                                  style={{ background: 'var(--gradient-sidebar)' }}>
-                                  Reassign
-                                </button>
-                              )}
                               {hasPermission('submit_call_review') && (
                                 <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
                                   className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
@@ -1261,37 +1229,6 @@ const StaffShell = () => {
 
       {/* ── MODALS ── */}
 
-      {/* Reassign Transfer */}
-      {reassignTarget && (
-        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
-              style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <h3 className="text-lg font-bold text-text mb-1">Reassign Transfer</h3>
-              <p className="text-sm text-text-secondary mb-4">
-                Customer: <strong>{reassignTarget.form_data?.customer_name || reassignTarget.form_data?.FirstName || 'Unknown'}</strong>
-              </p>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Assign to closer</label>
-              <select value={reassignCloser} onChange={e => setReassignCloser(e.target.value)} className="input mb-3">
-                <option value="">Select a closer…</option>
-                {availableClosers.map(c => (
-                  <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>
-                ))}
-              </select>
-              {reassignMsg && <p className="text-sm text-error-600 mb-3">{reassignMsg}</p>}
-              <div className="flex gap-3">
-                <button onClick={() => setReassignTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-                <button onClick={handleReassign} disabled={reassigning}
-                  className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
-                  style={{ background: 'var(--gradient-sidebar)' }}>
-                  {reassigning ? 'Reassigning…' : 'Confirm'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <SaleModal isOpen={modalOpen} onClose={() => setModalOpen(false)} user={user}
         transfer={activeTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
