@@ -388,6 +388,18 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       const av = W[a.priority] || 0, bv = W[b.priority] || 0;
       return sort.dir === 'asc' ? av - bv : bv - av;
     }
+    if (sort.col === 'fronter') {
+      const av = a.company_type === 'fronter' ? (a.user_name || '') : '';
+      const bv = b.company_type === 'fronter' ? (b.user_name || '') : '';
+      const cmp = av.localeCompare(bv);
+      return sort.dir === 'asc' ? cmp : -cmp;
+    }
+    if (sort.col === 'closer') {
+      const av = a.company_type === 'closer' ? (a.user_name || '') : '';
+      const bv = b.company_type === 'closer' ? (b.user_name || '') : '';
+      const cmp = av.localeCompare(bv);
+      return sort.dir === 'asc' ? cmp : -cmp;
+    }
     let av = a[sort.col] ?? '', bv = b[sort.col] ?? '';
     const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
     return sort.dir === 'asc' ? cmp : -cmp;
@@ -425,6 +437,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           s.customer_name || '', s.customer_phone || '', s.customer_email || '',
           s.reference_no || '',
           SALE_LABEL[s.status] || s.status || '',
+          s.fronter_name || '',
           s.closer_name || (s.user_profiles ? `${s.user_profiles.first_name||''} ${s.user_profiles.last_name||''}`.trim() : '') || '',
           s.companies?.name || '',
           s.plan || '',
@@ -433,7 +446,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           new Date(s.created_at).toLocaleDateString(),
         ]);
         downloadCSV(rows,
-          ['Customer','Phone','Email','Reference','Status','Closer','Company','Plan','Monthly','Sale Date','Created'],
+          ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Plan','Monthly','Sale Date','Created'],
           `sales_export_${today}.csv`);
       } else if (dataTab === 'transfers') {
         const params = {
@@ -477,11 +490,14 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           c.callback_at ? new Date(c.callback_at).toLocaleString() : '',
           CB_STATUS_LABEL[c.status] || c.status || '',
           c.priority || 'Medium',
-          c.notes || '', c.user_name || '', c.company_name || '',
+          c.notes || '',
+          c.company_type==='fronter' ? (c.user_name||'') : '',
+          c.company_type==='closer'  ? (c.user_name||'') : '',
+          c.company_name || '',
           new Date(c.created_at).toLocaleDateString(),
         ]);
         downloadCSV(rows,
-          ['Customer','Phone','Scheduled At','Status','Priority','Notes','Agent','Company','Created'],
+          ['Customer','Phone','Scheduled At','Status','Priority','Notes','Fronter','Closer','Company','Created'],
           `callbacks_${cbType}_export_${today}.csv`);
       }
     } catch { /* silent — user retries */ } finally {
@@ -773,6 +789,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="customer_name"   sort={sort} onSort={toggleSort}>Customer</Th>
                   <Th col="reference_no"    sort={sort} onSort={toggleSort}>Ref</Th>
                   <Th col="status"          sort={sort} onSort={toggleSort}>Status</Th>
+                  <Th col="fronter_name"    sort={sort} onSort={toggleSort}>Fronter</Th>
                   <Th col="closer_name"     sort={sort} onSort={toggleSort}>Closer</Th>
                   <Th col="company_id"      sort={sort} onSort={toggleSort}>Company</Th>
                   <Th col="plan"            sort={sort} onSort={toggleSort}>Plan</Th>
@@ -785,7 +802,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 {loading && rows.length===0 ? (
                   Array.from({length:8}).map((_,i) => (
                     <tr key={i} style={{ borderBottom:'1px solid var(--color-border)' }}>
-                      {Array.from({length:9}).map((_,j) => (
+                      {Array.from({length:10}).map((_,j) => (
                         <td key={j} className="py-2 px-2.5">
                           <div className="h-2.5 rounded animate-pulse" style={{ backgroundColor:'var(--color-border)', width: j===0?100:60 }} />
                         </td>
@@ -793,7 +810,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={9} className="py-10 text-center text-text-secondary text-xs">No sales match the current filters.</td></tr>
+                  <tr><td colSpan={10} className="py-10 text-center text-text-secondary text-xs">No sales match the current filters.</td></tr>
                 ) : (
                   sorted.map(s => (
                     <tr key={s.id} onClick={() => setDetailSale(s)}
@@ -807,6 +824,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       <td className="py-2 px-2.5">
                         <Badge variant={SALE_BADGE[s.status]||'secondary'} size="sm">{SALE_LABEL[s.status]||s.status||'—'}</Badge>
                       </td>
+                      <td className="py-2 px-2.5 text-text-secondary">{s.fronter_name||'—'}</td>
                       <td className="py-2 px-2.5 text-text-secondary">{s.closer_name||(s.user_profiles?`${s.user_profiles.first_name||''} ${s.user_profiles.last_name||''}`.trim():'—')}</td>
                       <td className="py-2 px-2.5 text-text-secondary">
                         {s.companies?.name||'—'}
@@ -909,7 +927,8 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="customer_name" sort={sort} onSort={toggleSort}>Customer</Th>
                   <Th col="priority"      sort={sort} onSort={toggleSort}>Priority</Th>
                   <Th col="callback_at"   sort={sort} onSort={toggleSort}>Scheduled At</Th>
-                  <Th col="user_name"     sort={sort} onSort={toggleSort}>Agent</Th>
+                  <Th col="fronter"       sort={sort} onSort={toggleSort}>Fronter</Th>
+                  <Th col="closer"        sort={sort} onSort={toggleSort}>Closer</Th>
                   <th className="py-2 px-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color:'var(--color-text-secondary)' }}>Company</th>
                   <Th col="status"        sort={sort} onSort={toggleSort}>Status</Th>
                   <th className="py-2 px-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color:'var(--color-text-secondary)' }}>Notes</th>
@@ -920,7 +939,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 {loading && rows.length===0 ? (
                   Array.from({length:8}).map((_,i) => (
                     <tr key={i} style={{ borderBottom:'1px solid var(--color-border)' }}>
-                      {Array.from({length:8}).map((_,j) => (
+                      {Array.from({length:9}).map((_,j) => (
                         <td key={j} className="py-2 px-2.5">
                           <div className="h-2.5 rounded animate-pulse" style={{ backgroundColor:'var(--color-border)', width:j===0?100:60 }} />
                         </td>
@@ -928,7 +947,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={8} className="py-10 text-center text-text-secondary text-xs">No callbacks match the current filters.</td></tr>
+                  <tr><td colSpan={9} className="py-10 text-center text-text-secondary text-xs">No callbacks match the current filters.</td></tr>
                 ) : (
                   sorted.map(c => (
                     <tr key={c.id}
@@ -947,7 +966,8 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                           <CbOverdueDot cb={c} />
                         </span>
                       </td>
-                      <td className="py-2 px-2.5 text-text-secondary">{c.user_name||'—'}</td>
+                      <td className="py-2 px-2.5 text-text-secondary">{c.company_type==='fronter' ? (c.user_name||'—') : '—'}</td>
+                      <td className="py-2 px-2.5 text-text-secondary">{c.company_type==='closer'  ? (c.user_name||'—') : '—'}</td>
                       <td className="py-2 px-2.5 text-text-secondary">{c.company_name||'—'}</td>
                       <td className="py-2 px-2.5">
                         <Badge variant={CB_STATUS_BADGE[c.status]||'secondary'} size="sm">
