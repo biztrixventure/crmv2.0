@@ -203,6 +203,32 @@ const StaffShell = () => {
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { if (isCloser) fetchSales({ date_from, date_to }); }, [fetchSales, date_from, date_to, isCloser]);
 
+  const fetchXferTab = useCallback(async () => {
+    if (!user?.company_id) return;
+    setXferTabLoading(true);
+    try {
+      const params = { company_id: user.company_id, page: xferPage, limit: PAGE_SIZE, date_from, date_to };
+      if (xferStatus) params.status  = xferStatus;
+      if (xferAgent)  params.user_id = xferAgent;
+      const res = await client.get('transfers', { params });
+      setXferTabRows(res.data.transfers || []);
+      setXferTabTotal(res.data.total    || 0);
+    } catch {} finally { setXferTabLoading(false); }
+  }, [user?.company_id, xferPage, xferStatus, xferAgent, date_from, date_to]);
+
+  const fetchSalesTab = useCallback(async () => {
+    if (!user?.company_id) return;
+    setSalesTabLoading(true);
+    try {
+      const params = { company_id: user.company_id, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
+      if (salesStatus) params.status  = salesStatus;
+      if (salesAgent)  params.user_id = salesAgent;
+      const res = await client.get('sales', { params });
+      setSalesTabRows(res.data.sales || []);
+      setSalesTabTotal(res.data.total || 0);
+    } catch {} finally { setSalesTabLoading(false); }
+  }, [user?.company_id, salesPage, salesStatus, salesAgent, date_from, date_to]);
+
   // Team tab data — only fetch when the tab is active
   useEffect(() => { if (activeTab === 'team_transfers') fetchXferTab();  }, [activeTab, fetchXferTab]);
   useEffect(() => { if (activeTab === 'team_sales')     fetchSalesTab(); }, [activeTab, fetchSalesTab]);
@@ -388,32 +414,6 @@ const StaffShell = () => {
       finally { setZipFronterLoading(false); }
     }, 500);
   };
-
-  const fetchXferTab = useCallback(async () => {
-    if (!user?.company_id) return;
-    setXferTabLoading(true);
-    try {
-      const params = { company_id: user.company_id, page: xferPage, limit: PAGE_SIZE, date_from, date_to };
-      if (xferStatus) params.status  = xferStatus;
-      if (xferAgent)  params.user_id = xferAgent;
-      const res = await client.get('transfers', { params });
-      setXferTabRows(res.data.transfers || []);
-      setXferTabTotal(res.data.total    || 0);
-    } catch {} finally { setXferTabLoading(false); }
-  }, [user?.company_id, xferPage, xferStatus, xferAgent, date_from, date_to]);
-
-  const fetchSalesTab = useCallback(async () => {
-    if (!user?.company_id) return;
-    setSalesTabLoading(true);
-    try {
-      const params = { company_id: user.company_id, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
-      if (salesStatus) params.status  = salesStatus;
-      if (salesAgent)  params.user_id = salesAgent;
-      const res = await client.get('sales', { params });
-      setSalesTabRows(res.data.sales || []);
-      setSalesTabTotal(res.data.total || 0);
-    } catch {} finally { setSalesTabLoading(false); }
-  }, [user?.company_id, salesPage, salesStatus, salesAgent, date_from, date_to]);
 
   const TABS = [
     ...((isCloser || hasPermission('view_own_sales')) && isEnabled('sales')
