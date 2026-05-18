@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
+const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
 
@@ -37,20 +37,22 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const superadmin  = await isSuperAdmin(userId);
   const isManager   = superadmin || MANAGER_LEVELS.includes(req.user.role);
+  // Permission-based company scope: users with view_team_callbacks can see all company callbacks
+  const canViewTeam = isManager || await hasPermission(userId, companyId, 'view_team_callbacks');
 
   let query = supabaseAdmin
     .from('callbacks')
     .select('*', { count: 'exact' })
     .order('callback_at', { ascending: true });
 
-  if (isManager && companyId) {
+  if (canViewTeam && companyId) {
     query = query.eq('company_id', companyId);
   } else {
     query = query.eq('user_id', userId);
   }
 
-  // Managers can filter by a specific agent
-  if (isManager && user_id) query = query.eq('user_id', user_id);
+  // Team viewers can filter by a specific agent
+  if (canViewTeam && user_id) query = query.eq('user_id', user_id);
 
   if (status)   query = query.eq('status', status);
   if (overdue)  query = query.eq('status', 'pending').lt('callback_at', new Date().toISOString());
@@ -62,7 +64,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (search) {
     // Resolve agent names → user_ids so we can OR on user_id
     let agentUserIds = [];
-    if (isManager) {
+    if (canViewTeam) {
       const { data: matchedProfiles } = await supabaseAdmin
         .from('user_profiles')
         .select('user_id')
@@ -86,8 +88,8 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const callbacks = data || [];
 
-  // Enrich with user display name (managers see whose callback it is)
-  if (isManager && callbacks.length > 0) {
+  // Enrich with user display name (team viewers see whose callback it is)
+  if (canViewTeam && callbacks.length > 0) {
     const userIds = [...new Set(callbacks.map(c => c.user_id))];
     const { data: profiles } = await supabaseAdmin
       .from('user_profiles')
