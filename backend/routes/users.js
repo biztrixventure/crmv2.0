@@ -12,6 +12,7 @@ const {
   getUserRole,
   isSuperAdmin,
   getCompanyTypeLevels,
+  ROLE_HIERARCHY,
 } = require('../models/helpers');
 const { validatePassword, generateSecurePassword } = require('../utils/passwordValidator');
 
@@ -111,6 +112,17 @@ router.get(
 
         logger.success('GET_USERS', `Combined data for ${users.length} users`, { total: users.length });
       }
+
+      // Role-hierarchy visibility: only show users with strictly lower authority.
+      // Superadmin (0) and readonly_admin (1) see all. Self always excluded.
+      const callerLevel = ROLE_HIERARCHY[req.user.role] ?? 999;
+      const isPrivilegedViewer = req.user.role === 'superadmin' || req.user.role === 'readonly_admin';
+      users = users.filter(u => {
+        if (u.user_id === userId) return false; // never show self
+        if (isPrivilegedViewer) return true;
+        const theirLevel = ROLE_HIERARCHY[u.custom_roles?.level] ?? -1;
+        return theirLevel > callerLevel; // strictly lower authority
+      });
 
       // Filter by search term if provided
       if (search) {
@@ -551,6 +563,16 @@ router.put(
 
       logger.success('UPDATE_USER', `Found user assignment`, { id, user_id: targetAssignment.user_id });
 
+      // Hierarchy guard: cannot edit users with equal or higher authority (self-edit exempt)
+      if (req.user.role !== 'superadmin' && userId !== targetAssignment.user_id) {
+        const myLevel    = ROLE_HIERARCHY[req.user.role] ?? 999;
+        const theirLevel = ROLE_HIERARCHY[targetAssignment.custom_roles?.level] ?? -1;
+        if (theirLevel <= myLevel) {
+          logger.error('UPDATE_USER', 'Hierarchy violation — target has equal or higher authority', new Error('Hierarchy check failed'));
+          return res.status(403).json({ error: 'Cannot edit users with equal or higher authority than yours' });
+        }
+      }
+
       // Check permissions
       logger.debug('UPDATE_USER', 'Checking edit permissions', { userId, company_id: targetAssignment.company_id, isSuperAdmin: req.user.role === 'superadmin' });
       const hasEditPerm = await hasPermission(userId, targetAssignment.company_id, "edit_user");
@@ -652,7 +674,7 @@ router.delete(
       logger.debug('DELETE_USER', 'Fetching target user assignment', { id });
       const { data: target } = await supabaseAdmin
         .from("user_company_roles")
-        .select("user_id, company_id")
+        .select("user_id, company_id, custom_roles(level)")
         .eq("id", id)
         .single();
 
@@ -662,6 +684,16 @@ router.delete(
       }
 
       logger.success('DELETE_USER', `Found target user`, { id, user_id: target.user_id, company_id: target.company_id });
+
+      // Hierarchy guard: cannot delete users with equal or higher authority
+      if (req.user.role !== 'superadmin') {
+        const myLevel    = ROLE_HIERARCHY[req.user.role] ?? 999;
+        const theirLevel = ROLE_HIERARCHY[target.custom_roles?.level] ?? -1;
+        if (theirLevel <= myLevel) {
+          logger.error('DELETE_USER', 'Hierarchy violation — cannot delete equal or higher authority user', new Error('Hierarchy check failed'));
+          return res.status(403).json({ error: 'Cannot delete users with equal or higher authority than yours' });
+        }
+      }
 
       // Check permission
       logger.debug('DELETE_USER', 'Checking delete permissions', { userId, company_id: target.company_id, isSuperAdmin: req.user.role === 'superadmin' });
