@@ -271,7 +271,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────
 // company_type=fronter|closer filters callbacks from companies of that type
 router.get('/callbacks', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, priority, date_from, date_to, company_type, search, page = 1, limit = 50 } = req.query;
+  const { company_id, user_ids, status, priority, date_from, date_to, created_from, created_to, company_type, search, page = 1, limit = 50 } = req.query;
 
   let scopeCompanyIds = null;
   if (company_type) {
@@ -298,11 +298,13 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
     const ids = user_ids.split(',').filter(Boolean);
     if (ids.length) query = query.in('user_id', ids);
   }
-  if (status)    query = query.eq('status', status);
-  if (priority)  query = query.eq('priority', priority);
-  if (date_from) query = query.gte('callback_at', date_from + 'T00:00:00');
-  if (date_to)   query = query.lte('callback_at', date_to   + 'T23:59:59');
-  if (search)    query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
+  if (status)       query = query.eq('status', status);
+  if (priority)     query = query.eq('priority', priority);
+  if (date_from)    query = query.gte('callback_at', date_from    + 'T00:00:00');
+  if (date_to)      query = query.lte('callback_at', date_to      + 'T23:59:59');
+  if (created_from) query = query.gte('created_at', created_from  + 'T00:00:00');
+  if (created_to)   query = query.lte('created_at', created_to    + 'T23:59:59');
+  if (search)       query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

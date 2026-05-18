@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { PhoneCall, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X } from 'lucide-react';
+import { PhoneCall, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
@@ -241,12 +241,17 @@ const ManagerCallbacksTab = ({ user }) => {
   const [search,       setSearch]       = useState('');
   const [dateFrom,     setDateFrom]     = useState('');
   const [dateTo,       setDateTo]       = useState('');
+  const [createdFrom,  setCreatedFrom]  = useState('');
+  const [createdTo,    setCreatedTo]    = useState('');
   const [sort,         setSort]         = useState({ col: 'callback_at', dir: 'asc' });
   const [companyUsers, setCompanyUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState('');
   const [agentStats,   setAgentStats]   = useState(null);
   const [detail,       setDetail]       = useState(null);
   const [phoneDrawer,  setPhoneDrawer]  = useState(null);
+  const [todayCount,   setTodayCount]   = useState(null);
+
+  const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     if (!companyId) return;
@@ -255,26 +260,35 @@ const ManagerCallbacksTab = ({ user }) => {
       .catch(() => {});
   }, [companyId]);
 
+  useEffect(() => {
+    if (!companyId) return;
+    client.get('callbacks', { params: { company_id: companyId, created_from: today, created_to: today, limit: 1, page: 1 } })
+      .then(r => setTodayCount(r.data.total ?? 0))
+      .catch(() => {});
+  }, [companyId, today]);
+
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
     try {
       const res = await client.get('callbacks', {
         params: {
-          company_id:  companyId,
-          status:      status   || undefined,
-          priority:    priority || undefined,
-          search:      search   || undefined,
-          date_from:   dateFrom || undefined,
-          date_to:     dateTo   || undefined,
-          user_id:     selectedUser || undefined,
+          company_id:   companyId,
+          status:       status       || undefined,
+          priority:     priority     || undefined,
+          search:       search       || undefined,
+          date_from:    dateFrom     || undefined,
+          date_to:      dateTo       || undefined,
+          created_from: createdFrom  || undefined,
+          created_to:   createdTo    || undefined,
+          user_id:      selectedUser || undefined,
           page, limit: LIMIT,
         },
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch { } finally { setLoading(false); }
-  }, [companyId, status, priority, search, dateFrom, dateTo, page, selectedUser]);
+  }, [companyId, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -295,16 +309,32 @@ const ManagerCallbacksTab = ({ user }) => {
     });
   }, [callbacks, sort]);
 
+  const applyTodayCreated = () => {
+    setCreatedFrom(today);
+    setCreatedTo(today);
+    setPage(1);
+  };
+
+  const clearCreatedFilter = () => {
+    setCreatedFrom('');
+    setCreatedTo('');
+    setPage(1);
+  };
+
+  const isTodayActive = createdFrom === today && createdTo === today;
+
   const handleExport = async () => {
     const res = await client.get('callbacks', {
       params: {
-        company_id: companyId,
-        status:     status   || undefined,
-        priority:   priority || undefined,
-        search:     search   || undefined,
-        date_from:  dateFrom || undefined,
-        date_to:    dateTo   || undefined,
-        user_id:    selectedUser || undefined,
+        company_id:   companyId,
+        status:       status       || undefined,
+        priority:     priority     || undefined,
+        search:       search       || undefined,
+        date_from:    dateFrom     || undefined,
+        date_to:      dateTo       || undefined,
+        created_from: createdFrom  || undefined,
+        created_to:   createdTo    || undefined,
+        user_id:      selectedUser || undefined,
         limit: 5000, page: 1,
       },
     });
@@ -330,6 +360,28 @@ const ManagerCallbacksTab = ({ user }) => {
         onExport={handleExport}
       />
 
+      {/* Today created chip */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button
+          onClick={isTodayActive ? clearCreatedFilter : applyTodayCreated}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+          style={{
+            backgroundColor: isTodayActive ? '#eff6ff' : 'var(--color-bg-secondary)',
+            color:            isTodayActive ? '#2563eb' : 'var(--color-text-secondary)',
+            borderColor:      isTodayActive ? '#bfdbfe' : 'var(--color-border)',
+          }}>
+          <CalendarDays size={12} />
+          Created Today
+          {todayCount !== null && (
+            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+              style={{ backgroundColor: isTodayActive ? '#bfdbfe' : 'var(--color-border)', color: isTodayActive ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
+              {todayCount}
+            </span>
+          )}
+          {isTodayActive && <X size={10} />}
+        </button>
+      </div>
+
       <Filters onSubmit={() => { setPage(1); load(); }}>
         <FInput label="Search" placeholder="Name or phone…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 160 }} />
         <FSelect label="Agent" value={selectedUser} onChange={e => setSelectedUser(e.target.value)}>
@@ -350,8 +402,10 @@ const ManagerCallbacksTab = ({ user }) => {
           <option value="Medium">🟡 Medium</option>
           <option value="Low">🔵 Low</option>
         </FSelect>
-        <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
+        <FInput label="Sched. From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <FInput label="Sched. To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
+        <FInput label="Crt. From" type="date" value={createdFrom} onChange={e => { setCreatedFrom(e.target.value); }} />
+        <FInput label="Crt. To"   type="date" value={createdTo}   onChange={e => { setCreatedTo(e.target.value); }} />
       </Filters>
 
       {callbacks.length > 0 && <PriorityStatsBar callbacks={callbacks} />}
