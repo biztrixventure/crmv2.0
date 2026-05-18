@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
-import { formatForInput, convertToUtc, getTzAbbr, formatInTz } from '../../utils/timezone';
+import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '../../utils/timezone';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -244,7 +244,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
           {/* Dual-time preview */}
           {callbackAt && (zipCbInfo?.timezone || companyTimezone) && (() => {
             const cbTz     = zipCbInfo?.timezone || companyTimezone;
-            const agentTz  = companyTimezone || 'Asia/Karachi';
+            const agentTz  = ET_ZONE;
             const utcIso   = convertToUtc(callbackAt, cbTz);
             const custTime = zipCbInfo?.timezone
               ? `${formatInTz(utcIso, zipCbInfo.timezone, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(zipCbInfo.timezone)}`

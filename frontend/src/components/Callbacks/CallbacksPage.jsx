@@ -155,8 +155,14 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
   });
   const [saving, setSaving]   = useState(false);
   const [err,    setErr]      = useState('');
+  const [now,    setNow]      = useState(() => new Date());
   const prevTzRef             = useRef(displayTz);
   const zipTimerRef           = useRef(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Re-derive input value when customer timezone changes
   useEffect(() => {
@@ -349,7 +355,7 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
                 )}
                 {customerTz && (
                   <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                    {nowInTz(customerTz)}
+                    {new Intl.DateTimeFormat('en-US', { timeZone: customerTz, weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now)}
                   </p>
                 )}
               </div>
@@ -361,7 +367,7 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
                   {agentPreview}
                 </p>
                 <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {nowInTz(agentTz)}
+                  {new Intl.DateTimeFormat('en-US', { timeZone: agentTz, weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now)}
                 </p>
               </div>
             </div>
