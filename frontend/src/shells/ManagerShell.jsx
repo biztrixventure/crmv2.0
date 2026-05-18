@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -39,6 +39,27 @@ const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
 const XFER_BADGE  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 const PAGE_SIZE   = 25;
+
+// ── Overview helpers ──────────────────────────────────────────────────────────
+const MEDAL_COLORS    = ['#f59e0b', '#94a3b8', '#b45309'];
+const AVATAR_PALETTE  = ['#6366f1','#0891b2','#059669','#dc2626','#7c3aed','#ea580c','#0284c7','#65a30d','#c026d3','#0d9488'];
+const getInitials     = n => (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+const getAvatarColor  = n => AVATAR_PALETTE[(n?.charCodeAt(0) || 0) % AVATAR_PALETTE.length];
+
+const SkeletonLeaderRow = () => (
+  <div className="flex items-center gap-3 py-2.5">
+    <div className="w-5 h-5 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+    <div className="w-7 h-7 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+    <div className="flex-1 space-y-1.5">
+      <div className="h-3.5 w-3/4 rounded animate-pulse" style={{ backgroundColor: 'var(--color-border)' }} />
+      <div className="h-1.5 w-full rounded-full animate-pulse" style={{ backgroundColor: 'var(--color-border)' }} />
+    </div>
+    <div className="w-16 space-y-1.5 flex-shrink-0">
+      <div className="h-3 rounded animate-pulse" style={{ backgroundColor: 'var(--color-border)' }} />
+      <div className="h-2.5 rounded animate-pulse" style={{ backgroundColor: 'var(--color-border)' }} />
+    </div>
+  </div>
+);
 
 const Pagination = ({ page, total, pageSize, onChange }) => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -107,6 +128,8 @@ const ManagerShell = () => {
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
   ];
+
+  const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
   const [activeTab, setActiveTab] = useState('overview');
   const [activeNav, setActiveNav] = useState('dashboard');
@@ -392,73 +415,250 @@ const ManagerShell = () => {
         {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Stats cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+
+            {/* ── Stat cards ── */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Total Transfers',   value: overviewTotals.transfers,     icon: Send,        color: 'info'    },
-                { label: 'Total Sales',       value: overviewTotals.sales,         icon: DollarSign,  color: 'success' },
-                { label: 'Approved Sales',    value: overviewTotals.approved,      icon: CheckCircle, color: 'success' },
-                { label: 'Awaiting Review',   value: overviewTotals.pendingReview, icon: Clock,       color: 'warning' },
-              ].map(({ label, value, icon: Icon, color }) => (
-                <Card key={label} className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      {loading
-                        ? <div className="h-9 w-16 rounded-lg animate-pulse mt-1" style={{ backgroundColor: 'var(--color-border)' }} />
-                        : <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{value}</p>
-                      }
+                {
+                  label: 'Total Transfers', value: overviewTotals.transfers, icon: Send, color: 'info',
+                  tab: 'transfers',
+                  sub: overviewTotals.transfers > 0 && overviewTotals.sales > 0
+                    ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null,
+                },
+                {
+                  label: 'Total Sales', value: overviewTotals.sales, icon: DollarSign, color: 'success',
+                  tab: 'team_sales',
+                  sub: overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null,
+                },
+                {
+                  label: 'Approved', value: overviewTotals.approved, icon: CheckCircle, color: 'success',
+                  tab: 'team_sales',
+                  sub: overviewTotals.sales > 0
+                    ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null,
+                },
+                {
+                  label: 'Awaiting Review', value: overviewTotals.pendingReview, icon: Clock, color: 'warning',
+                  tab: 'team_sales',
+                  sub: overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear',
+                },
+              ].map(({ label, value, icon: Icon, color, tab, sub }) => {
+                const canNav = tabKeys.has(tab);
+                return (
+                  <Card key={label}
+                    className={`p-5 group transition-all duration-200 ${canNav ? 'cursor-pointer hover:shadow-md' : ''}`}
+                    onClick={canNav ? () => setActiveTab(tab) : undefined}
+                    style={{ borderColor: canNav ? undefined : 'var(--color-border)' }}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className={`p-2.5 rounded-xl bg-${color}-100 dark:bg-${color}-900 transition-transform duration-200 ${canNav ? 'group-hover:scale-110' : ''}`}>
+                        <Icon size={18} className={`text-${color}-600`} />
+                      </div>
+                      {canNav && (
+                        <ArrowRight size={13} className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+                      )}
                     </div>
-                    <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
-                      <Icon size={22} className={`text-${color}-600`} />
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1">{label}</p>
+                    {loading
+                      ? <div className="h-8 w-14 rounded-lg animate-pulse mt-1" style={{ backgroundColor: 'var(--color-border)' }} />
+                      : <p className={`text-3xl font-bold text-${color}-600`} style={{ letterSpacing: '-0.03em' }}>{value}</p>
+                    }
+                    {sub && !loading && (
+                      <p className="text-xs text-text-tertiary mt-1.5">{sub}</p>
+                    )}
+                  </Card>
+                );
+              })}
             </div>
 
-            {/* Leaderboards */}
+            {/* ── Conversion funnel ── */}
+            {!loading && overviewTotals.transfers > 0 && (
+              <Card className="px-6 py-4">
+                <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+                  <p className="text-xs font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Funnel
+                  </p>
+                  <div className="flex-1 flex items-center">
+                    {/* Step: Transfers */}
+                    <div className="flex flex-col items-center flex-1">
+                      <p className="text-xl font-black text-info-600">{overviewTotals.transfers}</p>
+                      <p className="text-[11px] text-text-secondary font-medium">Transfers</p>
+                    </div>
+                    {/* Arrow 1 */}
+                    <div className="flex flex-col items-center px-1">
+                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {overviewTotals.transfers > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}%` : '—'}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-border)' }} />
+                        <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+                      </div>
+                    </div>
+                    {/* Step: Sales */}
+                    <div className="flex flex-col items-center flex-1">
+                      <p className="text-xl font-black text-success-600">{overviewTotals.sales}</p>
+                      <p className="text-[11px] text-text-secondary font-medium">Sales</p>
+                    </div>
+                    {/* Arrow 2 */}
+                    <div className="flex flex-col items-center px-1">
+                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}%` : '—'}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-border)' }} />
+                        <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+                      </div>
+                    </div>
+                    {/* Step: Approved */}
+                    <div className="flex flex-col items-center flex-1">
+                      <p className="text-xl font-black" style={{ color: 'var(--color-success-700, #15803d)' }}>{overviewTotals.approved}</p>
+                      <p className="text-[11px] text-text-secondary font-medium">Approved</p>
+                    </div>
+                    {/* Pending wedge */}
+                    {overviewTotals.pendingReview > 0 && (
+                      <>
+                        <div className="flex flex-col items-center px-1">
+                          <span className="text-[10px] font-bold text-warning-500">+{overviewTotals.pendingReview}</span>
+                          <div className="flex items-center gap-0.5">
+                            <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-warning-200)' }} />
+                            <ArrowRight size={12} className="text-warning-400" />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-center flex-1">
+                          <p className="text-xl font-black text-warning-600">{overviewTotals.pendingReview}</p>
+                          <p className="text-[11px] text-text-secondary font-medium">In Review</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* ── Leaderboards ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+              {/* Fronter leaderboard */}
               {hasPermission('view_fronter_stats') && (
                 <Card className="p-6">
-                  <h3 className="text-lg font-bold mb-4 text-text flex items-center gap-2"><BarChart3 size={18} /> Fronter Leaderboard</h3>
-                  {loading ? <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-                    : fronterLb.length === 0 ? <p className="text-text-secondary text-sm py-4">No data yet.</p>
-                    : fronterLb.slice(0, 8).map((f, i) => (
-                      <div key={f.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold w-6 text-text-tertiary">#{i + 1}</span>
-                          <span className="text-sm font-semibold text-text">{f.name}</span>
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-base font-bold text-text flex items-center gap-2">
+                      <BarChart3 size={16} /> Fronter Leaderboard
+                    </h3>
+                    {!loading && fronterLb.length > 0 && (
+                      <span className="text-xs text-text-tertiary">{fronterLb.length} agents</span>
+                    )}
+                  </div>
+                  {loading
+                    ? <div className="space-y-1">{[1,2,3,4].map(i => <SkeletonLeaderRow key={i} />)}</div>
+                    : fronterLb.length === 0
+                      ? (
+                        <div className="flex flex-col items-center py-8 gap-2">
+                          <Send size={28} className="text-text-tertiary opacity-40" />
+                          <p className="text-sm text-text-secondary">No transfers in this period.</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-text-secondary">{f.transfers} leads</span>
-                          <span className="text-xs font-bold text-success-600">{f.completed} closed</span>
-                        </div>
-                      </div>
-                    ))
+                      )
+                      : fronterLb.slice(0, 8).map((f, i) => {
+                          const maxT    = fronterLb[0]?.transfers || 1;
+                          const pct     = Math.round((f.transfers / maxT) * 100);
+                          const convPct = f.transfers > 0 ? Math.round((f.completed / f.transfers) * 100) : 0;
+                          return (
+                            <div key={f.id} className="flex items-center gap-3 py-2.5 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
+                              {/* Rank badge */}
+                              <div className="w-5 flex-shrink-0 flex items-center justify-center">
+                                {i < 3
+                                  ? <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white"
+                                      style={{ backgroundColor: MEDAL_COLORS[i] }}>{i + 1}</div>
+                                  : <span className="text-xs font-bold text-text-tertiary">{i + 1}</span>
+                                }
+                              </div>
+                              {/* Avatar */}
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
+                                style={{ backgroundColor: getAvatarColor(f.name) }}>
+                                {getInitials(f.name)}
+                              </div>
+                              {/* Name + bar */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-sm font-semibold text-text truncate">{f.name}</span>
+                                  <span className="text-xs text-text-secondary ml-2 flex-shrink-0">{f.transfers} leads</span>
+                                </div>
+                                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-border)' }}>
+                                  <div className="h-full rounded-full transition-all duration-500"
+                                    style={{ width: `${pct}%`, background: 'var(--gradient-sidebar)' }} />
+                                </div>
+                              </div>
+                              {/* Stats */}
+                              <div className="text-right flex-shrink-0 w-16">
+                                <p className="text-xs font-bold text-success-600">{f.completed} <span className="font-normal text-text-tertiary">closed</span></p>
+                                <p className="text-[10px] text-text-tertiary">{convPct}% conv</p>
+                              </div>
+                            </div>
+                          );
+                        })
                   }
                 </Card>
               )}
+
+              {/* Closer leaderboard */}
               {hasPermission('view_closer_stats') && (
                 <Card className="p-6">
-                  <h3 className="text-lg font-bold mb-4 text-text flex items-center gap-2"><TrendingUp size={18} /> Closer Leaderboard</h3>
-                  {loading ? <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-                    : closerLb.length === 0 ? <p className="text-text-secondary text-sm py-4">No data yet.</p>
-                    : closerLb.slice(0, 8).map((c, i) => (
-                      <div key={c.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold w-6 text-text-tertiary">#{i + 1}</span>
-                          <span className="text-sm font-semibold text-text">{c.name}</span>
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-base font-bold text-text flex items-center gap-2">
+                      <TrendingUp size={16} /> Closer Leaderboard
+                    </h3>
+                    {!loading && closerLb.length > 0 && (
+                      <span className="text-xs text-text-tertiary">{closerLb.length} closers</span>
+                    )}
+                  </div>
+                  {loading
+                    ? <div className="space-y-1">{[1,2,3,4].map(i => <SkeletonLeaderRow key={i} />)}</div>
+                    : closerLb.length === 0
+                      ? (
+                        <div className="flex flex-col items-center py-8 gap-2">
+                          <DollarSign size={28} className="text-text-tertiary opacity-40" />
+                          <p className="text-sm text-text-secondary">No sales in this period.</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-text-secondary">{c.sales} sales</span>
-                          <span className="text-xs font-bold text-success-600">{c.won} won</span>
-                          {hasPermission('view_financial_data') && c.monthly > 0 && (
-                            <span className="text-xs font-bold text-primary-600">${c.monthly.toLocaleString()}/mo</span>
-                          )}
-                        </div>
-                      </div>
-                    ))
+                      )
+                      : closerLb.slice(0, 8).map((c, i) => {
+                          const maxW   = closerLb[0]?.won || 1;
+                          const pct    = Math.round((c.won / maxW) * 100);
+                          const winPct = c.sales > 0 ? Math.round((c.won / c.sales) * 100) : 0;
+                          return (
+                            <div key={c.id} className="flex items-center gap-3 py-2.5 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
+                              {/* Rank badge */}
+                              <div className="w-5 flex-shrink-0 flex items-center justify-center">
+                                {i < 3
+                                  ? <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white"
+                                      style={{ backgroundColor: MEDAL_COLORS[i] }}>{i + 1}</div>
+                                  : <span className="text-xs font-bold text-text-tertiary">{i + 1}</span>
+                                }
+                              </div>
+                              {/* Avatar */}
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
+                                style={{ backgroundColor: getAvatarColor(c.name) }}>
+                                {getInitials(c.name)}
+                              </div>
+                              {/* Name + bar */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-sm font-semibold text-text truncate">{c.name}</span>
+                                  <span className="text-xs text-text-secondary ml-2 flex-shrink-0">{c.sales} sales</span>
+                                </div>
+                                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-border)' }}>
+                                  <div className="h-full rounded-full transition-all duration-500"
+                                    style={{ width: `${pct}%`, background: 'linear-gradient(135deg,#16a34a,#15803d)' }} />
+                                </div>
+                              </div>
+                              {/* Stats */}
+                              <div className="text-right flex-shrink-0 w-20">
+                                {hasPermission('view_financial_data') && c.monthly > 0
+                                  ? <p className="text-xs font-bold text-primary-600">${c.monthly.toLocaleString()}<span className="text-[10px] text-text-tertiary font-normal">/mo</span></p>
+                                  : <p className="text-xs font-bold text-success-600">{c.won} <span className="font-normal text-text-tertiary">won</span></p>
+                                }
+                                <p className="text-[10px] text-text-tertiary">{winPct}% win rate</p>
+                              </div>
+                            </div>
+                          );
+                        })
                   }
                 </Card>
               )}
