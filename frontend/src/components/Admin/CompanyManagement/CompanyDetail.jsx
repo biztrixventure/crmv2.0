@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
   Calendar, BarChart3, Search, RefreshCw, Settings, Download, Upload,
-  PlusCircle, Trash2, CheckCircle, XCircle, Link, LinkIcon, Unlink, Edit2, Hash, Phone,
+  PlusCircle, Trash2, CheckCircle, XCircle, Edit2, Hash, Phone,
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, LogIn, Copy, ExternalLink,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
@@ -70,7 +70,7 @@ const SortTh = ({ col, sort, onSort, children }) => {
 };
 
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
-const RecordsPanel = ({ companyId, type }) => {
+const RecordsPanel = ({ companyId, type, companyType }) => {
   const [rows, setRows]               = useState([]);
   const [total, setTotal]             = useState(0);
   const [loading, setLoading]         = useState(false);
@@ -132,27 +132,34 @@ const RecordsPanel = ({ companyId, type }) => {
       if (type === 'sales') {
         const rows = data.map(s => [
           s.customer_name||'', s.customer_phone||'', s.reference_no||'',
+          s.fronter_name||'', s.closer_name||'',
           s.status||'', s.plan||'',
           s.monthly_payment ? `$${s.monthly_payment}` : '',
           new Date(s.created_at).toLocaleDateString(),
         ]);
-        downloadCSV(rows, ['Customer','Phone','Reference','Status','Plan','Monthly','Created'],
+        downloadCSV(rows, ['Customer','Phone','Reference','Fronter','Closer','Status','Plan','Monthly','Created'],
           `${type}_${companyId}_${today}.csv`);
       } else if (type === 'transfers') {
         const rows = data.map(t => {
           const fd = t.form_data || {};
           const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName||''}`.trim() : '') || '';
-          return [name, fd.Phone||fd.customer_phone||'', t.status||'', new Date(t.created_at).toLocaleDateString()];
+          const closer = t.assigned_closer_name || (t.closer ? `${t.closer.first_name||''} ${t.closer.last_name||''}`.trim() : '') || '';
+          return [name, fd.Phone||fd.customer_phone||'', t.created_by_name||t.fronter_name||'', closer, t.status||'', new Date(t.created_at).toLocaleDateString()];
         });
-        downloadCSV(rows, ['Customer','Phone','Status','Created'],
+        downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Status','Created'],
           `transfers_${companyId}_${today}.csv`);
       } else {
-        const rows = data.map(cb => [
-          cb.customer_name||'', cb.customer_phone||'', cb.priority||'',
-          cb.user_name||'', cb.status||'',
-          cb.callback_at ? new Date(cb.callback_at).toLocaleString() : '',
-        ]);
-        downloadCSV(rows, ['Customer','Phone','Priority','Agent','Status','Scheduled'],
+        const rows = data.map(cb => {
+          const ct = cb.company_type || companyType;
+          return [
+            cb.customer_name||'', cb.customer_phone||'', cb.priority||'',
+            ct === 'fronter' ? (cb.user_name||'') : '',
+            ct === 'closer'  ? (cb.user_name||'') : '',
+            cb.status||'',
+            cb.callback_at ? new Date(cb.callback_at).toLocaleString() : '',
+          ];
+        });
+        downloadCSV(rows, ['Customer','Phone','Priority','Fronter','Closer','Status','Scheduled'],
           `callbacks_${companyId}_${today}.csv`);
       }
     } catch { /* silent */ } finally { setExportLoading(false); }
@@ -171,6 +178,8 @@ const RecordsPanel = ({ companyId, type }) => {
         case 'customer':    return (a.customer_name||'').localeCompare(b.customer_name||'') * dir;
         case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
         case 'agent':       return (a.user_name||'').localeCompare(b.user_name||'') * dir;
+        case 'fronter': { const av = (a.company_type||companyType)==='fronter'?(a.user_name||''):''; const bv = (b.company_type||companyType)==='fronter'?(b.user_name||''):''; return av.localeCompare(bv)*dir; }
+        case 'closer':  { const av = (a.company_type||companyType)==='closer' ?(a.user_name||''):''; const bv = (b.company_type||companyType)==='closer' ?(b.user_name||''):''; return av.localeCompare(bv)*dir; }
         default: return 0;
       }
     });
@@ -230,7 +239,7 @@ const RecordsPanel = ({ companyId, type }) => {
             {type === 'sales' && (
               <table className="w-full text-sm">
                 <thead><tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Customer','Phone','Reference','Vehicle','Monthly','Status','Date'].map(h => (
+                  {['Customer','Phone','Reference','Vehicle','Monthly','Fronter','Closer','Status','Date'].map(h => (
                     <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
                   ))}
                 </tr></thead>
@@ -244,6 +253,8 @@ const RecordsPanel = ({ companyId, type }) => {
                       <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{r.reference_no||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{[r.car_year,r.car_make,r.car_model].filter(Boolean).join(' ')||'—'}</td>
                       <td className="px-3 py-2.5 text-xs font-semibold text-success-600">{r.monthly_payment?`$${r.monthly_payment}`:'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.fronter_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.closer_name||'—'}</td>
                       <td className="px-3 py-2.5"><Badge variant={SALE_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
                       <td className="px-3 py-2.5 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
                     </tr>
@@ -254,7 +265,7 @@ const RecordsPanel = ({ companyId, type }) => {
             {type === 'transfers' && (
               <table className="w-full text-sm">
                 <thead><tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Customer','Phone','Status','Rejections','Date'].map(h => (
+                  {['Customer','Phone','Fronter','Closer','Status','Rejections','Date'].map(h => (
                     <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
                   ))}
                 </tr></thead>
@@ -267,6 +278,10 @@ const RecordsPanel = ({ companyId, type }) => {
                         {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'—'}
                       </td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{r.form_data?.Phone||r.form_data?.customer_phone||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.created_by_name||r.fronter_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary">
+                        {r.assigned_closer_name || (r.closer ? `${r.closer.first_name||''} ${r.closer.last_name||''}`.trim() : '') || '—'}
+                      </td>
                       <td className="px-3 py-2.5"><Badge variant={TRANSFER_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{r.rejection_count>0?`${r.rejection_count}×`:'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
@@ -281,7 +296,8 @@ const RecordsPanel = ({ companyId, type }) => {
                   <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
                     <SortTh col="customer"    sort={sort} onSort={toggleSort}>Customer</SortTh>
                     <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
-                    <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
+                    <SortTh col="fronter"     sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                    <SortTh col="closer"      sort={sort} onSort={toggleSort}>Closer</SortTh>
                     <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled</SortTh>
                     <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
                   </tr>
@@ -304,7 +320,12 @@ const RecordsPanel = ({ companyId, type }) => {
                           ) : null}
                         </td>
                         <td className="px-3 py-2.5"><PriorityBadge priority={r.priority} /></td>
-                        <td className="px-3 py-2.5 text-xs text-text-secondary">{r.user_name || '—'}</td>
+                        <td className="px-3 py-2.5 text-xs text-text-secondary">
+                          {(r.company_type||companyType) === 'fronter' ? (r.user_name||'—') : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-text-secondary">
+                          {(r.company_type||companyType) === 'closer' ? (r.user_name||'—') : '—'}
+                        </td>
                         <td className="px-3 py-2.5 text-xs">
                           <div className="flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(r.callback_at).toLocaleString()}
@@ -879,31 +900,6 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
   const [saveErr, setSaveErr]         = useState('');
   const [saveOk, setSaveOk]           = useState(false);
 
-  // Links (fronter only)
-  const [links, setLinks]               = useState([]);
-  const [linksLoading, setLinksLoading] = useState(false);
-  const [allClosers, setAllClosers]     = useState([]);
-  const [selectedCloser, setSelectedCloser] = useState('');
-  const [linking, setLinking]           = useState(false);
-  const [linkErr, setLinkErr]           = useState('');
-
-  const loadLinks = useCallback(() => {
-    if (companyType !== 'fronter') return;
-    setLinksLoading(true);
-    client.get(`companies/${company.id}/links`)
-      .then(r => setLinks(r.data.links || []))
-      .catch(() => {})
-      .finally(() => setLinksLoading(false));
-  }, [company.id, companyType]);
-
-  const loadAllCloserCompanies = useCallback(() => {
-    if (companyType !== 'fronter') return;
-    client.get('companies')
-      .then(r => setAllClosers((r.data.companies || []).filter(c => c.company_type === 'closer')))
-      .catch(() => {});
-  }, [companyType]);
-
-  useEffect(() => { loadLinks(); loadAllCloserCompanies(); }, [company.id, companyType]);
 
   const saveSettings = async (e) => {
     e.preventDefault();
@@ -919,32 +915,6 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
       setSaving(false);
     }
   };
-
-  const linkCloser = async () => {
-    if (!selectedCloser) return;
-    setLinking(true); setLinkErr('');
-    try {
-      await client.post(`companies/${company.id}/links`, { closer_company_id: selectedCloser });
-      setSelectedCloser('');
-      loadLinks();
-    } catch (err) {
-      setLinkErr(err.response?.data?.error || 'Link failed');
-    } finally {
-      setLinking(false);
-    }
-  };
-
-  const removeLink = async (linkId) => {
-    try {
-      await client.delete(`companies/${company.id}/links/${linkId}`);
-      loadLinks();
-    } catch (err) {
-      setLinkErr(err.response?.data?.error || 'Remove failed');
-    }
-  };
-
-  const linkedIds = new Set(links.map(l => l.id));
-  const availableClosers = allClosers.filter(c => !linkedIds.has(c.id));
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -1003,71 +973,6 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
         </form>
       </Card>
 
-      {/* Linked closer companies (fronter only) */}
-      {companyType === 'fronter' && (
-        <Card className="p-6">
-          <h3 className="text-lg font-bold text-text mb-1 flex items-center gap-2"><LinkIcon size={18} /> Linked Closer Companies</h3>
-          <p className="text-sm text-text-secondary mb-4">Fronters in this company will see closers from all linked closer companies.</p>
-
-          {linkErr && <p className="text-sm text-error-600 mb-3">{linkErr}</p>}
-
-          {/* Link new company */}
-          <div className="flex gap-2 mb-4">
-            <select
-              className="input flex-1"
-              value={selectedCloser}
-              onChange={e => setSelectedCloser(e.target.value)}
-            >
-              <option value="">— Select a closer company to link —</option>
-              {availableClosers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={linkCloser}
-              loading={linking}
-              disabled={!selectedCloser || linking}
-              className="flex items-center gap-1.5 whitespace-nowrap"
-            >
-              <Link size={14} /> Link
-            </Button>
-          </div>
-
-          {availableClosers.length === 0 && allClosers.length === 0 && (
-            <p className="text-xs text-warning-600 mb-3">No closer companies exist yet. Create a company with type "Closer" first.</p>
-          )}
-
-          {/* Current links */}
-          {linksLoading ? (
-            <div className="flex justify-center py-4"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" /></div>
-          ) : links.length === 0 ? (
-            <p className="text-sm text-text-secondary text-center py-4">No closer companies linked yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {links.map(l => (
-                <div key={l.link_id}
-                  className="flex items-center justify-between px-4 py-3 rounded-xl"
-                  style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-primary-500" />
-                    <span className="font-semibold text-sm text-text">{l.name}</span>
-                    <Badge variant="primary" size="sm">Closer</Badge>
-                  </div>
-                  <button
-                    onClick={() => removeLink(l.link_id)}
-                    className="p-1.5 rounded-lg hover:bg-error-50 dark:hover:bg-error-900 transition-colors"
-                    title="Remove link"
-                  >
-                    <Unlink size={14} className="text-error-500" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
     </div>
   );
 };
@@ -1294,7 +1199,7 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
       {activeTab === 'settings'   && <SettingsPanel  key={`st-${refresh}`} company={company} onCompanyUpdated={handleCompanyUpdated} />}
       {activeTab === 'transfers'  && <RecordsPanel   key={`tr-${refresh}`} companyId={company.id} type="transfers" />}
       {activeTab === 'sales'      && <RecordsPanel   key={`sa-${refresh}`} companyId={company.id} type="sales" />}
-      {activeTab === 'callbacks'  && <RecordsPanel   key={`cb-${refresh}`} companyId={company.id} type="callbacks" />}
+      {activeTab === 'callbacks'  && <RecordsPanel   key={`cb-${refresh}`} companyId={company.id} type="callbacks" companyType={company.company_type} />}
       {activeTab === 'numbers'    && <NumbersPanel   key={`nb-${refresh}`} companyId={company.id} />}
     </div>
   );
