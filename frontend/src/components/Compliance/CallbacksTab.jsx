@@ -448,6 +448,7 @@ const CallbacksTab = ({ companyList }) => {
       switch (sort.col) {
         case 'priority':     av = SORT_PRIORITY[a.priority]||0; bv = SORT_PRIORITY[b.priority]||0; return (bv - av) * dir;
         case 'callback_at':  av = a.callback_at || ''; bv = b.callback_at || ''; return av.localeCompare(bv) * dir;
+        case 'created_at':   av = a.created_at  || ''; bv = b.created_at  || ''; return av.localeCompare(bv) * dir;
         case 'customer':     av = (a.customer_name||'').toLowerCase(); bv = (b.customer_name||'').toLowerCase(); return av.localeCompare(bv) * dir;
         case 'status':       av = a.status||''; bv = b.status||''; return av.localeCompare(bv) * dir;
         case 'agent':        av = (a.user_name||'').toLowerCase(); bv = (b.user_name||'').toLowerCase(); return av.localeCompare(bv) * dir;
@@ -588,6 +589,7 @@ const CallbacksTab = ({ companyList }) => {
                     <SortTh col="customer"    sort={sort} onSort={toggleSort}>Customer</SortTh>
                     <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
                     <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled At</SortTh>
+                    <SortTh col="created_at"  sort={sort} onSort={toggleSort}>Created</SortTh>
                     <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
                     <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Company</th>
                     <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
@@ -623,6 +625,10 @@ const CallbacksTab = ({ companyList }) => {
                           {fmtDateTime(c.callback_at)}
                           <OverdueDot callback={c} />
                         </div>
+                      </td>
+
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                        {fmtDate(c.created_at)}
                       </td>
 
                       <td className="px-4 py-3 text-xs">

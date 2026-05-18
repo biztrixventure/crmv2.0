@@ -5,7 +5,7 @@ import { Badge } from '../UI';
 import client from '../../api/client';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
-  fmtDateTime, downloadCSV,
+  fmtDate, fmtDateTime, downloadCSV,
   TabHeader, Spinner, Empty, Pagination, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from '../Compliance/shared';
@@ -301,6 +301,7 @@ const ManagerCallbacksTab = ({ user }) => {
       switch (sort.col) {
         case 'priority':    { const av = SORT_PRIORITY[a.priority]||0; const bv = SORT_PRIORITY[b.priority]||0; return (bv - av) * dir; }
         case 'callback_at': return (a.callback_at||'').localeCompare(b.callback_at||'') * dir;
+        case 'created_at':  return (a.created_at ||'').localeCompare(b.created_at ||'') * dir;
         case 'customer':    return (a.customer_name||'').toLowerCase().localeCompare((b.customer_name||'').toLowerCase()) * dir;
         case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
         case 'agent':       return (a.user_name||'').toLowerCase().localeCompare((b.user_name||'').toLowerCase()) * dir;
@@ -422,6 +423,7 @@ const ManagerCallbacksTab = ({ user }) => {
                   <SortTh col="customer"    sort={sort} onSort={toggleSort}>Customer</SortTh>
                   <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
                   <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled At</SortTh>
+                  <SortTh col="created_at"  sort={sort} onSort={toggleSort}>Created</SortTh>
                   <SortTh col="agent"       sort={sort} onSort={toggleSort}>Agent</SortTh>
                   <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
                   <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Notes</th>
@@ -453,6 +455,10 @@ const ManagerCallbacksTab = ({ user }) => {
                         {fmtDateTime(c.callback_at)}
                         <OverdueDot callback={c} />
                       </div>
+                    </td>
+
+                    <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                      {fmtDate(c.created_at)}
                     </td>
 
                     <td className="px-4 py-3 text-xs">
