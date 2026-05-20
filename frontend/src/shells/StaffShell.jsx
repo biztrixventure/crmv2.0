@@ -10,7 +10,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, HelpCircle,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -57,6 +57,7 @@ import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import SaleSearch from "../components/Sales/SaleSearch";
+import FAQPanel from "../components/FAQ/FAQPanel";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -434,6 +435,7 @@ const StaffShell = () => {
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
+    { key: 'faqs',              label: 'FAQs',            icon: HelpCircle },
   ];
 
   return (
@@ -495,6 +497,7 @@ const StaffShell = () => {
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
         {activeTab === 'search'          && <SaleSearch />}
+        {activeTab === 'faqs'            && <FAQPanel />}
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'team_transfers' && (
