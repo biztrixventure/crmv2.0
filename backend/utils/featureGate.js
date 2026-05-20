@@ -49,8 +49,10 @@ function requireFeature(featureKey) {
         return res.status(403).json({ error: `Feature '${featureKey}' is not enabled for your company` });
       }
       next();
-    } catch {
-      next(); // on error, allow through (don't block on infra issues)
+    } catch (err) {
+      // Fail closed: if the gate can't be evaluated, deny rather than expose a
+      // potentially-disabled feature. Surface the error for debugging.
+      return res.status(503).json({ error: 'Feature availability could not be verified' });
     }
   };
 }

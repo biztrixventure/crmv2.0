@@ -163,11 +163,13 @@ const getUserCompanies = async (userId) => {
       .eq('user_id', userId)
       .eq('is_active', true);
 
-    return (data || []).map(row => ({
-      id:        row.company_id,
-      name:      row.companies.name,
-      is_active: row.companies.is_active,
-    }));
+    return (data || [])
+      .filter(row => row.companies)
+      .map(row => ({
+        id:        row.company_id,
+        name:      row.companies.name,
+        is_active: row.companies.is_active,
+      }));
   } catch {
     return [];
   }
@@ -253,13 +255,15 @@ const getTeamMembers = async (managerId, companyId) => {
       .eq('company_id', companyId)
       .eq('is_active', true);
 
-    return (data || []).map(row => ({
-      user_id:    row.user_id,
-      role:       row.custom_roles.name,
-      role_level: row.custom_roles.level,
-      first_name: row.user_profiles?.first_name,
-      last_name:  row.user_profiles?.last_name,
-    }));
+    return (data || [])
+      .filter(row => row.custom_roles)
+      .map(row => ({
+        user_id:    row.user_id,
+        role:       row.custom_roles.name,
+        role_level: row.custom_roles.level,
+        first_name: row.user_profiles?.first_name,
+        last_name:  row.user_profiles?.last_name,
+      }));
   } catch {
     return [];
   }

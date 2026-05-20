@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
+const { escapeOrValue } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -147,7 +148,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
   if (status)    query = query.eq('status', status);
   if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
   if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
-  if (search)    query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,reference_no.ilike.%${search}%`);
+  if (search) { const s = escapeOrValue(search); query = query.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -305,7 +306,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   if (date_to)      query = query.lte('callback_at', etDateToUtcEnd(date_to));
   if (created_from) query = query.gte('created_at',  etDateToUtcStart(created_from));
   if (created_to)   query = query.lte('created_at',  etDateToUtcEnd(created_to));
-  if (search)       query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
+  if (search)     { const s = escapeOrValue(search); query = query.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -390,7 +391,7 @@ router.get('/callback-numbers', asyncHandler(async (req, res) => {
 
   if (company_id) query = query.eq('company_id', company_id);
   if (status)     query = query.eq('status', status);
-  if (search)     query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  if (search)     { const s = escapeOrValue(search); query = query.or(`phone_number.ilike.%${s}%,customer_name.ilike.%${s}%`); }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

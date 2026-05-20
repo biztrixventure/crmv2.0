@@ -139,9 +139,12 @@ router.get(
 
       logger.success('GET_USERS', `Returning ${users.length} users`, { total: users.length });
 
+      // Drop rows whose role was deleted (custom_roles join returns null) to avoid crashing the map
+      const visibleUsers = users.filter(u => u.custom_roles);
+
       res.json({
-        total: users.length,
-        users: users.map((u) => ({
+        total: visibleUsers.length,
+        users: visibleUsers.map((u) => ({
           id: u.id,
           user_id: u.user_id,
           email: u.email,

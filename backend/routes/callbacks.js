@@ -6,6 +6,7 @@ const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
+const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -63,20 +64,21 @@ router.get('/', asyncHandler(async (req, res) => {
   if (created_from) query = query.gte('created_at',  etDateToUtcStart(created_from));
   if (created_to)   query = query.lte('created_at',  etDateToUtcEnd(created_to));
   if (search) {
+    const s = escapeOrValue(search);
     // Resolve agent names → user_ids so we can OR on user_id
     let agentUserIds = [];
     if (canViewTeam) {
       const { data: matchedProfiles } = await supabaseAdmin
         .from('user_profiles')
         .select('user_id')
-        .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
-      agentUserIds = (matchedProfiles || []).map(p => p.user_id);
+        .or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%`);
+      agentUserIds = (matchedProfiles || []).map(p => p.user_id).filter(id => safeUuid(id));
     }
     const orParts = [
-      `customer_name.ilike.%${search}%`,
-      `customer_phone.ilike.%${search}%`,
-      `customer_email.ilike.%${search}%`,
-      `notes.ilike.%${search}%`,
+      `customer_name.ilike.%${s}%`,
+      `customer_phone.ilike.%${s}%`,
+      `customer_email.ilike.%${s}%`,
+      `notes.ilike.%${s}%`,
     ];
     if (agentUserIds.length > 0) orParts.push(`user_id.in.(${agentUserIds.join(',')})`);
     query = query.or(orParts.join(','));

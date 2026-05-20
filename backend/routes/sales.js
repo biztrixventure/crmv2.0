@@ -7,6 +7,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const { hasPermission, isSuperAdmin } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
+const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -38,14 +39,15 @@ router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, r
   }
 
   // Build OR filter across all searchable columns using ilike (leverages trgm GIN indexes)
+  const s = escapeOrValue(q);
   const filter = [
-    `customer_name.ilike.%${q}%`,
-    `customer_phone.ilike.%${q}%`,
-    `customer_phone_2.ilike.%${q}%`,
-    `customer_email.ilike.%${q}%`,
-    `reference_no.ilike.%${q}%`,
-    `car_vin.ilike.%${q}%`,
-    `client_name.ilike.%${q}%`,
+    `customer_name.ilike.%${s}%`,
+    `customer_phone.ilike.%${s}%`,
+    `customer_phone_2.ilike.%${s}%`,
+    `customer_email.ilike.%${s}%`,
+    `reference_no.ilike.%${s}%`,
+    `car_vin.ilike.%${s}%`,
+    `client_name.ilike.%${s}%`,
   ].join(',');
 
   let searchQuery = supabaseAdmin
@@ -130,17 +132,21 @@ router.get(
 
     // Agent filter: managers can scope to a specific closer
     const isManagerRole = !['closer', 'fronter'].includes(userRole);
-    if (user_id && isManagerRole) query = query.eq('closer_id', user_id);
+    const safeCloserId = safeUuid(user_id);
+    if (safeCloserId && isManagerRole) query = query.eq('closer_id', safeCloserId);
 
     if (status)    query = query.eq('status', status);
     if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
-    if (search)    query = query.or(
-      `customer_name.ilike.%${search}%,` +
-      `customer_phone.ilike.%${search}%,` +
-      `reference_no.ilike.%${search}%,` +
-      `client_name.ilike.%${search}%`
-    );
+    if (search) {
+      const s = escapeOrValue(search);
+      query = query.or(
+        `customer_name.ilike.%${s}%,` +
+        `customer_phone.ilike.%${s}%,` +
+        `reference_no.ilike.%${s}%,` +
+        `client_name.ilike.%${s}%`
+      );
+    }
 
     const offset = (page - 1) * limit;
     query = query.range(offset, offset + parseInt(limit) - 1);
@@ -363,10 +369,11 @@ router.get('/compliance', asyncHandler(async (req, res) => {
   if (date_to)    query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   if (search) {
+    const s = escapeOrValue(search);
     query = query.or([
-      `customer_name.ilike.%${search}%`,
-      `customer_phone.ilike.%${search}%`,
-      `reference_no.ilike.%${search}%`,
+      `customer_name.ilike.%${s}%`,
+      `customer_phone.ilike.%${s}%`,
+      `reference_no.ilike.%${s}%`,
     ].join(','));
   }
 
@@ -771,9 +778,16 @@ router.delete(
       .from('sales').select('*').eq('id', id).single();
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
-    const isCreator = existing.created_by === userId;
+    const isCreator = existing.created_by === userId || existing.closer_id === userId;
     const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
+    const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
     if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+
+    // Company scope guard: managers can only delete sales in their own company
+    // (compliance + superadmin see all). Mirrors the PUT handler's scope check.
+    if (isManager && !isCompliance && !isCreator && existing.company_id !== req.user.company_id) {
+      return res.status(403).json({ error: 'Sale not within your company scope' });
+    }
 
     const { error: deleteError } = await supabaseAdmin.from('sales').delete().eq('id', id);
     if (deleteError) return res.status(500).json({ error: deleteError.message });

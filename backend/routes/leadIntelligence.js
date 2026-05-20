@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission } = require('../models/helpers');
+const { escapeOrValue } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -62,9 +63,10 @@ const buildTransferOr = (phone, email, name) => {
 router.get('/search', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.user.company_id;
-  const q         = (req.query.q || '').trim();
+  const rawQ      = (req.query.q || '').trim();
+  const q         = escapeOrValue(rawQ);
 
-  if (!q || q.length < 2) return res.json({ groups: [] });
+  if (!rawQ || rawQ.length < 2) return res.json({ groups: [] });
 
   const { allowed, superadmin } = await checkAccess(userId, companyId);
   if (!allowed) return res.status(403).json({ error: 'Permission denied' });
@@ -136,9 +138,9 @@ router.get('/search', asyncHandler(async (req, res) => {
 router.get('/profile', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.user.company_id;
-  const phone     = (req.query.phone || '').trim();
-  const email     = (req.query.email || '').trim();
-  const name      = (req.query.name  || '').trim();
+  const phone     = escapeOrValue((req.query.phone || '').trim());
+  const email     = escapeOrValue((req.query.email || '').trim());
+  const name      = escapeOrValue((req.query.name  || '').trim());
 
   if (!phone && !email && !name) return res.status(400).json({ error: 'phone, email, or name required' });
 

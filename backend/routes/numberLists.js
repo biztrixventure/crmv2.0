@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
+const { escapeOrValue } = require('../utils/searchSanitize');
 
 const router = express.Router();
 router.use(requireFeature('number_assignment'));
@@ -88,7 +89,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (status)         query = query.eq('status', status);
   if (list_name)      query = query.eq('list_name', list_name);
   if (assignment_day) query = query.eq('assignment_day', assignment_day);
-  if (search)         query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  if (search)         { const s = escapeOrValue(search); query = query.or(`phone_number.ilike.%${s}%,customer_name.ilike.%${s}%`); }
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
@@ -118,7 +119,7 @@ router.get('/summary', asyncHandler(async (req, res) => {
   if (list_name)   query = query.eq('list_name', list_name);
   if (date_from)   query = query.gte('assignment_day', date_from);
   if (date_to)     query = query.lte('assignment_day', date_to);
-  if (search)      query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  if (search)      { const s = escapeOrValue(search); query = query.or(`phone_number.ilike.%${s}%,customer_name.ilike.%${s}%`); }
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });

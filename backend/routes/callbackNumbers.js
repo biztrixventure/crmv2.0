@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
+const { escapeOrValue } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -107,7 +108,7 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   if (status) query = query.eq('status', status);
-  if (search)  query = query.or(`phone_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  if (search)  { const s = escapeOrValue(search); query = query.or(`phone_number.ilike.%${s}%,customer_name.ilike.%${s}%`); }
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });

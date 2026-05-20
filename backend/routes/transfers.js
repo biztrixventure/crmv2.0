@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
+const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 
 const router = express.Router();
 
@@ -73,8 +74,9 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   // Agent filter: managers can scope to a specific fronter or closer
-  if (user_id && MANAGER_ROLES.includes(userRole)) {
-    query = query.or(`created_by.eq.${user_id},assigned_closer_id.eq.${user_id}`);
+  const safeUserId = safeUuid(user_id);
+  if (safeUserId && MANAGER_ROLES.includes(userRole)) {
+    query = query.or(`created_by.eq.${safeUserId},assigned_closer_id.eq.${safeUserId}`);
   }
 
   if (status)    query = query.eq('status', status);
@@ -82,12 +84,13 @@ router.get('/', asyncHandler(async (req, res) => {
   if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
 
   if (search) {
+    const s = escapeOrValue(search);
     // PostgREST JSONB text-extraction notation: ->>key (no SQL quotes around key)
     query = query.or(
-      `form_data->>customer_name.ilike.%${search}%,` +
-      `form_data->>customer_phone.ilike.%${search}%,` +
-      `form_data->>Phone.ilike.%${search}%,` +
-      `form_data->>FirstName.ilike.%${search}%`
+      `form_data->>customer_name.ilike.%${s}%,` +
+      `form_data->>customer_phone.ilike.%${s}%,` +
+      `form_data->>Phone.ilike.%${s}%,` +
+      `form_data->>FirstName.ilike.%${s}%`
     );
   }
 
@@ -260,7 +263,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 
   const userRole  = req.user.role;
   const companyId = req.user.company_id;
-  const q         = phone.trim();
+  const q         = escapeOrValue(phone.trim());
 
   // Resolve which fronter companies this closer can see
   let fronterCompanyIds = [];
@@ -615,6 +618,29 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const isManager = MANAGER_ROLES.includes(userRole);
 
   if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+
+  // Company scope guard for non-superadmin managers (mirrors PUT handler).
+  // Prevents a manager in one company from deleting another company's transfer by id.
+  if (isManager && !isCreator && userRole !== 'superadmin') {
+    const userCompanyId = req.user.company_id;
+    const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole);
+    if (isCloserSide) {
+      if (existing.assigned_closer_id) {
+        const { data: ucr } = await supabaseAdmin
+          .from('user_company_roles')
+          .select('user_id')
+          .eq('company_id', userCompanyId)
+          .eq('user_id', existing.assigned_closer_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (!ucr) return res.status(403).json({ error: 'Transfer not within your company scope' });
+      } else {
+        return res.status(403).json({ error: 'Transfer not within your company scope' });
+      }
+    } else if (existing.company_id !== userCompanyId) {
+      return res.status(403).json({ error: 'Transfer not within your company scope' });
+    }
+  }
 
   const { data: linkedSale } = await supabaseAdmin
     .from('sales')
