@@ -1,11 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
-import { HelpCircle, Search, ChevronDown, ChevronRight, MessageSquareText, Copy, Check, X } from 'lucide-react';
-import { Card } from '../UI';
+import {
+  HelpCircle, Search, ChevronDown, MessageSquareText, Copy, Check, X,
+  Tag, LayoutGrid, BookOpen,
+} from 'lucide-react';
 import { useFaqs } from '../../hooks/useFaqs';
 
 const AUDIENCE_LABEL = { closer: 'Closer', fronter: 'Fronter', both: 'General' };
 
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
+
+// Highlight search matches inside a string
+const highlight = (text, q) => {
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i === -1) return text;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)', borderRadius: 3, padding: '0 2px' }}>
+        {text.slice(i, i + q.length)}
+      </mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+};
 
 const CopyButton = ({ text }) => {
   const [copied, setCopied] = useState(false);
@@ -15,31 +33,123 @@ const CopyButton = ({ text }) => {
   };
   return (
     <button onClick={copy}
-      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors"
-      style={{ color: copied ? 'var(--color-success-600)' : 'var(--color-primary-600)', backgroundColor: 'var(--color-bg-secondary)' }}>
-      {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Copied' : 'Copy script'}
+      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-all hover:scale-[1.03]"
+      style={{ color: copied ? 'var(--color-success-600)' : 'var(--color-primary-600)', backgroundColor: copied ? 'var(--color-success-50)' : 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy script'}
     </button>
   );
 };
+
+// ── FAQ accordion card ──────────────────────────────────────────────────────
+const FAQCard = ({ faq, open, onToggle, q }) => (
+  <div className="rounded-2xl overflow-hidden transition-all duration-200"
+    style={{
+      backgroundColor: 'var(--color-surface)',
+      border: `1px solid ${open ? 'var(--color-primary-300)' : 'var(--color-border)'}`,
+      boxShadow: open ? 'var(--shadow-md)' : 'none',
+    }}>
+    <button onClick={onToggle} className="w-full flex items-start gap-3 p-4 sm:p-5 text-left group">
+      <span className="mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
+        style={{ backgroundColor: open ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)' }}>
+        <HelpCircle size={15} style={{ color: open ? 'white' : 'var(--color-primary-600)' }} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold leading-snug" style={{ color: 'var(--color-text)' }}>
+          {highlight(faq.question, q)}
+        </p>
+        {!open && (
+          <p className="text-xs mt-1 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{faq.answer}</p>
+        )}
+        {splitKeywords(faq.keywords).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {splitKeywords(faq.keywords).slice(0, open ? 99 : 5).map(k => (
+              <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+                <Tag size={8} /> {k}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <ChevronDown size={18} className="flex-shrink-0 mt-1 transition-transform duration-200"
+        style={{ color: 'var(--color-text-tertiary)', transform: open ? 'rotate(180deg)' : 'none' }} />
+    </button>
+
+    {open && (
+      <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] space-y-3 animate-fade-in">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
+        </div>
+        {faq.script && (
+          <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
+                <MessageSquareText size={12} /> Call Script
+              </p>
+              <CopyButton text={faq.script} />
+            </div>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+);
+
+// ── Topic sidebar button ────────────────────────────────────────────────────
+const TopicButton = ({ active, label, count, icon: Icon, onClick }) => (
+  <button onClick={onClick}
+    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-all text-left"
+    style={{
+      background: active ? 'var(--gradient-sidebar)' : 'transparent',
+      color: active ? 'white' : 'var(--color-text-secondary)',
+    }}
+    onMouseEnter={e => { if (!active) e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
+    onMouseLeave={e => { if (!active) e.currentTarget.style.backgroundColor = 'transparent'; }}>
+    {Icon && <Icon size={15} className="flex-shrink-0" />}
+    <span className="flex-1 truncate capitalize">{label}</span>
+    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0"
+      style={{ backgroundColor: active ? 'rgba(255,255,255,0.22)' : 'var(--color-bg-secondary)', color: active ? 'white' : 'var(--color-text-tertiary)' }}>
+      {count}
+    </span>
+  </button>
+);
 
 const FAQPanel = () => {
   const { faqs, loading, error, fetchFaqs } = useFaqs();
   const [query, setQuery]       = useState('');
   const [audience, setAudience] = useState('');
+  const [topic, setTopic]       = useState('');     // selected keyword/topic
   const [expanded, setExpanded] = useState(null);
 
   useEffect(() => { fetchFaqs(); }, [fetchFaqs]);
 
-  // Audience chips only when the agent actually sees more than one bucket
+  // Audience segmented control only when the agent sees more than one bucket
   const audiences = useMemo(() => {
     const present = [...new Set(faqs.map(f => f.audience))];
     return present.length > 1 ? present : [];
   }, [faqs]);
 
+  // Topics = keyword tags ranked by frequency (respecting the audience filter)
+  const audienceScoped = useMemo(
+    () => faqs.filter(f => !audience || f.audience === audience),
+    [faqs, audience],
+  );
+
+  const topics = useMemo(() => {
+    const counts = {};
+    audienceScoped.forEach(f => splitKeywords(f.keywords).forEach(k => {
+      const key = k.toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    }));
+    return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [audienceScoped]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return faqs.filter(f => {
-      if (audience && f.audience !== audience) return false;
+    return audienceScoped.filter(f => {
+      if (topic && !splitKeywords(f.keywords).some(k => k.toLowerCase() === topic)) return false;
       if (!q) return true;
       return (
         f.question.toLowerCase().includes(q) ||
@@ -47,104 +157,136 @@ const FAQPanel = () => {
         (f.keywords || '').toLowerCase().includes(q)
       );
     });
-  }, [faqs, query, audience]);
+  }, [audienceScoped, query, topic]);
+
+  const clearFilters = () => { setQuery(''); setTopic(''); };
+  const hasFilters = query || topic;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-          <HelpCircle size={24} style={{ color: 'var(--color-primary-600)' }} /> FAQs &amp; Rebuttals
-        </h2>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-          Quick answers and scripts to handle customer questions and objections.
-        </p>
-      </div>
-
-      {/* Sticky search so it stays reachable during a call */}
-      <div className="sticky top-0 z-10 py-2 -mx-1 px-1" style={{ backgroundColor: 'var(--color-bg)' }}>
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-          <input value={query} onChange={e => setQuery(e.target.value)} autoFocus
-            placeholder="Search by keyword, question, or answer…" className="input pl-10 pr-9 w-full" />
-          {query && (
-            <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2"
-              style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>
-          )}
-        </div>
-        {audiences.length > 0 && (
-          <div className="flex gap-1.5 mt-2 flex-wrap">
-            <button onClick={() => setAudience('')}
-              className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
-              style={{ background: audience === '' ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)', color: audience === '' ? 'white' : 'var(--color-text-secondary)' }}>
-              All
-            </button>
-            {audiences.map(a => (
-              <button key={a} onClick={() => setAudience(a)}
-                className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
-                style={{ background: audience === a ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)', color: audience === a ? 'white' : 'var(--color-text-secondary)' }}>
-                {AUDIENCE_LABEL[a] || a}
-              </button>
-            ))}
+    <div className="animate-fade-in">
+      {/* Hero header */}
+      <div className="rounded-2xl p-6 sm:p-7 mb-5 relative overflow-hidden"
+        style={{ background: 'var(--gradient-sidebar)' }}>
+        <div className="relative z-10">
+          <div className="flex items-center gap-2.5 mb-1">
+            <BookOpen size={22} className="text-white" />
+            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Knowledge Base</h2>
           </div>
-        )}
+          <p className="text-sm text-white/80 max-w-xl">
+            Search answers, rebuttals, and ready-to-use call scripts to handle customer questions and objections in seconds.
+          </p>
+          {/* Prominent search */}
+          <div className="relative mt-4 max-w-2xl">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input value={query} onChange={e => setQuery(e.target.value)} autoFocus
+              placeholder="Search by keyword, question, or answer…"
+              className="w-full pl-11 pr-10 py-3 rounded-xl text-sm font-medium outline-none"
+              style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text)', border: 'none', boxShadow: 'var(--shadow-lg)' }} />
+            {query && (
+              <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--color-text-tertiary)' }}><X size={16} /></button>
+            )}
+          </div>
+        </div>
+        {/* decorative glow */}
+        <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
       </div>
 
-      {error && <p className="text-sm py-3" style={{ color: 'var(--color-error-600)' }}>{error}</p>}
+      {error && <p className="text-sm mb-3" style={{ color: 'var(--color-error-600)' }}>{error}</p>}
 
-      {loading ? (
-        <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
-      ) : filtered.length === 0 ? (
-        <Card className="p-12 text-center mt-3">
-          <HelpCircle size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {query ? `No FAQs match “${query}”.` : 'No FAQs available yet.'}
-          </p>
-        </Card>
-      ) : (
-        <div className="space-y-2.5 mt-3">
-          {filtered.map(faq => {
-            const open = expanded === faq.id;
-            return (
-              <Card key={faq.id} className="overflow-hidden">
-                <button onClick={() => setExpanded(open ? null : faq.id)}
-                  className="w-full flex items-start gap-3 p-4 text-left">
-                  <span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
-                    {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{faq.question}</p>
-                    {!open && splitKeywords(faq.keywords).length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {splitKeywords(faq.keywords).slice(0, 6).map(k => (
-                          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{k}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </button>
-
-                {open && (
-                  <div className="px-4 pb-4 pl-12 space-y-3">
-                    <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
-                    {faq.script && (
-                      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <p className="text-[10px] font-bold uppercase tracking-wide flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
-                            <MessageSquareText size={11} /> Script
-                          </p>
-                          <CopyButton text={faq.script} />
-                        </div>
-                        <p className="text-sm whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
+      {/* Mobile topic chips */}
+      {topics.length > 0 && (
+        <div className="lg:hidden flex gap-1.5 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          <button onClick={() => setTopic('')}
+            className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all"
+            style={{ background: topic === '' ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)', color: topic === '' ? 'white' : 'var(--color-text-secondary)' }}>
+            All ({audienceScoped.length})
+          </button>
+          {topics.map(([t, c]) => (
+            <button key={t} onClick={() => setTopic(topic === t ? '' : t)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap capitalize transition-all"
+              style={{ background: topic === t ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)', color: topic === t ? 'white' : 'var(--color-text-secondary)' }}>
+              {t} ({c})
+            </button>
+          ))}
         </div>
       )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-5">
+        {/* Sidebar (desktop) */}
+        <aside className="hidden lg:block">
+          <div className="sticky top-4 space-y-4">
+            {audiences.length > 0 && (
+              <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Audience</p>
+                <div className="space-y-0.5">
+                  <TopicButton active={audience === ''} label="Everyone" count={faqs.length} onClick={() => { setAudience(''); setTopic(''); }} />
+                  {audiences.map(a => (
+                    <TopicButton key={a} active={audience === a} label={AUDIENCE_LABEL[a] || a}
+                      count={faqs.filter(f => f.audience === a).length} onClick={() => { setAudience(a); setTopic(''); }} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
+              <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
+                <TopicButton active={topic === ''} label="All FAQs" count={audienceScoped.length} icon={LayoutGrid} onClick={() => setTopic('')} />
+                {topics.map(([t, c]) => (
+                  <TopicButton key={t} active={topic === t} label={t} count={c} icon={Tag} onClick={() => setTopic(topic === t ? '' : t)} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main list */}
+        <main>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              <span className="font-bold" style={{ color: 'var(--color-text)' }}>{filtered.length}</span> result{filtered.length !== 1 ? 's' : ''}
+              {topic && <> in <span className="font-semibold capitalize" style={{ color: 'var(--color-primary-600)' }}>{topic}</span></>}
+            </p>
+            {hasFilters && (
+              <button onClick={clearFilters}
+                className="text-xs font-semibold inline-flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors"
+                style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                <X size={12} /> Clear filters
+              </button>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="space-y-2.5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-bg-secondary)' }} />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
+              <HelpCircle size={44} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                {hasFilters ? 'No FAQs match your search.' : 'No FAQs available yet.'}
+              </p>
+              {hasFilters && (
+                <button onClick={clearFilters} className="mt-3 text-sm font-semibold" style={{ color: 'var(--color-primary-600)' }}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {filtered.map(faq => (
+                <FAQCard key={faq.id} faq={faq} q={query.trim()}
+                  open={expanded === faq.id}
+                  onToggle={() => setExpanded(expanded === faq.id ? null : faq.id)} />
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 };
