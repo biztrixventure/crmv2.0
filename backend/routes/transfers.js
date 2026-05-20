@@ -6,10 +6,20 @@ const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
+const { applySort } = require('../utils/sortHelper');
 
 const router = express.Router();
 
 const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'];
+
+// Client sort key -> real column / json path. Name columns sort by underlying id.
+const TRANSFER_SORT = {
+  customer:   'form_data->>customer_name',
+  status:     'status',
+  created_at: 'created_at',
+  fronter:    'created_by',
+  closer:     'assigned_closer_id',
+};
 
 // ============================================================================
 // GET /transfers
@@ -18,12 +28,12 @@ router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.user.company_id;
   const userRole  = req.user.role;
-  const { status, page = 1, limit = 50, search, date_from, date_to, user_id } = req.query;
+  const { status, page = 1, limit = 50, search, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
 
-  let query = supabaseAdmin
-    .from('transfers')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
+  let query = applySort(
+    supabaseAdmin.from('transfers').select('*', { count: 'exact' }),
+    sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
+  );
 
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.

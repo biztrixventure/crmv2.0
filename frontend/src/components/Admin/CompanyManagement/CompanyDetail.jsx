@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toastError } from '../../../utils/toast';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
@@ -35,7 +35,6 @@ const PRIORITY_CFG = {
   Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: '#d97706' },
   Low:    { dot: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb' },
 };
-const SORT_PRIORITY = { High: 3, Medium: 2, Low: 1 };
 
 const PriorityBadge = ({ priority }) => {
   if (!priority) return <span className="text-xs text-text-secondary">—</span>;
@@ -102,6 +101,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
         company_id: companyId,
         search: search || undefined,
         status: status || undefined,
+        sort_by: sort.col, sort_dir: sort.dir,
         page: p, limit: LIMIT,
       };
       if (type === 'callbacks') {
@@ -113,9 +113,11 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
       setTotal(res.data.total || 0);
       setPage(p);
     } catch { } finally { setLoading(false); }
-  }, [companyId, type, search, status, priority, userFilter]);
+  }, [companyId, type, search, status, priority, userFilter, sort]);
 
-  useEffect(() => { load(1); }, [companyId, type]);
+  // Reload from page 1 on mount, type/company switch, or sort change (sort is
+  // applied server-side across the whole dataset).
+  useEffect(() => { load(1); }, [companyId, type, sort]);
 
   const handleExport = async () => {
     setExportLoading(true);
@@ -165,27 +167,12 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
     } catch { /* silent */ } finally { setExportLoading(false); }
   };
 
+  // Sorting is applied server-side across the whole dataset; reset to page 1.
   const toggleSort = (col) =>
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
 
-  const sorted = useMemo(() => {
-    if (type !== 'callbacks') return rows;
-    return [...rows].sort((a, b) => {
-      const dir = sort.dir === 'asc' ? 1 : -1;
-      switch (sort.col) {
-        case 'priority':    return ((SORT_PRIORITY[b.priority]||0) - (SORT_PRIORITY[a.priority]||0)) * dir;
-        case 'callback_at': return (a.callback_at||'').localeCompare(b.callback_at||'') * dir;
-        case 'customer':    return (a.customer_name||'').localeCompare(b.customer_name||'') * dir;
-        case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
-        case 'agent':       return (a.user_name||'').localeCompare(b.user_name||'') * dir;
-        case 'fronter': { const av = (a.company_type||companyType)==='fronter'?(a.user_name||''):''; const bv = (b.company_type||companyType)==='fronter'?(b.user_name||''):''; return av.localeCompare(bv)*dir; }
-        case 'closer':  { const av = (a.company_type||companyType)==='closer' ?(a.user_name||''):''; const bv = (b.company_type||companyType)==='closer' ?(b.user_name||''):''; return av.localeCompare(bv)*dir; }
-        default: return 0;
-      }
-    });
-  }, [rows, sort, type]);
-
-  const displayRows = type === 'callbacks' ? sorted : rows;
+  const sorted = rows;
+  const displayRows = rows;
 
   return (
     <div className="space-y-3">
@@ -239,9 +226,15 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
             {type === 'sales' && (
               <table className="w-full text-sm">
                 <thead><tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Customer','Phone','Reference','Vehicle','Monthly','Fronter','Closer','Status','Date'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                  ))}
+                  <SortTh col="customer"        sort={sort} onSort={toggleSort}>Customer</SortTh>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Phone</th>
+                  <SortTh col="reference"       sort={sort} onSort={toggleSort}>Reference</SortTh>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Vehicle</th>
+                  <SortTh col="monthly_payment" sort={sort} onSort={toggleSort}>Monthly</SortTh>
+                  <SortTh col="fronter"         sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                  <SortTh col="closer"          sort={sort} onSort={toggleSort}>Closer</SortTh>
+                  <SortTh col="status"          sort={sort} onSort={toggleSort}>Status</SortTh>
+                  <SortTh col="created_at"      sort={sort} onSort={toggleSort}>Date</SortTh>
                 </tr></thead>
                 <tbody>
                   {displayRows.map(r => (
@@ -265,9 +258,13 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
             {type === 'transfers' && (
               <table className="w-full text-sm">
                 <thead><tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Customer','Phone','Fronter','Closer','Status','Rejections','Date'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                  ))}
+                  <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Phone</th>
+                  <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                  <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
+                  <SortTh col="status"     sort={sort} onSort={toggleSort}>Status</SortTh>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Rejections</th>
+                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
                 </tr></thead>
                 <tbody>
                   {displayRows.map(r => (
@@ -540,7 +537,7 @@ const MembersPanel = ({ companyId }) => {
 
   const load = useCallback(() => {
     setLoading(true);
-    client.get('users', { params: { company_id: companyId } })
+    client.get('users', { params: { company_id: companyId, include_inactive: true } })
       .then(r => setUsers(r.data.users || []))
       .catch(() => {})
       .finally(() => setLoading(false));

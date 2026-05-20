@@ -7,8 +7,21 @@ const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
+const { applySort } = require('../utils/sortHelper');
 
 const router = express.Router();
+
+// Client sort key -> real column. Name columns sort by the underlying user id
+// so an agent's callbacks group together across pages.
+const CALLBACK_SORT = {
+  customer:    'customer_name',
+  priority:    'priority_rank',
+  callback_at: 'callback_at',
+  created_at:  'created_at',
+  status:      'status',
+  fronter:     'user_id',
+  closer:      'user_id',
+};
 
 // Role levels that can see all company callbacks
 const MANAGER_LEVELS = [
@@ -36,16 +49,17 @@ router.get('/', asyncHandler(async (req, res) => {
   const page      = Math.max(1, parseInt(req.query.page)  || 1);
   const limit     = Math.min(200, parseInt(req.query.limit) || 50);
   const offset    = (page - 1) * limit;
+  const { sort_by, sort_dir } = req.query;
 
   const superadmin  = await isSuperAdmin(userId);
   const isManager   = superadmin || MANAGER_LEVELS.includes(req.user.role);
   // Permission-based company scope: users with view_team_callbacks can see all company callbacks
   const canViewTeam = isManager || await hasPermission(userId, companyId, 'view_team_callbacks');
 
-  let query = supabaseAdmin
-    .from('callbacks')
-    .select('*', { count: 'exact' })
-    .order('callback_at', { ascending: true });
+  let query = applySort(
+    supabaseAdmin.from('callbacks').select('*', { count: 'exact' }),
+    sort_by, sort_dir, CALLBACK_SORT, { col: 'callback_at', asc: true },
+  );
 
   if (canViewTeam && companyId) {
     query = query.eq('company_id', companyId);

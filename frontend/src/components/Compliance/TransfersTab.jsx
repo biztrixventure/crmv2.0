@@ -11,7 +11,7 @@ import ExportModal from './ExportModal';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
   fmtDate, fmtDateTime, customerName, downloadCSV,
-  TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from './shared';
 
@@ -24,6 +24,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [company, setCompany]     = useState(initCompany);
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
+  const [sort, setSort]           = useState({ col: 'created_at', dir: 'desc' });
 
   const [detail, setDetail]         = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -47,15 +48,22 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
         params: {
           status: status || undefined, company_id: company || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          sort_by: sort.col, sort_dir: sort.dir,
           page, limit: LIMIT,
         },
       });
       setTransfers(res.data.transfers || []);
       setTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [status, company, dateFrom, dateTo, page]);
+  }, [status, company, dateFrom, dateTo, page, sort]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Server-side sort across the whole dataset; reset to page 1 on sort change.
+  const toggleSort = (col) => {
+    setPage(1);
+    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  };
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
     const res = await client.get('compliance/transfers', {
@@ -124,13 +132,13 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <Th>Customer</Th>
-                  <Th>Fronter</Th>
-                  <Th>Closer</Th>
+                  <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
+                  <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                  <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
-                  <Th>Transfer Status</Th>
+                  <SortTh col="status"     sort={sort} onSort={toggleSort}>Transfer Status</SortTh>
                   <Th>Sale Status</Th>
-                  <Th>Date</Th>
+                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
                 </tr>
               </thead>
               <tbody>

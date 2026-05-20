@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { toastError } from '../../../utils/toast';
-import { Edit2, Trash2, LogIn, Copy, ExternalLink, X, CheckCircle } from 'lucide-react';
+import { Edit2, Trash2, LogIn, Copy, ExternalLink, X, CheckCircle, XCircle } from 'lucide-react';
 import { Badge, Button, Card } from '../../../components/UI';
 import { Table } from '../../../components/UI';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -107,7 +107,7 @@ const ImpersonateModal = ({ data, onClose }) => {
   );
 };
 
-const UserList = ({ users, onEdit, onDelete }) => {
+const UserList = ({ users, onEdit, onToggleActive, onDelete }) => {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'superadmin';
 
@@ -150,6 +150,7 @@ const UserList = ({ users, onEdit, onDelete }) => {
     name: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
     role: user.role,
     role_level: user.role_level,
+    is_active: user.is_active,
     status: user.is_active ? 'Active' : 'Inactive',
     created: new Date(user.created_at).toLocaleDateString(),
   }));
@@ -191,6 +192,16 @@ const UserList = ({ users, onEdit, onDelete }) => {
       variant: 'ghost',
       size: 'sm',
       className: 'text-primary-600 hover:text-primary-700',
+    }] : []),
+    ...(onToggleActive ? [{
+      // Status-aware: deactivate an active user, reactivate an inactive one
+      label: (row) => (row.is_active ? 'Deactivate' : 'Activate'),
+      icon: (row) => (row.is_active
+        ? <XCircle size={16} className="text-warning-500" />
+        : <CheckCircle size={16} className="text-success-500" />),
+      onClick: (row) => onToggleActive(users.find(u => u.id === row.id) || row),
+      variant: 'ghost',
+      size: 'sm',
     }] : []),
     {
       label: 'Delete',

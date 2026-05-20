@@ -4,8 +4,25 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
+const { applySort } = require('../utils/sortHelper');
 
 const router = express.Router();
+
+// Client sort key -> real column. Name columns sort by underlying id so an
+// agent's records group together across pages.
+const SALE_SORT = {
+  customer: 'customer_name', status: 'status', created_at: 'created_at',
+  sale_date: 'sale_date', reference: 'reference_no', monthly_payment: 'monthly_payment',
+  fronter: 'fronter_id', closer: 'closer_id', plan: 'plan',
+};
+const TRANSFER_SORT = {
+  customer: 'form_data->>customer_name', status: 'status', created_at: 'created_at',
+  fronter: 'created_by', closer: 'assigned_closer_id',
+};
+const CALLBACK_SORT = {
+  customer: 'customer_name', priority: 'priority_rank', callback_at: 'callback_at',
+  created_at: 'created_at', status: 'status', fronter: 'user_id', closer: 'user_id',
+};
 
 // Only compliance_manager or superadmin may use these routes
 router.use((req, res, next) => {
@@ -116,12 +133,12 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, date_from, date_to, search, page = 1, limit = 50 } = req.query;
+  const { company_id, user_ids, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
-  let query = supabaseAdmin
-    .from('sales')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
+  let query = applySort(
+    supabaseAdmin.from('sales').select('*', { count: 'exact' }),
+    sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false },
+  );
 
   // If filtering by a fronter company, translate to transfer_id scope
   // (sales are stored under the closer company, not the fronter company).
@@ -181,12 +198,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
 router.get('/transfers', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50 } = req.query;
+  const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
-  let query = supabaseAdmin
-    .from('transfers')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
+  let query = applySort(
+    supabaseAdmin.from('transfers').select('*', { count: 'exact' }),
+    sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
+  );
 
   if (company_id) query = query.eq('company_id', company_id);
   if (user_ids) {
@@ -273,7 +290,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────
 // company_type=fronter|closer filters callbacks from companies of that type
 router.get('/callbacks', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, priority, date_from, date_to, created_from, created_to, company_type, search, page = 1, limit = 50 } = req.query;
+  const { company_id, user_ids, status, priority, date_from, date_to, created_from, created_to, company_type, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
   let scopeCompanyIds = null;
   if (company_type) {
@@ -285,10 +302,10 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
     }
   }
 
-  let query = supabaseAdmin
-    .from('callbacks')
-    .select('*', { count: 'exact' })
-    .order('callback_at', { ascending: false });
+  let query = applySort(
+    supabaseAdmin.from('callbacks').select('*', { count: 'exact' }),
+    sort_by, sort_dir, CALLBACK_SORT, { col: 'callback_at', asc: false },
+  );
 
   if (company_id) {
     query = query.eq('company_id', company_id);

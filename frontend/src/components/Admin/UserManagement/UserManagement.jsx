@@ -13,15 +13,15 @@ import UserModal from './UserModal';
  */
 const UserManagement = () => {
   const { user } = useAuth();
-  const { users, loading, error, fetchUsers, createUser, updateUser, deleteUser } = useUsers(user?.company_id);
+  const { users, loading, error, fetchUsers, createUser, updateUser, setUserActive, deleteUser } = useUsers(user?.company_id);
   const [showModal, setShowModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('');
 
-  // Fetch users on component mount
+  // Fetch users on component mount — include inactive so they stay visible with a status
   useEffect(() => {
-    fetchUsers();
+    fetchUsers({ include_inactive: true });
   }, []);
 
   // Handle add user button click
@@ -36,9 +36,18 @@ const UserManagement = () => {
     setShowModal(true);
   };
 
-  // Handle delete user with confirmation
+  // Deactivate / reactivate — flips status, never deletes
+  const handleToggleActive = async (userItem) => {
+    try {
+      await setUserActive(userItem.id, !userItem.is_active);
+    } catch (err) {
+      // Error handled in hook
+    }
+  };
+
+  // Permanently delete a user (removes the auth account) — distinct from deactivation
   const handleDeleteUser = async (userId) => {
-    if (window.confirm('Are you sure you want to deactivate this user?')) {
+    if (window.confirm('Permanently delete this user? This removes their account and cannot be undone. To temporarily disable access, use Deactivate instead.')) {
       try {
         await deleteUser(userId);
       } catch (err) {
@@ -151,6 +160,7 @@ const UserManagement = () => {
         <UserList
           users={filteredUsers}
           onEdit={handleEditUser}
+          onToggleActive={handleToggleActive}
           onDelete={handleDeleteUser}
         />
       )}

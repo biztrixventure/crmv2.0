@@ -19,7 +19,7 @@ const TeamManagementPanel = ({ companyId }) => {
   const load = useCallback(() => {
     if (!companyId) return;
     setLoading(true);
-    client.get('users', { params: { company_id: companyId } })
+    client.get('users', { params: { company_id: companyId, include_inactive: true } })
       .then(r => setMembers(r.data.users || []))
       .catch(() => {})
       .finally(() => setLoading(false));

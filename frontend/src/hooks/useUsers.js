@@ -90,13 +90,28 @@ export const useUsers = (companyId = null) => {
     }
   }, [fetchUsers]);
 
-  // Delete user (soft delete - deactivate)
+  // Deactivate / reactivate a user — flips is_active without deleting the record.
+  // Updates the row in place so it stays visible with an updated status.
+  const setUserActive = useCallback(async (userAssignmentId, isActive) => {
+    setError(null);
+    try {
+      await client.put(`users/${userAssignmentId}`, { is_active: isActive });
+      setUsers(prev => prev.map(u => u.id === userAssignmentId ? { ...u, is_active: isActive } : u));
+      return true;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to update user status';
+      setError(errorMsg);
+      throw err;
+    }
+  }, []);
+
+  // Permanently delete a user (removes the auth account). Distinct from deactivation.
   const deleteUser = useCallback(async (userAssignmentId) => {
     setLoading(true);
     setError(null);
     try {
       await client.delete(`users/${userAssignmentId}`);
-      setUsers(users.filter((u) => u.id !== userAssignmentId));
+      setUsers(prev => prev.filter((u) => u.id !== userAssignmentId));
       return true;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to delete user';
@@ -105,7 +120,7 @@ export const useUsers = (companyId = null) => {
     } finally {
       setLoading(false);
     }
-  }, [users]);
+  }, []);
 
   // Resend invite
   const resendInvite = useCallback(async (userId) => {
@@ -131,6 +146,7 @@ export const useUsers = (companyId = null) => {
     fetchUsers,
     createUser,
     updateUser,
+    setUserActive,
     deleteUser,
     resendInvite,
   };

@@ -1,4 +1,4 @@
-import { FileText, RefreshCw, Download } from 'lucide-react';
+import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { ET_ZONE } from '../../utils/timezone';
 
 // ── Status maps ───────────────────────────────────────────────────────────────
@@ -125,6 +125,23 @@ export const Pagination = ({ page, total, limit, onPage }) => {
 export const Th = ({ children, className = '' }) => (
   <th className={`px-4 py-3 text-left text-xs font-bold uppercase tracking-wider ${className}`}
     style={{ color: 'var(--color-text-secondary)' }}>{children}</th>
+);
+
+// Sortable header. `sort` = { col, dir }; clicking calls onSort(col).
+// Sorting is applied server-side across the whole dataset (see applySort).
+export const SortIcon = ({ col, sort }) => {
+  if (sort.col !== col) return <ChevronsUpDown size={10} className="opacity-30 ml-0.5 inline-block" />;
+  return sort.dir === 'asc'
+    ? <ChevronUp size={10} className="ml-0.5 inline-block" style={{ color: 'var(--color-primary-600)' }} />
+    : <ChevronDown size={10} className="ml-0.5 inline-block" style={{ color: 'var(--color-primary-600)' }} />;
+};
+
+export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
+  <th onClick={() => onSort(col)}
+    className={`px-4 py-3 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary-600 ${className}`}
+    style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
+    {children}<SortIcon col={col} sort={sort} />
+  </th>
 );
 
 export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => (

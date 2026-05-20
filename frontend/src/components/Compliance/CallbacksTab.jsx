@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { todayET } from '../../utils/timezone';
 import { PhoneCall, ArrowRight, Trash2, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
@@ -43,8 +43,6 @@ const OverdueDot = ({ callback }) => {
 };
 
 // ── Sort helpers ───────────────────────────────────────────────────────────────
-const SORT_PRIORITY = { High: 3, Medium: 2, Low: 1 };
-
 const SortIcon = ({ col, sort }) => {
   if (sort.col !== col) return <ChevronsUpDown size={10} className="opacity-30 ml-0.5 inline-block" />;
   return sort.dir === 'asc'
@@ -423,13 +421,15 @@ const CallbacksTab = ({ companyList }) => {
           created_from: createdFrom  || undefined,
           created_to:   createdTo    || undefined,
           user_ids:     selectedUser || undefined,
+          sort_by:      sort.col,
+          sort_dir:     sort.dir,
           page, limit: LIMIT,
         },
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch { } finally { setLoading(false); }
-  }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser]);
+  }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, sort]);
 
   useEffect(() => { if (view === 'callbacks') load(); }, [load, view]);
 
@@ -439,25 +439,14 @@ const CallbacksTab = ({ companyList }) => {
   const applyTodayCreated  = () => { setCreatedFrom(today); setCreatedTo(today); setPage(1); };
   const clearCreatedFilter = () => { setCreatedFrom(''); setCreatedTo(''); setPage(1); };
 
-  const toggleSort = (col) =>
+  // Sorting is applied server-side across the whole dataset; reset to page 1 so
+  // the user sees the start of the newly-ordered results.
+  const toggleSort = (col) => {
+    setPage(1);
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  };
 
-  const sorted = useMemo(() => {
-    return [...callbacks].sort((a, b) => {
-      let av, bv;
-      const dir = sort.dir === 'asc' ? 1 : -1;
-      switch (sort.col) {
-        case 'priority':     av = SORT_PRIORITY[a.priority]||0; bv = SORT_PRIORITY[b.priority]||0; return (bv - av) * dir;
-        case 'callback_at':  av = a.callback_at || ''; bv = b.callback_at || ''; return av.localeCompare(bv) * dir;
-        case 'created_at':   av = a.created_at  || ''; bv = b.created_at  || ''; return av.localeCompare(bv) * dir;
-        case 'customer':     av = (a.customer_name||'').toLowerCase(); bv = (b.customer_name||'').toLowerCase(); return av.localeCompare(bv) * dir;
-        case 'status':       av = a.status||''; bv = b.status||''; return av.localeCompare(bv) * dir;
-        case 'fronter':      av = (a.company_type==='fronter' ? a.user_name||'' : '').toLowerCase(); bv = (b.company_type==='fronter' ? b.user_name||'' : '').toLowerCase(); return av.localeCompare(bv) * dir;
-        case 'closer':       av = (a.company_type==='closer'  ? a.user_name||'' : '').toLowerCase(); bv = (b.company_type==='closer'  ? b.user_name||'' : '').toLowerCase(); return av.localeCompare(bv) * dir;
-        default:             return 0;
-      }
-    });
-  }, [callbacks, sort]);
+  const sorted = callbacks;
 
   const sortedCompanies = [...companyList].sort((a, b) => a.name.localeCompare(b.name));
 

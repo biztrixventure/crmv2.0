@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { todayET } from '../../utils/timezone';
 import { PhoneCall, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
@@ -39,8 +39,6 @@ const OverdueDot = ({ callback }) => {
     </span>
   );
 };
-
-const SORT_PRIORITY = { High: 3, Medium: 2, Low: 1 };
 
 const SortIcon = ({ col, sort }) => {
   if (sort.col !== col) return <ChevronsUpDown size={10} className="opacity-30 ml-0.5 inline-block" />;
@@ -283,34 +281,25 @@ const ManagerCallbacksTab = ({ user }) => {
           created_from: createdFrom  || undefined,
           created_to:   createdTo    || undefined,
           user_id:      selectedUser || undefined,
+          sort_by:      sort.col,
+          sort_dir:     sort.dir,
           page, limit: LIMIT,
         },
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
     } catch { } finally { setLoading(false); }
-  }, [companyId, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser]);
+  }, [companyId, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, sort]);
 
   useEffect(() => { load(); }, [load]);
 
-  const toggleSort = (col) =>
+  // Server-side sort spans the whole dataset; reset to page 1 on sort change.
+  const toggleSort = (col) => {
+    setPage(1);
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  };
 
-  const sorted = useMemo(() => {
-    return [...callbacks].sort((a, b) => {
-      const dir = sort.dir === 'asc' ? 1 : -1;
-      switch (sort.col) {
-        case 'priority':    { const av = SORT_PRIORITY[a.priority]||0; const bv = SORT_PRIORITY[b.priority]||0; return (bv - av) * dir; }
-        case 'callback_at': return (a.callback_at||'').localeCompare(b.callback_at||'') * dir;
-        case 'created_at':  return (a.created_at ||'').localeCompare(b.created_at ||'') * dir;
-        case 'customer':    return (a.customer_name||'').toLowerCase().localeCompare((b.customer_name||'').toLowerCase()) * dir;
-        case 'status':      return (a.status||'').localeCompare(b.status||'') * dir;
-        case 'fronter':     return ((a.company_type==='fronter' ? a.user_name : '')||'').toLowerCase().localeCompare(((b.company_type==='fronter' ? b.user_name : '')||'').toLowerCase()) * dir;
-        case 'closer':      return ((a.company_type==='closer'  ? a.user_name : '')||'').toLowerCase().localeCompare(((b.company_type==='closer'  ? b.user_name : '')||'').toLowerCase()) * dir;
-        default:            return 0;
-      }
-    });
-  }, [callbacks, sort]);
+  const sorted = callbacks;
 
   const applyTodayCreated = () => {
     setCreatedFrom(today);

@@ -26,19 +26,23 @@ const router = express.Router();
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const { company_id, role_id, search } = req.query;
+    const { company_id, role_id, search, include_inactive } = req.query;
     const userId = req.user.id;
     const targetCompanyId = company_id || req.user.company_id;
+    // Management views pass include_inactive=true so deactivated users stay
+    // visible (with a status badge). Dropdowns/pickers omit it and get active only.
+    const includeInactive = include_inactive === 'true' || include_inactive === true;
 
-    logger.info('GET_USERS', `Fetching users for company=${targetCompanyId}, roleId=${role_id}, search=${search}`, { userId, targetCompanyId, role_id, search });
+    logger.info('GET_USERS', `Fetching users for company=${targetCompanyId}, roleId=${role_id}, search=${search}, includeInactive=${includeInactive}`, { userId, targetCompanyId, role_id, search });
 
     try {
-      logger.debug('GET_USERS', 'Querying user_company_roles', { company_id: targetCompanyId, is_active: true, role_id });
+      logger.debug('GET_USERS', 'Querying user_company_roles', { company_id: targetCompanyId, includeInactive, role_id });
 
       let query = supabaseAdmin
         .from("user_company_roles")
-        .select(`id,user_id,role_id,is_active,created_at,company_id,custom_roles(id,name,level)`)
-        .eq("is_active", true);
+        .select(`id,user_id,role_id,is_active,created_at,company_id,custom_roles(id,name,level)`);
+
+      if (!includeInactive) query = query.eq("is_active", true);
 
       if (targetCompanyId) {
         query = query.eq("company_id", targetCompanyId);

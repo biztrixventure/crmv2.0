@@ -7,7 +7,7 @@ import ExportModal from './ExportModal';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES, COMPLIANCE_EDIT_STATUSES, LIMIT,
   fmtDate, closerName, downloadCSV,
-  TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader,
 } from './shared';
 
@@ -22,6 +22,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [sort, setSort]         = useState({ col: 'created_at', dir: 'desc' });
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
@@ -52,15 +53,22 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
           search: search || undefined, status: status || undefined,
           company_id: company || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          sort_by: sort.col, sort_dir: sort.dir,
           page, limit: LIMIT,
         },
       });
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [search, status, company, dateFrom, dateTo, page]);
+  }, [search, status, company, dateFrom, dateTo, page, sort]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Server-side sort across the whole dataset; reset to page 1 on sort change.
+  const toggleSort = (col) => {
+    setPage(1);
+    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  };
 
   const approve = async (sale) => {
     setApproving(sale.id);
@@ -143,12 +151,12 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <Th>Customer</Th>
-                  <Th>Status</Th>
-                  <Th>Fronter</Th>
-                  <Th>Closer</Th>
+                  <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
+                  <SortTh col="status"     sort={sort} onSort={toggleSort}>Status</SortTh>
+                  <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
+                  <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
-                  <Th>Date</Th>
+                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
                   <Th>Actions</Th>
                 </tr>
               </thead>

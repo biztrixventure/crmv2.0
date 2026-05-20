@@ -8,8 +8,22 @@ const notifications = require('../utils/notificationService');
 const { hasPermission, isSuperAdmin } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
+const { applySort } = require('../utils/sortHelper');
 
 const router = express.Router();
+
+// Client sort key -> real column. Name columns sort by underlying user id.
+const SALE_SORT = {
+  customer:        'customer_name',
+  status:          'status',
+  created_at:      'created_at',
+  sale_date:       'sale_date',
+  reference:       'reference_no',
+  monthly_payment: 'monthly_payment',
+  fronter:         'fronter_id',
+  closer:          'closer_id',
+  plan:            'plan',
+};
 
 // Generate a reference number like "MBH4220SBN"
 function generateReferenceNo() {
@@ -74,14 +88,14 @@ router.get(
     const userId = req.user.id;
     const companyId = req.query.company_id || req.user.company_id;
     const userRole = req.user.role;
-    const { status, search, page = 1, limit = 50, date_from, date_to, user_id } = req.query;
+    const { status, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
-    let query = supabaseAdmin
-      .from('sales')
-      .select(`*, transfers(id, form_data, status, created_by)`, { count: 'exact' })
-      .order('created_at', { ascending: false });
+    let query = applySort(
+      supabaseAdmin.from('sales').select(`*, transfers(id, form_data, status, created_by)`, { count: 'exact' }),
+      sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false },
+    );
 
     if (['superadmin', 'readonly_admin'].includes(userRole)) {
       // Apply company filter only when admin explicitly passes company_id param

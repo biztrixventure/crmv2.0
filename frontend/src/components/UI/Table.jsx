@@ -85,16 +85,22 @@ const Table = ({
               {rowActions.length > 0 && (
                 <td>
                   <div className="flex items-center gap-2">
-                    {rowActions.map((action, idx) => (
-                      <button
-                        key={idx}
-                        onClick={(e) => { e.stopPropagation(); action.onClick(row); }}
-                        className="p-1.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors"
-                        title={action.label}
-                      >
-                        {action.icon || action.label}
-                      </button>
-                    ))}
+                    {rowActions.map((action, idx) => {
+                      // icon/label/hidden may be functions of the row for per-row state
+                      if (typeof action.hidden === 'function' && action.hidden(row)) return null;
+                      const icon  = typeof action.icon  === 'function' ? action.icon(row)  : action.icon;
+                      const label = typeof action.label === 'function' ? action.label(row) : action.label;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={(e) => { e.stopPropagation(); action.onClick(row); }}
+                          className="p-1.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors"
+                          title={label}
+                        >
+                          {icon || label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </td>
               )}
