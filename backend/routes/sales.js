@@ -218,6 +218,9 @@ router.post(
     body('status').isIn(['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost']).optional(),
     body('form_data').isObject().optional(),
     body('closer_disposition').trim().optional(),
+    // Multi-car: extra vehicles for the same customer/transfer. Each becomes its
+    // own sale row sharing the customer columns but with its own car + deal fields.
+    body('additional_cars').isArray().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -243,17 +246,16 @@ router.post(
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id,
       sale_date, status, form_data, closer_disposition,
+      additional_cars,
     } = req.body;
 
-    // If linked to a transfer, validate it
+    // If linked to a transfer, validate it. Multiple sales may now share one
+    // transfer (one per vehicle), so the previous one-sale-per-transfer guard
+    // is gone.
     if (transfer_id) {
       const { data: transfer, error: tErr } = await supabaseAdmin
         .from('transfers').select('*').eq('id', transfer_id).single();
       if (tErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
-
-      const { data: existingSale } = await supabaseAdmin
-        .from('sales').select('id').eq('transfer_id', transfer_id).single();
-      if (existingSale) return res.status(409).json({ error: 'A sale already exists for this transfer' });
 
       // Sale inherits the FRONTER company's company_id so it appears in their records
       if (transfer.company_id) companyId = transfer.company_id;
@@ -267,51 +269,66 @@ router.post(
       await supabaseAdmin.from('transfers').update(transferUpdates).eq('id', transfer_id);
     }
 
-    const refNo = reference_no || generateReferenceNo();
+    const saleDate = sale_date || new Date().toISOString().split('T')[0];
 
-    const { data: sale, error: saleError } = await supabaseAdmin
+    // Shared customer/identity columns — identical across every car for this sale.
+    const sharedCols = {
+      transfer_id: transfer_id || null,
+      created_by:  userId,
+      closer_id:   userId,
+      company_id:  companyId,
+      status:      status || 'open',
+      customer_name,
+      customer_phone,
+      customer_phone_2: customer_phone_2 || null,
+      customer_email:   customer_email   || null,
+      customer_address: customer_address || null,
+      client_name: client_name || null,
+      fronter_id:  fronter_id  || null,
+      sale_date:   saleDate,
+    };
+
+    // Build the per-vehicle portion of a sale row from a car payload.
+    const buildCarRow = (car) => ({
+      ...sharedCols,
+      car_year:  car.car_year  || null,
+      car_make:  car.car_make  || null,
+      car_model: car.car_model || null,
+      car_miles: car.car_miles || null,
+      car_vin:   car.car_vin ? String(car.car_vin).toUpperCase() : null,
+      plan:             car.plan             || null,
+      down_payment:     car.down_payment     || null,
+      monthly_payment:  car.monthly_payment  || null,
+      payment_due_note: car.payment_due_note || null,
+      reference_no:     car.reference_no     || generateReferenceNo(),
+      form_data:        car.form_data        || form_data || null,
+      closer_disposition: car.closer_disposition || null,
+    });
+
+    // First car comes from the top-level body; the rest from additional_cars.
+    const carPayloads = [
+      { car_year, car_make, car_model, car_miles, car_vin,
+        plan, down_payment, monthly_payment, payment_due_note,
+        reference_no, form_data, closer_disposition },
+      ...(Array.isArray(additional_cars) ? additional_cars : []),
+    ];
+
+    const rows = carPayloads.map(buildCarRow);
+
+    const { data: createdSales, error: saleError } = await supabaseAdmin
       .from('sales')
-      .insert({
-        transfer_id: transfer_id || null,
-        created_by: userId,
-        company_id: companyId,
-        status: status || 'open',
-        // Customer
-        customer_name,
-        customer_phone,
-        customer_phone_2: customer_phone_2 || null,
-        customer_email: customer_email || null,
-        customer_address: customer_address || null,
-        // Vehicle
-        car_year: car_year || null,
-        car_make: car_make || null,
-        car_model: car_model || null,
-        car_miles: car_miles || null,
-        car_vin: car_vin ? car_vin.toUpperCase() : null,
-        // Deal
-        plan: plan || null,
-        down_payment: down_payment || null,
-        monthly_payment: monthly_payment || null,
-        payment_due_note: payment_due_note || null,
-        reference_no: refNo,
-        client_name: client_name || null,
-        fronter_id: fronter_id || null,
-        closer_id: userId,
-        sale_date: sale_date || new Date().toISOString().split('T')[0],
-        form_data: form_data || null,
-        closer_disposition: closer_disposition || null,
-      })
-      .select()
-      .single();
+      .insert(rows)
+      .select();
 
-    if (saleError) {
+    if (saleError || !createdSales?.length) {
       logger.error('CREATE_SALE', 'Insert failed', saleError);
-      return res.status(500).json({ error: saleError.message });
+      return res.status(500).json({ error: saleError?.message || 'Failed to create sale' });
     }
 
-    logger.success('CREATE_SALE', `Sale created: ${sale.id} ref=${refNo}`);
+    const primarySale = createdSales[0];
+    logger.success('CREATE_SALE', `${createdSales.length} sale(s) created for transfer=${transfer_id || 'none'} primary=${primarySale.id}`);
 
-    // Auto-log "Sent to Compliance" disposition on the linked transfer
+    // Auto-log "Sent to Compliance" disposition once on the linked transfer
     if (transfer_id) {
       supabaseAdmin.from('disposition_actions').insert({
         transfer_id,
@@ -324,7 +341,11 @@ router.post(
       }).catch(err => logger.error('DISPO_AUTO', 'sale create dispo log failed', err));
     }
 
-    res.status(201).json({ sale });
+    res.status(201).json({
+      sale: primarySale,
+      sales: createdSales,
+      count: createdSales.length,
+    });
   })
 );
 

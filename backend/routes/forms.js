@@ -59,11 +59,12 @@ router.post('/fields', superadminOnly, [
   body('order').isInt().optional(),
   body('section').optional().isString(),
   body('show_to_fronter').isBoolean().optional(),
+  body('repeats_per_car').isBoolean().optional(),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
-  const { name, label, field_type, is_required, options, order, column_span, placeholder, section, show_to_fronter } = req.body;
+  const { name, label, field_type, is_required, options, order, column_span, placeholder, section, show_to_fronter, repeats_per_car } = req.body;
 
   let finalOrder = order;
   if (finalOrder === undefined) {
@@ -83,6 +84,7 @@ router.post('/fields', superadminOnly, [
       placeholder:     placeholder     || null,
       section:         section         || 'default',
       show_to_fronter: show_to_fronter !== false,
+      repeats_per_car: repeats_per_car === true,
     })
     .select()
     .single();
@@ -100,7 +102,7 @@ router.post('/fields', superadminOnly, [
 // ============================================================================
 router.put('/fields/:id', superadminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { label, is_required, options, column_span, placeholder, section, order, field_type, name, show_to_fronter } = req.body;
+  const { label, is_required, options, column_span, placeholder, section, order, field_type, name, show_to_fronter, repeats_per_car } = req.body;
 
   const updates = {};
   if (label           !== undefined) updates.label           = label;
@@ -113,6 +115,7 @@ router.put('/fields/:id', superadminOnly, asyncHandler(async (req, res) => {
   if (field_type      !== undefined) updates.field_type      = field_type;
   if (name            !== undefined) updates.name            = name;
   if (show_to_fronter !== undefined) updates.show_to_fronter = show_to_fronter;
+  if (repeats_per_car !== undefined) updates.repeats_per_car = repeats_per_car;
 
   const { data, error } = await supabaseAdmin
     .from('form_fields').update(updates).eq('id', id).select().single();
@@ -156,6 +159,7 @@ router.post('/fields/bulk-save', superadminOnly, [
     section:         f.section         || 'default',
     default_value:   f.default_value   || null,
     show_to_fronter: f.show_to_fronter !== false,
+    repeats_per_car: f.repeats_per_car === true,
   });
 
   // Fetch current DB state — need name for accurate DELETE calculation

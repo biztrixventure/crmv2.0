@@ -14,7 +14,7 @@ import {
   GripVertical, Plus, Save, Eye, EyeOff,
   Settings, CheckSquare,
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
-  X, Zap, Users, UserX, Tag, Briefcase, Link2,
+  X, Zap, Users, UserX, Tag, Briefcase, Link2, Car,
   ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight, MessageSquare,
   Bookmark, BookOpen, Trash2, Pencil, Check,
 } from 'lucide-react';
@@ -653,6 +653,7 @@ const FieldCard = ({
   field, index, isDragging, isDragOver,
   onDragStart, onDragOver, onDrop, onDragEnd,
   onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel, onConfigureMapping, onSaveOptions,
+  onToggleRepeatsPerCar,
 }) => {
   const [editingLabel,   setEditingLabel]   = useState(false);
   const [labelVal,       setLabelVal]       = useState(field.label);
@@ -799,6 +800,17 @@ const FieldCard = ({
           </button>
         )}
 
+        {/* Per-car: field duplicates for each vehicle on the sale form */}
+        <button onClick={() => onToggleRepeatsPerCar(index)}
+          title="Duplicate this field for each vehicle when a closer adds another car"
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0"
+          style={{
+            backgroundColor: field.repeats_per_car ? 'rgba(16,185,129,0.12)' : 'var(--color-bg-secondary)',
+            color: field.repeats_per_car ? '#047857' : 'var(--color-text-tertiary)',
+          }}>
+          <Car size={9} /> {field.repeats_per_car ? 'Per Car' : 'Single'}
+        </button>
+
         {/* Map Plans button */}
         {field.field_type === 'sale_plan' && (
           <button onClick={() => onConfigureMapping(index)}
@@ -926,6 +938,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
           is_required: f.is_required, column_span: f.column_span || 1,
           placeholder: f.placeholder || '', options: f.options,
           section: f.section || 'default', show_to_fronter: f.show_to_fronter !== false,
+          repeats_per_car: f.repeats_per_car === true,
         }));
         dbSnapshot.current = mapped;
         const canvasNames = new Set(dbFields.map(f => f.name));
@@ -966,6 +979,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
 
   const toggleRequired = (i) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, is_required: !f.is_required } : f));
   const toggleFronter  = (i) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, show_to_fronter: f.show_to_fronter === false } : f));
+  const toggleRepeatsPerCar = (i) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, repeats_per_car: !f.repeats_per_car } : f));
   const changeSpan     = (i, span) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, column_span: span } : f));
   const editLabel      = (i, label) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, label } : f));
   const saveMapping    = (i, mapping) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, options: mapping } : f));
@@ -1360,6 +1374,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   onEditLabel={(label) => editLabel(idx, label)}
                   onConfigureMapping={(i) => setMappingField(i)}
                   onSaveOptions={(i, opts) => saveOptions(i, opts)}
+                  onToggleRepeatsPerCar={toggleRepeatsPerCar}
                 />
               ))}
             </div>

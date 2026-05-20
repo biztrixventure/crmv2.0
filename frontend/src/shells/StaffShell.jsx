@@ -254,13 +254,12 @@ const StaffShell = () => {
     setSaleLoading(true);
     setSaleError('');
     try {
-      const newSale = await createSale(formData);
-      // Auto-submit for compliance review immediately after creation
-      if (newSale?.id) {
-        await client.post(`sales/${newSale.id}/submit-review`);
-      }
+      const res = await createSale(formData);
+      // Auto-submit every created sale (one per car) for compliance review
+      const created = res?.sales?.length ? res.sales : (res?.sale ? [res.sale] : []);
+      await Promise.all(created.filter(s => s?.id).map(s => client.post(`sales/${s.id}/submit-review`)));
       setModalOpen(false);
-      setSaleSuccess('Sale submitted to compliance!');
+      setSaleSuccess(created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!');
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to });

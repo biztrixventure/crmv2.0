@@ -38,9 +38,10 @@ export const useSales = (companyId = null) => {
         ? { transfer_id: saleData, company_id: companyId }   // legacy: string = transferId
         : { company_id: companyId, ...saleData };
       const response = await client.post('sales', payload);
-      const newSale = response.data.sale;
-      setSales(prev => [newSale, ...prev]);
-      return newSale;
+      // Backend returns { sale (primary), sales (all created, one per car), count }
+      const created = response.data.sales?.length ? response.data.sales : [response.data.sale].filter(Boolean);
+      setSales(prev => [...created, ...prev]);
+      return response.data;
     } catch (err) {
       const msg = err.response?.data?.errors
         ? err.response.data.errors.map(e => e.msg).join(', ')

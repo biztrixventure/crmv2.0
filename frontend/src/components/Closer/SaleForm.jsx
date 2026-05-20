@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DollarSign, Users, Calendar, Hash, FileText, Building2 } from 'lucide-react';
+import { DollarSign, Users, Calendar, Hash, FileText, Building2, Car, Plus, X } from 'lucide-react';
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
@@ -107,6 +107,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     setFormData(prev => ({ ...prev, [fronterField.name]: transfer.created_by }));
   }, [transfer?.created_by, fronters, fields]);
 
+  // Additional vehicles for the same customer/transfer. Each entry holds only
+  // the values for fields the superadmin marked repeats_per_car. The first car
+  // always lives in `formData` (unchanged single-car behavior).
+  const [extraCars, setExtraCars] = useState([]);
+
   const [zipLoading, setZipLoading] = useState(false);
   const [zipInfo,    setZipInfo]    = useState(null);
   const zipTimer = useRef(null);
@@ -115,6 +120,16 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
+
+  // Set a value on one of the additional cars
+  const setCarField = (carIdx, name, value) => {
+    setExtraCars(prev => prev.map((c, i) => i === carIdx ? { ...c, [name]: value } : c));
+    const ek = `x${carIdx}:${name}`;
+    if (errors[ek]) setErrors(prev => ({ ...prev, [ek]: '' }));
+  };
+
+  const addCar    = () => setExtraCars(prev => [...prev, {}]);
+  const removeCar = (idx) => setExtraCars(prev => prev.filter((_, i) => i !== idx));
 
   const handleZipChange = (fieldName, val) => {
     setDynField(fieldName, val);
@@ -138,13 +153,51 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     }, 500);
   };
 
+  // Fields that duplicate per car (superadmin-controlled). Everything else is
+  // shared/personal and entered once.
+  const carFields = fields.filter(f => f.repeats_per_car === true);
+
+  // formData holds car #1's values too; strip the car-field keys to get the
+  // shared/personal base reused by each additional car.
+  const personalData = (() => {
+    const carNames = new Set(carFields.map(f => f.name));
+    return Object.fromEntries(Object.entries(formData).filter(([k]) => !carNames.has(k)));
+  })();
+
   const validate = () => {
     const e = {};
+    // First car + personal fields live in formData
     fields.filter(f => f.is_required).forEach(f => {
       if (!formData[f.name]?.toString().trim()) e[f.name] = 'Required';
     });
+    // Required car fields must be filled on every additional car
+    extraCars.forEach((car, i) => {
+      carFields.filter(f => f.is_required).forEach(f => {
+        if (!car[f.name]?.toString().trim()) e[`x${i}:${f.name}`] = 'Required';
+      });
+    });
     setErrors(e);
     return Object.keys(e).length === 0;
+  };
+
+  // Extract the per-car portion (vehicle + deal fields) from a merged value set
+  const buildCarPayload = (values) => {
+    const mapped = mapToSaleColumns(values);
+    const dynVal = (type) => { const f = fields.find(x => x.field_type === type); return f ? (values[f.name] || '') : ''; };
+    return {
+      car_year:  mapped.car_year,
+      car_make:  mapped.car_make,
+      car_model: mapped.car_model,
+      car_miles: mapped.car_miles,
+      car_vin:   mapped.car_vin,
+      plan:             dynVal('sale_plan')                       || null,
+      down_payment:     parseFloat(dynVal('sale_down_payment'))    || null,
+      monthly_payment:  parseFloat(dynVal('sale_monthly_payment')) || null,
+      payment_due_note: dynVal('sale_payment_due_note')           || null,
+      reference_no:     dynVal('sale_reference_no')               || null,
+      closer_disposition: dynVal('sale_disposition') || dynVal('sale_status') || null,
+      form_data:        values,
+    };
   };
 
   const handleSubmit = e => {
@@ -152,8 +205,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     if (!validate()) return;
 
     const mapped = mapToSaleColumns(formData);
-    const dynField = (type) => fields.find(f => f.field_type === type);
-    const dynVal   = (type) => { const f = dynField(type); return f ? (formData[f.name] || '') : ''; };
+    const dynVal = (type) => { const f = fields.find(x => x.field_type === type); return f ? (formData[f.name] || '') : ''; };
 
     onSubmit({
       ...mapped,
@@ -170,15 +222,20 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       sale_date:           dynVal('sale_date')         || new Date().toISOString().split('T')[0],
       status:              'open',
       closer_disposition:  dynVal('sale_disposition') || dynVal('sale_status') || null,
+      // One extra sale per additional car. Strip car-field values from the shared
+      // base so a blank field on car #2 doesn't inherit car #1's vehicle data.
+      additional_cars: extraCars.map(car => buildCarPayload({ ...personalData, ...car })),
     });
   };
 
-  // Render a single dynamic field input
-  const renderInput = (field) => {
-    const val = formData[field.name] || '';
-    const onChange = e => setDynField(field.name, e.target.value);
+  // Render a single dynamic field input.
+  // values/setValue/errKey let the same renderer drive both the first car
+  // (formData) and additional cars (extraCars[i]).
+  const renderInput = (field, values = formData, setValue = setDynField, errKey = field.name) => {
+    const val = values[field.name] || '';
+    const onChange = e => setValue(field.name, e.target.value);
     const ph = field.placeholder || `Enter ${field.label.toLowerCase()}`;
-    const errClass = errors[field.name] ? 'ring-2 ring-red-400/60 border-red-400' : '';
+    const errClass = errors[errKey] ? 'ring-2 ring-red-400/60 border-red-400' : '';
 
     if (field.field_type === 'textarea') {
       return (
@@ -327,6 +384,17 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     .filter(f => !ZIP_AUTO_FILL.includes(f.name))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
+  // Vehicle/deal fields that duplicate on each additional car
+  const carFieldsSorted = carFields
+    .filter(f => !ZIP_AUTO_FILL.includes(f.name))
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  const SPAN_CLASS = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4', 5: 'col-span-5' };
+
+  // Multi-car only applies when creating (not editing one existing sale) and
+  // the superadmin has marked at least one field as repeats_per_car.
+  const allowMultiCar = !existingSale && carFieldsSorted.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
 
@@ -406,6 +474,60 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           </div>
         </Section>
       ) : null}
+
+      {/* ── Additional vehicles ── */}
+      {allowMultiCar && extraCars.map((car, idx) => (
+        <div key={idx} className="mb-5 rounded-xl p-4"
+          style={{ border: '1px dashed var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                <Car size={12} className="text-white" />
+              </div>
+              <span className="text-[11px] font-bold uppercase tracking-widest"
+                style={{ color: 'var(--color-text-secondary)' }}>
+                Vehicle #{idx + 2}
+              </span>
+            </div>
+            <button type="button" onClick={() => removeCar(idx)}
+              className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors"
+              style={{ color: 'var(--color-error-600)' }}>
+              <X size={12} /> Remove
+            </button>
+          </div>
+          <div className="grid grid-cols-5 items-start gap-x-4 gap-y-5">
+            {carFieldsSorted.map(field => (
+              <Field
+                key={field.id}
+                label={
+                  <span className="flex items-center gap-1.5">
+                    {field.label}
+                    {field.show_to_fronter === false && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
+                        style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-600)' }}>
+                        Closer Only
+                      </span>
+                    )}
+                  </span>
+                }
+                required={field.is_required}
+                error={errors[`x${idx}:${field.name}`]}
+                className={SPAN_CLASS[field.column_span] || 'col-span-1'}>
+                {renderInput(field, car, (n, v) => setCarField(idx, n, v), `x${idx}:${field.name}`)}
+              </Field>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {allowMultiCar && (
+        <button type="button" onClick={addCar}
+          className="mb-5 flex items-center gap-2 py-2.5 px-5 rounded-xl font-bold text-sm transition-all hover:scale-[1.01]"
+          style={{ border: '1.5px dashed var(--color-primary-400)', color: 'var(--color-primary-600)', backgroundColor: 'var(--color-primary-50)' }}>
+          <Plus size={16} /> Add Another Car
+        </button>
+      )}
 
       {/* ── SUBMIT ── */}
       <div className="flex items-center justify-between pt-5 mt-2"
