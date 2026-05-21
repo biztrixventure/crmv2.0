@@ -25,7 +25,7 @@ const DevCredit = () => {
           className="font-medium hover:underline transition-colors"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          @abdulmanan69
+          ABDUL MANAN ;)
         </a>
       </p>
     </div>
