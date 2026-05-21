@@ -73,7 +73,7 @@ const RolePicker = ({ roles, value, onChange }) => {
 };
 
 const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '', role_id: '' });
+  const [form, setForm] = useState({ full_name: '', email: '', password: '', role_id: '' });
   const [roles, setRoles] = useState([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -90,7 +90,7 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
   }, [isOpen, companyId]);
 
   const reset = () => {
-    setForm({ first_name: '', last_name: '', email: '', password: '', role_id: '' });
+    setForm({ full_name: '', email: '', password: '', role_id: '' });
     setError('');
     setShowPassword(false);
   };
@@ -100,6 +100,7 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!form.full_name.trim()) { setError('Please enter the full name.'); return; }
     if (!form.role_id) { setError('Please select a role.'); return; }
     setSubmitting(true);
     try {
@@ -127,20 +128,12 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
 
-          {/* Name row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1">
-                First Name <span className="text-error-500">*</span>
-              </label>
-              <input className="input" value={form.first_name} onChange={set('first_name')} required placeholder="John" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1">
-                Last Name <span className="text-error-500">*</span>
-              </label>
-              <input className="input" value={form.last_name} onChange={set('last_name')} required placeholder="Doe" />
-            </div>
+          {/* Full name */}
+          <div>
+            <label className="block text-xs font-semibold text-text-secondary mb-1">
+              Full Name <span className="text-error-500">*</span>
+            </label>
+            <input className="input" value={form.full_name} onChange={set('full_name')} required placeholder="John Doe" />
           </div>
 
           {/* Email */}

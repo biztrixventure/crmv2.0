@@ -18,6 +18,14 @@ const { validatePassword, generateSecurePassword } = require('../utils/passwordV
 
 const router = express.Router();
 
+// Split a single "Full Name" into first/last: first token is the first name,
+// everything after is the last name (single-word names get an empty last name).
+// Keeps name handling consistent with the bulk uploader's full-name field.
+function splitFullName(full) {
+  const parts = String(full || '').trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+  return { first_name: parts.shift() || '', last_name: parts.join(' ') };
+}
+
 // Auth is applied in server.js — no duplicate middleware here
 
 // ============================================================================
@@ -326,15 +334,18 @@ router.post(
   "/",
   [
     body("email").isEmail().normalizeEmail(),
-    body("first_name").trim().isLength({ min: 1 }),
-    body("last_name").trim().isLength({ min: 1 }),
+    // Accept a single full_name OR explicit first_name/last_name (for the bulk
+    // user CSV and any API caller). Required-ness is enforced in the handler.
+    body("full_name").optional().trim(),
+    body("first_name").optional().trim(),
+    body("last_name").optional().trim(),
     body("role_id").optional({ nullable: true }).isUUID().withMessage('role_id must be a valid UUID'),
     body("company_id").isUUID().optional(),
     body("password").optional().isLength({ min: 8 }),
     body("require_verification").optional().isBoolean(),
   ],
   asyncHandler(async (req, res) => {
-    logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, first_name: req.body.first_name, last_name: req.body.last_name, role_id: req.body.role_id, require_verification: req.body.require_verification });
+    logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, full_name: req.body.full_name, role_id: req.body.role_id, require_verification: req.body.require_verification });
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -342,7 +353,14 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { email, first_name, last_name, role_id, company_id, password, require_verification } = req.body;
+    const { email, role_id, company_id, password, require_verification } = req.body;
+    // Derive first/last from full_name when provided; fall back to explicit fields.
+    let { first_name, last_name } = req.body.full_name
+      ? splitFullName(req.body.full_name)
+      : { first_name: (req.body.first_name || '').trim(), last_name: (req.body.last_name || '').trim() };
+    if (!first_name) {
+      return res.status(400).json({ error: "Full name is required" });
+    }
     const needsVerification = require_verification === true || require_verification === 'true';
     const userId = req.user.id;
     const userCompanyId = company_id || req.user.company_id;
@@ -533,6 +551,7 @@ router.post(
 router.put(
   "/:id",
   [
+    body("full_name").trim().optional(),
     body("first_name").trim().optional(),
     body("last_name").trim().optional(),
     body("role_id").isUUID().optional(),
@@ -541,6 +560,12 @@ router.put(
   ],
   asyncHandler(async (req, res) => {
     logger.debug('UPDATE_USER', 'PUT /users/:id request received', { id: req.params.id, body: req.body });
+    // A single full_name overrides first/last for the profile update.
+    if (req.body.full_name !== undefined && String(req.body.full_name).trim()) {
+      const split = splitFullName(req.body.full_name);
+      req.body.first_name = split.first_name;
+      req.body.last_name  = split.last_name;
+    }
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

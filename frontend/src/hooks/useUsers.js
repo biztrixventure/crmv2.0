@@ -32,20 +32,13 @@ export const useUsers = (companyId = null) => {
     }
   }, [companyId]);
 
-  // Create user
-  const createUser = useCallback(async (email, firstName, lastName, roleId, password, companyId) => {
+  // Create user — payload: { full_name, email, role_id, password, company_id, require_verification }
+  const createUser = useCallback(async (payload) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await client.post('users', {
-        email,
-        first_name: firstName,
-        last_name: lastName,
-        role_id: roleId,
-        company_id: companyId,  // NEW - pass company assignment to backend
-        password,  // Include password if provided
-      });
-      setUsers([...users, response.data.user]);
+      const response = await client.post('users', payload);
+      setUsers(prev => [...prev, response.data.user]);
       return response.data;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to create user';
@@ -54,7 +47,7 @@ export const useUsers = (companyId = null) => {
     } finally {
       setLoading(false);
     }
-  }, [users]);
+  }, []);
 
   // Update user
   const updateUser = useCallback(async (userAssignmentId, updates) => {

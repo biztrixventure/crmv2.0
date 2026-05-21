@@ -62,21 +62,20 @@ const UserManagement = () => {
       if (selectedUser) {
         // Update existing user (password is optional)
         await updateUser(selectedUser.id, {
-          first_name: userData.first_name,
-          last_name: userData.last_name,
+          full_name: userData.full_name,
           role_id: userData.role_id,
           password: userData.password, // Optional - only sent if user provided it
         });
       } else {
         // Create new user with company assignment
-        await createUser(
-          userData.email,
-          userData.first_name,
-          userData.last_name,
-          userData.role_id,
-          userData.password,  // Required for new users
-          userData.company_id  // NEW - pass company selection
-        );
+        await createUser({
+          full_name: userData.full_name,
+          email: userData.email,
+          role_id: userData.role_id,
+          password: userData.password,
+          company_id: userData.company_id,
+          require_verification: userData.require_verification,
+        });
       }
       setShowModal(false);
       setSelectedUser(null);

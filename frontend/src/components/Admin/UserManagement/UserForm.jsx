@@ -10,8 +10,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
   const { companies, loading: companiesLoading, fetchAvailableCompanies } = useCompanies();
   const [formData, setFormData] = useState({
     email: '',
-    first_name: '',
-    last_name: '',
+    full_name: '',
     role_id: '',
     password: '',
     company_id: '',
@@ -25,8 +24,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
     if (user) {
       setFormData({
         email: user.email || '',
-        first_name: user.first_name || '',
-        last_name: user.last_name || '',
+        full_name: [user.first_name, user.last_name].filter(Boolean).join(' '),
         role_id: user.role_id || '',
         password: '',
         company_id: user.company_id || '',
@@ -55,8 +53,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
   const validate = () => {
     const newErrors = {};
     if (!formData.email || !formData.email.includes('@')) newErrors.email = 'Valid email is required';
-    if (!formData.first_name?.trim()) newErrors.first_name = 'First name is required';
-    if (!formData.last_name?.trim()) newErrors.last_name = 'Last name is required';
+    if (!formData.full_name?.trim()) newErrors.full_name = 'Full name is required';
     if (!formData.role_id) newErrors.role_id = 'Role is required';
     if (!user && !formData.company_id) newErrors.company_id = 'Company is required';
 
@@ -87,17 +84,11 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* Name row */}
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="First Name" required error={errors.first_name}>
-          <input type="text" name="first_name" value={formData.first_name}
-            onChange={handleInputChange} placeholder="John" className="input" />
-        </FormField>
-        <FormField label="Last Name" required error={errors.last_name}>
-          <input type="text" name="last_name" value={formData.last_name}
-            onChange={handleInputChange} placeholder="Doe" className="input" />
-        </FormField>
-      </div>
+      {/* Full name */}
+      <FormField label="Full Name" required error={errors.full_name}>
+        <input type="text" name="full_name" value={formData.full_name}
+          onChange={handleInputChange} placeholder="John Doe" className="input" />
+      </FormField>
 
       {/* Email */}
       <FormField label="Email Address" required error={errors.email}>
