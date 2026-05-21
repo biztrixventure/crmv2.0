@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import client from '../../../api/client';
 import { parseFile, isAcceptedFile } from './fileParser';
-import { applyMapping, autoMap, buildFields, detectPhoneKey, requiredKeys, normPhone } from './columnMapping';
+import { applyMapping, autoMap, buildFields, detectPhoneKey, normPhone } from './columnMapping';
 
 const CHUNK = 100;
 const MAX_ROWS = 2000;
@@ -84,13 +84,15 @@ export function useBulkUpload() {
     const seen = new Map();   // key(phone|fronter|company) -> true  (exact)
     const byPhone = new Map(); // normPhone -> { fronter, company } first owner seen
 
+    // Every required field (control fields + the phone/CLI + any form field
+    // marked required in the form config) must have a value on every row.
+    const reqFields = fields.filter(f => f.required);
     for (const row of mapped) {
-      // Required-field check first: fronter + company always; phone/CLI when the
-      // form config has a phone field (needed for duplicate detection).
-      const missing = [];
-      if (!String(row.fronter_name || '').trim()) missing.push('fronter_name');
-      if (!String(row.company_name || '').trim()) missing.push('company_name');
-      if (phoneKey && !String(row.cli_number || '').trim()) missing.push('phone');
+      const missing = reqFields.filter(f => {
+        if (f.isPhone)  return !String(row.cli_number || '').trim();
+        if (f.control)  return !String(row[f.key] || '').trim();
+        return !String(row.form_data?.[f.key] || '').trim();
+      }).map(f => f.label);
       if (missing.length) { invalid.push({ ...row, reason: `Missing ${missing.join(', ')}` }); continue; }
 
       const ph = normPhone(row.cli_number);
@@ -130,14 +132,14 @@ export function useBulkUpload() {
     // Conflicts default to excluded (safer): user opts in.
     setDecisions({});
     setStep('review');
-  }, [phoneKey]);
+  }, [phoneKey, fields]);
 
   // Step 2 → 3: save the mapping globally, then validate all rows.
   const confirmMapping = useCallback(async () => {
     setError('');
-    const reqs = requiredKeys(formFields, phoneKey);
-    const missing = reqs.filter(k => !mapping[k]);
-    if (missing.length) { setError(`Map the required fields: ${missing.join(', ')}`); return; }
+    // Every required field must be mapped to a column present in the file.
+    const unmapped = fields.filter(f => f.required && !mapping[f.key]);
+    if (unmapped.length) { setError(`Map the required field(s): ${unmapped.map(f => f.label).join(', ')}`); return; }
     setBusy(true);
     try {
       await client.post('uploads/mapping', { mapping });
@@ -145,7 +147,7 @@ export function useBulkUpload() {
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Validation failed.');
     } finally { setBusy(false); }
-  }, [mapping, rawRows, runValidation, formFields, phoneKey]);
+  }, [mapping, rawRows, runValidation, formFields, phoneKey, fields]);
 
   const toggleConflict = useCallback((i) => setDecisions(d => ({ ...d, [i]: !d[i] })), []);
   const setAllConflicts = useCallback((val) => {

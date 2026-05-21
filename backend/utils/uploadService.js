@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('../config/database');
+const { etWallClockToUtc } = require('./etUtils');
 
 // transfer_status values guaranteed to exist in the DB enum (migration 000).
 // Anything else from the file falls back to 'pending' (same default the manual
@@ -197,7 +198,9 @@ async function classifyChunk(resolvedRows) {
 // ============================================================================
 function buildTransferRow(row, batchId) {
   const cli = String(row.cli_number || '').trim();
-  const createdAt = row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString();
+  // Interpret the uploaded created_at as ET wall-clock so it displays exactly as
+  // entered in the ET-based panels/dashboard (no midnight-UTC / prev-day drift).
+  const createdAt = etWallClockToUtc(row.created_at) || new Date().toISOString();
   // form_data is built dynamically from the mapped form-config fields (same keys
   // a manual transfer uses), so the shape is identical to a fronter-created row.
   // cli_number (normalized) is added purely as the dedup key; transfer_date is

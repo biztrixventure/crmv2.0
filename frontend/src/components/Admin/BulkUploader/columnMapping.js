@@ -40,12 +40,6 @@ export function buildFields(formFields, phoneKey) {
   return [...CONTROL_FIELDS, ...dyn];
 }
 
-export function requiredKeys(formFields, phoneKey) {
-  const base = ['fronter_name', 'company_name'];
-  if (phoneKey) base.push(phoneKey);
-  return base;
-}
-
 // Header-name synonyms for the control fields + phone, for best-guess auto-map.
 const SYNONYMS = {
   fronter_name: ['fronter', 'frontername', 'agent', 'agentname'],
