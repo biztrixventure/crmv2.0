@@ -180,4 +180,77 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   res.json({ message: 'FAQ deleted' });
 }));
 
+// ============================================================================
+// Per-script endpoints — add / edit / delete a single script on an FAQ.
+// (Two-segment paths, so no collision with /:id.)
+// ============================================================================
+
+// POST /faqs/:faqId/scripts — append one script
+router.post('/:faqId/scripts', [
+  body('content').trim().notEmpty().withMessage('Script content is required'),
+  body('role').optional().isIn(VALID_AUDIENCE),
+  body('label').optional({ nullable: true }).isString(),
+], asyncHandler(async (req, res) => {
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
+
+  const { faqId } = req.params;
+  const { data: faq } = await supabaseAdmin.from('faqs').select('id').eq('id', faqId).single();
+  if (!faq) return res.status(404).json({ error: 'FAQ not found' });
+
+  // Next sort_order = current max + 1
+  const { data: last } = await supabaseAdmin
+    .from('faq_scripts').select('sort_order').eq('faq_id', faqId)
+    .order('sort_order', { ascending: false }).limit(1);
+  const nextOrder = ((last?.[0]?.sort_order) ?? -1) + 1;
+
+  const { data, error } = await supabaseAdmin
+    .from('faq_scripts')
+    .insert({
+      faq_id:     faqId,
+      label:      (req.body.label && req.body.label.trim()) || `Script ${nextOrder + 1}`,
+      content:    req.body.content.trim(),
+      role:       VALID_AUDIENCE.includes(req.body.role) ? req.body.role : 'both',
+      sort_order: nextOrder,
+    })
+    .select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ script: data });
+}));
+
+// PUT /faqs/scripts/:scriptId — edit one script
+router.put('/scripts/:scriptId', [
+  body('content').optional().trim().notEmpty(),
+  body('role').optional().isIn(VALID_AUDIENCE),
+  body('label').optional({ nullable: true }).isString(),
+], asyncHandler(async (req, res) => {
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
+
+  const updates = {};
+  if (req.body.label   !== undefined) updates.label   = req.body.label?.trim() || null;
+  if (req.body.content !== undefined) updates.content = req.body.content.trim();
+  if (req.body.role    !== undefined) updates.role    = req.body.role;
+
+  const { data, error } = await supabaseAdmin
+    .from('faq_scripts').update(updates).eq('id', req.params.scriptId).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data)  return res.status(404).json({ error: 'Script not found' });
+  res.json({ script: data });
+}));
+
+// DELETE /faqs/scripts/:scriptId — remove one script
+router.delete('/scripts/:scriptId', asyncHandler(async (req, res) => {
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+
+  const { error } = await supabaseAdmin.from('faq_scripts').delete().eq('id', req.params.scriptId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'Script deleted' });
+}));
+
 module.exports = router;
