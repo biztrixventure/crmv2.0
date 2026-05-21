@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -16,6 +16,7 @@ const NAV_SECTIONS = [
       { id: 'companies',    label: 'Companies',    icon: Building2  },
       { id: 'forms',        label: 'Form Builder', icon: FileText   },
       { id: 'faqs',         label: 'FAQs',         icon: HelpCircle },
+      { id: 'scripts',      label: 'Scripts',      icon: MessageSquareText },
     ],
   },
   {

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  HelpCircle, Search, ChevronDown, MessageSquareText, Copy, Check, X,
-  Tag, LayoutGrid, BookOpen,
+  HelpCircle, Search, ChevronDown, X, Tag, LayoutGrid, BookOpen,
 } from 'lucide-react';
 import { useFaqs } from '../../hooks/useFaqs';
 
@@ -22,21 +21,6 @@ const highlight = (text, q) => {
       </mark>
       {text.slice(i + q.length)}
     </>
-  );
-};
-
-const CopyButton = ({ text }) => {
-  const [copied, setCopied] = useState(false);
-  const copy = async (e) => {
-    e.stopPropagation();
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* ignore */ }
-  };
-  return (
-    <button onClick={copy}
-      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-all hover:scale-[1.03]"
-      style={{ color: copied ? 'var(--color-success-600)' : 'var(--color-primary-600)', backgroundColor: copied ? 'var(--color-success-50)' : 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy script'}
-    </button>
   );
 };
 
@@ -76,27 +60,9 @@ const FAQCard = ({ faq, open, onToggle, q }) => (
     </button>
 
     {open && (
-      <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] space-y-3 animate-fade-in">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
-          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
-        </div>
-        {(faq.scripts || []).map((s, i) => (
-          <div key={s.id || i} className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
-            <div className="flex items-center justify-between mb-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
-                <MessageSquareText size={12} /> {s.label || `Script ${i + 1}`}
-                {s.role && s.role !== 'both' && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
-                    {AUDIENCE_LABEL[s.role] || s.role}
-                  </span>
-                )}
-              </p>
-              <CopyButton text={s.content} />
-            </div>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{s.content}</p>
-          </div>
-        ))}
+      <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] animate-fade-in">
+        <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
       </div>
     )}
   </div>

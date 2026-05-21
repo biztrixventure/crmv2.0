@@ -15,6 +15,7 @@ import NumbersIntelligence from "../components/Admin/NumbersIntelligence";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
+import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
 
 // ============================================================================
 // AdminPanel — main component
@@ -46,6 +47,7 @@ const AdminPanel = () => {
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
+    ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 
@@ -82,6 +84,7 @@ const AdminPanel = () => {
               {activeTab === "sale-search" && <LeadIntelligence />}
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "faqs"        && <FAQManager />}
+              {activeTab === "scripts"     && <ScriptManager />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>

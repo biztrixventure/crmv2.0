@@ -40,10 +40,5 @@ export const useFaqs = () => {
     setFaqs(prev => prev.filter(f => f.id !== id));
   }, []);
 
-  // Per-script operations (caller refetches to refresh the list)
-  const addScript    = useCallback((faqId, payload)    => client.post(`faqs/${faqId}/scripts`, payload), []);
-  const updateScript = useCallback((scriptId, payload) => client.put(`faqs/scripts/${scriptId}`, payload), []);
-  const deleteScript = useCallback((scriptId)          => client.delete(`faqs/scripts/${scriptId}`), []);
-
-  return { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq, addScript, updateScript, deleteScript };
+  return { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq };
 };

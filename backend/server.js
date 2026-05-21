@@ -31,6 +31,7 @@ const leadIntelligenceRoutes    = require('./routes/leadIntelligence');
 const dispositionConfigsRoutes  = require('./routes/dispositionConfigs');
 const zipcodeRoutes             = require('./routes/zipcode');
 const faqsRoutes                = require('./routes/faqs');
+const scriptsRoutes             = require('./routes/scripts');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
@@ -191,6 +192,7 @@ app.use('/api/lead-intelligence',    authMiddleware, leadIntelligenceRoutes);
 app.use('/api/disposition-configs', authMiddleware, dispositionConfigsRoutes);
 app.use('/api/zipcode',            authMiddleware, zipcodeRoutes);
 app.use('/api/faqs',               authMiddleware, faqsRoutes);
+app.use('/api/scripts',            authMiddleware, scriptsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)
