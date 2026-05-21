@@ -9,7 +9,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -21,6 +21,7 @@ import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
+import FAQPanel from "../components/FAQ/FAQPanel";
 import SaleModal from "../components/Closer/SaleModal";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
@@ -127,6 +128,7 @@ const ManagerShell = () => {
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
+    { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
   ];
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
@@ -1048,6 +1050,7 @@ const ManagerShell = () => {
           </div>
         )}
         {activeTab === 'search'    && <SaleSearch />}
+        {activeTab === 'faqs'      && <FAQPanel />}
         {activeTab === 'team'      && <TeamManagementPanel companyId={companyId} />}
         {activeTab === 'roles'     && <RoleManagementPanel companyId={companyId} />}
         {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} />}

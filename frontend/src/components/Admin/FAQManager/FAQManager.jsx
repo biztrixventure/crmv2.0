@@ -1,23 +1,24 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
-  HelpCircle, Plus, Search, Edit2, Trash2, X, ChevronDown, ChevronRight,
-  MessageSquareText, Tag, Eye, EyeOff,
+  HelpCircle, Plus, Search, Edit2, Trash2, X, ChevronDown,
+  MessageSquareText, Tag, Eye, EyeOff, BookOpen, Users, Headphones, PhoneOutgoing,
 } from 'lucide-react';
-import { Card, Badge, Button, Alert, AutoResizeTextarea } from '../../UI';
+import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useFaqs } from '../../../hooks/useFaqs';
 
 const AUDIENCE_META = {
-  closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.10)' },
-  fronter: { label: 'Fronter', color: '#0891b2', bg: 'rgba(8,145,178,0.10)' },
-  both:    { label: 'Both',    color: '#059669', bg: 'rgba(5,150,105,0.10)' },
+  closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
+  fronter: { label: 'Fronter', color: '#0891b2', bg: 'rgba(8,145,178,0.12)',  icon: PhoneOutgoing },
+  both:    { label: 'Both',    color: '#059669', bg: 'rgba(5,150,105,0.12)',  icon: Users },
 };
 
 const AudienceBadge = ({ audience }) => {
   const m = AUDIENCE_META[audience] || AUDIENCE_META.both;
+  const Icon = m.icon;
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold"
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold"
       style={{ backgroundColor: m.bg, color: m.color }}>
-      {m.label}
+      <Icon size={10} /> {m.label}
     </span>
   );
 };
@@ -41,20 +42,11 @@ const FAQModal = ({ faq, onClose, onSave }) => {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.question.trim() || !form.answer.trim()) {
-      setErr('Question and answer are required.');
-      return;
-    }
-    setSaving(true);
-    setErr('');
-    try {
-      await onSave(form);
-      onClose();
-    } catch (er) {
-      setErr(er.response?.data?.error || er.response?.data?.details?.[0]?.msg || 'Failed to save FAQ');
-    } finally {
-      setSaving(false);
-    }
+    if (!form.question.trim() || !form.answer.trim()) { setErr('Question and answer are required.'); return; }
+    setSaving(true); setErr('');
+    try { await onSave(form); onClose(); }
+    catch (er) { setErr(er.response?.data?.error || er.response?.data?.details?.[0]?.msg || 'Failed to save FAQ'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -81,8 +73,7 @@ const FAQModal = ({ faq, onClose, onSave }) => {
               Question <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <input value={form.question} onChange={e => set('question', e.target.value)}
-              placeholder="e.g. How do I respond when the customer says it's too expensive?"
-              className="input" />
+              placeholder="e.g. How do I respond when the customer says it's too expensive?" className="input" />
           </div>
 
           <div>
@@ -94,7 +85,7 @@ const FAQModal = ({ faq, onClose, onSave }) => {
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+            <label className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
               <MessageSquareText size={12} /> Script <span className="font-normal normal-case opacity-60">(optional — verbatim wording for calls)</span>
             </label>
             <AutoResizeTextarea value={form.script} onChange={e => set('script', e.target.value)}
@@ -103,17 +94,15 @@ const FAQModal = ({ faq, onClose, onSave }) => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+              <label className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 <Tag size={12} /> Keywords
               </label>
               <input value={form.keywords} onChange={e => set('keywords', e.target.value)}
                 placeholder="price, expensive, budget" className="input" />
-              <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Comma-separated, used for search.</p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Comma-separated — also power agent topic browsing.</p>
             </div>
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                Category
-              </label>
+              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Category</label>
               <select value={form.audience} onChange={e => set('audience', e.target.value)} className="input">
                 <option value="both">Both (closers &amp; fronters)</option>
                 <option value="closer">Closers only</option>
@@ -139,31 +128,46 @@ const FAQModal = ({ faq, onClose, onSave }) => {
   );
 };
 
+// ── Stat tile ───────────────────────────────────────────────────────────────
+const StatTile = ({ label, value, color, active, onClick }) => (
+  <button onClick={onClick}
+    className="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
+    style={{
+      backgroundColor: active ? color : 'var(--color-surface)',
+      border: `1px solid ${active ? color : 'var(--color-border)'}`,
+      boxShadow: active ? 'var(--shadow-md)' : 'none',
+    }}>
+    <span className="text-2xl font-bold" style={{ color: active ? 'white' : 'var(--color-text)' }}>{value}</span>
+    <span className="text-xs font-semibold uppercase tracking-wide text-left leading-tight"
+      style={{ color: active ? 'rgba(255,255,255,0.85)' : 'var(--color-text-secondary)' }}>{label}</span>
+  </button>
+);
+
 // ── Main manager ────────────────────────────────────────────────────────────
 const FAQManager = () => {
   const { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq } = useFaqs();
   const [search, setSearch]     = useState('');
   const [audience, setAudience] = useState('');
-  const [modal, setModal]       = useState(null);   // { faq } | { faq: null }
+  const [modal, setModal]       = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [confirm, setConfirm]   = useState(null);    // faq pending delete
+  const [confirm, setConfirm]   = useState(null);
 
-  const load = () => fetchFaqs({
-    include_inactive: true,
-    audience: audience || undefined,
-    q: search.trim() || undefined,
-  });
-
+  const load = () => fetchFaqs({ include_inactive: true, audience: audience || undefined, q: search.trim() || undefined });
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience]);
-
   const onSearch = (e) => { e.preventDefault(); load(); };
 
-  const counts = useMemo(() => ({
-    total:   faqs.length,
-    closer:  faqs.filter(f => f.audience === 'closer').length,
-    fronter: faqs.filter(f => f.audience === 'fronter').length,
-    both:    faqs.filter(f => f.audience === 'both').length,
-  }), [faqs]);
+  // Counts are computed from the full set (independent of the active audience filter)
+  const [allCounts, setAllCounts] = useState({ total: 0, closer: 0, fronter: 0, both: 0 });
+  useEffect(() => {
+    if (!audience) {
+      setAllCounts({
+        total: faqs.length,
+        closer: faqs.filter(f => f.audience === 'closer').length,
+        fronter: faqs.filter(f => f.audience === 'fronter').length,
+        both: faqs.filter(f => f.audience === 'both').length,
+      });
+    }
+  }, [faqs, audience]);
 
   const handleDelete = async (faq) => {
     try { await deleteFaq(faq.id); } catch { /* surfaced via hook error */ }
@@ -171,76 +175,98 @@ const FAQManager = () => {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <HelpCircle size={24} style={{ color: 'var(--color-primary-600)' }} /> FAQ Knowledge Base
-          </h2>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {counts.total} FAQ{counts.total !== 1 ? 's' : ''} · {counts.closer} closer · {counts.fronter} fronter · {counts.both} both
-          </p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Hero */}
+      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 mb-1">
+              <BookOpen size={22} className="text-white" />
+              <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>FAQ Knowledge Base</h2>
+            </div>
+            <p className="text-sm text-white/80 max-w-lg">
+              Manage questions, rebuttals, and call scripts agents see during calls.
+            </p>
+          </div>
+          <Button variant="primary" onClick={() => setModal({ faq: null })}
+            className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
+            <Plus size={16} /> Add FAQ
+          </Button>
         </div>
-        <Button variant="primary" onClick={() => setModal({ faq: null })} className="flex items-center gap-1.5">
-          <Plus size={16} /> Add FAQ
-        </Button>
+        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
       </div>
 
       {error && <Alert type="error" message={error} />}
 
-      {/* Search + audience filter */}
-      <div className="flex flex-wrap items-center gap-3">
-        <form onSubmit={onSearch} className="relative flex-1 min-w-[220px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search questions, answers, keywords…" className="input pl-9 w-full" />
-        </form>
-        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {[{ k: '', l: 'All' }, { k: 'closer', l: 'Closer' }, { k: 'fronter', l: 'Fronter' }, { k: 'both', l: 'Both' }].map(t => (
-            <button key={t.k} onClick={() => setAudience(t.k)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                background: audience === t.k ? 'var(--gradient-sidebar)' : 'transparent',
-                color: audience === t.k ? 'white' : 'var(--color-text-secondary)',
-              }}>
-              {t.l}
-            </button>
-          ))}
-        </div>
+      {/* Stat tiles (clickable filters) */}
+      <div className="flex flex-wrap gap-2.5">
+        <StatTile label="Total FAQs" value={allCounts.total} color="var(--color-primary-600)" active={audience === ''} onClick={() => setAudience('')} />
+        <StatTile label="Closers"  value={allCounts.closer}  color={AUDIENCE_META.closer.color}  active={audience === 'closer'}  onClick={() => setAudience('closer')} />
+        <StatTile label="Fronters" value={allCounts.fronter} color={AUDIENCE_META.fronter.color} active={audience === 'fronter'} onClick={() => setAudience('fronter')} />
+        <StatTile label="Both"     value={allCounts.both}    color={AUDIENCE_META.both.color}    active={audience === 'both'}    onClick={() => setAudience('both')} />
       </div>
+
+      {/* Search */}
+      <form onSubmit={onSearch} className="relative">
+        <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search questions, answers, keywords…" className="input pl-10 pr-9 w-full" />
+        {search && (
+          <button type="button" onClick={() => { setSearch(''); fetchFaqs({ include_inactive: true, audience: audience || undefined }); }}
+            className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>
+        )}
+      </form>
 
       {/* List */}
       {loading ? (
-        <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-bg-secondary)' }} />
+          ))}
+        </div>
       ) : faqs.length === 0 ? (
-        <Card className="p-12 text-center">
-          <HelpCircle size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No FAQs yet. Click “Add FAQ” to create one.</p>
-        </Card>
+        <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
+          <HelpCircle size={44} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+          <p className="text-sm font-medium mb-3" style={{ color: 'var(--color-text)' }}>No FAQs yet.</p>
+          <Button variant="primary" onClick={() => setModal({ faq: null })} className="inline-flex items-center gap-1.5">
+            <Plus size={15} /> Create your first FAQ
+          </Button>
+        </div>
       ) : (
         <div className="space-y-2.5">
           {faqs.map(faq => {
             const open = expanded === faq.id;
+            const m = AUDIENCE_META[faq.audience] || AUDIENCE_META.both;
             return (
-              <Card key={faq.id} className={`overflow-hidden transition-all ${faq.is_active ? '' : 'opacity-60'}`}>
+              <div key={faq.id}
+                className={`rounded-2xl overflow-hidden transition-all duration-200 ${faq.is_active ? '' : 'opacity-60'}`}
+                style={{
+                  backgroundColor: 'var(--color-surface)',
+                  border: `1px solid ${open ? 'var(--color-primary-300)' : 'var(--color-border)'}`,
+                  borderLeft: `3px solid ${m.color}`,
+                  boxShadow: open ? 'var(--shadow-md)' : 'none',
+                }}>
                 <div className="flex items-start gap-3 p-4 cursor-pointer" onClick={() => setExpanded(open ? null : faq.id)}>
-                  <button className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
-                    {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                  </button>
+                  <ChevronDown size={18} className="mt-0.5 flex-shrink-0 transition-transform duration-200"
+                    style={{ color: 'var(--color-text-tertiary)', transform: open ? 'none' : 'rotate(-90deg)' }} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{faq.question}</p>
                       <AudienceBadge audience={faq.audience} />
-                      {!faq.is_active && <Badge variant="secondary" size="sm">Hidden</Badge>}
+                      {!faq.is_active && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                          style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>
+                      )}
                     </div>
-                    {!open && (
-                      <p className="text-xs mt-1 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{faq.answer}</p>
-                    )}
+                    {!open && <p className="text-xs mt-1 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{faq.answer}</p>}
                     {splitKeywords(faq.keywords).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {splitKeywords(faq.keywords).map(k => (
-                          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{k}</span>
+                          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
+                            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+                            <Tag size={8} /> {k}
+                          </span>
                         ))}
                       </div>
                     )}
@@ -248,55 +274,49 @@ const FAQManager = () => {
                   <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                     <button onClick={() => updateFaq(faq.id, { is_active: !faq.is_active })}
                       title={faq.is_active ? 'Hide from agents' : 'Show to agents'}
-                      className="p-1.5 rounded hover:bg-bg-secondary transition-colors">
-                      {faq.is_active
-                        ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} />
-                        : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}
+                      className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">
+                      {faq.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}
                     </button>
-                    <button onClick={() => setModal({ faq })} title="Edit"
-                      className="p-1.5 rounded hover:bg-bg-secondary transition-colors">
+                    <button onClick={() => setModal({ faq })} title="Edit" className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">
                       <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
                     </button>
-                    <button onClick={() => setConfirm(faq)} title="Delete"
-                      className="p-1.5 rounded hover:bg-error-50 transition-colors">
+                    <button onClick={() => setConfirm(faq)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 transition-colors">
                       <Trash2 size={15} style={{ color: 'var(--color-error-500)' }} />
                     </button>
                   </div>
                 </div>
 
                 {open && (
-                  <div className="px-4 pb-4 pl-12 space-y-3">
+                  <div className="px-4 pb-4 pl-[2.85rem] space-y-3 animate-fade-in">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
-                      <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
                     </div>
                     {faq.script && (
-                      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
-                        <p className="text-[10px] font-bold uppercase tracking-wide mb-1 flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
-                          <MessageSquareText size={11} /> Script
+                      <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
+                          <MessageSquareText size={12} /> Call Script
                         </p>
-                        <p className="text-sm whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
                       </div>
                     )}
                   </div>
                 )}
-              </Card>
+              </div>
             );
           })}
         </div>
       )}
 
       {modal && (
-        <FAQModal
-          faq={modal.faq}
-          onClose={() => setModal(null)}
-          onSave={(payload) => modal.faq ? updateFaq(modal.faq.id, payload) : createFaq(payload)}
-        />
+        <FAQModal faq={modal.faq} onClose={() => setModal(null)}
+          onSave={(payload) => modal.faq ? updateFaq(modal.faq.id, payload) : createFaq(payload)} />
       )}
 
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <Card className="w-full max-w-md p-6">
+          <div className="w-full max-w-md p-6 rounded-2xl animate-scale-in"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
             <h3 className="text-lg font-bold mb-1" style={{ color: 'var(--color-text)' }}>Delete FAQ</h3>
             <p className="text-sm mb-5" style={{ color: 'var(--color-text-secondary)' }}>
               Permanently delete “{confirm.question}”? This cannot be undone.
@@ -305,7 +325,7 @@ const FAQManager = () => {
               <Button variant="secondary" onClick={() => setConfirm(null)} className="flex-1">Cancel</Button>
               <Button variant="danger" onClick={() => handleDelete(confirm)} className="flex-1">Delete</Button>
             </div>
-          </Card>
+          </div>
         </div>
       )}
     </div>
