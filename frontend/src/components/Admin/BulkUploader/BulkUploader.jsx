@@ -33,14 +33,14 @@ const BulkUploader = () => {
       {/* Step 1 — guide + dropzone (the guide is always the first thing visible) */}
       {u.step === 'guide' && (
         <>
-          <FileRequirementsGuide reference={u.reference} />
+          <FileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
           <FileDropzone onFile={u.onFile} busy={u.busy} />
         </>
       )}
 
       {/* Step 2 — column mapping */}
       {u.step === 'mapping' && (
-        <ColumnMapper headers={u.headers} mapping={u.mapping} setMap={u.setMap}
+        <ColumnMapper fields={u.fields} headers={u.headers} mapping={u.mapping} setMap={u.setMap}
           onContinue={u.confirmMapping} onBack={u.reset} error={u.error} busy={u.busy} />
       )}
 

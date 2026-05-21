@@ -21,8 +21,22 @@ const safeStatus = (s) => {
 // Reference data — every active company plus its fronter users, used both for
 // the on-screen "valid names" guide and for resolving uploaded name strings to
 // real company_id / fronter user_id values.
+//
+// Cached for 30s: a 2000-row upload validates in ~20 chunks; without the cache
+// each chunk would re-query companies + all roles + profiles. The TTL is short
+// enough that role/company edits are reflected within the same minute.
 // ============================================================================
-async function getReference() {
+let _refCache = { data: null, at: 0 };
+const REF_TTL_MS = 30000;
+
+async function getReference({ fresh = false } = {}) {
+  if (!fresh && _refCache.data && (Date.now() - _refCache.at) < REF_TTL_MS) return _refCache.data;
+  const data = await loadReference();
+  _refCache = { data, at: Date.now() };
+  return data;
+}
+
+async function loadReference() {
   const { data: companies } = await supabaseAdmin
     .from('companies').select('id, name').eq('is_active', true).order('name');
 
@@ -184,6 +198,10 @@ async function classifyChunk(resolvedRows) {
 function buildTransferRow(row, batchId) {
   const cli = String(row.cli_number || '').trim();
   const createdAt = row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString();
+  // form_data is built dynamically from the mapped form-config fields (same keys
+  // a manual transfer uses), so the shape is identical to a fronter-created row.
+  // cli_number (normalized) is added purely as the dedup key; transfer_date is
+  // preserved alongside the form fields.
   return {
     company_id:         row.company_id,
     created_by:         row.fronter_user_id,   // the fronter — NOT the uploading superadmin
@@ -191,10 +209,9 @@ function buildTransferRow(row, batchId) {
     assigned_closer_id: null,
     status:             safeStatus(row.status),
     form_data: {
-      ...(row.custom_fields || {}),
-      customer_phone: cli,                      // CLI is the phone; dashboard reads this
-      cli_number:     normPhone(cli),           // normalized key for fast dedup
-      transfer_date:  row.transfer_date || null,
+      ...(row.form_data || {}),
+      cli_number:    normPhone(cli),
+      transfer_date: row.transfer_date || row.form_data?.transfer_date || null,
     },
     upload_batch_id: batchId,
     created_at: createdAt,

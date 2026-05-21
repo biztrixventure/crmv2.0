@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import client from '../../../api/client';
 import { parseFile, isAcceptedFile } from './fileParser';
-import { applyMapping, autoMap, REQUIRED_FIELDS, normPhone } from './columnMapping';
+import { applyMapping, autoMap, buildFields, detectPhoneKey, requiredKeys, normPhone } from './columnMapping';
 
 const CHUNK = 100;
 const MAX_ROWS = 2000;
@@ -22,9 +22,22 @@ export function useBulkUpload() {
   const [summary, setSummary]   = useState(null);      // { inserted, skipped }
   const [reference, setReference] = useState([]);
   const [batches, setBatches]   = useState([]);
+  const [formFields, setFormFields] = useState([]);
+
+  // The phone/CLI field + full mappable field list are derived from the live
+  // form config, so new form-builder fields are picked up with no code change.
+  const phoneKey = detectPhoneKey(formFields);
+  const fields   = buildFields(formFields, phoneKey);
 
   const loadReference = useCallback(async () => {
-    try { const r = await client.get('uploads/reference'); setReference(r.data.companies || []); } catch { /* ignore */ }
+    try {
+      const [ref, ff] = await Promise.all([
+        client.get('uploads/reference'),
+        client.get('forms/fields'),
+      ]);
+      setReference(ref.data.companies || []);
+      setFormFields(ff.data.fields || []);
+    } catch { /* ignore */ }
   }, []);
 
   const loadBatches = useCallback(async () => {
@@ -50,7 +63,7 @@ export function useBulkUpload() {
       // Pre-fill from the saved global mapping, falling back to a best-guess.
       let saved = null;
       try { saved = (await client.get('uploads/mapping')).data.mapping; } catch { /* ignore */ }
-      const usable = saved && Object.values(saved).some(h => hdrs.includes(h)) ? saved : autoMap(hdrs);
+      const usable = saved && Object.values(saved).some(h => hdrs.includes(h)) ? saved : autoMap(hdrs, fields);
       // Drop any mapped header that isn't actually in this file.
       const cleaned = {};
       Object.entries(usable || {}).forEach(([k, h]) => { if (hdrs.includes(h)) cleaned[k] = h; });
@@ -59,7 +72,7 @@ export function useBulkUpload() {
     } catch (e) {
       setError(e.message || 'Failed to parse file.');
     } finally { setBusy(false); }
-  }, []);
+  }, [fields]);
 
   const setMap = useCallback((field, header) => {
     setMapping(prev => ({ ...prev, [field]: header || undefined }));
@@ -72,8 +85,12 @@ export function useBulkUpload() {
     const byPhone = new Map(); // normPhone -> { fronter, company } first owner seen
 
     for (const row of mapped) {
-      // Required-field check first.
-      const missing = REQUIRED_FIELDS.filter(k => !String(row[k] || '').trim());
+      // Required-field check first: fronter + company always; phone/CLI when the
+      // form config has a phone field (needed for duplicate detection).
+      const missing = [];
+      if (!String(row.fronter_name || '').trim()) missing.push('fronter_name');
+      if (!String(row.company_name || '').trim()) missing.push('company_name');
+      if (phoneKey && !String(row.cli_number || '').trim()) missing.push('phone');
       if (missing.length) { invalid.push({ ...row, reason: `Missing ${missing.join(', ')}` }); continue; }
 
       const ph = normPhone(row.cli_number);
@@ -113,21 +130,22 @@ export function useBulkUpload() {
     // Conflicts default to excluded (safer): user opts in.
     setDecisions({});
     setStep('review');
-  }, []);
+  }, [phoneKey]);
 
   // Step 2 → 3: save the mapping globally, then validate all rows.
   const confirmMapping = useCallback(async () => {
     setError('');
-    const missing = REQUIRED_FIELDS.filter(k => !mapping[k]);
+    const reqs = requiredKeys(formFields, phoneKey);
+    const missing = reqs.filter(k => !mapping[k]);
     if (missing.length) { setError(`Map the required fields: ${missing.join(', ')}`); return; }
     setBusy(true);
     try {
       await client.post('uploads/mapping', { mapping });
-      await runValidation(applyMapping(rawRows, mapping));
+      await runValidation(applyMapping(rawRows, mapping, formFields, phoneKey));
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Validation failed.');
     } finally { setBusy(false); }
-  }, [mapping, rawRows, runValidation]);
+  }, [mapping, rawRows, runValidation, formFields, phoneKey]);
 
   const toggleConflict = useCallback((i) => setDecisions(d => ({ ...d, [i]: !d[i] })), []);
   const setAllConflicts = useCallback((val) => {
@@ -183,6 +201,7 @@ export function useBulkUpload() {
 
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, batches,
+    formFields, fields, phoneKey,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleConflict, setAllConflicts,
     confirmInsert, reset, deleteBatch, deleteAllBatches, setStep,
   };

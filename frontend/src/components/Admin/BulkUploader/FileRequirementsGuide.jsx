@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { Download, FileSpreadsheet, CheckCircle2, Info, Building2, ChevronDown } from 'lucide-react';
-import { SYSTEM_FIELDS, sampleTemplateCsv } from './columnMapping';
+import { sampleTemplateCsv } from './columnMapping';
 
-const downloadTemplate = () => {
-  const blob = new Blob(['﻿' + sampleTemplateCsv()], { type: 'text/csv;charset=utf-8;' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'bulk_transfer_template.csv' });
-  a.click(); URL.revokeObjectURL(a.href);
-};
-
-const FileRequirementsGuide = ({ reference = [] }) => {
+const FileRequirementsGuide = ({ reference = [], fields = [], formFields = [], phoneKey = null }) => {
   const [showNames, setShowNames] = useState(false);
-  const required = SYSTEM_FIELDS.filter(f => f.required);
-  const optional = SYSTEM_FIELDS.filter(f => !f.required);
+  const required = fields.filter(f => f.required);
+  const optional = fields.filter(f => !f.required);
+
+  const downloadTemplate = () => {
+    const blob = new Blob(['﻿' + sampleTemplateCsv(formFields, phoneKey)], { type: 'text/csv;charset=utf-8;' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'bulk_transfer_template.csv' });
+    a.click(); URL.revokeObjectURL(a.href);
+  };
 
   return (
     <div className="space-y-4">
@@ -23,7 +23,9 @@ const FileRequirementsGuide = ({ reference = [] }) => {
             </div>
             <div>
               <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Before you upload</h3>
-              <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Prepare your file using the columns below, then drop it in.</p>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                Columns below are built from your live form configuration — new form fields appear here automatically.
+              </p>
             </div>
           </div>
           <button onClick={downloadTemplate}
@@ -42,21 +44,22 @@ const FileRequirementsGuide = ({ reference = [] }) => {
                   <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-success-600)' }} />
                   <div>
                     <code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{f.key}</code>
-                    <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>
+                    {f.isPhone && <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>CLI</span>}
+                    {f.desc && <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>}
                   </div>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-secondary)' }}>Optional columns</p>
-            <div className="space-y-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-secondary)' }}>Optional columns ({optional.length})</p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
               {optional.map(f => (
                 <div key={f.key} className="flex items-start gap-2">
                   <Info size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />
                   <div>
                     <code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{f.key}</code>
-                    <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>
+                    {f.desc && <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>}
                   </div>
                 </div>
               ))}
