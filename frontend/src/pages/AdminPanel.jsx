@@ -16,6 +16,7 @@ const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuild
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
+import BulkUploader from "../components/Admin/BulkUploader/BulkUploader";
 
 // ============================================================================
 // AdminPanel — main component
@@ -48,6 +49,7 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "bulk-upload", label: "Bulk Upload" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 
@@ -85,6 +87,7 @@ const AdminPanel = () => {
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
+              {activeTab === "bulk-upload" && <BulkUploader />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>

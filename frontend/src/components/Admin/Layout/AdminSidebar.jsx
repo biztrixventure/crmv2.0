@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -17,6 +17,7 @@ const NAV_SECTIONS = [
       { id: 'forms',        label: 'Form Builder', icon: FileText   },
       { id: 'faqs',         label: 'FAQs',         icon: HelpCircle },
       { id: 'scripts',      label: 'Scripts',      icon: MessageSquareText },
+      { id: 'bulk-upload',  label: 'Bulk Upload',  icon: UploadCloud },
     ],
   },
   {
