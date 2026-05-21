@@ -26,25 +26,42 @@ const AudienceBadge = ({ audience }) => {
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
 // ── Create / edit modal ─────────────────────────────────────────────────────
+const ROLE_OPTS = [
+  { v: 'both', l: 'Both roles' },
+  { v: 'fronter', l: 'Fronter' },
+  { v: 'closer', l: 'Closer' },
+];
+
 const FAQModal = ({ faq, onClose, onSave }) => {
+  const initScripts = faq?.scripts?.length
+    ? faq.scripts.map((s, i) => ({ label: s.label || `Script ${i + 1}`, role: s.role || 'both', content: s.content || '' }))
+    : [{ label: 'Script 1', role: 'both', content: '' }];
+
   const [form, setForm] = useState({
     question: faq?.question || '',
     answer:   faq?.answer   || '',
-    script:   faq?.script   || '',
     keywords: faq?.keywords || '',
     audience: faq?.audience || 'both',
     is_active: faq?.is_active ?? true,
+    scripts:  initScripts,
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState('');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setScript = (i, k, v) => setForm(f => ({ ...f, scripts: f.scripts.map((s, idx) => idx === i ? { ...s, [k]: v } : s) }));
+  const addScript = () => setForm(f => ({ ...f, scripts: [...f.scripts, { label: `Script ${f.scripts.length + 1}`, role: 'both', content: '' }] }));
+  const removeScript = (i) => setForm(f => ({ ...f, scripts: f.scripts.filter((_, idx) => idx !== i) }));
 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.question.trim() || !form.answer.trim()) { setErr('Question and answer are required.'); return; }
     setSaving(true); setErr('');
-    try { await onSave(form); onClose(); }
+    try {
+      // Drop blank scripts before sending
+      await onSave({ ...form, scripts: form.scripts.filter(s => s.content.trim()) });
+      onClose();
+    }
     catch (er) { setErr(er.response?.data?.error || er.response?.data?.details?.[0]?.msg || 'Failed to save FAQ'); }
     finally { setSaving(false); }
   };
@@ -84,12 +101,42 @@ const FAQModal = ({ faq, onClose, onSave }) => {
               minRows={3} maxRows={10} placeholder="The detailed answer agents should use…" className="input" />
           </div>
 
+          {/* Scripts — one or more, each tagged to a role */}
           <div>
-            <label className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-              <MessageSquareText size={12} /> Script <span className="font-normal normal-case opacity-60">(optional — verbatim wording for calls)</span>
-            </label>
-            <AutoResizeTextarea value={form.script} onChange={e => set('script', e.target.value)}
-              minRows={2} maxRows={8} placeholder={'"I completely understand budget is important. Many of our customers felt the same…"'} className="input" />
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <MessageSquareText size={12} /> Scripts <span className="font-normal normal-case opacity-60">(optional — per-role wording for calls)</span>
+              </label>
+              <button type="button" onClick={addScript}
+                className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg transition-colors"
+                style={{ color: 'var(--color-primary-600)', backgroundColor: 'var(--color-primary-50)' }}>
+                <Plus size={12} /> Add script
+              </button>
+            </div>
+            <div className="space-y-2.5">
+              {form.scripts.map((s, i) => (
+                <div key={i} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input value={s.label} onChange={e => setScript(i, 'label', e.target.value)}
+                      placeholder={`Script ${i + 1}`} className="input flex-1 !py-1.5 text-sm font-semibold" />
+                    <select value={s.role} onChange={e => setScript(i, 'role', e.target.value)} className="input !py-1.5 !w-auto text-sm">
+                      {ROLE_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                    </select>
+                    {form.scripts.length > 1 && (
+                      <button type="button" onClick={() => removeScript(i)} title="Remove script"
+                        className="p-1.5 rounded-lg transition-colors hover:bg-error-50">
+                        <Trash2 size={14} style={{ color: 'var(--color-error-500)' }} />
+                      </button>
+                    )}
+                  </div>
+                  <AutoResizeTextarea value={s.content} onChange={e => setScript(i, 'content', e.target.value)}
+                    minRows={2} maxRows={8} placeholder={'"I completely understand budget is important. Many of our customers felt the same…"'} className="input" />
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+              Each script shows only to its role. Use “Both roles” for general scripts.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -292,14 +339,17 @@ const FAQManager = () => {
                       <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
                       <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
                     </div>
-                    {faq.script && (
-                      <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
-                        <p className="text-[10px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
-                          <MessageSquareText size={12} /> Call Script
-                        </p>
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
+                    {(faq.scripts || []).map((s, i) => (
+                      <div key={s.id || i} className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
+                            <MessageSquareText size={12} /> {s.label || `Script ${i + 1}`}
+                          </p>
+                          <AudienceBadge audience={s.role} />
+                        </div>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{s.content}</p>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>

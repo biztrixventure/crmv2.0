@@ -81,17 +81,22 @@ const FAQCard = ({ faq, open, onToggle, q }) => (
           <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
           <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
         </div>
-        {faq.script && (
-          <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
+        {(faq.scripts || []).map((s, i) => (
+          <div key={s.id || i} className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--color-primary-50)', border: '1px solid var(--color-primary-200)' }}>
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
-                <MessageSquareText size={12} /> Call Script
+                <MessageSquareText size={12} /> {s.label || `Script ${i + 1}`}
+                {s.role && s.role !== 'both' && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                    {AUDIENCE_LABEL[s.role] || s.role}
+                  </span>
+                )}
               </p>
-              <CopyButton text={faq.script} />
+              <CopyButton text={s.content} />
             </div>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{faq.script}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap italic" style={{ color: 'var(--color-text)' }}>{s.content}</p>
           </div>
-        )}
+        ))}
       </div>
     )}
   </div>

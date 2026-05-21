@@ -22,6 +22,7 @@ import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
+import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import SaleModal from "../components/Closer/SaleModal";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
@@ -1050,7 +1051,7 @@ const ManagerShell = () => {
           </div>
         )}
         {activeTab === 'search'    && <SaleSearch />}
-        {activeTab === 'faqs'      && <FAQPanel />}
+        {activeTab === 'faqs'      && (hasPermission('manage_faqs') ? <FAQManager /> : <FAQPanel />)}
         {activeTab === 'team'      && <TeamManagementPanel companyId={companyId} />}
         {activeTab === 'roles'     && <RoleManagementPanel companyId={companyId} />}
         {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} />}

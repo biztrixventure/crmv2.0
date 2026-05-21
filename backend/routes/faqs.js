@@ -9,11 +9,17 @@ const router = express.Router();
 
 const VALID_AUDIENCE = ['closer', 'fronter', 'both'];
 
-// Which audiences a viewer is allowed to see, derived from their role.
+// Which FAQ audiences a viewer may see, derived from their role.
 function viewerAudiences(role) {
   if (['fronter', 'fronter_manager'].includes(role)) return ['fronter', 'both'];
   if (['closer', 'closer_manager'].includes(role))   return ['closer', 'both'];
-  // Oversight roles (admins, ops, compliance) see everything.
+  return ['closer', 'fronter', 'both']; // oversight roles see everything
+}
+
+// Which script roles a viewer may see within an FAQ.
+function viewerScriptRoles(role) {
+  if (['fronter', 'fronter_manager'].includes(role)) return ['fronter', 'both'];
+  if (['closer', 'closer_manager'].includes(role))   return ['closer', 'both'];
   return ['closer', 'fronter', 'both'];
 }
 
@@ -22,31 +28,52 @@ async function canManage(req) {
     || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
 }
 
+// Validate + normalize an incoming scripts array.
+function normalizeScripts(scripts) {
+  if (!Array.isArray(scripts)) return [];
+  return scripts
+    .filter(s => s && typeof s.content === 'string' && s.content.trim())
+    .map((s, i) => ({
+      label:      (s.label && String(s.label).trim()) || `Script ${i + 1}`,
+      content:    String(s.content).trim(),
+      role:       VALID_AUDIENCE.includes(s.role) ? s.role : 'both',
+      sort_order: i,
+    }));
+}
+
+async function attachScripts(faqs, { manage, role }) {
+  if (!faqs.length) return faqs;
+  const ids = faqs.map(f => f.id);
+  const { data: scripts } = await supabaseAdmin
+    .from('faq_scripts')
+    .select('*')
+    .in('faq_id', ids)
+    .order('sort_order', { ascending: true });
+
+  const allowed = viewerScriptRoles(role);
+  const byFaq = {};
+  (scripts || []).forEach(s => {
+    if (!manage && !allowed.includes(s.role)) return; // role-filter for agents
+    (byFaq[s.faq_id] ||= []).push(s);
+  });
+  return faqs.map(f => ({ ...f, scripts: byFaq[f.id] || [] }));
+}
+
 // ============================================================================
-// GET /faqs — list FAQs the caller is allowed to see (role-scoped + searchable)
-// Query: q (search), audience (optional explicit filter), include_inactive (managers)
+// GET /faqs — role-scoped FAQs with role-filtered scripts
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
   const { q, audience, include_inactive } = req.query;
   const allowed = viewerAudiences(req.user.role);
-  const manager = await canManage(req);
+  const manage  = await canManage(req);
 
-  let query = supabaseAdmin
-    .from('faqs')
-    .select('*')
-    .order('created_at', { ascending: false });
+  let query = supabaseAdmin.from('faqs').select('*').order('created_at', { ascending: false });
 
-  // Managers may include inactive FAQs; everyone else sees active only.
-  if (!(manager && (include_inactive === 'true' || include_inactive === true))) {
+  if (!(manage && (include_inactive === 'true' || include_inactive === true))) {
     query = query.eq('is_active', true);
   }
-
-  // Audience scope: honor an explicit in-scope filter, else restrict to allowed.
-  if (audience && allowed.includes(audience)) {
-    query = query.eq('audience', audience);
-  } else {
-    query = query.in('audience', allowed);
-  }
+  if (audience && allowed.includes(audience)) query = query.eq('audience', audience);
+  else query = query.in('audience', allowed);
 
   if (q && q.trim()) {
     const s = escapeOrValue(q.trim());
@@ -55,7 +82,9 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ faqs: data || [] });
+
+  const withScripts = await attachScripts(data || [], { manage, role: req.user.role });
+  res.json({ faqs: withScripts });
 }));
 
 // ============================================================================
@@ -65,22 +94,21 @@ router.post('/', [
   body('question').trim().notEmpty().withMessage('Question is required'),
   body('answer').trim().notEmpty().withMessage('Answer is required'),
   body('audience').optional().isIn(VALID_AUDIENCE),
-  body('script').optional({ nullable: true }).isString(),
   body('keywords').optional({ nullable: true }).isString(),
+  body('scripts').optional().isArray(),
 ], asyncHandler(async (req, res) => {
   if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
-  const { question, answer, script, keywords, audience } = req.body;
+  const { question, answer, keywords, audience } = req.body;
 
-  const { data, error } = await supabaseAdmin
+  const { data: faq, error } = await supabaseAdmin
     .from('faqs')
     .insert({
       question:   question.trim(),
       answer:     answer.trim(),
-      script:     script?.trim()   || null,
       keywords:   keywords?.trim() || null,
       audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
       created_by: req.user.id,
@@ -89,43 +117,60 @@ router.post('/', [
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json({ faq: data });
+
+  const scripts = normalizeScripts(req.body.scripts);
+  if (scripts.length) {
+    await supabaseAdmin.from('faq_scripts').insert(scripts.map(s => ({ ...s, faq_id: faq.id })));
+  }
+
+  const [withScripts] = await attachScripts([faq], { manage: true, role: req.user.role });
+  res.status(201).json({ faq: withScripts });
 }));
 
 // ============================================================================
-// PUT /faqs/:id — update (manage_faqs / superadmin)
+// PUT /faqs/:id — update (manage_faqs / superadmin). Replaces scripts if provided.
 // ============================================================================
 router.put('/:id', [
   body('question').optional().trim().notEmpty(),
   body('answer').optional().trim().notEmpty(),
   body('audience').optional().isIn(VALID_AUDIENCE),
-  body('script').optional({ nullable: true }).isString(),
   body('keywords').optional({ nullable: true }).isString(),
   body('is_active').optional().isBoolean(),
+  body('scripts').optional().isArray(),
 ], asyncHandler(async (req, res) => {
   if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
+  const { id } = req.params;
   const updates = { updated_at: new Date().toISOString() };
   if (req.body.question  !== undefined) updates.question  = req.body.question.trim();
   if (req.body.answer    !== undefined) updates.answer    = req.body.answer.trim();
-  if (req.body.script    !== undefined) updates.script    = req.body.script?.trim()   || null;
   if (req.body.keywords  !== undefined) updates.keywords  = req.body.keywords?.trim() || null;
   if (req.body.audience  !== undefined) updates.audience  = req.body.audience;
   if (req.body.is_active !== undefined) updates.is_active = req.body.is_active;
 
-  const { data, error } = await supabaseAdmin
-    .from('faqs').update(updates).eq('id', req.params.id).select().single();
-
+  const { data: faq, error } = await supabaseAdmin
+    .from('faqs').update(updates).eq('id', id).select().single();
   if (error)  return res.status(500).json({ error: error.message });
-  if (!data)  return res.status(404).json({ error: 'FAQ not found' });
-  res.json({ faq: data });
+  if (!faq)   return res.status(404).json({ error: 'FAQ not found' });
+
+  // Replace scripts when an array is supplied (delete-then-insert).
+  if (req.body.scripts !== undefined) {
+    await supabaseAdmin.from('faq_scripts').delete().eq('faq_id', id);
+    const scripts = normalizeScripts(req.body.scripts);
+    if (scripts.length) {
+      await supabaseAdmin.from('faq_scripts').insert(scripts.map(s => ({ ...s, faq_id: id })));
+    }
+  }
+
+  const [withScripts] = await attachScripts([faq], { manage: true, role: req.user.role });
+  res.json({ faq: withScripts });
 }));
 
 // ============================================================================
-// DELETE /faqs/:id — permanent delete (manage_faqs / superadmin)
+// DELETE /faqs/:id — permanent delete (scripts cascade)
 // ============================================================================
 router.delete('/:id', asyncHandler(async (req, res) => {
   if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
