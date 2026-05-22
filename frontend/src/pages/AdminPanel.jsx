@@ -17,6 +17,9 @@ import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
 import BulkUploadHub from "../components/Admin/BulkUploader/BulkUploadHub";
+import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsManager";
+import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
+import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 
 // ============================================================================
 // AdminPanel — main component
@@ -50,6 +53,9 @@ const AdminPanel = () => {
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "bulk-upload", label: "Bulk Upload" }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "announcements", label: "Announcements" }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "marquee",       label: "Marquee"       }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "spiff",         label: "SPIFF"         }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 
@@ -88,6 +94,9 @@ const AdminPanel = () => {
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
               {activeTab === "bulk-upload" && <BulkUploadHub />}
+              {activeTab === "announcements" && <AnnouncementsManager />}
+              {activeTab === "marquee"       && <MarqueeManager />}
+              {activeTab === "spiff"         && <SpiffManager />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>
