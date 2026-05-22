@@ -1,12 +1,13 @@
 import MarqueeBanner from './MarqueeBanner';
-import AnnouncementBanner from './AnnouncementBanner';
+import AnnouncementPopup from './AnnouncementPopup';
 
-// Top-of-app strips shown below the nav in every shell: scrolling marquee +
-// unread announcement banners (urgent/high prominent).
+// Top-of-app engagement surfaces shown in every shell:
+//   - scrolling marquee strip (below the nav)
+//   - center-screen announcement popup (priority-styled, re-shows on cadence)
 const EngagementBanners = () => (
   <>
     <MarqueeBanner />
-    <AnnouncementBanner />
+    <AnnouncementPopup />
   </>
 );
 

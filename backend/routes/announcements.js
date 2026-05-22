@@ -67,14 +67,26 @@ router.get('/', asyncHandler(async (req, res) => {
     .filter(a => !a.expires_at || a.expires_at > nowIso)
     .filter(a => announcementMatches(a, viewer));
 
-  let readSet = new Set();
+  let readMap = {};
   if (visible.length) {
     const { data: reads } = await supabaseAdmin
-      .from('announcement_reads').select('announcement_id').eq('user_id', viewer.id)
+      .from('announcement_reads').select('announcement_id, read_at').eq('user_id', viewer.id)
       .in('announcement_id', visible.map(a => a.id));
-    readSet = new Set((reads || []).map(r => r.announcement_id));
+    (reads || []).forEach(r => { readMap[r.announcement_id] = r.read_at; });
   }
-  res.json({ announcements: visible.map(a => ({ ...a, is_read: readSet.has(a.id) })) });
+
+  const now = Date.now();
+  // `due` = should it pop now? Never read → yes. Read but reshow_hours elapsed
+  // since the last dismiss → yes again. Read with no reshow_hours → no.
+  const out = visible.map(a => {
+    const readAt = readMap[a.id];
+    let due;
+    if (!readAt) due = true;
+    else if (a.reshow_hours) due = (new Date(readAt).getTime() + a.reshow_hours * 3600000) <= now;
+    else due = false;
+    return { ...a, is_read: !!readAt, due };
+  });
+  res.json({ announcements: out });
 }));
 
 // ── POST /announcements — create (superadmin) ────────────────────────────────
@@ -96,6 +108,7 @@ router.post('/', superadminOnly, [
     target_user_ids: b.target_type === 'users' ? (b.target_user_ids || []) : null,
     target_company_ids: b.target_type === 'company' ? (b.target_company_ids || []) : null,
     priority: VALID_PRIORITY.includes(b.priority) ? b.priority : 'normal',
+    reshow_hours: Number.isFinite(+b.reshow_hours) && +b.reshow_hours > 0 ? Math.round(+b.reshow_hours) : null,
     expires_at: b.expires_at || null,
     is_active: b.is_active !== false,
     created_by: req.user.id,
@@ -111,6 +124,7 @@ router.put('/:id', superadminOnly, asyncHandler(async (req, res) => {
   const b = req.body;
   const updates = { updated_at: new Date().toISOString() };
   ['title', 'body', 'expires_at', 'is_active', 'priority'].forEach(k => { if (b[k] !== undefined) updates[k] = b[k]; });
+  if (b.reshow_hours !== undefined) updates.reshow_hours = (Number.isFinite(+b.reshow_hours) && +b.reshow_hours > 0) ? Math.round(+b.reshow_hours) : null;
   if (b.target_type !== undefined) {
     updates.target_type = b.target_type;
     updates.target_roles = b.target_type === 'role' ? (b.target_roles || []) : null;

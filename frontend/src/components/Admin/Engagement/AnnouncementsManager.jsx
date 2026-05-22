@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Megaphone, Plus, Edit2, Trash2, X, Eye, EyeOff } from 'lucide-react';
-import { Button, Alert, Badge, AutoResizeTextarea } from '../../UI';
+import { Button, Alert, Badge } from '../../UI';
+import RichTextEditor from '../../UI/RichTextEditor';
+import { stripHtml } from '../../../utils/sanitizeHtml';
 import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
-const blank = { title: '', body: '', priority: 'normal', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
+const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
 
 const targetLabel = (a) => a.target_type === 'global' ? 'Everyone'
   : a.target_type === 'role' ? `Roles: ${(a.target_roles || []).map(r => r.replace(/_/g, ' ')).join(', ') || '—'}`
@@ -42,20 +44,25 @@ const Modal = ({ row, reference, onClose, onSave }) => {
           </div>
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Body <span style={{ color: '#ef4444' }}>*</span></label>
-            <AutoResizeTextarea value={form.body} onChange={e => set('body', e.target.value)} minRows={3} maxRows={10} className="input" placeholder="Details…" />
+            <RichTextEditor value={form.body} onChange={v => set('body', v)} placeholder="Write your announcement — bold, italic, underline, lists, links, images…" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
               <select value={form.priority} onChange={e => set('priority', e.target.value)} className="input">
-                <option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent (banner)</option>
+                <option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Re-show (hrs)</label>
+              <input type="number" min="1" value={form.reshow_hours} onChange={e => set('reshow_hours', e.target.value)} className="input" placeholder="once" />
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Expires at</label>
               <input type="datetime-local" value={form.expires_at} onChange={e => set('expires_at', e.target.value)} className="input" />
             </div>
           </div>
+          <p className="text-[11px] -mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Re-show: pops up again every N hours after an agent dismisses it. Leave blank to show once.</p>
           <AudienceTargetPicker withType value={form} onChange={v => setForm(f => ({ ...f, ...v }))} reference={reference} />
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} />
@@ -118,7 +125,7 @@ const AnnouncementsManager = () => {
             <tbody>
               {rows.map(a => (
                 <tr key={a.id} className={a.is_active ? '' : 'opacity-60'} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3"><p className="font-semibold" style={{ color: 'var(--color-text)' }}>{a.title}</p><p className="text-xs line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{a.body}</p></td>
+                  <td className="px-4 py-3"><p className="font-semibold" style={{ color: 'var(--color-text)' }}>{a.title}{a.reshow_hours ? <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>↻ {a.reshow_hours}h</span> : null}</p><p className="text-xs line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{stripHtml(a.body)}</p></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{targetLabel(a)}</td>
                   <td className="px-4 py-3"><Badge variant={PRIORITY[a.priority]?.variant || 'secondary'} size="sm">{PRIORITY[a.priority]?.label}</Badge></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{a.read_count}</td>
