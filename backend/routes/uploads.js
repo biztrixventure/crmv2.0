@@ -86,7 +86,7 @@ router.post('/confirm', asyncHandler(async (req, res) => {
 // GET /uploads/batches — list upload batches (for the delete UI)
 router.get('/batches', asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin
-    .from('upload_batches').select('*').order('created_at', { ascending: false });
+    .from('upload_batches').select('*').eq('kind', 'transfer').order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
 
   // Resolve uploader names
@@ -111,7 +111,7 @@ router.delete('/batches/:id', asyncHandler(async (req, res) => {
 router.delete('/bulk', asyncHandler(async (req, res) => {
   // gen_random_uuid() never collides with the all-zero UUID, so this matches every row.
   const { error } = await supabaseAdmin
-    .from('upload_batches').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    .from('upload_batches').delete().eq('kind', 'transfer');
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: 'All bulk-uploaded data deleted' });
 }));

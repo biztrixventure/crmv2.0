@@ -33,6 +33,7 @@ const zipcodeRoutes             = require('./routes/zipcode');
 const faqsRoutes                = require('./routes/faqs');
 const scriptsRoutes             = require('./routes/scripts');
 const uploadsRoutes             = require('./routes/uploads');
+const saleUploadsRoutes         = require('./routes/saleUploads');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
@@ -195,6 +196,7 @@ app.use('/api/zipcode',            authMiddleware, zipcodeRoutes);
 app.use('/api/faqs',               authMiddleware, faqsRoutes);
 app.use('/api/scripts',            authMiddleware, scriptsRoutes);
 app.use('/api/uploads',            authMiddleware, uploadsRoutes);
+app.use('/api/sale-uploads',       authMiddleware, saleUploadsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

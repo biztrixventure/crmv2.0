@@ -233,6 +233,7 @@ async function insertApproved(rows, batchMeta, uploaderId) {
   const { data: batch, error: bErr } = await supabaseAdmin
     .from('upload_batches')
     .insert({
+      kind:           'transfer',
       file_name:      batchMeta.file_name || null,
       uploaded_by:    uploaderId,
       total_rows:     batchMeta.total_rows || finalRows.length,

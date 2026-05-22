@@ -16,7 +16,7 @@ const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuild
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
-import BulkUploader from "../components/Admin/BulkUploader/BulkUploader";
+import BulkUploadHub from "../components/Admin/BulkUploader/BulkUploadHub";
 
 // ============================================================================
 // AdminPanel — main component
@@ -87,7 +87,7 @@ const AdminPanel = () => {
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
-              {activeTab === "bulk-upload" && <BulkUploader />}
+              {activeTab === "bulk-upload" && <BulkUploadHub />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>

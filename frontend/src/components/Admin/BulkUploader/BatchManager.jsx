@@ -46,7 +46,7 @@ const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches }) =
         <h3 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           <Database size={17} style={{ color: 'var(--color-primary-600)' }} /> Uploaded batches
         </h3>
-        {batches.length > 0 && (
+        {deleteAllBatches && batches.length > 0 && (
           <button onClick={() => setTarget({ type: 'all' })}
             className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-300)' }}>
