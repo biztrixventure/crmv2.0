@@ -25,6 +25,8 @@ import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
+import EngagementBanners from "../components/Engagement/EngagementBanners";
+import SpiffWidget from "../components/Engagement/SpiffWidget";
 import SaleModal from "../components/Closer/SaleModal";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
@@ -383,6 +385,7 @@ const ManagerShell = () => {
         navItems={[]} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
+      <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
@@ -421,6 +424,8 @@ const ManagerShell = () => {
         {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+
+            <SpiffWidget />
 
             {/* ── Stat cards ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

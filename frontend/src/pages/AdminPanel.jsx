@@ -20,6 +20,7 @@ import BulkUploadHub from "../components/Admin/BulkUploader/BulkUploadHub";
 import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsManager";
 import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
+import EngagementBanners from "../components/Engagement/EngagementBanners";
 
 // ============================================================================
 // AdminPanel — main component
@@ -74,6 +75,7 @@ const AdminPanel = () => {
         onToggleSidebar={() => setSidebarOpen(o => !o)}
       />
 
+      <EngagementBanners />
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
         {sidebarOpen && <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />}
 

@@ -6,6 +6,7 @@ import UpdateBanner from '../components/UI/UpdateBanner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
+import EngagementBanners from '../components/Engagement/EngagementBanners';
 import { useNotifications } from '../hooks/useNotifications';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
@@ -83,6 +84,7 @@ const ComplianceShell = () => {
         onClearNotifications={notifHook.clearAll}
       />
 
+      <EngagementBanners />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Tab bar */}

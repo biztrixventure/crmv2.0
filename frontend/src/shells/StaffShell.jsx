@@ -59,6 +59,8 @@ import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
+import EngagementBanners from "../components/Engagement/EngagementBanners";
+import SpiffWidget from "../components/Engagement/SpiffWidget";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -458,9 +460,11 @@ const StaffShell = () => {
         navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
+      <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
+        <SpiffWidget />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
