@@ -179,6 +179,18 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const page = (data || []).slice(0, limit);
   const cards = await getUserCards(page.map(m => m.sender_id));
 
+  // Reactions for this page, grouped per message as [{ emoji, user_ids }].
+  const ids = page.map(m => m.id);
+  const reactionsByMsg = {};
+  if (ids.length) {
+    const { data: rx } = await supabaseAdmin
+      .from('message_reactions').select('message_id, user_id, emoji').in('message_id', ids);
+    (rx || []).forEach(r => {
+      (reactionsByMsg[r.message_id] = reactionsByMsg[r.message_id] || {});
+      (reactionsByMsg[r.message_id][r.emoji] = reactionsByMsg[r.message_id][r.emoji] || []).push(r.user_id);
+    });
+  }
+
   // Return chronological (oldest → newest) for straightforward rendering.
   const messages = page.reverse().map(m => ({
     id: m.id,
@@ -189,9 +201,38 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
     deleted: !!m.deleted_at,
     edited: !!m.edited_at,
     created_at: m.created_at,
+    reactions: Object.entries(reactionsByMsg[m.id] || {}).map(([emoji, user_ids]) => ({ emoji, user_ids })),
   }));
 
   res.json({ messages, has_more: hasMore, next_cursor: page.length ? page[0].created_at : null });
+}));
+
+// ── POST /chat/messages/:id/react — toggle an emoji reaction ──────────────────
+router.post('/messages/:id/react', [
+  body('emoji').isString().trim().notEmpty().isLength({ max: 16 }),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Invalid emoji' });
+
+  const { data: msg } = await supabaseAdmin
+    .from('messages').select('id, conversation_id').eq('id', req.params.id).maybeSingle();
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+  if (!(await getMembership(msg.conversation_id, req.user.id))) return res.status(403).json({ error: 'Not a member of this conversation' });
+
+  const emoji = req.body.emoji.trim();
+  const { data: existing } = await supabaseAdmin
+    .from('message_reactions').select('message_id')
+    .eq('message_id', msg.id).eq('user_id', req.user.id).eq('emoji', emoji).maybeSingle();
+
+  let reacted;
+  if (existing) {
+    await supabaseAdmin.from('message_reactions').delete().eq('message_id', msg.id).eq('user_id', req.user.id).eq('emoji', emoji);
+    reacted = false;
+  } else {
+    await supabaseAdmin.from('message_reactions').insert({ message_id: msg.id, user_id: req.user.id, emoji });
+    reacted = true;
+  }
+  res.json({ message_id: msg.id, emoji, reacted });
 }));
 
 // ── POST /chat/conversations/:id/messages — send ──────────────────────────────
@@ -206,7 +247,7 @@ router.post('/conversations/:id/messages', [
 
   const [membership, { data: conv }, banned] = await Promise.all([
     getMembership(convId, uid),
-    supabaseAdmin.from('conversations').select('id, is_locked').eq('id', convId).maybeSingle(),
+    supabaseAdmin.from('conversations').select('id, is_locked, type').eq('id', convId).maybeSingle(),
     isBanned(uid),
   ]);
 
@@ -214,6 +255,10 @@ router.post('/conversations/:id/messages', [
   if (banned)            return res.status(403).json({ error: 'You are banned from chat' });
   if (conv.is_locked)    return res.status(403).json({ error: 'This room is locked' });
   if (membership.is_muted) return res.status(403).json({ error: 'You are muted in this conversation' });
+  // Broadcasts are one-way: only an admin member (the superadmin who sent it) may post.
+  if (conv.type === 'broadcast' && membership.member_role !== 'admin') {
+    return res.status(403).json({ error: 'This is a broadcast announcement — replies are disabled.' });
+  }
 
   const { data: msg, error } = await supabaseAdmin
     .from('messages')

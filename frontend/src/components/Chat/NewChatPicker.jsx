@@ -97,13 +97,18 @@ const NewChatPicker = ({ onClose, onCreated }) => {
           : results.length === 0 ? <p className="text-center text-sm py-8" style={{ color: 'var(--color-text-tertiary)' }}>No people found</p>
             : results.map(u => (
               <button key={u.id} onClick={() => toggle(u)} disabled={creating}
-                className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-bg-secondary transition-colors text-left disabled:opacity-50">
-                <Avatar name={u.name} size={38} />
+                className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-bg-secondary transition-colors text-left disabled:opacity-50"
+                style={{ backgroundColor: isSel(u.id) ? 'var(--color-primary-50, #f5f3ff)' : 'transparent' }}>
+                <Avatar name={u.name} size={40} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</p>
-                  <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{[u.role, u.company].filter(Boolean).join(' · ')}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    {u.role && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{u.role}</span>}
+                    {u.company && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{u.company}</span>}
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>#{String(u.id).slice(0, 6)}</span>
+                  </div>
                 </div>
-                {groupMode && isSel(u.id) && <Check size={16} style={{ color: 'var(--color-primary-600)' }} />}
+                {groupMode && isSel(u.id) && <Check size={16} style={{ color: 'var(--color-primary-600)', flexShrink: 0 }} />}
               </button>
             ))}
       </div>

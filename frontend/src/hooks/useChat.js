@@ -3,11 +3,14 @@
  * Live message stream for the OPEN conversation. Mirrors useNotifications.js:
  *   - postgres_changes (INSERT + UPDATE) on `messages` filtered to this
  *     conversation, JWT-authed via setRealtimeAuth
- *   - jittered poll fallback (30–42 s + backoff) so chat survives a dropped WS
- *   - AbortController + in-flight guard, channel auto-reconnect on error
- *   - cursor pagination (load older on demand), optimistic send
- *   - ephemeral typing indicator over Supabase Broadcast (never hits the DB)
- * Tears down and re-subscribes whenever the conversation id changes.
+ *   - jittered poll fallback so chat survives a dropped WS
+ *   - optimistic send, cursor pagination, emoji reactions (instant via Broadcast)
+ *   - typing indicator over Broadcast (never hits the DB)
+ *
+ * The realtime/poll lifecycle is keyed ONLY on conversationId + meId. Volatile
+ * inputs (resolveName, markRead) are read through refs, so the channel is NOT
+ * torn down and the scrollback is NOT reset when the parent re-renders (e.g. the
+ * conversation-list poll) — that churn was the "keeps refreshing" bug.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import client from '../api/client';
@@ -15,16 +18,31 @@ import { supabase, setRealtimeAuth } from '../api/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { playNotificationSound } from './useNotifications';
 
-const POLL_BASE = 30_000;
-const POLL_JITTER = 12_000;
-const TYPING_TTL = 4_000;
+const POLL_BASE = 25_000;
+const POLL_JITTER = 10_000;
+const TYPING_TTL = 3_500;
 
 const sortByTime = (a, b) => new Date(a.created_at) - new Date(b.created_at);
 const dedupe = (list) => {
   const seen = new Map();
-  for (const m of list) seen.set(m.id, m);
+  for (const m of list) seen.set(m.id, { ...seen.get(m.id), ...m });
   return [...seen.values()].sort(sortByTime);
 };
+
+// Apply a reaction toggle to a message list immutably.
+const applyReaction = (list, { message_id, emoji, user_id, reacted }) =>
+  list.map(m => {
+    if (m.id !== message_id) return m;
+    const reactions = (m.reactions || []).map(r => ({ ...r, user_ids: [...r.user_ids] }));
+    let group = reactions.find(r => r.emoji === emoji);
+    if (reacted) {
+      if (!group) reactions.push({ emoji, user_ids: [user_id] });
+      else if (!group.user_ids.includes(user_id)) group.user_ids.push(user_id);
+    } else if (group) {
+      group.user_ids = group.user_ids.filter(u => u !== user_id);
+    }
+    return { ...m, reactions: reactions.filter(r => r.user_ids.length) };
+  });
 
 export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const { token } = useAuth();
@@ -42,21 +60,26 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const fetchingRef = useRef(false);
   const oldestRef = useRef(null);
   const typingRef = useRef(new Map());
-  const tokenRef = useRef(token);
-  useEffect(() => { tokenRef.current = token; }, [token]);
+
+  // Volatile values accessed inside the long-lived effect via refs.
+  const tokenRef = useRef(token);   useEffect(() => { tokenRef.current = token; }, [token]);
+  const resolveRef = useRef(resolveName); useEffect(() => { resolveRef.current = resolveName; }, [resolveName]);
+  const nameOf = useCallback((id) => (resolveRef.current?.(id)) || 'User', []);
+
+  const markRead = useCallback(() => {
+    if (conversationId) client.patch(`chat/conversations/${conversationId}/read`).catch(() => {});
+  }, [conversationId]);
+  const markReadRef = useRef(markRead); useEffect(() => { markReadRef.current = markRead; }, [markRead]);
 
   const mapRow = useCallback((row) => ({
-    id: row.id,
-    conversation_id: row.conversation_id,
-    sender_id: row.sender_id,
-    sender_name: resolveName?.(row.sender_id) || 'User',
+    id: row.id, conversation_id: row.conversation_id, sender_id: row.sender_id,
+    sender_name: nameOf(row.sender_id),
     body: row.deleted_at ? null : row.body,
-    deleted: !!row.deleted_at,
-    edited: !!row.edited_at,
-    created_at: row.created_at,
-  }), [resolveName]);
+    deleted: !!row.deleted_at, edited: !!row.edited_at,
+    created_at: row.created_at, reactions: [],
+  }), [nameOf]);
 
-  // ── fetch newest page, merge into state ───────────────────────────────────
+  // ── fetch newest page, merge (never collapse the scrollback) ───────────────
   const fetchLatest = useCallback(async (silent = false) => {
     if (!conversationId) return;
     if (silent && fetchingRef.current) return;
@@ -69,20 +92,16 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
         params: { limit: 30 }, signal: abortRef.current.signal,
       });
       const fetched = res.data.messages || [];
-      // Merge into existing state (keeps older pages already loaded via loadOlder
-      // and lets fresh server rows overwrite stale/edited/deleted copies); never
-      // collapse the scrollback to just the newest page.
       setMessages(prev => {
         const merged = dedupe([...prev, ...fetched]);
         oldestRef.current = merged.length ? merged[0].created_at : null;
-        // Only the first page reliably tells us whether older history remains.
         if (!prev.length) setHasMore(!!res.data.has_more);
         return merged;
       });
       backoffRef.current = 0;
     } catch (err) {
       if (err?.code !== 'ERR_CANCELED' && err?.name !== 'CanceledError') {
-        backoffRef.current = backoffRef.current ? Math.min(backoffRef.current * 2, 120_000) : 15_000;
+        backoffRef.current = backoffRef.current ? Math.min(backoffRef.current * 2, 120_000) : 12_000;
       }
     } finally {
       fetchingRef.current = false;
@@ -110,16 +129,13 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     const bodyText = (text || '').trim();
     if (!bodyText || !conversationId) return;
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const optimistic = {
-      id: tempId, conversation_id: conversationId, sender_id: meId,
-      sender_name: 'You', body: bodyText, deleted: false, edited: false,
-      created_at: new Date().toISOString(), pending: true,
-    };
-    setMessages(prev => dedupe([...prev, optimistic]));
+    setMessages(prev => dedupe([...prev, {
+      id: tempId, conversation_id: conversationId, sender_id: meId, sender_name: 'You',
+      body: bodyText, deleted: false, edited: false, created_at: new Date().toISOString(), reactions: [], pending: true,
+    }]));
     try {
       const res = await client.post(`chat/conversations/${conversationId}/messages`, { body: bodyText });
-      const saved = res.data.message;
-      setMessages(prev => dedupe(prev.filter(m => m.id !== tempId).concat(saved)));
+      setMessages(prev => dedupe(prev.filter(m => m.id !== tempId).concat({ ...res.data.message, reactions: [] })));
     } catch (err) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, pending: false, error: true } : m));
       throw err;
@@ -136,19 +152,26 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     try { await client.delete(`chat/messages/${id}`); } catch { /* ignore */ }
   }, []);
 
-  const markRead = useCallback(() => {
-    if (conversationId) client.patch(`chat/conversations/${conversationId}/read`).catch(() => {});
-  }, [conversationId]);
+  // ── reactions (optimistic + persisted + broadcast for instant peers) ───────
+  const addReaction = useCallback(async (messageId, emoji) => {
+    if (String(messageId).startsWith('temp-')) return; // not saved yet
+    const msg = messages.find(m => m.id === messageId);
+    const had = !!msg?.reactions?.find(r => r.emoji === emoji)?.user_ids.includes(meId);
+    const next = !had;
+    setMessages(prev => applyReaction(prev, { message_id: messageId, emoji, user_id: meId, reacted: next }));
+    try {
+      const res = await client.post(`chat/messages/${messageId}/react`, { emoji });
+      setMessages(prev => applyReaction(prev, { message_id: messageId, emoji, user_id: meId, reacted: res.data.reacted }));
+      channelRef.current?.send({ type: 'broadcast', event: 'reaction', payload: { message_id: messageId, emoji, user_id: meId, reacted: res.data.reacted } });
+    } catch {
+      setMessages(prev => applyReaction(prev, { message_id: messageId, emoji, user_id: meId, reacted: had })); // revert
+    }
+  }, [messages, meId]);
 
-  // ── typing broadcast ─────────────────────────────────────────────────────────
   const sendTyping = useCallback(() => {
-    channelRef.current?.send({
-      type: 'broadcast', event: 'typing',
-      payload: { user_id: meId, name: resolveName?.(meId) || 'Someone' },
-    });
-  }, [meId, resolveName]);
+    channelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: meId, name: nameOf(meId) } });
+  }, [meId, nameOf]);
 
-  // ── poll scheduler ────────────────────────────────────────────────────────────
   const schedulePoll = useCallback(() => {
     clearTimeout(pollRef.current);
     if (document.hidden || !conversationId) return;
@@ -156,7 +179,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     pollRef.current = setTimeout(async () => { await fetchLatest(true); schedulePoll(); }, delay);
   }, [conversationId, fetchLatest]);
 
-  // ── realtime + polling lifecycle, keyed on conversation id ────────────────────
+  // ── realtime + polling lifecycle (keyed ONLY on conversationId + meId) ─────
   useEffect(() => {
     if (!conversationId) { setMessages([]); return; }
     oldestRef.current = null;
@@ -165,6 +188,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     schedulePoll();
     setRealtimeAuth(tokenRef.current || localStorage.getItem('token'));
 
+    const dropTyping = (userId) => {
+      if (typingRef.current.delete(userId)) setTypingNames([...typingRef.current.values()].map(v => v.name));
+    };
+
     const setupChannel = () => {
       if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
       const ch = supabase
@@ -172,20 +199,28 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           (payload) => {
             if (!payload.new) return;
-            const msg = mapRow(payload.new);
+            const msg = { id: payload.new.id, conversation_id: payload.new.conversation_id, sender_id: payload.new.sender_id,
+              sender_name: nameOf(payload.new.sender_id), body: payload.new.deleted_at ? null : payload.new.body,
+              deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at, created_at: payload.new.created_at, reactions: [] };
             setMessages(prev => dedupe([...prev, msg]));
-            if (msg.sender_id !== meId) { playNotificationSound(); markRead(); }
+            dropTyping(msg.sender_id);
+            if (msg.sender_id !== meId) { playNotificationSound(); markReadRef.current(); }
           })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           (payload) => {
             if (!payload.new) return;
-            const msg = mapRow(payload.new);
-            setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+            setMessages(prev => prev.map(m => m.id === payload.new.id
+              ? { ...m, body: payload.new.deleted_at ? null : payload.new.body, deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at }
+              : m));
           })
         .on('broadcast', { event: 'typing' }, ({ payload }) => {
           if (!payload || payload.user_id === meId) return;
-          typingRef.current.set(payload.user_id, { name: payload.name, at: Date.now() });
+          typingRef.current.set(payload.user_id, { name: payload.name || 'Someone', at: Date.now() });
           setTypingNames([...typingRef.current.values()].map(v => v.name));
+        })
+        .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+          if (!payload || payload.user_id === meId) return;
+          setMessages(prev => applyReaction(prev, payload));
         })
         .subscribe((status) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -196,13 +231,12 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     };
     setupChannel();
 
-    // Expire stale typing entries.
     const typingTimer = setInterval(() => {
       const now = Date.now();
       let changed = false;
       for (const [k, v] of typingRef.current) if (now - v.at > TYPING_TTL) { typingRef.current.delete(k); changed = true; }
       if (changed) setTypingNames([...typingRef.current.values()].map(v => v.name));
-    }, 2000);
+    }, 1500);
 
     const onVis = () => { if (document.hidden) clearTimeout(pollRef.current); else { fetchLatest(true); schedulePoll(); } };
     document.addEventListener('visibilitychange', onVis);
@@ -216,7 +250,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
       document.removeEventListener('visibilitychange', onVis);
       if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
     };
-  }, [conversationId, meId, mapRow, fetchLatest, schedulePoll, markRead]);
+  }, [conversationId, meId, nameOf, fetchLatest, schedulePoll]);
 
-  return { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, loadOlder, markRead, sendTyping };
+  return { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping };
 };

@@ -249,6 +249,7 @@ const BroadcastTab = () => {
             ))}
           </div>
         )}
+        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Broadcasts are one-way — recipients can read but cannot reply, so the thread stays clean.</p>
         <Button variant="primary" onClick={send} disabled={sending} className="flex items-center gap-1.5"><Send size={15} />{sending ? 'Sending…' : 'Send broadcast'}</Button>
       </div>
     </div>

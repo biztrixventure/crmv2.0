@@ -1,9 +1,11 @@
 import { useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import Avatar from './Avatar';
 import PresenceDot from './PresenceDot';
 import Composer from './Composer';
+
+const QUICK = ['👍', '❤️', '😂', '🔥', '✅', '🙏'];
 
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 const dayLabel = (s) => {
@@ -15,39 +17,82 @@ const dayLabel = (s) => {
 };
 const clockTime = (s) => new Date(s).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-const Bubble = ({ m, mine, showName, onEdit, onDelete }) => {
+const TypingDots = ({ names }) => (
+  <div className="flex items-center gap-1.5 px-1 h-5">
+    <span className="flex gap-0.5">
+      {[0, 1, 2].map(i => (
+        <span key={i} className="w-1.5 h-1.5 rounded-full bsx-typing-dot" style={{ backgroundColor: 'var(--color-primary-500)', animationDelay: `${i * 0.16}s` }} />
+      ))}
+    </span>
+    <span className="text-xs truncate" style={{ color: 'var(--color-primary-600)' }}>{names.slice(0, 2).join(', ')} typing…</span>
+  </div>
+);
+
+const Bubble = ({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
   const [menu, setMenu] = useState(false);
+  const [picker, setPicker] = useState(false);
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
-      <div className="max-w-[78%] min-w-0">
+      <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
         {showName && !mine && <p className="text-xs font-semibold mb-0.5 px-1" style={{ color: 'var(--color-primary-600)' }}>{m.sender_name}</p>}
         <div className="relative flex items-end gap-1">
+          {/* hover actions (own messages) */}
           {mine && !m.deleted && (
-            <div className="relative">
+            <div className="relative self-center">
               <button onClick={() => setMenu(v => !v)} className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity" style={{ color: 'var(--color-text-tertiary)' }}><MoreVertical size={14} /></button>
               {menu && (
-                <div className="absolute bottom-7 right-0 z-10 rounded-xl py-1 w-28" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                <div className="absolute bottom-7 right-0 z-20 rounded-xl py-1 w-28" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
                   <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={12} /> Edit</button>
                   <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={12} /> Delete</button>
                 </div>
               )}
             </div>
           )}
-          <div className="rounded-2xl px-3.5 py-2 break-words" style={{
-            background: m.deleted ? 'transparent' : mine ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)',
-            color: m.deleted ? 'var(--color-text-tertiary)' : mine ? 'white' : 'var(--color-text)',
-            border: m.deleted ? '1px dashed var(--color-border)' : 'none',
-            opacity: m.pending ? 0.6 : 1,
-          }}>
-            {m.deleted
-              ? <span className="text-sm italic">message deleted</span>
-              : <span className="text-sm whitespace-pre-wrap">{m.body}</span>}
-            <span className="block text-right mt-0.5" style={{ fontSize: 10, opacity: 0.75, color: mine && !m.deleted ? 'rgba(255,255,255,0.85)' : 'var(--color-text-tertiary)' }}>
-              {clockTime(m.created_at)}{m.edited && !m.deleted ? ' · edited' : ''}
-              {mine && m.error ? <AlertCircle size={11} className="inline ml-1" /> : mine && !m.pending && !m.deleted ? <Check size={11} className="inline ml-1" /> : null}
-            </span>
+
+          <div className="relative">
+            <div className="rounded-2xl px-3.5 py-2 break-words" style={{
+              background: m.deleted ? 'transparent' : mine ? 'var(--gradient-sidebar)' : 'var(--color-surface)',
+              color: m.deleted ? 'var(--color-text-tertiary)' : mine ? 'white' : 'var(--color-text)',
+              border: m.deleted ? '1px dashed var(--color-border)' : mine ? 'none' : '1px solid var(--color-border)',
+              borderBottomRightRadius: mine ? 4 : 16, borderBottomLeftRadius: mine ? 16 : 4,
+              opacity: m.pending ? 0.6 : 1, boxShadow: m.deleted ? 'none' : 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.06))',
+            }}>
+              {m.deleted ? <span className="text-sm italic">message deleted</span> : <span className="text-sm whitespace-pre-wrap">{m.body}</span>}
+              <span className="block text-right mt-0.5" style={{ fontSize: 10, opacity: 0.75, color: mine && !m.deleted ? 'rgba(255,255,255,0.85)' : 'var(--color-text-tertiary)' }}>
+                {clockTime(m.created_at)}{m.edited && !m.deleted ? ' · edited' : ''}
+                {mine && m.error ? <AlertCircle size={11} className="inline ml-1" /> : mine && !m.pending && !m.deleted ? <Check size={11} className="inline ml-1" /> : null}
+              </span>
+            </div>
+
+            {/* react launcher */}
+            {!m.deleted && !String(m.id).startsWith('temp-') && (
+              <div className={`absolute ${mine ? 'left-0 -translate-x-full pl-0 pr-1' : 'right-0 translate-x-full pl-1'} top-1/2 -translate-y-1/2`}>
+                <button onClick={() => setPicker(p => !p)} className="opacity-0 group-hover:opacity-100 p-1 rounded-full transition-opacity" style={{ color: 'var(--color-text-tertiary)' }} title="React"><SmilePlus size={15} /></button>
+                {picker && (
+                  <div className="absolute z-20 flex gap-0.5 p-1 rounded-full" style={{ bottom: '120%', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                    {QUICK.map(e => <button key={e} onClick={() => { setPicker(false); onReact(m.id, e); }} className="text-base hover:scale-125 transition-transform px-0.5">{e}</button>)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
+
+        {/* reaction chips */}
+        {m.reactions?.length > 0 && (
+          <div className={`flex flex-wrap gap-1 mt-1 ${mine ? 'justify-end' : ''}`}>
+            {m.reactions.map(r => {
+              const mineR = r.user_ids.includes(meId);
+              return (
+                <button key={r.emoji} onClick={() => onReact(m.id, r.emoji)}
+                  className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition-transform hover:scale-105"
+                  style={{ backgroundColor: mineR ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', border: `1px solid ${mineR ? 'var(--color-primary-300)' : 'var(--color-border)'}` }}>
+                  <span>{r.emoji}</span><span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{r.user_ids.length}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -61,7 +106,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
   }, [conversation.members, meId]);
   const resolveName = useMemo(() => (id) => nameMap[id] || (id === meId ? 'You' : 'User'), [nameMap, meId]);
 
-  const { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, loadOlder, markRead, sendTyping } =
+  const { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping } =
     useChat(conversation.id, { meId, resolveName });
 
   const scrollRef = useRef(null);
@@ -71,73 +116,71 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
 
   useEffect(() => { markRead(); }, [conversation.id, markRead]);
 
-  // Scroll management: keep pinned to bottom on new messages, but preserve the
-  // visual position when an older page is prepended (explicit flag, not a guess).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (prependingRef.current) {
-      el.scrollTop = el.scrollHeight - prevHeightRef.current;
-      prependingRef.current = false;
-      prevHeightRef.current = 0;
-    } else if (nearBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages]);
+    if (prependingRef.current) { el.scrollTop = el.scrollHeight - prevHeightRef.current; prependingRef.current = false; prevHeightRef.current = 0; }
+    else if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages, typingNames]);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (el.scrollTop < 40 && hasMore && !loadingOlder) {
-      prevHeightRef.current = el.scrollHeight;
-      prependingRef.current = true;
-      loadOlder();
-    }
+    if (el.scrollTop < 40 && hasMore && !loadingOlder) { prevHeightRef.current = el.scrollHeight; prependingRef.current = true; loadOlder(); }
   };
 
   const onEdit = async (m) => {
     const next = window.prompt('Edit message', m.body);
-    if (next != null && next.trim() && next.trim() !== m.body) {
-      try { await editMessage(m.id, next); } catch { /* ignore */ }
-    }
+    if (next != null && next.trim() && next.trim() !== m.body) { try { await editMessage(m.id, next); } catch { /* ignore */ } }
   };
   const onDelete = (m) => { if (window.confirm('Delete this message?')) deleteMessage(m.id); };
 
+  const isBroadcast = conversation.type === 'broadcast';
   const online = conversation.other && onlineIds?.has(conversation.other.id);
   const disabledReason = banned ? 'You are banned from chat'
+    : isBroadcast ? 'Broadcast announcement — read only'
     : conversation.is_locked ? 'This room is locked by an admin'
     : conversation.is_muted ? 'You are muted in this conversation' : null;
 
-  const subtitle = typingNames.length
-    ? `${typingNames.slice(0, 2).join(', ')} typing…`
-    : conversation.type === 'dm' ? (online ? 'Online' : 'Offline')
+  const subtitle = typingNames.length ? null
+    : isBroadcast ? 'Announcement'
+    : conversation.type === 'dm' ? (online ? 'Active now' : 'Offline')
     : `${(conversation.members || []).length} members`;
 
   return (
     <div className="flex flex-col h-full">
+      <style>{`@keyframes bsxTyping{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}.bsx-typing-dot{animation:bsxTyping 1.1s infinite ease-in-out}`}</style>
+
       {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-bg-secondary lg:hidden" style={{ color: 'var(--color-text-secondary)' }}><ArrowLeft size={18} /></button>
+      <div className="flex items-center gap-3 px-3 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+        <button onClick={onBack} className="p-1.5 rounded-lg transition-colors flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'} title="Back to conversations">
+          <ArrowLeft size={18} />
+        </button>
         <div className="relative flex-shrink-0">
-          <Avatar name={conversation.title} group={conversation.type !== 'dm'} size={40} />
+          <Avatar name={conversation.title} group={conversation.type !== 'dm'} size={38} />
           {conversation.type === 'dm' && <span className="absolute -bottom-0.5 -right-0.5"><PresenceDot online={online} size={11} /></span>}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+            {isBroadcast && <Megaphone size={13} style={{ color: 'var(--color-primary-600)' }} />}
             {conversation.title}{conversation.is_locked && <Lock size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
           </p>
-          <p className="text-xs truncate" style={{ color: typingNames.length ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{subtitle}</p>
+          {typingNames.length ? <TypingDots names={typingNames} /> : <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{subtitle}</p>}
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-3 space-y-1" style={{ backgroundColor: 'var(--color-bg)' }}>
         {loadingOlder && <div className="flex justify-center py-2"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" /></div>}
         {loading && !messages.length ? (
           <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
         ) : !messages.length ? (
-          <div className="flex items-center justify-center h-full"><p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Say hello 👋</p></div>
+          <div className="flex flex-col items-center justify-center h-full gap-2" style={{ color: 'var(--color-text-tertiary)' }}>
+            <Avatar name={conversation.title} group={conversation.type !== 'dm'} size={56} />
+            <p className="text-sm">{isBroadcast ? 'No announcement yet.' : 'Say hello 👋'}</p>
+          </div>
         ) : messages.map((m, i) => {
           const prev = messages[i - 1];
           const showDay = !prev || !sameDay(prev.created_at, m.created_at);
@@ -149,7 +192,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
                   <span className="text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{dayLabel(m.created_at)}</span>
                 </div>
               )}
-              <Bubble m={m} mine={m.sender_id === meId} showName={showName} onEdit={onEdit} onDelete={onDelete} />
+              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName} onEdit={onEdit} onDelete={onDelete} onReact={addReaction} />
             </div>
           );
         })}
