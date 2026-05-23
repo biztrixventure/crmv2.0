@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react';
+import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import Avatar from './Avatar';
@@ -28,7 +28,7 @@ const TypingDots = ({ names }) => (
   </div>
 );
 
-const Bubble = ({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
+const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
   const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
   return (
@@ -96,7 +96,7 @@ const Bubble = ({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
       </div>
     </div>
   );
-};
+});
 
 const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
   const nameMap = useMemo(() => {
@@ -130,11 +130,11 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
     if (el.scrollTop < 40 && hasMore && !loadingOlder) { prevHeightRef.current = el.scrollHeight; prependingRef.current = true; loadOlder(); }
   };
 
-  const onEdit = async (m) => {
+  const onEdit = useCallback(async (m) => {
     const next = window.prompt('Edit message', m.body);
     if (next != null && next.trim() && next.trim() !== m.body) { try { await editMessage(m.id, next); } catch { /* ignore */ } }
-  };
-  const onDelete = (m) => { if (window.confirm('Delete this message?')) deleteMessage(m.id); };
+  }, [editMessage]);
+  const onDelete = useCallback((m) => { if (window.confirm('Delete this message?')) deleteMessage(m.id); }, [deleteMessage]);
 
   const isBroadcast = conversation.type === 'broadcast';
   const online = conversation.other && onlineIds?.has(conversation.other.id);

@@ -1,17 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, AlertTriangle } from 'lucide-react';
+import { X, AlertTriangle, MessagesSquare } from 'lucide-react';
 import client from '../../api/client';
 import { usePresence } from '../../hooks/usePresence';
 import ConversationList from './ConversationList';
 import MessageThread from './MessageThread';
 import NewChatPicker from './NewChatPicker';
 
-// Right-side slide-over chat drawer (full-screen on mobile). Owns the
-// conversation list + selection; the open thread streams via useChat.
+// Full chat window: dim backdrop + opaque docked panel. On large screens it's a
+// two-pane layout (conversation list always visible alongside the open thread,
+// so going back is one click); on mobile it's single-pane with a back button.
 const ChatPanel = ({ open, onClose, meId, banned }) => {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [view, setView] = useState('list');     // 'list' | 'thread' | 'new'
+  const [view, setView] = useState('list');   // 'list' | 'new'
   const [active, setActive] = useState(null);
   const pollRef = useRef(null);
   const onlineIds = usePresence(open);
@@ -23,42 +24,40 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     finally { setLoading(false); }
   }, []);
 
-  // Refresh the list while the panel is open; pause when closed.
+  // Refresh the LIST on a slow cadence while open. Intentionally does NOT touch
+  // the open `active` conversation — that kept re-rendering the thread and made
+  // messages flicker. Lock/mute changes apply on next open.
   useEffect(() => {
     if (!open) { clearInterval(pollRef.current); return; }
     load();
-    pollRef.current = setInterval(load, 18_000);
+    pollRef.current = setInterval(load, 20_000);
     return () => clearInterval(pollRef.current);
   }, [open, load]);
 
-  // Keep the open thread's metadata (lock/mute/members) fresh from the list.
-  useEffect(() => {
-    if (active) { const next = conversations.find(c => c.id === active.id); if (next) setActive(next); }
-  }, [conversations]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const openConversation = (c) => {
     setConversations(prev => prev.map(x => x.id === c.id ? { ...x, unread: 0 } : x));
-    setActive(c); setView('thread');
+    setView('list');
+    setActive(c);
   };
+  const onNewChat = () => { setActive(null); setView('new'); };
   const onCreated = async (conversationId) => {
     const list = await load();
-    const full = list?.find(c => c.id === conversationId);
-    setActive(full || { id: conversationId, type: 'dm', title: '', members: [] });
-    setView('thread');
+    setActive(list?.find(c => c.id === conversationId) || { id: conversationId, type: 'dm', title: '', members: [] });
+    setView('list');
   };
 
   if (!open) return null;
 
   return (
     <>
-      {/* Backdrop (mobile) */}
-      <div className="fixed inset-0 z-[65] lg:hidden" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={onClose} />
+      {/* Dim backdrop on all sizes (fixes the see-through look) */}
+      <div className="fixed inset-0 z-[65]" style={{ backgroundColor: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(2px)' }} onClick={onClose} />
 
-      <aside className="fixed top-0 right-0 z-[70] h-full flex flex-col w-full sm:w-[400px] animate-slide-in-right"
+      <aside className="fixed top-0 right-0 z-[70] h-full flex flex-col w-full lg:w-[920px] animate-slide-in-right"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
         {/* Title bar */}
         <div className="flex items-center justify-between px-4 h-14 flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>
-          <span className="font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Chat</span>
+          <span className="flex items-center gap-2 font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}><MessagesSquare size={18} /> Chat</span>
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
         </div>
 
@@ -69,15 +68,30 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           </div>
         )}
 
-        <div className="flex-1 min-h-0">
-          {view === 'new' ? (
-            <NewChatPicker onClose={() => setView('list')} onCreated={onCreated} />
-          ) : view === 'thread' && active ? (
-            <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => { setView('list'); load(); }} />
-          ) : (
-            <ConversationList conversations={conversations} onlineIds={onlineIds} meId={meId}
-              activeId={active?.id} onSelect={openConversation} onNewChat={() => setView('new')} loading={loading} />
-          )}
+        <div className="flex flex-1 min-h-0">
+          {/* LEFT — list / new chat (hidden on mobile once a thread is open) */}
+          <div className={`flex-col w-full lg:w-[330px] lg:flex-shrink-0 ${active ? 'hidden lg:flex' : 'flex'}`}
+            style={{ borderRight: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+            {view === 'new'
+              ? <NewChatPicker onClose={() => setView('list')} onCreated={onCreated} />
+              : <ConversationList conversations={conversations} onlineIds={onlineIds} meId={meId}
+                  activeId={active?.id} onSelect={openConversation} onNewChat={onNewChat} loading={loading} />}
+          </div>
+
+          {/* RIGHT — open thread (or empty state on large screens) */}
+          <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
+            {active
+              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} />
+              : (
+                <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>
+                    <MessagesSquare size={28} className="text-white" />
+                  </div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Select a conversation</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Pick a chat on the left, or start a new one to message anyone across the company.</p>
+                </div>
+              )}
+          </div>
         </div>
       </aside>
     </>

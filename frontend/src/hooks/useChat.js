@@ -29,6 +29,18 @@ const dedupe = (list) => {
   return [...seen.values()].sort(sortByTime);
 };
 
+// True when two message arrays are visually identical — lets us keep the SAME
+// array reference after a poll so React doesn't repaint (the "flicker").
+const sameMessages = (a, b) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x.id !== y.id || x.body !== y.body || x.deleted !== y.deleted || x.edited !== y.edited
+      || x.pending !== y.pending || (x.reactions?.length || 0) !== (y.reactions?.length || 0)) return false;
+  }
+  return true;
+};
+
 // Apply a reaction toggle to a message list immutably.
 const applyReaction = (list, { message_id, emoji, user_id, reacted }) =>
   list.map(m => {
@@ -60,6 +72,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const fetchingRef = useRef(false);
   const oldestRef = useRef(null);
   const typingRef = useRef(new Map());
+  const messagesRef = useRef([]); useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Volatile values accessed inside the long-lived effect via refs.
   const tokenRef = useRef(token);   useEffect(() => { tokenRef.current = token; }, [token]);
@@ -96,7 +109,8 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
         const merged = dedupe([...prev, ...fetched]);
         oldestRef.current = merged.length ? merged[0].created_at : null;
         if (!prev.length) setHasMore(!!res.data.has_more);
-        return merged;
+        // Keep the same reference when nothing changed → no needless repaint.
+        return sameMessages(prev, merged) ? prev : merged;
       });
       backoffRef.current = 0;
     } catch (err) {
@@ -155,7 +169,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   // ── reactions (optimistic + persisted + broadcast for instant peers) ───────
   const addReaction = useCallback(async (messageId, emoji) => {
     if (String(messageId).startsWith('temp-')) return; // not saved yet
-    const msg = messages.find(m => m.id === messageId);
+    const msg = messagesRef.current.find(m => m.id === messageId);
     const had = !!msg?.reactions?.find(r => r.emoji === emoji)?.user_ids.includes(meId);
     const next = !had;
     setMessages(prev => applyReaction(prev, { message_id: messageId, emoji, user_id: meId, reacted: next }));
@@ -166,7 +180,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     } catch {
       setMessages(prev => applyReaction(prev, { message_id: messageId, emoji, user_id: meId, reacted: had })); // revert
     }
-  }, [messages, meId]);
+  }, [meId]);
 
   const sendTyping = useCallback(() => {
     channelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: meId, name: nameOf(meId) } });
