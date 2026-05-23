@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle, MessagesSquare } from 'lucide-react';
 import client from '../../api/client';
 import { usePresence } from '../../hooks/usePresence';
@@ -48,12 +49,14 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
 
   if (!open) return null;
 
-  return (
+  // Portal to <body> so the panel escapes the header's stacking context
+  // (AdminHeader's backdrop-filter would otherwise trap it behind the page).
+  return createPortal(
     <>
       {/* Dim backdrop on all sizes (fixes the see-through look) */}
-      <div className="fixed inset-0 z-[65]" style={{ backgroundColor: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(2px)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-[2147483646]" style={{ backgroundColor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(2px)' }} onClick={onClose} />
 
-      <aside className="fixed top-0 right-0 z-[70] h-full flex flex-col w-full lg:w-[920px] animate-slide-in-right"
+      <aside className="fixed top-0 right-0 z-[2147483647] h-full flex flex-col w-full lg:w-[920px] animate-slide-in-right"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
         {/* Title bar */}
         <div className="flex items-center justify-between px-4 h-14 flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -94,7 +97,8 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           </div>
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 };
 
