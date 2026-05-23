@@ -4,7 +4,10 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const {
   getReference, buildIndex, resolveRow, classifyChunk, insertApproved,
+  findDuplicateTransferGroups, mergeDuplicateTransfers,
 } = require('../utils/uploadService');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = express.Router();
 
@@ -88,6 +91,28 @@ router.post('/confirm', asyncHandler(async (req, res) => {
 
   const result = await insertApproved(valid, batch, req.user.id);
   res.json(result);
+}));
+
+// GET /uploads/duplicate-transfers — groups of same company+fronter+phone (>1)
+router.get('/duplicate-transfers', asyncHandler(async (req, res) => {
+  res.json({ groups: await findDuplicateTransferGroups() });
+}));
+
+// POST /uploads/merge-duplicates — reassign children to a keeper, delete the rest
+// Body: { merges: [{ keep_id, remove_ids: [uuid] }] }
+router.post('/merge-duplicates', asyncHandler(async (req, res) => {
+  const merges = Array.isArray(req.body?.merges) ? req.body.merges : [];
+  if (!merges.length) return res.status(400).json({ error: 'No merges provided.' });
+
+  for (const m of merges) {
+    if (!m || !UUID_RE.test(m.keep_id || '')) return res.status(400).json({ error: 'Each merge needs a valid keep_id.' });
+    if (!Array.isArray(m.remove_ids) || !m.remove_ids.every(id => UUID_RE.test(id || ''))) {
+      return res.status(400).json({ error: 'remove_ids must be valid transfer IDs.' });
+    }
+    if (m.remove_ids.includes(m.keep_id)) return res.status(400).json({ error: 'keep_id cannot also be in remove_ids.' });
+  }
+
+  res.json(await mergeDuplicateTransfers(merges));
 }));
 
 // GET /uploads/batches — list upload batches (for the delete UI)

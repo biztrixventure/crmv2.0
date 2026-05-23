@@ -235,6 +235,18 @@ export function useBulkUpload() {
     setError(''); setProgress(null); setResults(emptyResults); setDecisions({}); setSummary(null);
   }, []);
 
+  const [duplicates, setDuplicates] = useState([]);
+  const loadDuplicates = useCallback(async () => {
+    try { const r = await client.get('uploads/duplicate-transfers'); setDuplicates(r.data.groups || []); }
+    catch (e) { toast.error(apiErr(e, 'Could not load duplicate transfers.')); }
+  }, []);
+  const mergeDuplicates = useCallback(async (merges) => {
+    const { data } = await client.post('uploads/merge-duplicates', { merges });
+    await loadDuplicates();
+    loadBatches();
+    return data;
+  }, [loadDuplicates, loadBatches]);
+
   const deleteBatch = useCallback(async (id) => {
     await client.delete(`uploads/batches/${id}`); loadBatches();
   }, [loadBatches]);
@@ -244,8 +256,8 @@ export function useBulkUpload() {
 
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, batches,
-    formFields, fields, phoneKey,
+    formFields, fields, phoneKey, duplicates,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleConflict, setAllConflicts,
-    confirmInsert, reset, deleteBatch, deleteAllBatches, setStep,
+    confirmInsert, reset, deleteBatch, deleteAllBatches, setStep, loadDuplicates, mergeDuplicates,
   };
 }

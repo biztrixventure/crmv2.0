@@ -269,4 +269,99 @@ async function insertApproved(rows, batchMeta, uploaderId) {
   return { batch_id: batch.id, inserted, skipped: dupKeys.size };
 }
 
-module.exports = { getReference, buildIndex, resolveRow, classifyChunk, insertApproved, normPhone, normName };
+// ============================================================================
+// DUPLICATE TRANSFER MERGE (intelligent cleanup)
+// ----------------------------------------------------------------------------
+// Same company + fronter + phone transferred more than once is almost always
+// the SAME lead entered twice. These inflate dashboards and create upload
+// ambiguity. We surface each group with full detail + a recommended keeper, and
+// merge by REASSIGNING all child rows (sales, reviews, dispositions, …) to the
+// keeper BEFORE deleting the duplicates — so nothing linked is lost (sales have
+// ON DELETE CASCADE, so deleting without reassigning would destroy them).
+// ============================================================================
+const TRANSFER_PHONE_KEYS = ['customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone', 'cli_number'];
+const fdPhone = (fd) => { if (!fd) return ''; for (const k of TRANSFER_PHONE_KEYS) if (fd[k]) return fd[k]; return ''; };
+
+async function findDuplicateTransferGroups() {
+  let all = [], from = 0;
+  for (;;) {
+    const { data, error } = await supabaseAdmin
+      .from('transfers').select('id, company_id, created_by, status, created_at, form_data').range(from, from + 999);
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) break;
+    all = all.concat(data);
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+
+  const groups = new Map();
+  all.forEach(t => {
+    const n = normPhone(fdPhone(t.form_data || {}));
+    if (!n) return;
+    const k = `${t.company_id}|${t.created_by}|${n}`;
+    (groups.get(k) || groups.set(k, []).get(k)).push(t);
+  });
+  const dup = [...groups.entries()].filter(([, a]) => a.length > 1);
+  if (!dup.length) return [];
+
+  // sale counts per duplicate transfer (so we keep the "worked" one + show it)
+  const allIds = dup.flatMap(([, a]) => a.map(t => t.id));
+  const salesCount = {};
+  for (let i = 0; i < allIds.length; i += 300) {
+    const { data } = await supabaseAdmin.from('sales').select('transfer_id').in('transfer_id', allIds.slice(i, i + 300));
+    (data || []).forEach(s => { salesCount[s.transfer_id] = (salesCount[s.transfer_id] || 0) + 1; });
+  }
+
+  const coIds = [...new Set(dup.map(([k]) => k.split('|')[0]))];
+  const frIds = [...new Set(dup.map(([k]) => k.split('|')[1]))];
+  const [{ data: cos }, { data: profs }] = await Promise.all([
+    supabaseAdmin.from('companies').select('id, name').in('id', coIds),
+    supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', frIds),
+  ]);
+  const coName = {}; (cos || []).forEach(c => { coName[c.id] = c.name; });
+  const frName = {}; (profs || []).forEach(p => { frName[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
+  const fd = (t) => t.form_data || {};
+
+  return dup.map(([k, arr]) => {
+    const [cid, uid, phone] = k.split('|');
+    const transfers = arr.map(t => ({
+      id: t.id, created_at: t.created_at, status: t.status,
+      customer: `${fd(t).FirstName || fd(t).customer_name || ''} ${fd(t).LastName || ''}`.trim() || '—',
+      car: `${fd(t).CarYear || fd(t).car_year || ''} ${fd(t).CarMake || fd(t).car_make || ''} ${fd(t).CarModel || fd(t).car_model || ''}`.trim() || '—',
+      sales_count: salesCount[t.id] || 0,
+    })).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+    // Recommend keeping the one with the most linked sales, then the earliest.
+    const recommended = [...transfers].sort((a, b) => b.sales_count - a.sales_count || (a.created_at < b.created_at ? -1 : 1))[0];
+    return { key: k, company_id: cid, company_name: coName[cid] || cid, fronter_name: frName[uid] || '—', phone, transfers, recommended_keep_id: recommended.id };
+  }).sort((a, b) => b.transfers.length - a.transfers.length);
+}
+
+async function mergeDuplicateTransfers(merges) {
+  // Reassign in order; number_lists is SET NULL (safe) but we move it for
+  // continuity. Each table is best-effort (a table may not exist on every env).
+  const childTables = ['sales', 'call_reviews', 'call_dispositions', 'disposition_actions', 'number_lists'];
+  let groupsMerged = 0, transfersRemoved = 0, salesReassigned = 0;
+
+  for (const m of (merges || [])) {
+    const keep = m?.keep_id;
+    const remove = [...new Set((m?.remove_ids || []).filter(id => id && id !== keep))];
+    if (!keep || !remove.length) continue;
+
+    for (const tbl of childTables) {
+      try {
+        const { data } = await supabaseAdmin.from(tbl).update({ transfer_id: keep }).in('transfer_id', remove).select('id');
+        if (tbl === 'sales') salesReassigned += (data || []).length;
+      } catch { /* table absent on this env — skip */ }
+    }
+    const { error } = await supabaseAdmin.from('transfers').delete().in('id', remove);
+    if (error) throw new Error(error.message);
+    groupsMerged++;
+    transfersRemoved += remove.length;
+  }
+  return { groups_merged: groupsMerged, transfers_removed: transfersRemoved, sales_reassigned: salesReassigned };
+}
+
+module.exports = {
+  getReference, buildIndex, resolveRow, classifyChunk, insertApproved, normPhone, normName,
+  findDuplicateTransferGroups, mergeDuplicateTransfers,
+};

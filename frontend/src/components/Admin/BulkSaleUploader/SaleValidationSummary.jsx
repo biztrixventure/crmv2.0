@@ -25,6 +25,7 @@ const Collapsible = ({ icon: Icon, color, title, rows }) => {
             <div key={i} className="text-xs py-1 px-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
               <strong style={{ color: 'var(--color-text)' }}>{r.cli_number || r.customer_phone || '—'}</strong> · {r.fronter_name || '—'} · {r.company_name || '—'}
               {r.reason && <span style={{ color: 'var(--color-error-600)' }}> — {r.reason}</span>}
+              {!r.reason && r.match_note && <span style={{ color: '#7c3aed' }}> — {r.match_note}</span>}
             </div>
           ))}
         </div>
@@ -55,6 +56,7 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
         </div>
       )}
 
+      <Collapsible icon={AlertTriangle} color="#7c3aed" title="Auto-matched — please review (fronter/duplicate/new-car)" rows={newSales.filter(r => r.match_note)} />
       <Collapsible icon={XCircle} color="var(--color-error-600)" title="True duplicates (auto-skipped)" rows={skipped} />
       <Collapsible icon={AlertTriangle} color="#d97706" title="Ambiguous (multiple transfers/sales match)" rows={ambiguous} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Unmatched (no transfer found)" rows={unmatched} />

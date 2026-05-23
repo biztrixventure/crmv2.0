@@ -8,6 +8,7 @@ import ColumnMapper from './ColumnMapper';
 import ValidationSummary from './ValidationSummary';
 import UploadProgress from './UploadProgress';
 import BatchManager from './BatchManager';
+import DuplicateTransferManager from './DuplicateTransferManager';
 
 const BulkUploader = () => {
   const u = useBulkUpload();
@@ -66,6 +67,9 @@ const BulkUploader = () => {
           </Button>
         </div>
       )}
+
+      {/* Duplicate-transfer cleanup (intelligent merge with full control) */}
+      <DuplicateTransferManager duplicates={u.duplicates} loadDuplicates={u.loadDuplicates} mergeDuplicates={u.mergeDuplicates} />
 
       {/* Batch management / test cleanup (always available) */}
       <BatchManager batches={u.batches} loadBatches={u.loadBatches}

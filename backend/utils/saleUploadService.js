@@ -152,23 +152,63 @@ function resolveRow(row, index) {
   return { ok: true, company_id: co.id, company_name: co.name, fronter_user_id: fr[0].user_id, closer_user_id };
 }
 
-// Pick the specific existing sale (multi-car aware): reference_no → car_vin →
-// year+make+model → single → ambiguous.
+// Loose year|make|model key for comparing a sale row to a transfer/sale.
+const ymmKey = (y, mk, md) => [y, mk, md].map(v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
+const upper  = (v) => String(v || '').trim().toUpperCase();
+const transferVin = (t) => upper(t.form_data?.VIN || t.form_data?.car_vin);
+const transferYmm = (t) => ymmKey(t.form_data?.CarYear ?? t.form_data?.car_year, t.form_data?.CarMake ?? t.form_data?.car_make, t.form_data?.CarModel ?? t.form_data?.car_model);
+
+// Duplicate transfers for the same phone are almost always the SAME lead entered
+// twice, so which one a sale attaches to rarely changes the deal — but we still
+// pick deterministically (and prefer a transfer with no sale yet so a real 2nd
+// car lands on its own transfer). Score, then break ties by earliest created_at
+// → id so the same transfer always wins on a re-run.
+function pickBestTransfer(row, candidates, salesByTransfer) {
+  const saleVin  = upper(row.car_vin);
+  const saleYmm  = ymmKey(row.car_year, row.car_make, row.car_model);
+  const hasYmm   = !!saleYmm.replace(/\|/g, '');
+  const saleDate = row.sale_date ? String(row.sale_date).slice(0, 10) : null;
+
+  const scored = candidates.map(t => {
+    let score = 0; const reasons = [];
+    if (saleVin && transferVin(t) && saleVin === transferVin(t)) { score += 100; reasons.push('VIN'); }
+    if (hasYmm && transferYmm(t) === saleYmm)                    { score += 40;  reasons.push('car'); }
+    const hasSale = (salesByTransfer.get(t.id) || []).length > 0;
+    if (!hasSale) score += 25;
+    const created = (t.created_at || '').slice(0, 10);
+    if (saleDate && created && created <= saleDate) score += 15;
+    return { t, score, reasons, created, hasSale };
+  });
+  scored.sort((a, b) =>
+    b.score - a.score ||
+    (a.created < b.created ? -1 : a.created > b.created ? 1 : 0) ||
+    (a.t.id < b.t.id ? -1 : 1));
+  const best = scored[0];
+  const why = best.reasons.length ? best.reasons.join('+') : (best.hasSale ? 'earliest' : 'earliest unused');
+  return { transfer: best.t, why };
+}
+
+// Pick which existing sale on the chosen transfer this row updates (multi-car
+// aware): reference_no → car_vin → year+make+model. If the row carries a
+// distinguishing key but matches none of them, it's a DIFFERENT car → add as a
+// new sale. Only when there's no key at all AND several sales exist is it a true
+// ambiguity that needs a human.
 function pickExistingSale(row, sales) {
   if (!sales || sales.length === 0) return { match: null };
+
+  const ref = upper(row.reference_no);
+  const vin = upper(row.car_vin);
+  const ymm = ymmKey(row.car_year, row.car_make, row.car_model);
+  const hasYmm = !!ymm.replace(/\|/g, '');
+
+  if (ref) { const m = sales.find(s => upper(s.reference_no) === ref); if (m) return { match: m }; }
+  if (vin) { const m = sales.find(s => upper(s.car_vin) === vin); if (m) return { match: m }; }
+  if (hasYmm) { const m = sales.find(s => ymmKey(s.car_year, s.car_make, s.car_model) === ymm); if (m) return { match: m }; }
+
+  // Has a distinguishing key but nothing matched → it's another car → new sale.
+  if (ref || vin || hasYmm) return { match: null, newCar: sales.length };
+  // No key to tell them apart: safe only when there's a single sale to update.
   if (sales.length === 1) return { match: sales[0] };
-
-  const ref = String(row.reference_no || '').trim().toUpperCase();
-  if (ref) { const m = sales.find(s => String(s.reference_no || '').trim().toUpperCase() === ref); if (m) return { match: m }; }
-
-  const vin = String(row.car_vin || '').trim().toUpperCase();
-  if (vin) { const m = sales.find(s => String(s.car_vin || '').trim().toUpperCase() === vin); if (m) return { match: m }; }
-
-  const ymm = [row.car_year, row.car_make, row.car_model].map(v => String(v || '').trim().toLowerCase()).join('|');
-  if (ymm.replace(/\|/g, '')) {
-    const m = sales.find(s => [s.car_year, s.car_make, s.car_model].map(v => String(v || '').trim().toLowerCase()).join('|') === ymm);
-    if (m) return { match: m };
-  }
   return { ambiguous: true };
 }
 
@@ -242,26 +282,33 @@ async function classifyChunk(rows) {
     const base = { ...r, company_id: r._r.company_id, fronter_user_id: r._r.fronter_user_id, closer_user_id: r._r.closer_user_id };
     const mismatch = r._mismatch;
     delete base._r; delete base._xfers; delete base._mismatch;
-    if (mismatch) base.match_note = `Matched by phone in ${r.company_name}; the transfer's fronter differs from "${r.fronter_name}".`;
-
     if (!r._xfers || r._xfers.length === 0) {
       unmatched.push({ ...base, reason: `No transfer on file for ${r.cli_number || 'this phone'} in ${r.company_name}. Upload the transfer first, or check the phone / company / fronter spelling.` });
       continue;
     }
-    if (r._xfers.length > 1) {
-      ambiguous.push({ ...base, reason: mismatch
-        ? `Phone exists on ${r._xfers.length} transfers in ${r.company_name} under different fronters — pick the right one manually.`
-        : `${r._xfers.length} transfers match ${r.fronter_name} + this phone — resolve manually.` });
-      continue;
-    }
 
-    const transfer = r._xfers[0];
+    // 1+ candidate transfers: auto-pick the best one (duplicates are the same
+    // lead). Note how it was chosen so the review screen stays transparent.
+    let transfer = r._xfers[0];
+    const notes = [];
+    if (mismatch) notes.push(`Matched by phone in ${r.company_name}; transfer's fronter differs from "${r.fronter_name}".`);
+    if (r._xfers.length > 1) {
+      const best = pickBestTransfer(r, r._xfers, salesByTransfer);
+      transfer = best.transfer;
+      notes.push(`Auto-picked 1 of ${r._xfers.length} duplicate transfers for this phone (by ${best.why}) — review before confirming.`);
+    }
+    if (notes.length) base.match_note = notes.join(' ');
+
     const existing = salesByTransfer.get(transfer.id) || [];
     const pick = pickExistingSale(r, existing);
 
-    if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales already exist on this transfer — add a Reference No or VIN so the right one can be updated.` }); continue; }
+    if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales already exist on this transfer and the row has no Reference No / VIN / car to tell them apart — add one so the right sale is updated.` }); continue; }
 
-    if (!pick.match) { newSales.push({ ...base, transfer_id: transfer.id }); continue; }
+    if (!pick.match) {
+      if (pick.newCar) base.match_note = [base.match_note, `Added as a new car (${pick.newCar} other sale(s) already on this transfer).`].filter(Boolean).join(' ');
+      newSales.push({ ...base, transfer_id: transfer.id });
+      continue;
+    }
 
     const changes = diffSale(r, pick.match);
     if (changes.length === 0) {
