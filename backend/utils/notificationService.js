@@ -432,8 +432,71 @@ async function onDispositionSubmitted({ action, transfer, config, submitterId, s
   }
 }
 
+// Fronter-side managers (NOT compliance) — they own duplicate-handling visibility.
+const FRONTER_MGR_LEVELS = ['company_admin', 'operations_manager', 'fronter_manager', 'manager'];
+
+/**
+ * Manager-dashboard alert when a fronter hits the duplicate-transfer rules.
+ * Grouped per manager + fronter + day + kind via dedup_key (ignoreDuplicates),
+ * so a fronter spamming the same case in a day yields one alert. Scoped to the
+ * fronter's own company (managers never see other companies). Fire-and-forget.
+ *   kind: 'refresh' (Case A) | 'reengage' (Case B) | 'sale_overlap'
+ */
+async function onFronterDuplicateEvent({ kind, companyId, fronterId, phone, priorTransferId }) {
+  try {
+    if (!companyId || !fronterId) return;
+
+    // Fronter display name
+    const { data: fp } = await supabaseAdmin
+      .from('user_profiles').select('first_name, last_name').eq('user_id', fronterId).maybeSingle();
+    const fronterName = `${fp?.first_name || ''} ${fp?.last_name || ''}`.trim() || 'A fronter';
+
+    // Prior transfer context (closer + disposition) for the re-engage/sale messages
+    let priorBits = '';
+    if (priorTransferId && kind !== 'refresh') {
+      const { data: pt } = await supabaseAdmin
+        .from('transfers').select('created_at, assigned_closer_id').eq('id', priorTransferId).maybeSingle();
+      let closer = 'not yet assigned';
+      if (pt?.assigned_closer_id) {
+        const { data: cp } = await supabaseAdmin
+          .from('user_profiles').select('first_name, last_name').eq('user_id', pt.assigned_closer_id).maybeSingle();
+        closer = `${cp?.first_name || ''} ${cp?.last_name || ''}`.trim() || 'a closer';
+      }
+      const { data: disp } = await supabaseAdmin
+        .from('disposition_actions').select('disposition_name').eq('transfer_id', priorTransferId)
+        .order('created_at', { ascending: false }).limit(1);
+      const disposition = disp?.[0]?.disposition_name || 'no disposition';
+      const dateStr = pt?.created_at ? new Date(pt.created_at).toLocaleDateString() : 'an earlier date';
+      priorBits = ` (previously: ${dateStr}, ${closer}, ${disposition})`;
+    }
+
+    const COPY = {
+      refresh:      { type: 'transfer_refresh',  title: 'Transfer refreshed',          message: `${fronterName} refreshed an existing transfer for ${phone}.` },
+      reengage:     { type: 'transfer_reengaged', title: 'Old lead re-engaged',         message: `${fronterName} created a new transfer for ${phone}, last contacted over 30 days ago${priorBits}.` },
+      sale_overlap: { type: 'transfer_sale_overlap', title: 'New transfer despite a sale', message: `${fronterName} created a new transfer for ${phone} though a completed sale already exists${priorBits}.` },
+    }[kind];
+    if (!COPY) return;
+
+    const managerIds = await getUserIdsByLevel(companyId, FRONTER_MGR_LEVELS);
+    const targets = managerIds.filter(id => id !== fronterId);
+    if (!targets.length) return;
+
+    const day = new Date().toISOString().slice(0, 10);
+    const rows = targets.map(uid => ({
+      user_id: uid, company_id: companyId, type: COPY.type, title: COPY.title, message: COPY.message,
+      data: { phone, kind, fronter_id: fronterId },
+      is_read: false,
+      dedup_key: `dup_${kind}_${fronterId}_${day}_${uid}`,   // one per manager/fronter/day/kind
+    }));
+    await supabaseAdmin.from('notifications').upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true });
+  } catch (err) {
+    logger.warn('NOTIF', `Duplicate-event alert failed: ${err.message}`);
+  }
+}
+
 module.exports = {
   onTransferCreated,
+  onFronterDuplicateEvent,
   onTransferRejected,
   onTransferEdited,
   onSaleSubmittedForReview,

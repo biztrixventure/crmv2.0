@@ -19,6 +19,21 @@ const phoneFromFD = (fd) => { if (!fd) return ''; for (const k of PHONE_KEYS) if
 // A "completed" sale (the deal closed) — used to decide insert-vs-update.
 const COMPLETED_SALE = ['closed_won', 'sold'];
 
+// Resolve a transfer's closer name + latest disposition for duplicate alerts.
+// Falls back to friendly text so the message never shows a blank.
+async function priorContext(t) {
+  let closerName = 'not yet assigned';
+  if (t.assigned_closer_id) {
+    const { data: cp } = await supabaseAdmin
+      .from('user_profiles').select('first_name, last_name').eq('user_id', t.assigned_closer_id).maybeSingle();
+    closerName = `${cp?.first_name || ''} ${cp?.last_name || ''}`.trim() || 'a closer';
+  }
+  const { data: disp } = await supabaseAdmin
+    .from('disposition_actions').select('disposition_name').eq('transfer_id', t.id)
+    .order('created_at', { ascending: false }).limit(1);
+  return { closerName, disposition: disp?.[0]?.disposition_name || 'no disposition' };
+}
+
 // Client sort key -> real column / json path. Name columns sort by underlying id.
 const TRANSFER_SORT = {
   customer:   'form_data->>customer_name',
@@ -415,13 +430,15 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
   const norm      = normPhone(req.query.phone);
   if (!companyId || norm.length < 7) return res.json({ result: 'clean' });
 
+  // Most recent matching transfer decides the case (Case A vs B). created_at is
+  // selected in the same indexed lookup — no extra round trip for the date.
   const { data: tfs } = await supabaseAdmin
     .from('transfers')
-    .select('id, form_data, status, created_at, updated_at')
+    .select('id, form_data, status, created_at, assigned_closer_id')
     .eq('company_id', companyId)
     .eq('created_by', userId)
     .eq('normalized_phone', norm)
-    .order('updated_at', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (!tfs?.length) return res.json({ result: 'clean' });
 
@@ -434,7 +451,7 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: false })
     .limit(1);
 
-  // Check 2/3: sale rule wins → warn, a NEW transfer will be created on submit.
+  // Sale rule wins (regardless of Case A/B) → warn, a NEW transfer is created.
   if (sale?.length) {
     return res.json({
       result: 'sale',
@@ -443,12 +460,25 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
     });
   }
 
-  // Check 1: existing transfer (most recent) → load + update in place on submit.
+  // Resolve prior closer + disposition for the alert (only on a match).
   const t = tfs[0];
+  const { closerName, disposition } = await priorContext(t);
+  const dateStr = new Date(t.created_at).toLocaleDateString();
+  // 30-day window, server time (UTC instants): <= 30 days = Case A (refresh).
+  const withinWindow = (Date.now() - new Date(t.created_at).getTime()) / 86400000 <= 30;
+
+  const base = { id: t.id, form_data: t.form_data, status: t.status, date: t.created_at, closer_name: closerName, disposition };
+  if (withinWindow) {
+    return res.json({
+      result: 'refresh',
+      transfer: base,
+      message: `You already transferred this number on ${dateStr} to closer ${closerName} with disposition ${disposition}. The previous information has been loaded — please review and update. This will refresh the existing transfer.`,
+    });
+  }
   return res.json({
-    result: 'transfer',
-    transfer: { id: t.id, form_data: t.form_data, status: t.status, date: t.created_at },
-    message: `You already created a transfer for this number on ${new Date(t.created_at).toLocaleDateString()} with status "${t.status}". The previous information has been loaded — please review and update.`,
+    result: 'reengage',
+    transfer: base,
+    message: `This number was previously transferred on ${dateStr} (more than 30 days ago) to closer ${closerName} with disposition ${disposition}. Since it's been over 30 days, a new transfer will be created. Previous details are loaded for your reference — edit as needed.`,
   });
 }));
 
@@ -485,34 +515,44 @@ router.post('/', [
   // Authoritative duplicate resolution (final check at write time — prevents a
   // race between the debounced input check and submit). STRICTLY this fronter's
   // own records (company_id + created_by + normalized_phone).
-  let transfer, action = 'created';
+  let transfer, action = 'created', managerEvent = null, priorId = null;
   if (norm) {
     const { data: tfs } = await supabaseAdmin
-      .from('transfers').select('id')
+      .from('transfers').select('id, created_at')
       .eq('company_id', companyId).eq('created_by', userId).eq('normalized_phone', norm)
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (tfs?.length) {
+      priorId = tfs[0].id;
       const { data: completed } = await supabaseAdmin
         .from('sales').select('id').in('transfer_id', tfs.map(t => t.id)).in('status', COMPLETED_SALE).limit(1);
 
       if (completed?.length) {
-        // Check 2/3: completed sale → INSERT a brand-new transfer (don't touch the sale-linked one).
+        // Sale rule wins (any case) → INSERT a new transfer; never touch the sale-linked one.
         const r = await supabaseAdmin.from('transfers').insert(newRow).select().single();
         if (r.error) return res.status(500).json({ error: r.error.message });
-        transfer = r.data; action = 'created_sale_warning';
+        transfer = r.data; action = 'created_sale_warning'; managerEvent = 'sale_overlap';
       } else {
-        // Check 1: UPDATE the most recent existing transfer in place (no new row).
-        const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString() };
-        if (hasCloser) {
-          updates.assigned_closer_id = assigned_closer_id;
-          updates.assigned_to        = assigned_closer_id;
-          updates.status             = 'assigned';
-          updates.rejected_by = null; updates.rejection_reason = null; updates.rejected_at = null;
+        // 30-day window, server time (UTC instants): <= 30 days = Case A.
+        const withinWindow = (Date.now() - new Date(tfs[0].created_at).getTime()) / 86400000 <= 30;
+        if (withinWindow) {
+          // Case A: UPDATE the most recent transfer in place — no new row, no count.
+          const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString() };
+          if (hasCloser) {
+            updates.assigned_closer_id = assigned_closer_id;
+            updates.assigned_to        = assigned_closer_id;
+            updates.status             = 'assigned';
+            updates.rejected_by = null; updates.rejection_reason = null; updates.rejected_at = null;
+          }
+          const r = await supabaseAdmin.from('transfers').update(updates).eq('id', tfs[0].id).select().single();
+          if (r.error) return res.status(500).json({ error: r.error.message });
+          transfer = r.data; action = 'updated'; managerEvent = 'refresh';
+        } else {
+          // Case B (>30 days): brand-new transfer (counts); prior record untouched.
+          const r = await supabaseAdmin.from('transfers').insert(newRow).select().single();
+          if (r.error) return res.status(500).json({ error: r.error.message });
+          transfer = r.data; action = 'created_reengaged'; managerEvent = 'reengage';
         }
-        const r = await supabaseAdmin.from('transfers').update(updates).eq('id', tfs[0].id).select().single();
-        if (r.error) return res.status(500).json({ error: r.error.message });
-        transfer = r.data; action = 'updated';
       }
     }
   }
@@ -527,6 +567,11 @@ router.post('/', [
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
     const fronterName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'A fronter';
     notifications.onTransferCreated({ transfer, fronterName, closerUserId: assigned_closer_id }).catch(() => {});
+  }
+
+  // Manager-dashboard alert (async, non-blocking) for duplicate-handling events.
+  if (managerEvent) {
+    notifications.onFronterDuplicateEvent({ kind: managerEvent, companyId, fronterId: userId, phone: norm, priorTransferId: priorId }).catch(() => {});
   }
 
   res.status(201).json({ transfer, action });

@@ -217,8 +217,9 @@ const StaffShell = () => {
         const { data } = await client.get('transfers/duplicate-check', { params: { phone: phoneValue } });
         if (data.result === 'clean') { setDupCheck(null); return; }
         setDupCheck(data);
-        // Check 1: auto-load the previous transfer's fields once (sale match never prefills).
-        if (data.result === 'transfer' && data.transfer && lastPrefilledId.current !== data.transfer.id) {
+        // Auto-load the previous transfer's fields once, for both refresh (Case A)
+        // and re-engage (Case B). A completed-sale match never prefills.
+        if ((data.result === 'refresh' || data.result === 'reengage') && data.transfer && lastPrefilledId.current !== data.transfer.id) {
           lastPrefilledId.current = data.transfer.id;
           setFormData(prev => ({ ...prev, ...(data.transfer.form_data || {}) }));
         }
@@ -419,7 +420,8 @@ const StaffShell = () => {
       const res = await createTransfer({ ...formData });
       const action = res?.action;
       toast.success(
-        action === 'updated' ? 'Existing transfer updated — closers now see it as the latest activity.'
+        action === 'updated' ? 'Existing transfer refreshed — no new transfer counted.'
+          : action === 'created_reengaged' ? 'New transfer created — this number was last contacted over 30 days ago.'
           : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
           : 'Transfer created.');
       setShowCreateForm(false);
@@ -1067,18 +1069,30 @@ const StaffShell = () => {
                       </div>
 
                       {/* Fronter-scoped duplicate alert / sale warning (dismissible, non-blocking) */}
-                      {dupCheck && (
-                        <div className="mb-4 flex items-start gap-2.5 px-3.5 py-3 rounded-xl"
-                          style={{
-                            backgroundColor: dupCheck.result === 'sale' ? '#fffbeb' : 'var(--color-primary-50, #eef2ff)',
-                            border: `1px solid ${dupCheck.result === 'sale' ? '#fcd34d' : 'var(--color-primary-300, #c7d2fe)'}`,
-                          }}>
-                          <AlertTriangle size={16} style={{ color: dupCheck.result === 'sale' ? '#d97706' : 'var(--color-primary-600)', flexShrink: 0, marginTop: 1 }} />
-                          <p className="text-xs flex-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{dupCheck.message}</p>
-                          <button type="button" onClick={() => setDupCheck(null)} aria-label="Dismiss"
-                            className="text-lg leading-none px-1 rounded hover:bg-black/5" style={{ color: 'var(--color-text-tertiary)' }}>×</button>
-                        </div>
-                      )}
+                      {dupCheck && (() => {
+                        const warn = dupCheck.result !== 'refresh'; // sale + re-engage draw attention (amber); refresh = soft indigo
+                        const accent = warn ? '#d97706' : 'var(--color-primary-600)';
+                        const prev = dupCheck.transfer;
+                        return (
+                          <div className="mb-4 flex items-start gap-2.5 px-3.5 py-3 rounded-xl"
+                            style={{
+                              backgroundColor: warn ? '#fffbeb' : 'var(--color-primary-50, #eef2ff)',
+                              border: `1px solid ${warn ? '#fcd34d' : 'var(--color-primary-300, #c7d2fe)'}`,
+                            }}>
+                            <AlertTriangle size={16} style={{ color: accent, flexShrink: 0, marginTop: 1 }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{dupCheck.message}</p>
+                              {prev && (
+                                <p className="text-[11px] mt-1 font-semibold" style={{ color: accent }}>
+                                  Previous: {prev.date ? new Date(prev.date).toLocaleDateString() : '—'} · {prev.closer_name || 'not yet assigned'} · {prev.disposition || 'no disposition'}
+                                </p>
+                              )}
+                            </div>
+                            <button type="button" onClick={() => setDupCheck(null)} aria-label="Dismiss"
+                              className="text-lg leading-none px-1 rounded hover:bg-black/5" style={{ color: 'var(--color-text-tertiary)' }}>×</button>
+                          </div>
+                        );
+                      })()}
 
                       <div className="grid grid-cols-1 sm:grid-cols-5 items-start gap-x-4 gap-y-5">
                         {fields.filter(f => f.show_to_fronter !== false).sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => {
