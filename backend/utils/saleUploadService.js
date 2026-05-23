@@ -1,6 +1,18 @@
 const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
-const { normPhone, normName } = require('./uploadService');
+const { normPhone, normName, getReference: getXferReference, buildIndex: buildXferIndex, resolveRow: resolveXferRow } = require('./uploadService');
+
+// Compact view of a transfer for the review screen (which one was matched +
+// the alternatives when the phone had duplicates).
+const summarizeTransfer = (t, salesByTransfer) => {
+  const fd = t.form_data || {};
+  return {
+    id: t.id, created_at: t.created_at, status: t.status,
+    customer: `${fd.FirstName || fd.customer_name || ''} ${fd.LastName || ''}`.trim() || '—',
+    car: `${fd.CarYear || fd.car_year || ''} ${fd.CarMake || fd.car_make || ''} ${fd.CarModel || fd.car_model || ''}`.trim() || '—',
+    sales_count: (salesByTransfer.get(t.id) || []).length,
+  };
+};
 
 // Generate a reference number like the manual flow (sales.js generateReferenceNo).
 function generateReferenceNo() {
@@ -62,7 +74,7 @@ async function fetchTransfersForCompanies(companyIds) {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabaseAdmin
-      .from('transfers').select('id, company_id, created_by, form_data')
+      .from('transfers').select('id, company_id, created_by, created_at, status, form_data')
       .in('company_id', companyIds).range(from, from + 999);
     if (error) throw new Error(error.message);
     if (!data || !data.length) break;
@@ -299,6 +311,12 @@ async function classifyChunk(rows) {
     }
     if (notes.length) base.match_note = notes.join(' ');
 
+    // Expose what was matched + the alternatives so the review screen can show
+    // (and let the user change) the auto-pick.
+    base.chosen_transfer_id = transfer.id;
+    base.matched_transfer = summarizeTransfer(transfer, salesByTransfer);
+    if (r._xfers.length > 1) base.candidate_transfers = r._xfers.map(t => summarizeTransfer(t, salesByTransfer));
+
     const existing = salesByTransfer.get(transfer.id) || [];
     const pick = pickExistingSale(r, existing);
 
@@ -442,4 +460,31 @@ async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, 
   return { batch_id: batch.id, inserted, updated };
 }
 
-module.exports = { getReference, classifyChunk, confirmUpload, SALE_STATUSES };
+// ============================================================================
+// Create a transfer inline from an unmatched sale row, so the sale can attach
+// without leaving the upload page. The sale's form_data already uses the same
+// FormBuilder keys a fronter transfer uses (FirstName/Phone/CarYear/…), so we
+// reuse it directly and just guarantee the phone keys for matching.
+// ============================================================================
+async function createTransferFromRow(row) {
+  if (!row || typeof row !== 'object') return { ok: false, reason: 'Invalid row.' };
+  const index = buildXferIndex(await getXferReference());
+  const r = resolveXferRow(row, index); // company + fronter only (no closer needed)
+  if (!r.ok) return { ok: false, reason: r.reason };
+
+  const cli = String(row.cli_number || row.customer_phone || '').trim();
+  if (!normPhone(cli)) return { ok: false, reason: 'This row has no usable phone number to key the transfer on.' };
+
+  const fd = { ...(row.form_data || {}) };
+  if (!fd.Phone) fd.Phone = cli;
+  fd.cli_number = normPhone(cli);
+
+  const { data, error } = await supabaseAdmin
+    .from('transfers')
+    .insert({ company_id: r.company_id, created_by: r.fronter_user_id, assigned_to: null, assigned_closer_id: null, status: 'pending', form_data: fd })
+    .select('id, company_id, created_by, created_at, status, form_data').single();
+  if (error) return { ok: false, reason: error.message };
+  return { ok: true, transfer: data };
+}
+
+module.exports = { getReference, classifyChunk, confirmUpload, createTransferFromRow, SALE_STATUSES };

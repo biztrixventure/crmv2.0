@@ -2,7 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
-const { getReference, classifyChunk, confirmUpload } = require('../utils/saleUploadService');
+const { getReference, classifyChunk, confirmUpload, createTransferFromRow } = require('../utils/saleUploadService');
 
 const router = express.Router();
 
@@ -54,6 +54,16 @@ router.post('/confirm', asyncHandler(async (req, res) => {
   if (!newRows.length && !updateRows.length) return res.status(400).json({ error: 'Nothing to insert or update.' });
   const batchMeta = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
   res.json(await confirmUpload({ newRows, updateRows, batchMeta }, req.user.id));
+}));
+
+// POST /sale-uploads/create-transfer — create the missing transfer for an
+// unmatched sale row, inline, so it can match without leaving the page.
+router.post('/create-transfer', asyncHandler(async (req, res) => {
+  const row = req.body?.row;
+  if (!row || typeof row !== 'object') return res.status(400).json({ error: 'A sale row is required.' });
+  const result = await createTransferFromRow(row);
+  if (!result.ok) return res.status(400).json({ error: result.reason });
+  res.status(201).json({ transfer: result.transfer });
 }));
 
 // GET /sale-uploads/batches — list sale batches

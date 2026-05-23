@@ -136,6 +136,40 @@ export function useBulkSaleUpload() {
   const toggleUpdate  = useCallback((i) => setDecisions(d => ({ ...d, [i]: !d[i] })), []);
   const setAllUpdates = useCallback((val) => setDecisions(() => { const d = {}; results.updates.forEach((_, i) => { d[i] = val; }); return d; }), [results.updates]);
 
+  // Change which transfer an auto-matched NEW sale attaches to (from candidates).
+  const setNewSaleTransfer = useCallback((idx, transferId) => {
+    setResults(prev => {
+      const newSales = [...prev.newSales];
+      const row = { ...newSales[idx], transfer_id: transferId, chosen_transfer_id: transferId };
+      const cand = (row.candidate_transfers || []).find(c => c.id === transferId);
+      if (cand) row.matched_transfer = cand;
+      newSales[idx] = row;
+      return { ...prev, newSales };
+    });
+  }, []);
+
+  // Create the missing transfer for an unmatched row, then re-validate just that
+  // row and move it into the right bucket — all without leaving the page.
+  const createTransferForRow = useCallback(async (idx) => {
+    const row = results.unmatched[idx];
+    if (!row) return;
+    try {
+      await client.post('sale-uploads/create-transfer', { row });
+      const { data } = await client.post('sale-uploads/validate-chunk', { rows: [row] });
+      setResults(prev => {
+        const next = { ...prev, unmatched: prev.unmatched.filter((_, i) => i !== idx) };
+        ['newSales', 'updates', 'skipped', 'ambiguous'].forEach(k => { next[k] = [...prev[k], ...(data[k] || [])]; });
+        next.unmatched = [...next.unmatched, ...(data.unmatched || [])];
+        return next;
+      });
+      const moved = (data.newSales?.length || 0) + (data.updates?.length || 0);
+      if (moved) toast.success('Transfer created — sale now matches.');
+      else toast.warning('Transfer created, but the sale still did not match. Check the phone/fronter.');
+    } catch (e) {
+      toast.error(apiErr(e, 'Could not create the transfer.'));
+    }
+  }, [results.unmatched]);
+
   const confirmInsert = useCallback(async () => {
     setError('');
     const newRows = results.newSales;
@@ -185,5 +219,6 @@ export function useBulkSaleUpload() {
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, formFields, fields, phoneKey, batches,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, confirmInsert, reset, deleteBatch, setStep,
+    setNewSaleTransfer, createTransferForRow,
   };
 }
