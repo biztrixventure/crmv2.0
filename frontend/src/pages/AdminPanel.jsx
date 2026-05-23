@@ -20,6 +20,7 @@ import BulkUploadHub from "../components/Admin/BulkUploader/BulkUploadHub";
 import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsManager";
 import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
+import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
 // ============================================================================
@@ -57,6 +58,7 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                   ? [{ id: "announcements", label: "Announcements" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "marquee",       label: "Marquee"       }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "spiff",         label: "SPIFF"         }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "chat",          label: "Chat Control"  }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 
@@ -99,6 +101,7 @@ const AdminPanel = () => {
               {activeTab === "announcements" && <AnnouncementsManager />}
               {activeTab === "marquee"       && <MarqueeManager />}
               {activeTab === "spiff"         && <SpiffManager />}
+              {activeTab === "chat"          && <ChatAdmin />}
               {activeTab === "features"    && <FeatureFlagsManager />}
               <DevCredit />
             </div>

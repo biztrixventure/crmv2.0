@@ -37,6 +37,9 @@ const saleUploadsRoutes         = require('./routes/saleUploads');
 const announcementsRoutes       = require('./routes/announcements');
 const marqueeRoutes             = require('./routes/marquee');
 const spiffRoutes               = require('./routes/spiff');
+const chatRoutes                = require('./routes/chat');
+const chatAdminRoutes           = require('./routes/chatAdmin');
+const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
@@ -204,6 +207,10 @@ app.use('/api/sale-uploads',       authMiddleware, saleUploadsRoutes);
 app.use('/api/announcements',      authMiddleware, announcementsRoutes);
 app.use('/api/marquee',            authMiddleware, marqueeRoutes);
 app.use('/api/spiff',              authMiddleware, spiffRoutes);
+// Chat — admin routes mounted first (superadmin-gated, no feature gate so
+// moderation always works); user routes behind the per-company 'chat' flag.
+app.use('/api/chat/admin',         authMiddleware, chatAdminRoutes);
+app.use('/api/chat',               authMiddleware, requireFeature('chat'), chatRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

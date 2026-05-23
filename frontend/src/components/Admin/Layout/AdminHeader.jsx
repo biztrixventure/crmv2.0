@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
+import ChatLauncher from '../../Chat/ChatLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
 
 const AdminHeader = ({
@@ -65,6 +66,7 @@ const AdminHeader = ({
 
         {/* Right */}
         <div className="flex items-center gap-2">
+          <ChatLauncher />
           <NotificationBell
             notifications={notifications}
             unreadCount={unreadCount}

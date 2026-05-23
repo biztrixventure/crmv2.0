@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -32,6 +32,7 @@ const NAV_SECTIONS = [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'marquee',       label: 'Marquee',       icon: Radio },
       { id: 'spiff',         label: 'SPIFF',         icon: Trophy },
+      { id: 'chat',          label: 'Chat Control',  icon: MessagesSquare },
     ],
   },
   {

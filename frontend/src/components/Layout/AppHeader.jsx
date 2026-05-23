@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Moon, Sun, LogOut, ChevronDown } from 'lucide-react';
 import NotificationBell from '../UI/NotificationBell';
+import ChatLauncher from '../Chat/ChatLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 
@@ -134,8 +135,11 @@ const AppHeader = ({
             </div>
           )}
 
-          {/* Right: Notifications + Theme + User + Logout */}
+          {/* Right: Chat + Notifications + Theme + User + Logout */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Chat — self-gated by the 'chat' feature flag */}
+            <ChatLauncher />
+
             {/* Notification bell — receives push state for setup prompt */}
             <NotificationBell
               notifications={notifications}
