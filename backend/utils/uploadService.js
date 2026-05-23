@@ -148,17 +148,29 @@ async function classifyChunk(resolvedRows) {
   }
 
   if (rawSet.size) {
-    // (b) manual transfers — match raw phone on the two common keys.
-    const raws = [...rawSet];
-    const { data: byPhone } = await supabaseAdmin
-      .from('transfers')
-      .select('id, company_id, created_by, form_data, created_at')
-      .or(`form_data->>customer_phone.in.(${raws.join(',')}),form_data->>Phone.in.(${raws.join(',')})`);
-    (byPhone || []).forEach(addExisting);
+    // (b) manual transfers store the number raw under customer_phone / Phone.
+    // Quote each value so spaces/punctuation can't break the PostgREST filter,
+    // and drop characters that can't be safely quoted. Best-effort: the
+    // cli_number path above already covers re-imported bulk rows reliably, so a
+    // filter hiccup here must never abort the whole validation.
+    const quoted = [...rawSet]
+      .map(s => String(s).replace(/["\\(),]/g, '').trim())
+      .filter(Boolean)
+      .map(s => `"${s}"`);
+    if (quoted.length) {
+      try {
+        const { data: byPhone } = await supabaseAdmin
+          .from('transfers')
+          .select('id, company_id, created_by, form_data, created_at')
+          .or(`form_data->>customer_phone.in.(${quoted.join(',')}),form_data->>Phone.in.(${quoted.join(',')})`);
+        (byPhone || []).forEach(addExisting);
+      } catch { /* manual-phone dedup is best-effort; ignore malformed-filter errors */ }
+    }
   }
 
   // Classify every resolved row.
   for (const row of resolvedRows) {
+    if (!row || typeof row !== 'object') continue;
     const n = normPhone(row.cli_number);
     const matches = (n && existingByPhone.get(n)) || [];
 

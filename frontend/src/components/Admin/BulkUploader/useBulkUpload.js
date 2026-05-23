@@ -1,7 +1,16 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
 import client from '../../../api/client';
-import { parseFile, isAcceptedFile } from './fileParser';
+import { parseFile, isAcceptedFile, MAX_FILE_BYTES, headerWarnings } from './fileParser';
 import { applyMapping, autoMap, buildFields, detectPhoneKey, normPhone } from './columnMapping';
+
+// Turn an axios/network error into a short, actionable sentence.
+const apiErr = (e, fallback) =>
+  e?.response?.data?.error
+  || (e?.code === 'ERR_NETWORK' ? 'Network error — check your connection and retry.'
+    : e?.response?.status >= 500 ? 'The server had a problem. Wait a moment and retry.'
+    : e?.message)
+  || fallback;
 
 const CHUNK = 100;
 const MAX_ROWS = 2000;
@@ -48,13 +57,22 @@ export function useBulkUpload() {
   const onFile = useCallback(async (file) => {
     setError('');
     if (!file) return;
-    if (!isAcceptedFile(file)) { setError('Unsupported file. Use CSV or Excel (.xlsx).'); return; }
+    if (!isAcceptedFile(file)) { setError('Unsupported file type. Use a .csv or .xlsx file exported from your spreadsheet.'); return; }
+    if (file.size > MAX_FILE_BYTES) { setError(`This file is ${(file.size / 1048576).toFixed(1)} MB — the limit is 10 MB. Split it into smaller files.`); return; }
     setBusy(true);
     try {
-      const { headers: hdrs, rows } = await parseFile(file);
-      if (!hdrs.length) { setError('Could not read any columns from this file.'); return; }
-      if (rows.length === 0) { setError('The file has no data rows.'); return; }
-      if (rows.length > MAX_ROWS) { setError(`Too many rows (${rows.length}). Max is ${MAX_ROWS}.`); return; }
+      let parsed;
+      try { parsed = await parseFile(file); }
+      catch { setError('Could not read this file. It may be corrupt or not a real CSV/Excel file. Re-export it and try again.'); return; }
+      const { headers: hdrs, rows } = parsed;
+      if (!hdrs.length) { setError('No columns were found. Make sure the first row contains column headers.'); return; }
+      if (rows.length === 0) { setError('The file has headers but no data rows.'); return; }
+      if (rows.length > MAX_ROWS) { setError(`Too many rows (${rows.length}). The limit is ${MAX_ROWS} — split the file and upload in parts.`); return; }
+
+      // Warn (don't block) on blank/duplicate headers — they confuse mapping.
+      const { blank, dups } = headerWarnings(hdrs);
+      if (blank.length) toast.warning(`${blank.length} column(s) have no header (shown as "__EMPTY"). Map the right columns, or leave them unmapped.`);
+      if (dups.length) toast.warning(`Duplicate column name(s): ${dups.slice(0, 3).join(', ')}. Only one will be used per field.`);
 
       setFileName(file.name);
       setHeaders(hdrs);
@@ -116,14 +134,22 @@ export function useBulkUpload() {
     // DB validation in chunks of 100.
     const agg = { clean: [], trueDuplicates: [...skipExact], conflicts: [...inFileConflicts], unmatched: [] };
     const total = toSend.length;
+    let failed = 0;
     setProgress({ phase: 'validate', done: 0, total });
     for (let i = 0; i < total; i += CHUNK) {
       const chunk = toSend.slice(i, i + CHUNK);
-      const { data } = await client.post('uploads/validate-chunk', { rows: chunk });
-      agg.clean.push(...(data.clean || []));
-      agg.trueDuplicates.push(...(data.trueDuplicates || []));
-      agg.conflicts.push(...(data.conflicts || []));
-      agg.unmatched.push(...(data.unmatched || []));
+      try {
+        const { data } = await client.post('uploads/validate-chunk', { rows: chunk });
+        agg.clean.push(...(data.clean || []));
+        agg.trueDuplicates.push(...(data.trueDuplicates || []));
+        agg.conflicts.push(...(data.conflicts || []));
+        agg.unmatched.push(...(data.unmatched || []));
+      } catch (e) {
+        // One failed chunk must not lose the rest — list its rows as needing a
+        // re-check rather than silently dropping them.
+        failed += chunk.length;
+        agg.unmatched.push(...chunk.map(r => ({ ...r, reason: apiErr(e, 'Could not be validated (server/network error). Re-run to re-check this row.') })));
+      }
       setProgress({ phase: 'validate', done: Math.min(i + CHUNK, total), total });
     }
     agg.invalid = invalid;
@@ -132,6 +158,8 @@ export function useBulkUpload() {
     // Conflicts default to excluded (safer): user opts in.
     setDecisions({});
     setStep('review');
+    if (failed) toast.error(`${failed} row(s) couldn't be validated and are listed under unmatched — re-run to re-check them.`);
+    else if (invalid.length) toast.warning(`${invalid.length} row(s) are missing required fields — see the review screen.`);
   }, [phoneKey, fields]);
 
   // Step 2 → 3: save the mapping globally, then validate all rows.
@@ -162,12 +190,12 @@ export function useBulkUpload() {
     if (!rows.length) { setError('No records selected to insert.'); return; }
 
     setBusy(true);
-    let inserted = 0, skipped = 0;
+    let inserted = 0, skipped = 0, errMsg = '', stopped = false;
     const total = rows.length;
     setProgress({ phase: 'confirm', done: 0, total });
-    try {
-      for (let i = 0; i < total; i += CHUNK) {
-        const chunk = rows.slice(i, i + CHUNK);
+    for (let i = 0; i < total; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      try {
         const { data } = await client.post('uploads/confirm', {
           rows: chunk,
           batch: {
@@ -180,13 +208,26 @@ export function useBulkUpload() {
         inserted += data.inserted || 0;
         skipped  += data.skipped  || 0;
         setProgress({ phase: 'confirm', done: Math.min(i + CHUNK, total), total });
+      } catch (e) {
+        errMsg = apiErr(e, 'Insert failed.');
+        stopped = true;
+        break;
       }
-      setSummary({ inserted, skipped });
-      setStep('done');
-      loadBatches();
-    } catch (e) {
-      setError(e.response?.data?.error || e.message || 'Insert failed.');
-    } finally { setProgress(null); setBusy(false); }
+    }
+    setProgress(null);
+    setBusy(false);
+    if (stopped) {
+      // Partial insert: tell the user exactly where it stopped. Re-running is
+      // safe — already-inserted rows are skipped as duplicates.
+      setError(`Inserted ${inserted} of ${total} before stopping: ${errMsg} You can safely re-run — already-inserted records are skipped as duplicates.`);
+      toast.error('Upload stopped partway — see the message above.');
+      if (inserted) loadBatches();
+      return;
+    }
+    setSummary({ inserted, skipped });
+    setStep('done');
+    loadBatches();
+    toast.success(`Upload complete — ${inserted} transfer(s) inserted${skipped ? `, ${skipped} duplicate(s) skipped` : ''}.`);
   }, [results, decisions, fileName, loadBatches]);
 
   const reset = useCallback(() => {

@@ -22,8 +22,23 @@ export async function parseFile(file) {
 }
 
 export const ACCEPTED_EXT = ['.csv', '.xlsx', '.xls'];
+// Guard against a browser-hanging parse of an oversized workbook.
+export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export function isAcceptedFile(file) {
   const name = (file?.name || '').toLowerCase();
   return ACCEPTED_EXT.some(ext => name.endsWith(ext));
+}
+
+// Flag headers that will confuse mapping: blank cells (XLSX names them
+// "__EMPTY", "__EMPTY_1", …) and case-insensitive duplicates.
+export function headerWarnings(headers = []) {
+  const blank = headers.filter(h => !String(h).trim() || /^__EMPTY/i.test(String(h)));
+  const seen = new Set(), dups = new Set();
+  headers.forEach(h => {
+    const k = String(h).trim().toLowerCase();
+    if (!k) return;
+    if (seen.has(k)) dups.add(h); else seen.add(k);
+  });
+  return { blank, dups: [...dups] };
 }

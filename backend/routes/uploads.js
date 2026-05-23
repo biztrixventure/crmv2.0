@@ -46,8 +46,12 @@ router.post('/mapping', asyncHandler(async (req, res) => {
 // Body: { rows: [{ cli_number, fronter_name, company_name, transfer_date, status, created_at, custom_fields }] }
 // Returns: { clean, trueDuplicates, conflicts, unmatched }
 router.post('/validate-chunk', asyncHandler(async (req, res) => {
-  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  if (rows.length > 100) return res.status(400).json({ error: 'Max 100 rows per chunk' });
+  if (req.body?.rows !== undefined && !Array.isArray(req.body.rows)) {
+    return res.status(400).json({ error: '"rows" must be an array of records.' });
+  }
+  const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object');
+  if (rows.length > 100) return res.status(400).json({ error: 'Too many rows in one chunk (max 100). Reduce the chunk size and retry.' });
+  if (!rows.length) return res.json({ clean: [], trueDuplicates: [], conflicts: [], unmatched: [] });
 
   const index = buildIndex(await getReference());
 
@@ -66,9 +70,12 @@ router.post('/validate-chunk', asyncHandler(async (req, res) => {
 // POST /uploads/confirm — insert approved rows (clean + user-included conflicts)
 // Body: { rows: [...resolved rows], batch: { file_name, total_rows, skipped_count, conflict_count } }
 router.post('/confirm', asyncHandler(async (req, res) => {
-  const rows  = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  const batch = req.body?.batch || {};
-  if (!rows.length) return res.status(400).json({ error: 'No rows to insert' });
+  if (req.body?.rows !== undefined && !Array.isArray(req.body.rows)) {
+    return res.status(400).json({ error: '"rows" must be an array of records.' });
+  }
+  const rows  = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object');
+  const batch = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
+  if (!rows.length) return res.status(400).json({ error: 'No valid rows to insert.' });
 
   // Trust-but-verify: every row must still resolve to a real fronter + company.
   const index = buildIndex(await getReference());

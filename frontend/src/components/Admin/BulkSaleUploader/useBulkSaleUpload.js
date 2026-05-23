@@ -1,7 +1,16 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
 import client from '../../../api/client';
-import { parseFile, isAcceptedFile } from '../BulkUploader/fileParser';
+import { parseFile, isAcceptedFile, MAX_FILE_BYTES, headerWarnings } from '../BulkUploader/fileParser';
 import { applyMapping, autoMap, buildFields, detectPhoneKey } from './saleColumnMapping';
+
+// Turn an axios/network error into a short, actionable sentence.
+const apiErr = (e, fallback) =>
+  e?.response?.data?.error
+  || (e?.code === 'ERR_NETWORK' ? 'Network error — check your connection and retry.'
+    : e?.response?.status >= 500 ? 'The server had a problem. Wait a moment and retry.'
+    : e?.message)
+  || fallback;
 
 const CHUNK = 100;
 const MAX_ROWS = 2000;
@@ -41,13 +50,20 @@ export function useBulkSaleUpload() {
   const onFile = useCallback(async (file) => {
     setError('');
     if (!file) return;
-    if (!isAcceptedFile(file)) { setError('Unsupported file. Use CSV or Excel (.xlsx).'); return; }
+    if (!isAcceptedFile(file)) { setError('Unsupported file type. Use a .csv or .xlsx file exported from your spreadsheet.'); return; }
+    if (file.size > MAX_FILE_BYTES) { setError(`This file is ${(file.size / 1048576).toFixed(1)} MB — the limit is 10 MB. Split it into smaller files.`); return; }
     setBusy(true);
     try {
-      const { headers: hdrs, rows } = await parseFile(file);
-      if (!hdrs.length) { setError('Could not read any columns.'); return; }
-      if (rows.length === 0) { setError('The file has no data rows.'); return; }
-      if (rows.length > MAX_ROWS) { setError(`Too many rows (${rows.length}). Max ${MAX_ROWS}.`); return; }
+      let parsed;
+      try { parsed = await parseFile(file); }
+      catch { setError('Could not read this file. It may be corrupt or not a real CSV/Excel file. Re-export it and try again.'); return; }
+      const { headers: hdrs, rows } = parsed;
+      if (!hdrs.length) { setError('No columns were found. Make sure the first row contains column headers.'); return; }
+      if (rows.length === 0) { setError('The file has headers but no data rows.'); return; }
+      if (rows.length > MAX_ROWS) { setError(`Too many rows (${rows.length}). The limit is ${MAX_ROWS} — split the file and upload in parts.`); return; }
+      const { blank, dups } = headerWarnings(hdrs);
+      if (blank.length) toast.warning(`${blank.length} column(s) have no header (shown as "__EMPTY"). Map the right columns, or leave them unmapped.`);
+      if (dups.length) toast.warning(`Duplicate column name(s): ${dups.slice(0, 3).join(', ')}. Only one will be used per field.`);
       setFileName(file.name); setHeaders(hdrs); setRawRows(rows);
 
       let saved = null;
@@ -78,20 +94,31 @@ export function useBulkSaleUpload() {
 
     const agg = { newSales: [], updates: [], skipped: [], unmatched: [], ambiguous: [], invalid };
     const total = toSend.length;
+    let failed = 0;
     setProgress({ phase: 'validate', done: 0, total });
     for (let i = 0; i < total; i += CHUNK) {
-      const { data } = await client.post('sale-uploads/validate-chunk', { rows: toSend.slice(i, i + CHUNK) });
-      agg.newSales.push(...(data.newSales || []));
-      agg.updates.push(...(data.updates || []));
-      agg.skipped.push(...(data.skipped || []));
-      agg.unmatched.push(...(data.unmatched || []));
-      agg.ambiguous.push(...(data.ambiguous || []));
+      const chunk = toSend.slice(i, i + CHUNK);
+      try {
+        const { data } = await client.post('sale-uploads/validate-chunk', { rows: chunk });
+        agg.newSales.push(...(data.newSales || []));
+        agg.updates.push(...(data.updates || []));
+        agg.skipped.push(...(data.skipped || []));
+        agg.unmatched.push(...(data.unmatched || []));
+        agg.ambiguous.push(...(data.ambiguous || []));
+      } catch (e) {
+        // Don't lose a chunk on a transient failure — list it as unmatched so
+        // the user can re-run instead of silently skipping those sales.
+        failed += chunk.length;
+        agg.unmatched.push(...chunk.map(r => ({ ...r, reason: apiErr(e, 'Could not be validated (server/network error). Re-run to re-check this row.') })));
+      }
       setProgress({ phase: 'validate', done: Math.min(i + CHUNK, total), total });
     }
     setProgress(null);
     setResults(agg);
     setDecisions({}); // updates default to excluded — superadmin opts in
     setStep('review');
+    if (failed) toast.error(`${failed} row(s) couldn't be validated and are listed under unmatched — re-run to re-check them.`);
+    else if (invalid.length) toast.warning(`${invalid.length} row(s) are missing required fields — see the review screen.`);
   }, [fields]);
 
   const confirmMapping = useCallback(async () => {
@@ -115,26 +142,37 @@ export function useBulkSaleUpload() {
     const updateRows = results.updates.filter((_, i) => decisions[i]);
     if (!newRows.length && !updateRows.length) { setError('Nothing selected to insert or update.'); return; }
     setBusy(true);
-    setProgress({ phase: 'confirm', done: 0, total: newRows.length + updateRows.length });
-    try {
-      // Inserts in chunks; updates sent together (already individually reviewed).
-      let inserted = 0, updated = 0, done = 0;
-      for (let i = 0; i < newRows.length; i += CHUNK) {
-        const slice = newRows.slice(i, i + CHUNK);
+    const total = newRows.length + updateRows.length;
+    setProgress({ phase: 'confirm', done: 0, total });
+    // Inserts in chunks; updates sent together (already individually reviewed).
+    let inserted = 0, updated = 0, done = 0, errMsg = '', stopped = false;
+    for (let i = 0; i < newRows.length; i += CHUNK) {
+      const slice = newRows.slice(i, i + CHUNK);
+      try {
         const { data } = await client.post('sale-uploads/confirm', { newRows: slice, updateRows: [], batch: { file_name: fileName } });
         inserted += data.inserted || 0; done += slice.length;
-        setProgress({ phase: 'confirm', done, total: newRows.length + updateRows.length });
-      }
-      if (updateRows.length) {
+        setProgress({ phase: 'confirm', done, total });
+      } catch (e) { errMsg = apiErr(e, 'Insert failed.'); stopped = true; break; }
+    }
+    if (!stopped && updateRows.length) {
+      try {
         const { data } = await client.post('sale-uploads/confirm', { newRows: [], updateRows, batch: { file_name: fileName } });
         updated += data.updated || 0; done += updateRows.length;
-        setProgress({ phase: 'confirm', done, total: newRows.length + updateRows.length });
-      }
-      setSummary({ inserted, updated });
-      setStep('done');
-      loadBatches();
-    } catch (e) { setError(e.response?.data?.error || e.message || 'Insert/update failed.'); }
-    finally { setProgress(null); setBusy(false); }
+        setProgress({ phase: 'confirm', done, total });
+      } catch (e) { errMsg = apiErr(e, 'Update failed.'); stopped = true; }
+    }
+    setProgress(null);
+    setBusy(false);
+    if (stopped) {
+      setError(`Saved ${inserted} new sale(s)${updated ? ` and ${updated} update(s)` : ''} of ${total} before stopping: ${errMsg} You can safely re-run — existing sales are detected and won't be duplicated.`);
+      toast.error('Upload stopped partway — see the message above.');
+      if (inserted || updated) loadBatches();
+      return;
+    }
+    setSummary({ inserted, updated });
+    setStep('done');
+    loadBatches();
+    toast.success(`Done — ${inserted} sale(s) created${updated ? `, ${updated} updated` : ''}.`);
   }, [results, decisions, fileName, loadBatches]);
 
   const reset = useCallback(() => {

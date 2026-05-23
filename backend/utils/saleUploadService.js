@@ -43,6 +43,35 @@ const DIFF_FIELDS = [
 
 const cmp = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
 
+// Phone can live under several form_data keys depending on the form config /
+// how a transfer was created (FormBuilder default "Phone", manual "customer_phone",
+// prior bulk inserts "cli_number"). Check them all so a key mismatch never hides
+// an existing transfer.
+const TRANSFER_PHONE_KEYS = ['customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone', 'cli_number'];
+const fdPhone = (fd) => {
+  if (!fd) return '';
+  for (const k of TRANSFER_PHONE_KEYS) if (fd[k]) return fd[k];
+  return '';
+};
+
+// Fetch every transfer for a set of companies, paginating past Supabase's
+// default 1000-row cap. Without this, busy companies silently lose transfers
+// beyond row 1000 and their sales are wrongly reported as "no transfer".
+async function fetchTransfersForCompanies(companyIds) {
+  if (!companyIds.length) return [];
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('transfers').select('id, company_id, created_by, form_data')
+      .in('company_id', companyIds).range(from, from + 999);
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) break;
+    all.push(...data);
+    if (data.length < 1000) break;
+  }
+  return all;
+}
+
 // ============================================================================
 // Reference — companies (+ their fronters) and closers, for name→id resolution.
 // Cached 30s (same rationale as the transfer uploader: many chunks per upload).
@@ -166,36 +195,40 @@ async function classifyChunk(rows) {
 
   const resolved = [], unmatched = [];
   for (const row of rows) {
+    if (!row || typeof row !== 'object') { unmatched.push({ reason: 'Empty or invalid row' }); continue; }
     const r = resolveRow(row, index);
     if (!r.ok) { unmatched.push({ ...row, reason: r.reason }); continue; }
     resolved.push({ ...row, _r: r });
   }
 
-  // ── Transfer match: company_id + fronter(created_by) + normalized phone ──────
+  // ── Transfer match ───────────────────────────────────────────────────────────
+  // Primary key: company + fronter(created_by) + normalized phone. Fallback:
+  // company + phone — so a transfer created by a DIFFERENT fronter than the sale
+  // file states is still matched (a common real case) instead of falsely reported
+  // "no transfer". Multiple company+phone hits stay ambiguous for manual review.
   const companyIds = [...new Set(resolved.map(r => r._r.company_id))];
-  const fronterIds = [...new Set(resolved.map(r => r._r.fronter_user_id))];
-  let xfers = [];
-  if (companyIds.length && fronterIds.length) {
-    const { data } = await supabaseAdmin
-      .from('transfers').select('id, company_id, created_by, form_data')
-      .in('company_id', companyIds).in('created_by', fronterIds);
-    xfers = data || [];
-  }
-  const xferKey = (cid, uid, phone) => `${cid}|${uid}|${normPhone(phone)}`;
-  const xferByKey = new Map();
+  const xfers = await fetchTransfersForCompanies(companyIds);
+
+  const keyCFP = (cid, uid, phone) => `${cid}|${uid}|${normPhone(phone)}`;
+  const keyCP  = (cid, phone) => `${cid}|${normPhone(phone)}`;
+  const byCFP = new Map();
+  const byCP  = new Map();
   xfers.forEach(t => {
-    const fd = t.form_data || {};
-    const ph = fd.customer_phone || fd.Phone || fd.phone || fd.cli_number;
-    const k = xferKey(t.company_id, t.created_by, ph);
-    (xferByKey.get(k) || xferByKey.set(k, []).get(k)).push(t);
+    const ph = fdPhone(t.form_data || {});
+    if (!normPhone(ph)) return;
+    const kf = keyCFP(t.company_id, t.created_by, ph);
+    const kp = keyCP(t.company_id, ph);
+    (byCFP.get(kf) || byCFP.set(kf, []).get(kf)).push(t);
+    (byCP.get(kp)  || byCP.set(kp, []).get(kp)).push(t);
   });
 
-  // Existing sales for all candidate transfers, grouped by transfer.
+  // Resolve candidate transfer(s) per row, recording whether the fronter matched.
   const matchedTransferIds = [];
   resolved.forEach(r => {
-    const m = xferByKey.get(xferKey(r._r.company_id, r._r.fronter_user_id, r.cli_number)) || [];
-    r._xfers = m;
-    m.forEach(t => matchedTransferIds.push(t.id));
+    const exact = byCFP.get(keyCFP(r._r.company_id, r._r.fronter_user_id, r.cli_number)) || [];
+    if (exact.length) { r._xfers = exact; r._mismatch = false; }
+    else { r._xfers = byCP.get(keyCP(r._r.company_id, r.cli_number)) || []; r._mismatch = r._xfers.length > 0; }
+    r._xfers.forEach(t => matchedTransferIds.push(t.id));
   });
   let salesByTransfer = new Map();
   if (matchedTransferIds.length) {
@@ -207,16 +240,26 @@ async function classifyChunk(rows) {
   const newSales = [], updates = [], skipped = [], ambiguous = [];
   for (const r of resolved) {
     const base = { ...r, company_id: r._r.company_id, fronter_user_id: r._r.fronter_user_id, closer_user_id: r._r.closer_user_id };
-    delete base._r; delete base._xfers;
+    const mismatch = r._mismatch;
+    delete base._r; delete base._xfers; delete base._mismatch;
+    if (mismatch) base.match_note = `Matched by phone in ${r.company_name}; the transfer's fronter differs from "${r.fronter_name}".`;
 
-    if (!r._xfers || r._xfers.length === 0) { unmatched.push({ ...base, reason: `No transfer for ${r.fronter_name} / ${r.company_name} / ${r.cli_number}` }); continue; }
-    if (r._xfers.length > 1) { ambiguous.push({ ...base, reason: `${r._xfers.length} transfers match — resolve manually` }); continue; }
+    if (!r._xfers || r._xfers.length === 0) {
+      unmatched.push({ ...base, reason: `No transfer on file for ${r.cli_number || 'this phone'} in ${r.company_name}. Upload the transfer first, or check the phone / company / fronter spelling.` });
+      continue;
+    }
+    if (r._xfers.length > 1) {
+      ambiguous.push({ ...base, reason: mismatch
+        ? `Phone exists on ${r._xfers.length} transfers in ${r.company_name} under different fronters — pick the right one manually.`
+        : `${r._xfers.length} transfers match ${r.fronter_name} + this phone — resolve manually.` });
+      continue;
+    }
 
     const transfer = r._xfers[0];
     const existing = salesByTransfer.get(transfer.id) || [];
     const pick = pickExistingSale(r, existing);
 
-    if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales on this transfer — can't tell which to update` }); continue; }
+    if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales already exist on this transfer — add a Reference No or VIN so the right one can be updated.` }); continue; }
 
     if (!pick.match) { newSales.push({ ...base, transfer_id: transfer.id }); continue; }
 

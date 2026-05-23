@@ -38,17 +38,22 @@ router.post('/mapping', asyncHandler(async (req, res) => {
 
 // POST /sale-uploads/validate-chunk — classify up to 100 rows
 router.post('/validate-chunk', asyncHandler(async (req, res) => {
-  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  if (rows.length > 100) return res.status(400).json({ error: 'Max 100 rows per chunk' });
+  if (req.body?.rows !== undefined && !Array.isArray(req.body.rows)) {
+    return res.status(400).json({ error: '"rows" must be an array of records.' });
+  }
+  const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object');
+  if (rows.length > 100) return res.status(400).json({ error: 'Too many rows in one chunk (max 100). Reduce the chunk size and retry.' });
+  if (!rows.length) return res.json({ newSales: [], updates: [], skipped: [], unmatched: [], ambiguous: [] });
   res.json(await classifyChunk(rows));
 }));
 
 // POST /sale-uploads/confirm — insert new sales + apply confirmed updates
 router.post('/confirm', asyncHandler(async (req, res) => {
-  const newRows    = Array.isArray(req.body?.newRows) ? req.body.newRows : [];
-  const updateRows = Array.isArray(req.body?.updateRows) ? req.body.updateRows : [];
-  if (!newRows.length && !updateRows.length) return res.status(400).json({ error: 'Nothing to insert or update' });
-  res.json(await confirmUpload({ newRows, updateRows, batchMeta: req.body?.batch || {} }, req.user.id));
+  const newRows    = (Array.isArray(req.body?.newRows) ? req.body.newRows : []).filter(r => r && typeof r === 'object');
+  const updateRows = (Array.isArray(req.body?.updateRows) ? req.body.updateRows : []).filter(r => r && typeof r === 'object');
+  if (!newRows.length && !updateRows.length) return res.status(400).json({ error: 'Nothing to insert or update.' });
+  const batchMeta = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
+  res.json(await confirmUpload({ newRows, updateRows, batchMeta }, req.user.id));
 }));
 
 // GET /sale-uploads/batches — list sale batches
