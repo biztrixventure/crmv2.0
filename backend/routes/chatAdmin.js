@@ -23,25 +23,54 @@ router.use(asyncHandler(async (req, res, next) => {
 
 const startOfTodayUtc = () => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.toISOString(); };
 
-// ── GET /overview — global stats ──────────────────────────────────────────────
+// ── GET /overview — global stats + leaderboards ───────────────────────────────
 router.get('/overview', asyncHandler(async (req, res) => {
   const todayStart = startOfTodayUtc();
-  const [convCount, msgToday, bannedCount, lockedCount, todaySenders] = await Promise.all([
+  const weekStart  = new Date(Date.now() - 7 * 86400000).toISOString();
+
+  const [convCount, dmCount, groupCount, bcastCount, msgTotal, msgToday, msg7d, bannedCount, lockedCount, todaySenders, week] = await Promise.all([
     supabaseAdmin.from('conversations').select('id', { count: 'exact', head: true }),
+    supabaseAdmin.from('conversations').select('id', { count: 'exact', head: true }).eq('type', 'dm'),
+    supabaseAdmin.from('conversations').select('id', { count: 'exact', head: true }).eq('type', 'group'),
+    supabaseAdmin.from('conversations').select('id', { count: 'exact', head: true }).eq('type', 'broadcast'),
+    supabaseAdmin.from('messages').select('id', { count: 'exact', head: true }).is('deleted_at', null),
     supabaseAdmin.from('messages').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('created_at', todayStart),
+    supabaseAdmin.from('messages').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('created_at', weekStart),
     supabaseAdmin.from('chat_user_settings').select('user_id', { count: 'exact', head: true }).eq('is_chat_banned', true),
     supabaseAdmin.from('conversations').select('id', { count: 'exact', head: true }).eq('is_locked', true),
-    supabaseAdmin.from('messages').select('sender_id').gte('created_at', todayStart).limit(5000),
+    supabaseAdmin.from('messages').select('sender_id').gte('created_at', todayStart).limit(8000),
+    supabaseAdmin.from('messages').select('sender_id, conversation_id').is('deleted_at', null).gte('created_at', weekStart).limit(12000),
   ]);
 
   const activeUsers = new Set((todaySenders.data || []).map(m => m.sender_id).filter(Boolean)).size;
 
+  // 7-day leaderboards
+  const senderTally = {}, roomTally = {};
+  (week.data || []).forEach(m => {
+    if (m.sender_id) senderTally[m.sender_id] = (senderTally[m.sender_id] || 0) + 1;
+    if (m.conversation_id) roomTally[m.conversation_id] = (roomTally[m.conversation_id] || 0) + 1;
+  });
+  const topSenderIds = Object.entries(senderTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topRoomIds   = Object.entries(roomTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const cards = await getUserCards(topSenderIds.map(([id]) => id));
+  let roomTitles = {};
+  if (topRoomIds.length) {
+    const { data: rooms } = await supabaseAdmin.from('conversations').select('id, title, type').in('id', topRoomIds.map(([id]) => id));
+    (rooms || []).forEach(r => { roomTitles[r.id] = r.title || (r.type === 'dm' ? 'Direct message' : r.type); });
+  }
+
   res.json({
     total_conversations: convCount.count || 0,
-    messages_today:      msgToday.count || 0,
-    active_users_today:  activeUsers,
-    banned_users:        bannedCount.count || 0,
-    locked_rooms:        lockedCount.count || 0,
+    dm_count: dmCount.count || 0, group_count: groupCount.count || 0, broadcast_count: bcastCount.count || 0,
+    total_messages: msgTotal.count || 0,
+    messages_today: msgToday.count || 0,
+    messages_7d: msg7d.count || 0,
+    active_users_today: activeUsers,
+    banned_users: bannedCount.count || 0,
+    locked_rooms: lockedCount.count || 0,
+    top_senders: topSenderIds.map(([id, count]) => ({ id, count, name: cards.get(id)?.name || 'User', role: cards.get(id)?.role || '', company: cards.get(id)?.company || '' })),
+    top_rooms: topRoomIds.map(([id, count]) => ({ id, count, title: roomTitles[id] || 'Conversation' })),
   });
 }));
 
@@ -51,6 +80,13 @@ router.get('/conversations', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
   const from  = (page - 1) * limit;
   const q     = (req.query.q || '').trim();
+  const type  = ['dm', 'group', 'broadcast'].includes(req.query.type) ? req.query.type : null;
+  const lockedOnly = req.query.locked === 'true';
+  const applyFilters = (query) => {
+    if (type) query = query.eq('type', type);
+    if (lockedOnly) query = query.eq('is_locked', true);
+    return query;
+  };
 
   let convs = [];
   if (q) {
@@ -68,12 +104,12 @@ router.get('/conversations', asyncHandler(async (req, res) => {
     }
     const idSet = new Set([...(titleRes.data || []).map(c => c.id), ...memberConvIds]);
     if (idSet.size) {
-      const { data } = await supabaseAdmin.from('conversations').select('*').in('id', [...idSet])
+      const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*').in('id', [...idSet]))
         .order('last_message_at', { ascending: false }).range(from, from + limit);
       convs = data || [];
     }
   } else {
-    const { data } = await supabaseAdmin.from('conversations').select('*')
+    const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*'))
       .order('last_message_at', { ascending: false }).range(from, from + limit);
     convs = data || [];
   }
@@ -135,6 +171,76 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   }));
 
   res.json({ messages, has_more: hasMore, next_cursor: page.length ? page[0].created_at : null });
+}));
+
+// ── GET /conversations/:id — room detail + members (roles, mute, read state) ──
+router.get('/conversations/:id', asyncHandler(async (req, res) => {
+  const { data: conv } = await supabaseAdmin.from('conversations').select('*').eq('id', req.params.id).maybeSingle();
+  if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+  const [{ data: members }, { count: messageCount }] = await Promise.all([
+    supabaseAdmin.from('conversation_members').select('user_id, member_role, is_muted, last_read_at, joined_at').eq('conversation_id', conv.id),
+    supabaseAdmin.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', conv.id),
+  ]);
+  const cards = await getUserCards((members || []).map(m => m.user_id));
+
+  res.json({
+    conversation: { ...conv, message_count: messageCount || 0 },
+    members: (members || []).map(m => ({ ...m, ...(cards.get(m.user_id) || { id: m.user_id, name: 'User' }) })),
+  });
+}));
+
+// ── PATCH /conversations/:id/members/:userId/mute — mute/unmute in a room ─────
+router.patch('/conversations/:id/members/:userId/mute', asyncHandler(async (req, res) => {
+  const next = typeof req.body.is_muted === 'boolean' ? req.body.is_muted : true;
+  const { data, error } = await supabaseAdmin.from('conversation_members')
+    .update({ is_muted: next }).eq('conversation_id', req.params.id).eq('user_id', req.params.userId).select('user_id').maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Member not found in this conversation' });
+
+  await logModeration({ actorId: req.user.id, action: next ? 'mute_member' : 'unmute_member', targetUserId: req.params.userId, targetConversationId: req.params.id });
+  res.json({ user_id: req.params.userId, is_muted: next });
+}));
+
+// ── DELETE /conversations/:id/members/:userId — remove a member from a room ───
+router.delete('/conversations/:id/members/:userId', asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('conversation_members')
+    .delete().eq('conversation_id', req.params.id).eq('user_id', req.params.userId);
+  if (error) return res.status(500).json({ error: error.message });
+
+  await logModeration({ actorId: req.user.id, action: 'remove_member', targetUserId: req.params.userId, targetConversationId: req.params.id });
+  res.json({ message: 'removed' });
+}));
+
+// ── GET /messages/search?q= — global message content search ───────────────────
+router.get('/messages/search', asyncHandler(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json({ results: [] });
+
+  const { data, error } = await supabaseAdmin.from('messages')
+    .select('id, conversation_id, sender_id, body, created_at')
+    .ilike('body', `%${q.replace(/[%,]/g, '')}%`)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false }).limit(50);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const rows = data || [];
+  const cards = await getUserCards(rows.map(m => m.sender_id));
+  const convIds = [...new Set(rows.map(m => m.conversation_id))];
+  let titles = {};
+  if (convIds.length) {
+    const { data: convs } = await supabaseAdmin.from('conversations').select('id, title, type').in('id', convIds);
+    (convs || []).forEach(c => { titles[c.id] = { title: c.title || (c.type === 'dm' ? 'Direct message' : c.type), type: c.type }; });
+  }
+
+  res.json({
+    results: rows.map(m => ({
+      id: m.id, conversation_id: m.conversation_id, body: m.body, created_at: m.created_at,
+      sender_name: cards.get(m.sender_id)?.name || 'User',
+      conversation_title: titles[m.conversation_id]?.title || 'Conversation',
+      conversation_type: titles[m.conversation_id]?.type || null,
+    })),
+  });
 }));
 
 // ── DELETE /messages/:id — remove any message ─────────────────────────────────

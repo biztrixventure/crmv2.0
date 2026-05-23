@@ -1,122 +1,232 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  MessageSquare, Activity, Users, Lock, Unlock, Trash2, Send, Shield,
-  Search, X, Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock,
+  MessageSquare, Activity, Users, Lock, Unlock, Trash2, Send, Shield, Search, X,
+  Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
+  UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
 import client from '../../../api/client';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+const fmtDay = (s) => s ? new Date(s).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 const Spinner = () => <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>;
+const typeColor = (t) => t === 'dm' ? 'info' : t === 'broadcast' ? 'warning' : 'primary';
+const convName = (c) => c.title || (c.members ? c.members.map(m => m.name).slice(0, 2).join(' ↔ ') : 'Conversation');
+
+const downloadText = (name, text) => {
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+};
 
 const TABS = [
-  { id: 'overview',     label: 'Overview',      icon: Activity },
-  { id: 'conversations', label: 'Conversations', icon: MessageSquare },
-  { id: 'users',        label: 'Users',         icon: Users },
-  { id: 'broadcast',    label: 'Broadcast',     icon: Megaphone },
-  { id: 'log',          label: 'Moderation Log', icon: ScrollText },
-  { id: 'companies',    label: 'Rollout',       icon: Building2 },
+  { id: 'overview',      label: 'Overview',       icon: Activity },
+  { id: 'conversations', label: 'Conversations',  icon: MessageSquare },
+  { id: 'search',        label: 'Message Search', icon: Search },
+  { id: 'users',         label: 'Users',          icon: Users },
+  { id: 'broadcast',     label: 'Broadcast',      icon: Megaphone },
+  { id: 'log',           label: 'Moderation Log', icon: ScrollText },
+  { id: 'companies',     label: 'Rollout',        icon: Building2 },
 ];
 
 // ── Overview ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, value, icon: Icon }) => (
-  <div className="rounded-2xl p-5 flex items-center gap-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-    <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}><Icon size={20} /></div>
-    <div>
-      <p className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>{value}</p>
-      <p className="text-xs uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
+const StatCard = ({ label, value, icon: Icon, accent }) => (
+  <div className="rounded-2xl p-4 relative overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white flex-shrink-0" style={{ background: accent || 'var(--gradient-sidebar)' }}><Icon size={18} /></div>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold leading-none" style={{ color: 'var(--color-text)' }}>{value}</p>
+        <p className="text-xs uppercase tracking-wide font-semibold mt-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
+      </div>
     </div>
   </div>
 );
 
-const OverviewTab = () => {
-  const [stats, setStats] = useState(null);
-  useEffect(() => { client.get('chat/admin/overview').then(r => setStats(r.data)).catch(() => setStats({})); }, []);
-  if (!stats) return <Spinner />;
+const OverviewTab = ({ onOpenConversation }) => {
+  const [s, setS] = useState(null);
+  const load = useCallback(() => client.get('chat/admin/overview').then(r => setS(r.data)).catch(() => setS({})), []);
+  useEffect(() => { load(); }, [load]);
+  if (!s) return <Spinner />;
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <StatCard label="Conversations" value={stats.total_conversations ?? 0} icon={MessageSquare} />
-      <StatCard label="Messages today" value={stats.messages_today ?? 0} icon={Send} />
-      <StatCard label="Active users today" value={stats.active_users_today ?? 0} icon={Users} />
-      <StatCard label="Banned users" value={stats.banned_users ?? 0} icon={Ban} />
-      <StatCard label="Locked rooms" value={stats.locked_rooms ?? 0} icon={Lock} />
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <StatCard label="Conversations" value={s.total_conversations ?? 0} icon={MessageSquare} />
+        <StatCard label="Total messages" value={s.total_messages ?? 0} icon={MessagesSquare} accent="linear-gradient(135deg,#6366f1,#8b5cf6)" />
+        <StatCard label="Messages today" value={s.messages_today ?? 0} icon={Send} accent="linear-gradient(135deg,#0ea5e9,#2563eb)" />
+        <StatCard label="Messages · 7d" value={s.messages_7d ?? 0} icon={TrendingUp} accent="linear-gradient(135deg,#10b981,#059669)" />
+        <StatCard label="Active today" value={s.active_users_today ?? 0} icon={Users} accent="linear-gradient(135deg,#f59e0b,#d97706)" />
+        <StatCard label="Banned users" value={s.banned_users ?? 0} icon={Ban} accent="linear-gradient(135deg,#ef4444,#b91c1c)" />
+        <StatCard label="Locked rooms" value={s.locked_rooms ?? 0} icon={Lock} accent="linear-gradient(135deg,#64748b,#475569)" />
+        <StatCard label="DM / Group / Bcast" value={`${s.dm_count || 0}/${s.group_count || 0}/${s.broadcast_count || 0}`} icon={Hash} accent="linear-gradient(135deg,#ec4899,#db2777)" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <h4 className="text-sm font-bold mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}><TrendingUp size={15} style={{ color: 'var(--color-primary-600)' }} /> Busiest rooms · 7 days</h4>
+          {(s.top_rooms || []).length === 0 ? <p className="text-xs py-3 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No activity</p> :
+            (s.top_rooms).map((r, i) => (
+              <button key={r.id} onClick={() => onOpenConversation(r.id)} className="w-full flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-bg-secondary text-left">
+                <span className="text-xs font-bold w-5" style={{ color: 'var(--color-text-tertiary)' }}>#{i + 1}</span>
+                <span className="flex-1 text-sm truncate" style={{ color: 'var(--color-text)' }}>{r.title}</span>
+                <Badge variant="primary" size="sm">{r.count} msgs</Badge>
+              </button>
+            ))}
+        </div>
+        <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <h4 className="text-sm font-bold mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}><Crown size={15} style={{ color: '#d97706' }} /> Most active people · 7 days</h4>
+          {(s.top_senders || []).length === 0 ? <p className="text-xs py-3 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No activity</p> :
+            (s.top_senders).map((u, i) => (
+              <div key={u.id} className="flex items-center gap-3 py-2 px-2">
+                <span className="text-xs font-bold w-5" style={{ color: 'var(--color-text-tertiary)' }}>#{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{u.name}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{[u.role, u.company].filter(Boolean).join(' · ')}</p>
+                </div>
+                <Badge variant="success" size="sm">{u.count} msgs</Badge>
+              </div>
+            ))}
+        </div>
+      </div>
     </div>
   );
 };
 
-// ── Conversation viewer (read any thread + moderate) ─────────────────────────
-const ConversationViewer = ({ conv, onClose, onChanged }) => {
+// ── Conversation viewer (read + moderate, with Members panel) ─────────────────
+const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
+  const [tab, setTab] = useState('messages');
+  const [detail, setDetail] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [locked, setLocked] = useState(conv.is_locked);
 
-  const load = useCallback(async () => {
+  const loadDetail = useCallback(async () => {
+    try { const r = await client.get(`chat/admin/conversations/${conversationId}`); setDetail(r.data); } catch { /* ignore */ }
+  }, [conversationId]);
+  const loadMessages = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get(`chat/admin/conversations/${conv.id}/messages`, { params: { limit: 100 } }); setMessages(r.data.messages || []); }
-    catch { /* ignore */ }
-    finally { setLoading(false); }
-  }, [conv.id]);
-  useEffect(() => { load(); }, [load]);
+    try { const r = await client.get(`chat/admin/conversations/${conversationId}/messages`, { params: { limit: 100 } }); setMessages(r.data.messages || []); }
+    catch { /* ignore */ } finally { setLoading(false); }
+  }, [conversationId]);
+  useEffect(() => { loadDetail(); loadMessages(); }, [loadDetail, loadMessages]);
 
-  const delMsg = async (id) => { if (!window.confirm('Delete this message for everyone?')) return; await client.delete(`chat/admin/messages/${id}`); load(); };
-  const toggleLock = async () => { const r = await client.patch(`chat/admin/conversations/${conv.id}/lock`, { is_locked: !locked }); setLocked(r.data.conversation.is_locked); onChanged?.(); };
-  const delRoom = async () => { if (!window.confirm('Delete this entire room and all its messages?')) return; await client.delete(`chat/admin/conversations/${conv.id}`); onChanged?.(); onClose(); };
+  const conv = detail?.conversation;
+  const members = detail?.members || [];
+  const title = conv ? (conv.title || members.map(m => m.name).slice(0, 2).join(' ↔ ') || 'Conversation') : 'Loading…';
+
+  const delMsg = async (id) => { if (!window.confirm('Delete this message for everyone?')) return; await client.delete(`chat/admin/messages/${id}`); toast.success('Message deleted'); loadMessages(); };
+  const toggleLock = async () => { const r = await client.patch(`chat/admin/conversations/${conversationId}/lock`, { is_locked: !conv.is_locked }); setDetail(d => ({ ...d, conversation: { ...d.conversation, is_locked: r.data.conversation.is_locked } })); toast.success(r.data.conversation.is_locked ? 'Room locked' : 'Room unlocked'); onChanged?.(); };
+  const delRoom = async () => { if (!window.confirm('Delete this entire room and all its messages?')) return; await client.delete(`chat/admin/conversations/${conversationId}`); toast.success('Room deleted'); onChanged?.(); onClose(); };
+  const muteMember = async (m) => { const r = await client.patch(`chat/admin/conversations/${conversationId}/members/${m.id}/mute`, { is_muted: !m.is_muted }); setDetail(d => ({ ...d, members: d.members.map(x => x.id === m.id ? { ...x, is_muted: r.data.is_muted } : x) })); toast.success(r.data.is_muted ? `Muted ${m.name}` : `Unmuted ${m.name}`); };
+  const removeMember = async (m) => { if (!window.confirm(`Remove ${m.name} from this conversation?`)) return; await client.delete(`chat/admin/conversations/${conversationId}/members/${m.id}`); setDetail(d => ({ ...d, members: d.members.filter(x => x.id !== m.id) })); toast.success(`Removed ${m.name}`); };
+  const exportTranscript = () => {
+    const head = `${title} — exported ${new Date().toLocaleString()}\n${'='.repeat(48)}\n\n`;
+    const body = messages.map(m => `[${fmt(m.created_at)}] ${m.sender_name}${m.deleted ? ' (deleted)' : ''}: ${m.body || ''}`).join('\n');
+    downloadText(`chat-${conversationId.slice(0, 8)}.txt`, head + body);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-2xl max-h-[85vh] rounded-2xl flex flex-col animate-scale-in" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
+      <div className="w-full max-w-2xl max-h-[88vh] rounded-2xl flex flex-col animate-scale-in" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
         <div className="flex items-center justify-between px-5 py-4 rounded-t-2xl" style={{ background: 'var(--gradient-sidebar)' }}>
           <div className="min-w-0">
-            <h3 className="font-bold text-white truncate">{conv.title || (conv.type === 'dm' ? conv.members?.map(m => m.name).join(' ↔ ') : 'Group')}</h3>
-            <p className="text-xs text-white/80">{conv.type} · {conv.members?.length || 0} members</p>
+            <h3 className="font-bold text-white truncate flex items-center gap-1.5">{conv?.is_locked && <Lock size={14} />}{title}</h3>
+            <p className="text-xs text-white/80">{conv ? `${conv.type} · ${members.length} members · ${conv.message_count} messages` : ''}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
         </div>
 
-        <div className="flex items-center gap-2 px-5 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <Button size="sm" variant="secondary" onClick={toggleLock} className="flex items-center gap-1.5">{locked ? <Unlock size={14} /> : <Lock size={14} />}{locked ? 'Unlock' : 'Lock'}</Button>
-          <Button size="sm" variant="danger" onClick={delRoom} className="flex items-center gap-1.5"><Trash2 size={14} /> Delete room</Button>
+        {/* toolbar */}
+        <div className="flex items-center gap-2 px-5 py-2.5 flex-wrap flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div className="flex gap-1 mr-auto">
+            {['messages', 'members'].map(t => (
+              <button key={t} onClick={() => setTab(t)} className="text-xs font-semibold px-3 py-1.5 rounded-lg capitalize"
+                style={{ background: tab === t ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)', color: tab === t ? 'white' : 'var(--color-text-secondary)' }}>
+                {t}{t === 'members' ? ` (${members.length})` : ''}
+              </button>
+            ))}
+          </div>
+          {conv && <>
+            <Button size="sm" variant="secondary" onClick={exportTranscript} className="flex items-center gap-1.5"><Download size={13} /> Export</Button>
+            <Button size="sm" variant="secondary" onClick={toggleLock} className="flex items-center gap-1.5">{conv.is_locked ? <Unlock size={13} /> : <Lock size={13} />}{conv.is_locked ? 'Unlock' : 'Lock'}</Button>
+            <Button size="sm" variant="danger" onClick={delRoom} className="flex items-center gap-1.5"><Trash2 size={13} /> Delete</Button>
+          </>}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2" style={{ backgroundColor: 'var(--color-bg)' }}>
-          {loading ? <Spinner /> : messages.length === 0 ? <p className="text-center text-sm py-8" style={{ color: 'var(--color-text-tertiary)' }}>No messages</p> : messages.map(m => (
-            <div key={m.id} className="flex items-start gap-2 group">
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>{m.sender_name} <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {fmt(m.created_at)}</span></p>
-                <p className="text-sm" style={{ color: m.deleted ? 'var(--color-text-tertiary)' : 'var(--color-text)', fontStyle: m.deleted ? 'italic' : 'normal' }}>
-                  {m.body}{m.deleted && <span className="ml-1 text-xs">(deleted{m.deleted_by_name ? ` by ${m.deleted_by_name}` : ''})</span>}
-                </p>
+        <div className="flex-1 overflow-y-auto px-5 py-4" style={{ backgroundColor: 'var(--color-bg)' }}>
+          {tab === 'messages' ? (
+            loading ? <Spinner /> : messages.length === 0 ? <p className="text-center text-sm py-8" style={{ color: 'var(--color-text-tertiary)' }}>No messages</p> : (
+              <div className="space-y-2">
+                {messages.map(m => (
+                  <div key={m.id} className="flex items-start gap-2 group">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>{m.sender_name} <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {fmt(m.created_at)}</span></p>
+                      <p className="text-sm" style={{ color: m.deleted ? 'var(--color-text-tertiary)' : 'var(--color-text)', fontStyle: m.deleted ? 'italic' : 'normal' }}>
+                        {m.body}{m.deleted && <span className="ml-1 text-xs">(deleted{m.deleted_by_name ? ` by ${m.deleted_by_name}` : ''})</span>}
+                      </p>
+                    </div>
+                    {!m.deleted && <button onClick={() => delMsg(m.id)} title="Delete message" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error-50"><Trash2 size={13} style={{ color: '#ef4444' }} /></button>}
+                  </div>
+                ))}
               </div>
-              {!m.deleted && <button onClick={() => delMsg(m.id)} title="Delete message" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error-50"><Trash2 size={13} style={{ color: '#ef4444' }} /></button>}
+            )
+          ) : (
+            <div className="space-y-1.5">
+              {members.map(m => (
+                <div key={m.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                      {m.name}
+                      {m.member_role === 'admin' && <Crown size={12} style={{ color: '#d97706' }} />}
+                      {m.is_muted && <VolumeX size={12} style={{ color: '#ef4444' }} />}
+                    </p>
+                    <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{[m.role, m.company].filter(Boolean).join(' · ') || '—'} · last read {m.last_read_at ? fmt(m.last_read_at) : 'never'}</p>
+                  </div>
+                  <button onClick={() => muteMember(m)} title={m.is_muted ? 'Unmute' : 'Mute'} className="p-1.5 rounded-lg hover:bg-bg-secondary">{m.is_muted ? <Volume2 size={15} style={{ color: 'var(--color-success-600)' }} /> : <VolumeX size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
+                  <button onClick={() => removeMember(m)} title="Remove from room" className="p-1.5 rounded-lg hover:bg-error-50"><UserMinus size={15} style={{ color: '#ef4444' }} /></button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-const ConversationsTab = () => {
+// ── Conversations tab (filters + search) ──────────────────────────────────────
+const FILTERS = [{ k: '', label: 'All' }, { k: 'dm', label: 'Direct' }, { k: 'group', label: 'Groups' }, { k: 'broadcast', label: 'Broadcasts' }];
+
+const ConversationsTab = ({ openId, setOpenId }) => {
   const [convs, setConvs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
-  const [viewer, setViewer] = useState(null);
+  const [type, setType] = useState('');
+  const [locked, setLocked] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('chat/admin/conversations', { params: { q } }); setConvs(r.data.conversations || []); }
-    catch { /* ignore */ }
-    finally { setLoading(false); }
-  }, [q]);
+    try { const r = await client.get('chat/admin/conversations', { params: { q, type, locked: locked ? 'true' : undefined } }); setConvs(r.data.conversations || []); }
+    catch { /* ignore */ } finally { setLoading(false); }
+  }, [q, type, locked]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   return (
     <div>
-      <div className="relative mb-4 max-w-md">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by participant, company, or title…" className="input" style={{ paddingLeft: 34 }} />
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by participant, company, or title…" className="input" style={{ paddingLeft: 34 }} />
+        </div>
+        {FILTERS.map(f => (
+          <button key={f.k} onClick={() => setType(f.k)} className="text-xs font-semibold px-3 py-2 rounded-lg"
+            style={{ background: type === f.k ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: type === f.k ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{f.label}</button>
+        ))}
+        <button onClick={() => setLocked(l => !l)} className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5"
+          style={{ background: locked ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: locked ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}><Lock size={12} /> Locked</button>
+        <button onClick={load} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }} title="Refresh"><RefreshCw size={14} /></button>
       </div>
+
       {loading ? <Spinner /> : convs.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No conversations</p> : (
         <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
@@ -126,19 +236,59 @@ const ConversationsTab = () => {
             <tbody>
               {convs.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3"><div className="flex items-center gap-1.5"><span className="font-semibold truncate max-w-[200px] inline-block" style={{ color: 'var(--color-text)' }}>{c.title || c.members?.map(m => m.name).slice(0, 2).join(' ↔ ') || '—'}</span>{c.is_locked && <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />}</div></td>
-                  <td className="px-4 py-3"><Badge variant={c.type === 'dm' ? 'info' : c.type === 'broadcast' ? 'warning' : 'primary'} size="sm">{c.type}</Badge></td>
+                  <td className="px-4 py-3"><div className="flex items-center gap-1.5"><span className="font-semibold truncate max-w-[200px] inline-block" style={{ color: 'var(--color-text)' }}>{convName(c)}</span>{c.is_locked && <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />}</div></td>
+                  <td className="px-4 py-3"><Badge variant={typeColor(c.type)} size="sm">{c.type}</Badge></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.members?.length || 0}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.message_count}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{fmt(c.last_message_at)}</td>
-                  <td className="px-4 py-3"><Button size="sm" variant="secondary" onClick={() => setViewer(c)}>Open</Button></td>
+                  <td className="px-4 py-3"><Button size="sm" variant="secondary" onClick={() => setOpenId(c.id)}>Open</Button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {viewer && <ConversationViewer conv={viewer} onClose={() => setViewer(null)} onChanged={load} />}
+      {openId && <ConversationViewer conversationId={openId} onClose={() => setOpenId(null)} onChanged={load} />}
+    </div>
+  );
+};
+
+// ── Message search tab ────────────────────────────────────────────────────────
+const SearchTab = ({ setOpenId }) => {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      try { const r = await client.get('chat/admin/messages/search', { params: { q } }); setResults(r.data.results || []); }
+      catch { /* ignore */ } finally { setLoading(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  return (
+    <div>
+      <div className="relative mb-4 max-w-xl">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search message text across every conversation…" className="input" style={{ paddingLeft: 34 }} autoFocus />
+      </div>
+      {loading ? <Spinner /> : q.trim().length < 2 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>Type at least 2 characters.</p>
+        : results.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No messages found.</p> : (
+          <div className="space-y-1.5">
+            {results.map(m => (
+              <button key={m.id} onClick={() => setOpenId(m.conversation_id)} className="w-full text-left rounded-xl px-3 py-2.5 hover:bg-bg-secondary transition-colors" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Badge variant={typeColor(m.conversation_type)} size="sm">{m.conversation_type || 'chat'}</Badge>
+                  <span className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{m.conversation_title}</span>
+                  <span className="text-xs ml-auto flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{fmt(m.created_at)}</span>
+                </div>
+                <p className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}><span style={{ color: 'var(--color-primary-600)', fontWeight: 600 }}>{m.sender_name}:</span> {m.body}</p>
+              </button>
+            ))}
+          </div>
+        )}
     </div>
   );
 };
@@ -148,17 +298,15 @@ const UsersTab = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
-
   const load = useCallback(async () => {
     setLoading(true);
     try { const r = await client.get('chat/admin/users', { params: { q } }); setUsers(r.data.users || []); }
-    catch { /* ignore */ }
-    finally { setLoading(false); }
+    catch { /* ignore */ } finally { setLoading(false); }
   }, [q]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
-  const ban = async (u) => { const reason = window.prompt(`Ban ${u.name} from chat? Optional reason:`, ''); if (reason === null) return; await client.post(`chat/admin/users/${u.id}/ban`, { reason }); load(); };
-  const unban = async (u) => { await client.post(`chat/admin/users/${u.id}/unban`); load(); };
+  const ban = async (u) => { const reason = window.prompt(`Ban ${u.name} from chat? Optional reason:`, ''); if (reason === null) return; await client.post(`chat/admin/users/${u.id}/ban`, { reason }); toast.success(`${u.name} banned`); load(); };
+  const unban = async (u) => { await client.post(`chat/admin/users/${u.id}/unban`); toast.success(`${u.name} unbanned`); load(); };
 
   return (
     <div>
@@ -208,6 +356,7 @@ const BroadcastTab = () => {
     try {
       const r = await client.post('chat/admin/broadcast', form);
       setMsg({ type: 'success', text: `Broadcast sent to ${r.data.recipients} user(s).` });
+      toast.success(`Broadcast sent to ${r.data.recipients} user(s)`);
       setForm(f => ({ ...f, title: '', message: '' }));
     } catch (e) { setMsg({ type: 'error', text: e.response?.data?.error || 'Failed to send' }); }
     finally { setSending(false); }
@@ -249,42 +398,58 @@ const BroadcastTab = () => {
             ))}
           </div>
         )}
-        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Broadcasts are one-way — recipients can read but cannot reply, so the thread stays clean.</p>
+        <p className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}><Mail size={13} /> One-way — recipients can read but cannot reply, so the thread stays clean. Also fires Web Push.</p>
         <Button variant="primary" onClick={send} disabled={sending} className="flex items-center gap-1.5"><Send size={15} />{sending ? 'Sending…' : 'Send broadcast'}</Button>
       </div>
     </div>
   );
 };
 
-// ── Moderation log ────────────────────────────────────────────────────────────
+// ── Moderation log (with action filter) ───────────────────────────────────────
 const ACTION_LABEL = {
   delete_message: 'Deleted a message', ban_user: 'Banned a user', unban_user: 'Unbanned a user',
   lock_room: 'Locked a room', unlock_room: 'Unlocked a room', delete_room: 'Deleted a room',
   broadcast: 'Sent a broadcast', feature_toggle: 'Toggled chat for a company',
+  mute_member: 'Muted a member', unmute_member: 'Unmuted a member', remove_member: 'Removed a member',
 };
+const ACTION_VARIANT = (a) => /delete|ban|remove|lock/.test(a) && !/unlock|unban/.test(a) ? 'error' : /unban|unlock|unmute/.test(a) ? 'success' : 'info';
+
 const ModerationTab = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
   useEffect(() => { client.get('chat/admin/moderation-log').then(r => setRows(r.data.log || [])).catch(() => {}).finally(() => setLoading(false)); }, []);
   if (loading) return <Spinner />;
-  if (!rows.length) return <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No moderation actions yet.</p>;
+  const shown = filter ? rows.filter(r => r.action === filter) : rows;
+  const actions = [...new Set(rows.map(r => r.action))];
+
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      <table className="w-full text-sm">
-        <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-          {['When', 'Moderator', 'Action', 'Target'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
-        </tr></thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} className="inline mr-1" />{fmt(r.created_at)}</td>
-              <td className="px-4 py-3 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{r.actor_name}</td>
-              <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{ACTION_LABEL[r.action] || r.action}</td>
-              <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.target_name || (r.detail ? JSON.stringify(r.detail) : '—')}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button onClick={() => setFilter('')} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ background: !filter ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: !filter ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>All ({rows.length})</button>
+        {actions.map(a => (
+          <button key={a} onClick={() => setFilter(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ background: filter === a ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: filter === a ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{ACTION_LABEL[a] || a}</button>
+        ))}
+      </div>
+      {shown.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No moderation actions.</p> : (
+        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+              {['When', 'Moderator', 'Action', 'Target'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {shown.map(r => (
+                <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} className="inline mr-1" />{fmt(r.created_at)}</td>
+                  <td className="px-4 py-3 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{r.actor_name}</td>
+                  <td className="px-4 py-3"><Badge variant={ACTION_VARIANT(r.action)} size="sm">{ACTION_LABEL[r.action] || r.action}</Badge></td>
+                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.target_name || (r.detail ? JSON.stringify(r.detail) : '—')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
@@ -303,29 +468,34 @@ const CompaniesTab = () => {
     const next = !c.flags?.chat?.is_enabled;
     await client.patch('chat/admin/feature', { company_id: c.id, is_enabled: next });
     setCompanies(prev => prev.map(x => x.id === c.id ? { ...x, flags: { ...x.flags, chat: { ...x.flags.chat, is_enabled: next } } } : x));
+    toast.success(`Chat ${next ? 'enabled' : 'disabled'} for ${c.name}`);
   };
 
   if (loading) return <Spinner />;
+  const onCount = companies.filter(c => c.flags?.chat?.is_enabled).length;
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      <table className="w-full text-sm">
-        <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-          {['Company', 'Type', 'Chat enabled', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
-        </tr></thead>
-        <tbody>
-          {companies.map(c => {
-            const on = c.flags?.chat?.is_enabled;
-            return (
-              <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{c.name}</td>
-                <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>{c.company_type || '—'}</td>
-                <td className="px-4 py-3">{on ? <Badge variant="success" size="sm">On</Badge> : <Badge variant="info" size="sm">Off</Badge>}</td>
-                <td className="px-4 py-3"><Button size="sm" variant={on ? 'secondary' : 'primary'} onClick={() => toggle(c)}>{on ? 'Disable' : 'Enable'}</Button></td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Chat is enabled for <strong>{onCount}</strong> of <strong>{companies.length}</strong> companies.</p>
+      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+            {['Company', 'Type', 'Chat', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {companies.map(c => {
+              const on = c.flags?.chat?.is_enabled;
+              return (
+                <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{c.name}</td>
+                  <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>{c.company_type || '—'}</td>
+                  <td className="px-4 py-3">{on ? <Badge variant="success" size="sm">On</Badge> : <Badge variant="info" size="sm">Off</Badge>}</td>
+                  <td className="px-4 py-3"><Button size="sm" variant={on ? 'secondary' : 'primary'} onClick={() => toggle(c)}>{on ? 'Disable' : 'Enable'}</Button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
@@ -333,14 +503,19 @@ const CompaniesTab = () => {
 // ── Shell ───────────────────────────────────────────────────────────────────
 const ChatAdmin = () => {
   const [tab, setTab] = useState('overview');
+  const [openId, setOpenId] = useState(null);   // conversation viewer (shared across tabs)
+
+  const openConversation = (id) => { setTab('conversations'); setOpenId(id); };
+
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 flex items-center gap-2.5" style={{ background: 'var(--gradient-sidebar)' }}>
-        <Shield size={22} className="text-white" />
-        <div>
+      <div className="rounded-2xl p-6 relative overflow-hidden flex items-center gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
+        <Shield size={24} className="text-white flex-shrink-0" />
+        <div className="relative z-10">
           <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Chat Control</h2>
-          <p className="text-sm text-white/80">Monitor every conversation, moderate messages, ban users, broadcast, and roll chat out per company.</p>
+          <p className="text-sm text-white/80">Full oversight: monitor every conversation, search messages, moderate members & rooms, broadcast, and roll out per company.</p>
         </div>
+        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -356,8 +531,9 @@ const ChatAdmin = () => {
         })}
       </div>
 
-      {tab === 'overview' && <OverviewTab />}
-      {tab === 'conversations' && <ConversationsTab />}
+      {tab === 'overview' && <OverviewTab onOpenConversation={openConversation} />}
+      {tab === 'conversations' && <ConversationsTab openId={openId} setOpenId={setOpenId} />}
+      {tab === 'search' && <SearchTab setOpenId={openConversation} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'broadcast' && <BroadcastTab />}
       {tab === 'log' && <ModerationTab />}
