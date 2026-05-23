@@ -176,6 +176,15 @@ router.post('/submit', async (req, res) => {
       .single();
     if (actErr) throw actErr;
 
+    // Claim the transfer for the closer who handled it, so the fronter sees the
+    // closer's name instead of "Unassigned" (mirrors manual sale creation +
+    // bulk upload). Only when not already assigned and the submitter is a closer.
+    if (!transfer.assigned_closer_id && req.user.role === 'closer') {
+      await supabaseAdmin.from('transfers')
+        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() })
+        .eq('id', transfer_id);
+    }
+
     onDispositionSubmitted({ action, transfer, config, submitterId: userId, submitterCompanyId: companyId })
       .catch(err => console.error('[DISPOSITION] Notification error:', err.message));
 
@@ -239,6 +248,14 @@ router.post('/submit-callback', async (req, res) => {
 
     if (actErr) throw actErr;
     if (cbErr)  throw cbErr;
+
+    // Claim the transfer for the closer (same as a disposition) so the fronter
+    // sees who scheduled the callback rather than "Unassigned".
+    if (!transfer.assigned_closer_id && req.user.role === 'closer') {
+      await supabaseAdmin.from('transfers')
+        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() })
+        .eq('id', transfer_id);
+    }
 
     res.status(201).json({ action, callback });
   } catch (err) {

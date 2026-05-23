@@ -429,7 +429,11 @@ async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, 
         note: s.closer_disposition ? `Disposition: ${s.closer_disposition}` : 'Sale submitted to compliance (bulk upload)',
         setter_role: 'closer',
       }).catch(() => {});
-      supabaseAdmin.from('transfers').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', s.transfer_id).catch(() => {});
+      // Complete the transfer AND stamp the closer who handled it, so the
+      // fronter sees the closer's name (same field the manual flow now sets).
+      const tUpd = { status: 'completed', updated_at: new Date().toISOString() };
+      if (s.closer_id) { tUpd.assigned_closer_id = s.closer_id; tUpd.assigned_to = s.closer_id; }
+      supabaseAdmin.from('transfers').update(tUpd).eq('id', s.transfer_id).catch(() => {});
     }
   }
 
