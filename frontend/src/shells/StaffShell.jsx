@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
@@ -194,6 +195,37 @@ const StaffShell = () => {
   const [formData, setFormData]             = useState({});
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
+  // Fronter-scoped duplicate detection (own history only)
+  const [dupCheck, setDupCheck]             = useState(null); // { result, message, transfer, sale }
+  const dupTimer       = useRef(null);
+  const lastPrefilledId = useRef(null);
+
+  // Which dynamic field holds the phone/CLI — drives the duplicate check.
+  const phoneFieldName = (fields || []).find(f =>
+    ['phone', 'tel'].includes(f.field_type) ||
+    /(phone|cli|mobile|cell|contact|number)/i.test(f.name || '') ||
+    /(phone|cli|mobile|cell)/i.test(f.label || ''))?.name;
+  const phoneValue = phoneFieldName ? (formData[phoneFieldName] || '') : '';
+
+  // Debounced check against THIS fronter's own transfers/sales only.
+  useEffect(() => {
+    if (!showCreateForm || !phoneFieldName) return;
+    if (String(phoneValue).replace(/\D/g, '').length < 7) { setDupCheck(null); return; }
+    clearTimeout(dupTimer.current);
+    dupTimer.current = setTimeout(async () => {
+      try {
+        const { data } = await client.get('transfers/duplicate-check', { params: { phone: phoneValue } });
+        if (data.result === 'clean') { setDupCheck(null); return; }
+        setDupCheck(data);
+        // Check 1: auto-load the previous transfer's fields once (sale match never prefills).
+        if (data.result === 'transfer' && data.transfer && lastPrefilledId.current !== data.transfer.id) {
+          lastPrefilledId.current = data.transfer.id;
+          setFormData(prev => ({ ...prev, ...(data.transfer.form_data || {}) }));
+        }
+      } catch { /* non-blocking */ }
+    }, 500);
+    return () => clearTimeout(dupTimer.current);
+  }, [phoneValue, showCreateForm, phoneFieldName]); // eslint-disable-line react-hooks/exhaustive-deps
   const [zipFronterLoading, setZipFronterLoading]   = useState(false);
   const [zipFronterInfo,    setZipFronterInfo]       = useState(null);
   const zipFronterTimer = useRef(null);
@@ -384,10 +416,17 @@ const StaffShell = () => {
     setTransferError('');
     setTransferSubmitting(true);
     try {
-      await createTransfer({ ...formData });
+      const res = await createTransfer({ ...formData });
+      const action = res?.action;
+      toast.success(
+        action === 'updated' ? 'Existing transfer updated — closers now see it as the latest activity.'
+          : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
+          : 'Transfer created.');
       setShowCreateForm(false);
       setFormData({});
       setZipFronterInfo(null);
+      setDupCheck(null);
+      lastPrefilledId.current = null;
       fetchStats();
       fetchTransfers({ date_from, date_to });
     } catch (err) {
@@ -1005,7 +1044,7 @@ const StaffShell = () => {
                       </div>
                     </div>
                     {!showCreateForm && (
-                      <button onClick={() => setShowCreateForm(true)}
+                      <button onClick={() => { setShowCreateForm(true); setDupCheck(null); lastPrefilledId.current = null; }}
                         className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
                         style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
                         <Plus size={14} /> Create Lead
@@ -1026,6 +1065,20 @@ const StaffShell = () => {
                         </span>
                         <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
                       </div>
+
+                      {/* Fronter-scoped duplicate alert / sale warning (dismissible, non-blocking) */}
+                      {dupCheck && (
+                        <div className="mb-4 flex items-start gap-2.5 px-3.5 py-3 rounded-xl"
+                          style={{
+                            backgroundColor: dupCheck.result === 'sale' ? '#fffbeb' : 'var(--color-primary-50, #eef2ff)',
+                            border: `1px solid ${dupCheck.result === 'sale' ? '#fcd34d' : 'var(--color-primary-300, #c7d2fe)'}`,
+                          }}>
+                          <AlertTriangle size={16} style={{ color: dupCheck.result === 'sale' ? '#d97706' : 'var(--color-primary-600)', flexShrink: 0, marginTop: 1 }} />
+                          <p className="text-xs flex-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{dupCheck.message}</p>
+                          <button type="button" onClick={() => setDupCheck(null)} aria-label="Dismiss"
+                            className="text-lg leading-none px-1 rounded hover:bg-black/5" style={{ color: 'var(--color-text-tertiary)' }}>×</button>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-5 items-start gap-x-4 gap-y-5">
                         {fields.filter(f => f.show_to_fronter !== false).sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => {
@@ -1096,7 +1149,7 @@ const StaffShell = () => {
 
                       <div className="flex gap-3 pt-5 mt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
                         <button type="button"
-                          onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); }}
+                          onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
                           className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors hover:bg-bg-secondary"
                           style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
                           Cancel

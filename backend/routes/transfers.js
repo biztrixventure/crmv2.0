@@ -12,6 +12,13 @@ const router = express.Router();
 
 const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'];
 
+// ── Fronter-scoped duplicate detection helpers ───────────────────────────────
+const PHONE_KEYS = ['cli_number', 'customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone'];
+const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+const phoneFromFD = (fd) => { if (!fd) return ''; for (const k of PHONE_KEYS) if (fd[k]) return fd[k]; return ''; };
+// A "completed" sale (the deal closed) — used to decide insert-vs-update.
+const COMPLETED_SALE = ['closed_won', 'sold'];
+
 // Client sort key -> real column / json path. Name columns sort by underlying id.
 const TRANSFER_SORT = {
   customer:   'form_data->>customer_name',
@@ -395,6 +402,57 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /transfers/duplicate-check?phone= — STRICTLY this fronter's own history
+// Returns: { result: 'transfer' | 'sale' | 'clean', message?, transfer?, sale? }
+//   transfer → this fronter already has a transfer for this number (load+update)
+//   sale     → this fronter has a COMPLETED sale on this number (warn, new row)
+// Scoped to company_id + created_by(=this fronter) + normalized_phone. Never
+// references other fronters or companies.
+// ============================================================================
+router.get('/duplicate-check', asyncHandler(async (req, res) => {
+  const userId    = req.user.id;
+  const companyId = req.user.company_id;
+  const norm      = normPhone(req.query.phone);
+  if (!companyId || norm.length < 7) return res.json({ result: 'clean' });
+
+  const { data: tfs } = await supabaseAdmin
+    .from('transfers')
+    .select('id, form_data, status, created_at, updated_at')
+    .eq('company_id', companyId)
+    .eq('created_by', userId)
+    .eq('normalized_phone', norm)
+    .order('updated_at', { ascending: false });
+
+  if (!tfs?.length) return res.json({ result: 'clean' });
+
+  // Completed sale tied to one of THIS fronter's transfers for this number?
+  const { data: sale } = await supabaseAdmin
+    .from('sales')
+    .select('id, status, reference_no, created_at')
+    .in('transfer_id', tfs.map(t => t.id))
+    .in('status', COMPLETED_SALE)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  // Check 2/3: sale rule wins → warn, a NEW transfer will be created on submit.
+  if (sale?.length) {
+    return res.json({
+      result: 'sale',
+      sale: { status: sale[0].status, reference_no: sale[0].reference_no, date: sale[0].created_at },
+      message: 'You already have a completed sale on this number. Creating another transfer may cause duplicate effort. You can still proceed, and a new transfer will be created.',
+    });
+  }
+
+  // Check 1: existing transfer (most recent) → load + update in place on submit.
+  const t = tfs[0];
+  return res.json({
+    result: 'transfer',
+    transfer: { id: t.id, form_data: t.form_data, status: t.status, date: t.created_at },
+    message: `You already created a transfer for this number on ${new Date(t.created_at).toLocaleDateString()} with status "${t.status}". The previous information has been loaded — please review and update.`,
+  });
+}));
+
+// ============================================================================
 // POST /transfers — fronter creates + directly assigns to a closer
 // ============================================================================
 router.post('/', [
@@ -412,21 +470,58 @@ router.post('/', [
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
   const hasCloser = !!assigned_closer_id;
+  const norm = normPhone(phoneFromFD(form_data));
 
-  const { data: transfer, error } = await supabaseAdmin
-    .from('transfers')
-    .insert({
-      company_id:         companyId,
-      created_by:         userId,
-      form_data,
-      assigned_closer_id: hasCloser ? assigned_closer_id : null,
-      assigned_to:        hasCloser ? assigned_closer_id : null,
-      status:             hasCloser ? 'assigned' : 'pending',
-    })
-    .select()
-    .single();
+  const newRow = {
+    company_id:         companyId,
+    created_by:         userId,
+    form_data,
+    normalized_phone:   norm || null,
+    assigned_closer_id: hasCloser ? assigned_closer_id : null,
+    assigned_to:        hasCloser ? assigned_closer_id : null,
+    status:             hasCloser ? 'assigned' : 'pending',
+  };
 
-  if (error) return res.status(500).json({ error: error.message });
+  // Authoritative duplicate resolution (final check at write time — prevents a
+  // race between the debounced input check and submit). STRICTLY this fronter's
+  // own records (company_id + created_by + normalized_phone).
+  let transfer, action = 'created';
+  if (norm) {
+    const { data: tfs } = await supabaseAdmin
+      .from('transfers').select('id')
+      .eq('company_id', companyId).eq('created_by', userId).eq('normalized_phone', norm)
+      .order('updated_at', { ascending: false });
+
+    if (tfs?.length) {
+      const { data: completed } = await supabaseAdmin
+        .from('sales').select('id').in('transfer_id', tfs.map(t => t.id)).in('status', COMPLETED_SALE).limit(1);
+
+      if (completed?.length) {
+        // Check 2/3: completed sale → INSERT a brand-new transfer (don't touch the sale-linked one).
+        const r = await supabaseAdmin.from('transfers').insert(newRow).select().single();
+        if (r.error) return res.status(500).json({ error: r.error.message });
+        transfer = r.data; action = 'created_sale_warning';
+      } else {
+        // Check 1: UPDATE the most recent existing transfer in place (no new row).
+        const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString() };
+        if (hasCloser) {
+          updates.assigned_closer_id = assigned_closer_id;
+          updates.assigned_to        = assigned_closer_id;
+          updates.status             = 'assigned';
+          updates.rejected_by = null; updates.rejection_reason = null; updates.rejected_at = null;
+        }
+        const r = await supabaseAdmin.from('transfers').update(updates).eq('id', tfs[0].id).select().single();
+        if (r.error) return res.status(500).json({ error: r.error.message });
+        transfer = r.data; action = 'updated';
+      }
+    }
+  }
+
+  if (!transfer) {
+    const r = await supabaseAdmin.from('transfers').insert(newRow).select().single();
+    if (r.error) return res.status(500).json({ error: r.error.message });
+    transfer = r.data;
+  }
 
   if (hasCloser) {
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -434,7 +529,7 @@ router.post('/', [
     notifications.onTransferCreated({ transfer, fronterName, closerUserId: assigned_closer_id }).catch(() => {});
   }
 
-  res.status(201).json({ transfer });
+  res.status(201).json({ transfer, action });
 }));
 
 // ============================================================================
@@ -567,9 +662,10 @@ router.put('/:id', asyncHandler(async (req, res) => {
     updates.rejected_at       = null;
   }
 
-  // Edit form_data — append to audit trail
+  // Edit form_data — append to audit trail + keep the dedup key in sync
   if (form_data) {
     updates.form_data = form_data;
+    updates.normalized_phone = normPhone(phoneFromFD(form_data)) || null;
     const historyEntry = {
       editor_id:    userId,
       reason:       reason || 'No reason provided',

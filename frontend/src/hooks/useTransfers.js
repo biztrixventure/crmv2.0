@@ -42,9 +42,13 @@ export const useTransfers = (companyId = null) => {
         form_data:          rest,
         assigned_closer_id,
       });
-      const newTransfer = response.data.transfer;
-      setTransfers(prev => [newTransfer, ...prev]);
-      return newTransfer;
+      const { transfer, action } = response.data;
+      // 'updated' (Check 1) returns the existing row in place — replace it, don't
+      // prepend a duplicate. New rows go to the top.
+      setTransfers(prev => action === 'updated' && prev.some(t => t.id === transfer.id)
+        ? prev.map(t => (t.id === transfer.id ? transfer : t))
+        : [transfer, ...prev]);
+      return response.data;   // { transfer, action }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to create transfer';
       setError(errorMsg);

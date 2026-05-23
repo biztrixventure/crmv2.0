@@ -485,7 +485,7 @@ async function createTransferFromRow(row) {
 
   const { data, error } = await supabaseAdmin
     .from('transfers')
-    .insert({ company_id: r.company_id, created_by: r.fronter_user_id, assigned_to: null, assigned_closer_id: null, status: 'pending', form_data: fd })
+    .insert({ company_id: r.company_id, created_by: r.fronter_user_id, assigned_to: null, assigned_closer_id: null, status: 'pending', normalized_phone: normPhone(cli) || null, form_data: fd })
     .select('id, company_id, created_by, created_at, status, form_data').single();
   if (error) return { ok: false, reason: error.message };
   return { ok: true, transfer: data };

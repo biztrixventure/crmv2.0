@@ -223,6 +223,7 @@ function buildTransferRow(row, batchId) {
     assigned_to:        null,
     assigned_closer_id: null,
     status:             safeStatus(row.status),
+    normalized_phone:   normPhone(cli) || null,
     form_data: {
       ...(row.form_data || {}),
       cli_number:    normPhone(cli),
