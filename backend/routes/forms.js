@@ -9,7 +9,7 @@ const ALLOWED_TYPES = [
   'text', 'email', 'number', 'textarea', 'select', 'date', 'phone', 'tel', 'zip', 'checkbox',
   'sale_client', 'sale_plan',
   'sale_down_payment', 'sale_monthly_payment', 'sale_payment_due_note', 'sale_reference_no',
-  'sale_fronter', 'sale_date', 'sale_status', 'sale_disposition',
+  'sale_fronter', 'sale_date', 'sale_status', 'sale_disposition', 'sale_call_review',
 ];
 
 const superadminOnly = (req, res, next) => {
