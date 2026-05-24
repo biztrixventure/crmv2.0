@@ -49,7 +49,7 @@ const AdminHeader = ({
             <Settings size={18} className="text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold leading-tight" style={{ color: 'var(--color-text)' }}>
+            <h1 className="text-base font-bold leading-tight" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
               Admin Panel
             </h1>
             <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -80,35 +80,43 @@ const AdminHeader = ({
           <button
             onClick={onToggleTheme}
             className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105"
-            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
-            title="Toggle theme"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
           >
             {theme === 'light'
               ? <Moon size={17} style={{ color: 'var(--color-text-secondary)' }} />
-              : <Sun  size={17} style={{ color: 'var(--color-text-secondary)' }} />
+              : <Sun  size={17} style={{ color: 'var(--color-accent)' }} />
             }
           </button>
+
+          <div className="hidden sm:block w-px h-6 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
 
           {/* User pill — clickable to open profile */}
           <button
             onClick={() => setProfileOpen(true)}
-            className="hidden sm:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl transition-all hover:bg-bg-secondary group"
-            style={{ border: '1px solid var(--color-border)' }}
+            className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all group"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-primary-50, #f5f3ff)'; e.currentTarget.style.borderColor = 'var(--color-primary-300)'; }}
+            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
             title="View profile"
           >
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              {initials}
+            <div className="relative flex-shrink-0">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {initials}
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: '#22c55e', border: '2px solid var(--color-surface)' }} />
             </div>
             <div className="text-right">
               <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--color-text)' }}>
                 {user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user?.email}
               </p>
-              <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
-                {user?.role_name || user?.role || 'Admin'}
+              <p className="text-xs leading-tight capitalize" style={{ color: 'var(--color-text-tertiary)' }}>
+                {(user?.role_name || user?.role || 'Admin').replace(/_/g, ' ')}
               </p>
             </div>
-            <ChevronDown size={12} className="text-text-tertiary group-hover:text-text-secondary transition-colors" />
+            <ChevronDown size={12} className="transition-transform duration-200 group-hover:translate-y-0.5" style={{ color: 'var(--color-text-tertiary)' }} />
           </button>
 
           {/* Logout */}
