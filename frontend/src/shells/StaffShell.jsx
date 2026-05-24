@@ -192,6 +192,7 @@ const StaffShell = () => {
 
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [closerSection, setCloserSection]   = useState('assigned'); // 'assigned' | 'sales'
   const [formData, setFormData]             = useState({});
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
@@ -793,8 +794,25 @@ const StaffShell = () => {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Assigned Transfers — only transfers explicitly assigned to this closer */}
+            {/* Sub-nav: Assigned Transfers | My Sales */}
+            <div className="flex gap-1 p-1 rounded-xl w-fit mb-5 overflow-x-auto"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              {[{ k: 'assigned', l: 'Assigned Transfers', icon: Clock, count: transfers.length },
+                { k: 'sales',    l: 'My Sales',           icon: DollarSign, count: sales.length }].map(s => (
+                <button key={s.k} onClick={() => setCloserSection(s.k)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap"
+                  style={{ background: closerSection === s.k ? 'var(--gradient-sidebar)' : 'transparent',
+                    color: closerSection === s.k ? 'white' : 'var(--color-text-secondary)',
+                    boxShadow: closerSection === s.k ? 'var(--shadow-sm)' : 'none' }}>
+                  <s.icon size={15} /> {s.l}
+                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ backgroundColor: closerSection === s.k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)',
+                      color: closerSection === s.k ? 'white' : 'var(--color-text-tertiary)' }}>{s.count}</span>
+                </button>
+              ))}
+            </div>
+
+            {closerSection === 'assigned' && (
               <Card className="p-6">
                 <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
                   <Clock size={20} /> Assigned Transfers
@@ -804,7 +822,7 @@ const StaffShell = () => {
                 ) : transfers.length === 0 ? (
                   <p className="text-text-secondary text-center py-8">No transfers assigned yet.</p>
                 ) : (
-                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {transfers.slice(0, 15).map(t => (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
@@ -844,8 +862,9 @@ const StaffShell = () => {
                   </div>
                 )}
               </Card>
+            )}
 
-              {/* My Sales */}
+            {closerSection === 'sales' && (
               <Card className="p-6">
                 <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
                   <DollarSign size={20} /> My Sales
@@ -857,7 +876,7 @@ const StaffShell = () => {
                     No sales yet. Use phone search above to find a lead and create a sale.
                   </p>
                 ) : (
-                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {sales.slice(0, 15).map(s => (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
@@ -971,7 +990,7 @@ const StaffShell = () => {
                   </div>
                 )}
               </Card>
-            </div>
+            )}
           </div>
         )}
 
@@ -1000,31 +1019,27 @@ const StaffShell = () => {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Create Lead */}
-              {hasPermission('create_transfer') && (
-                <Card className="p-6">
-                  <div className="flex items-center justify-between mb-5">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: 'var(--gradient-sidebar)' }}>
-                        <Plus size={15} className="text-white" />
-                      </div>
+            {/* Create Transfer modal — fronter fields only, sized like the sale modal */}
+            {showCreateForm && hasPermission('create_transfer') && (
+              <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
+                style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+                onClick={e => { if (e.target === e.currentTarget) { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; } }}>
+                <div className="relative w-full max-w-2xl my-6 rounded-2xl animate-scale-in"
+                  style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
+                  <div className="flex items-center justify-between px-6 py-5 rounded-t-2xl" style={{ background: 'var(--gradient-sidebar)' }}>
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white/20 rounded-xl"><Send size={20} className="text-white" /></div>
                       <div>
-                        <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>New Lead</h3>
-                        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Transfer a call to a closer</p>
+                        <h2 className="text-xl font-bold text-white">New Transfer / Lead</h2>
+                        <p className="text-xs text-white/70">Route a call to a closer</p>
                       </div>
                     </div>
-                    {!showCreateForm && (
-                      <button onClick={() => { setShowCreateForm(true); setDupCheck(null); lastPrefilledId.current = null; }}
-                        className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
-                        style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-                        <Plus size={14} /> Create Lead
-                      </button>
-                    )}
+                    <button onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
+                      className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
+                      <XCircle size={18} className="text-white" />
+                    </button>
                   </div>
-                  {showCreateForm ? (
-                    <form onSubmit={handleSubmitTransfer} className="animate-slide-up">
+                  <form onSubmit={handleSubmitTransfer} className="p-6">
                       {/* Section header */}
                       <div className="flex items-center gap-2.5 mb-4">
                         <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -1148,127 +1163,118 @@ const StaffShell = () => {
                         </button>
                       </div>
                     </form>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-10 rounded-2xl border-dashed border-2"
-                      style={{ borderColor: 'var(--color-border)' }}>
-                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
-                        style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <Send size={22} style={{ color: 'var(--color-text-tertiary)' }} />
-                      </div>
-                      <p className="font-semibold text-sm mb-1" style={{ color: 'var(--color-text)' }}>Ready to transfer?</p>
-                      <p className="text-xs mb-4" style={{ color: 'var(--color-text-tertiary)' }}>Fill customer details to route call to a closer.</p>
-                      <button onClick={() => setShowCreateForm(true)}
-                        className="flex items-center gap-1.5 py-2 px-5 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
-                        style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-                        <Plus size={14} /> Create Lead
-                      </button>
-                    </div>
-                  )}
-                </Card>
-              )}
-
-              {/* My Leads */}
-              <Card className="p-6">
-                <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2"><FileText size={20} /> My Leads</h3>
-                <div className="relative mb-3">
-                  <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-                  <input
-                    type="tel"
-                    value={leadSearch}
-                    onChange={e => setLeadSearch(e.target.value)}
-                    placeholder="Filter by phone or name…"
-                    className="input pl-8 text-sm"
-                  />
+                  </div>
                 </div>
-                {tLoading ? (
-                  <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-                ) : transfers.length === 0 ? (
-                  <p className="text-text-secondary text-center py-8">No leads yet.</p>
-                ) : (
-                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                    {transfers.filter(t => {
-                      if (!leadSearch.trim()) return true;
-                      const q = leadSearch.trim().toLowerCase();
-                      const phone = (t.form_data?.customer_phone || t.form_data?.Phone || '').toLowerCase();
-                      const name  = (t.form_data?.customer_name  || `${t.form_data?.FirstName || ''} ${t.form_data?.LastName || ''}`).toLowerCase();
-                      return phone.includes(q) || name.includes(q);
-                    }).map(t => (
-                      <div key={t.id} onClick={() => setDetailTransfer(t)}
-                        className="p-4 rounded-xl border hover:shadow-md transition-all cursor-pointer"
-                        style={{
-                          borderColor: t.sale_status === 'needs_revision' ? 'var(--color-error-300)' : 'var(--color-border)',
-                          backgroundColor: t.sale_status === 'needs_revision' ? 'var(--color-error-50)' : 'var(--color-bg)',
-                        }}>
-                        <div className="flex items-start justify-between mb-1">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-text truncate">
-                              {t.form_data?.customer_name || (t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim() : 'Lead')}
-                            </p>
-                            <p className="text-xs text-text-secondary mt-0.5">{t.form_data?.Phone || t.form_data?.customer_phone || ''}</p>
-                            {t.status === 'rejected' && t.rejection_reason && (
-                              <p className="text-xs text-error-600 mt-0.5">Rejected: {t.rejection_reason}</p>
+            )}
+
+            {/* My Leads — full width */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+                <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                  <FileText size={20} /> My Leads
+                  <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transfers.length}</span>
+                </h3>
+                <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end min-w-0">
+                  <div className="relative flex-1 sm:flex-none sm:w-56">
+                    <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+                    <input type="tel" value={leadSearch} onChange={e => setLeadSearch(e.target.value)}
+                      placeholder="Filter by phone or name…" className="input pl-8 text-sm" />
+                  </div>
+                  {hasPermission('create_transfer') && (
+                    <button onClick={() => { setShowCreateForm(true); setFormData({}); setDupCheck(null); lastPrefilledId.current = null; }}
+                      className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] flex-shrink-0"
+                      style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
+                      <Plus size={14} /> Create Transfer
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {tLoading ? (
+                <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
+              ) : transfers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    <FileText size={22} style={{ color: 'var(--color-text-tertiary)' }} />
+                  </div>
+                  <p className="font-semibold text-sm mb-1" style={{ color: 'var(--color-text)' }}>No leads yet</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Create your first transfer to get started.</p>
+                </div>
+              ) : (() => {
+                const filtered = transfers.filter(t => {
+                  if (!leadSearch.trim()) return true;
+                  const q = leadSearch.trim().toLowerCase();
+                  const phone = (t.form_data?.customer_phone || t.form_data?.Phone || '').toLowerCase();
+                  const name  = (t.form_data?.customer_name  || `${t.form_data?.FirstName || ''} ${t.form_data?.LastName || ''}`).toLowerCase();
+                  return phone.includes(q) || name.includes(q);
+                });
+                if (!filtered.length) return <p className="text-text-secondary text-center py-10 text-sm">No leads match “{leadSearch}”.</p>;
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {filtered.map(t => {
+                      const name = t.form_data?.customer_name || (t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim() : 'Lead');
+                      const phone = t.form_data?.Phone || t.form_data?.customer_phone || '';
+                      const ds = getTransferDisplayStatus(t);
+                      const d = t.latest_disposition;
+                      const dispoName = d?.disposition_name || t.sale_closer_disposition;
+                      const dispoColor = d?.color || '#6b7280';
+                      const needsRev = t.sale_status === 'needs_revision';
+                      return (
+                        <div key={t.id} onClick={() => setDetailTransfer(t)}
+                          className="p-4 rounded-2xl border transition-all hover:shadow-md cursor-pointer flex flex-col"
+                          style={{ borderColor: needsRev ? 'var(--color-error-300)' : 'var(--color-border)',
+                            backgroundColor: needsRev ? 'var(--color-error-50)' : 'var(--color-surface)' }}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+                                style={{ background: 'var(--gradient-sidebar)', fontSize: 13 }}>{(name[0] || 'L').toUpperCase()}</div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-text truncate">{name}</p>
+                                {phone && <p className="text-xs text-text-secondary truncate">{phone}</p>}
+                              </div>
+                            </div>
+                            <Badge variant={ds.variant} size="sm">{ds.label}</Badge>
+                          </div>
+
+                          {dispoName && (
+                            <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                                style={{ backgroundColor: dispoColor + '22', color: dispoColor, border: `1px solid ${dispoColor}44` }}>
+                                <MessageSquare size={9} />{dispoName}
+                              </span>
+                              {d?.setter_name && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>by {d.setter_name}</span>}
+                            </div>
+                          )}
+
+                          {t.status === 'rejected' && t.rejection_reason && (
+                            <p className="text-xs text-error-600 mt-2">Rejected: {t.rejection_reason}</p>
+                          )}
+                          {needsRev && t.sale_compliance_note && (
+                            <div className="mt-2 flex items-start gap-1.5 px-2 py-1.5 rounded-lg"
+                              style={{ backgroundColor: 'var(--color-error-100)', border: '1px solid var(--color-error-200)' }}>
+                              <AlertTriangle size={12} className="text-error-600 mt-0.5 flex-shrink-0" />
+                              <p className="text-xs text-error-600">{t.sale_compliance_note}</p>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+                            <p className="text-xs text-text-tertiary">{fmtDateET(t.created_at)}</p>
+                            {t.status !== 'completed' && !t.sale_id && (
+                              <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this lead? This cannot be undone.')) { deleteTransfer(t.id).catch(err => toastError(err, 'Failed to delete lead')); } }}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all hover:bg-error-50"
+                                style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
+                                <Trash2 size={11} /> Delete
+                              </button>
                             )}
                           </div>
-                          <div className="flex flex-col items-end gap-1">
-                            {(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}
-                            {(() => {
-                              const d     = t.latest_disposition;
-                              const name  = d?.disposition_name || t.sale_closer_disposition;
-                              const color = d?.color || '#6b7280';
-                              if (name) return (
-                                <div className="flex flex-col items-end gap-0.5">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
-                                    style={{ backgroundColor: color + '22', color, border: `1px solid ${color}44` }}>
-                                    <MessageSquare size={9} />
-                                    {name}
-                                  </span>
-                                  {d?.setter_name && (
-                                    <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                                      by {d.setter_name}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                              return (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
-                                  style={{ backgroundColor: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb' }}>
-                                  <Clock size={9} /> In Progress
-                                </span>
-                              );
-                            })()}
-                          </div>
                         </div>
-                        {t.sale_status === 'needs_revision' && t.sale_compliance_note && (
-                          <div className="mt-2 flex items-start gap-1.5 px-2 py-1.5 rounded-lg"
-                            style={{ backgroundColor: 'var(--color-error-100)', border: '1px solid var(--color-error-200)' }}>
-                            <AlertTriangle size={12} className="text-error-600 mt-0.5 flex-shrink-0" />
-                            <p className="text-xs text-error-600">{t.sale_compliance_note}</p>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between mt-2">
-                          <p className="text-xs text-text-tertiary">{fmtDateET(t.created_at)}</p>
-                          {t.status !== 'completed' && !t.sale_id && (
-                            <button
-                              onClick={e => {
-                                e.stopPropagation();
-                                if (window.confirm('Delete this lead? This cannot be undone.')) {
-                                  deleteTransfer(t.id).catch(err =>
-                                    toastError(err, 'Failed to delete lead')
-                                  );
-                                }
-                              }}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all hover:bg-error-50"
-                              style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-                              <Trash2 size={11} /> Delete
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                )}
-              </Card>
-            </div>
+                );
+              })()}
+            </Card>
           </div>
         )}
         <DevCredit />
