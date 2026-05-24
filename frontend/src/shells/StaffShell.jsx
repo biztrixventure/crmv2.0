@@ -98,8 +98,8 @@ const StaffShell = () => {
   const [activeNav, setActiveNav] = useState('dashboard');
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
-  const { transfers, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
-  const { sales, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
+  const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
+  const { sales, total: salesTotal, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
@@ -193,6 +193,9 @@ const StaffShell = () => {
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [closerSection, setCloserSection]   = useState('assigned'); // 'assigned' | 'sales'
+  const [transfersPage, setTransfersPage]   = useState(1);  // fronter My Leads + closer Assigned
+  const [closerSalesPage, setCloserSalesPage] = useState(1);
+  const [leadSearchQ, setLeadSearchQ]       = useState(''); // debounced server search for leads
   const [formData, setFormData]             = useState({});
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferError, setTransferError]           = useState('');
@@ -239,8 +242,12 @@ const StaffShell = () => {
     fetchStats();
     if (isFronter) { fetchFields(); fetchConfigs(); }
   }, []);
-  useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
-  useEffect(() => { if (isCloser) fetchSales({ date_from, date_to }); }, [fetchSales, date_from, date_to, isCloser]);
+  // Debounce the fronter lead filter into a server-side search; reset to page 1.
+  useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
+  useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ]);
+  useEffect(() => { if (isCloser) fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE }); }, [fetchSales, date_from, date_to, isCloser, closerSalesPage]);
+  // Keep page within range when the date filter narrows the dataset.
+  useEffect(() => { setTransfersPage(1); setCloserSalesPage(1); }, [date_from, date_to]);
 
   const fetchXferTab = useCallback(async () => {
     if (!user?.company_id) return;
@@ -300,8 +307,8 @@ const StaffShell = () => {
       setSaleSuccess(created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!');
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
-      fetchTransfers({ date_from, date_to });
-      fetchSales({ date_from, date_to });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
@@ -317,7 +324,7 @@ const StaffShell = () => {
       await client.put(`sales/${editSale.id}`, formData);
       setEditSale(null);
       setSaleSuccess('Sale updated!');
-      fetchSales({ date_from, date_to });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setEditSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to update sale');
@@ -331,7 +338,7 @@ const StaffShell = () => {
     setSubmitMsg('');
     try {
       await client.post(`sales/${saleId}/submit-review`);
-      fetchSales({ date_from, date_to });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
       setSubmitMsg('');
     } catch (err) {
       setSubmitMsg(err.response?.data?.error || 'Failed to submit');
@@ -348,7 +355,7 @@ const StaffShell = () => {
       setRejectTarget(null);
       setRejectReason('');
       setRejectMsg('');
-      fetchTransfers({ date_from, date_to });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
       fetchStats();
     } catch (err) {
       setRejectMsg(err.response?.data?.error || 'Failed to reject');
@@ -431,7 +438,7 @@ const StaffShell = () => {
       setDupCheck(null);
       lastPrefilledId.current = null;
       fetchStats();
-      fetchTransfers({ date_from, date_to });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
     } catch (err) {
       setTransferError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to submit');
     } finally {
@@ -797,8 +804,8 @@ const StaffShell = () => {
             {/* Sub-nav: Assigned Transfers | My Sales */}
             <div className="flex gap-1 p-1 rounded-xl w-fit mb-5 overflow-x-auto"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              {[{ k: 'assigned', l: 'Assigned Transfers', icon: Clock, count: transfers.length },
-                { k: 'sales',    l: 'My Sales',           icon: DollarSign, count: sales.length }].map(s => (
+              {[{ k: 'assigned', l: 'Assigned Transfers', icon: Clock, count: transferTotal },
+                { k: 'sales',    l: 'My Sales',           icon: DollarSign, count: salesTotal }].map(s => (
                 <button key={s.k} onClick={() => setCloserSection(s.k)}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap"
                   style={{ background: closerSection === s.k ? 'var(--gradient-sidebar)' : 'transparent',
@@ -822,8 +829,9 @@ const StaffShell = () => {
                 ) : transfers.length === 0 ? (
                   <p className="text-text-secondary text-center py-8">No transfers assigned yet.</p>
                 ) : (
+                  <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {transfers.slice(0, 15).map(t => (
+                    {transfers.map(t => (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
@@ -860,6 +868,8 @@ const StaffShell = () => {
                       </div>
                     ))}
                   </div>
+                  <Pagination page={transfersPage} total={transferTotal} pageSize={PAGE_SIZE} onChange={setTransfersPage} />
+                  </>
                 )}
               </Card>
             )}
@@ -876,8 +886,9 @@ const StaffShell = () => {
                     No sales yet. Use phone search above to find a lead and create a sale.
                   </p>
                 ) : (
+                  <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {sales.slice(0, 15).map(s => (
+                    {sales.map(s => (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
@@ -979,7 +990,7 @@ const StaffShell = () => {
                         )}
                         {hasPermission('delete_sale') && (
                           <button
-                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to })); } }}
+                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE })); } }}
                             className="w-full mt-1 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-error-50"
                             style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
                             <Trash2 size={11} /> Delete Sale
@@ -988,6 +999,8 @@ const StaffShell = () => {
                       </div>
                     ))}
                   </div>
+                  <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
+                  </>
                 )}
               </Card>
             )}
@@ -1024,7 +1037,7 @@ const StaffShell = () => {
               <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
                 style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
                 onClick={e => { if (e.target === e.currentTarget) { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; } }}>
-                <div className="relative w-full max-w-2xl my-6 rounded-2xl animate-scale-in"
+                <div className="relative w-full max-w-5xl my-6 rounded-2xl animate-scale-in"
                   style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
                   <div className="flex items-center justify-between px-6 py-5 rounded-t-2xl" style={{ background: 'var(--gradient-sidebar)' }}>
                     <div className="flex items-center gap-3">
@@ -1173,7 +1186,7 @@ const StaffShell = () => {
                 <h3 className="text-xl font-bold text-text flex items-center gap-2">
                   <FileText size={20} /> My Leads
                   <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transfers.length}</span>
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transferTotal}</span>
                 </h3>
                 <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end min-w-0">
                   <div className="relative flex-1 sm:flex-none sm:w-56">
@@ -1194,25 +1207,21 @@ const StaffShell = () => {
               {tLoading ? (
                 <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
               ) : transfers.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-14 text-center">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                    <FileText size={22} style={{ color: 'var(--color-text-tertiary)' }} />
+                leadSearchQ ? (
+                  <p className="text-text-secondary text-center py-10 text-sm">No leads match “{leadSearch}”.</p>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-14 text-center">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      <FileText size={22} style={{ color: 'var(--color-text-tertiary)' }} />
+                    </div>
+                    <p className="font-semibold text-sm mb-1" style={{ color: 'var(--color-text)' }}>No leads yet</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Create your first transfer to get started.</p>
                   </div>
-                  <p className="font-semibold text-sm mb-1" style={{ color: 'var(--color-text)' }}>No leads yet</p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Create your first transfer to get started.</p>
-                </div>
-              ) : (() => {
-                const filtered = transfers.filter(t => {
-                  if (!leadSearch.trim()) return true;
-                  const q = leadSearch.trim().toLowerCase();
-                  const phone = (t.form_data?.customer_phone || t.form_data?.Phone || '').toLowerCase();
-                  const name  = (t.form_data?.customer_name  || `${t.form_data?.FirstName || ''} ${t.form_data?.LastName || ''}`).toLowerCase();
-                  return phone.includes(q) || name.includes(q);
-                });
-                if (!filtered.length) return <p className="text-text-secondary text-center py-10 text-sm">No leads match “{leadSearch}”.</p>;
-                return (
+                )
+              ) : (
+                <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {filtered.map(t => {
+                    {transfers.map(t => {
                       const name = t.form_data?.customer_name || (t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim() : 'Lead');
                       const phone = t.form_data?.Phone || t.form_data?.customer_phone || '';
                       const ds = getTransferDisplayStatus(t);
@@ -1272,8 +1281,9 @@ const StaffShell = () => {
                       );
                     })}
                   </div>
-                );
-              })()}
+                  <Pagination page={transfersPage} total={transferTotal} pageSize={PAGE_SIZE} onChange={setTransfersPage} />
+                </>
+              )}
             </Card>
           </div>
         )}
