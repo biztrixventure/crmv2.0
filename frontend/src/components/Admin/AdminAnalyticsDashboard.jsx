@@ -70,6 +70,17 @@ const Th = ({ col, sort, onSort, children }) => (
   </th>
 );
 
+// Plain (non-sortable) extra columns for the expanded horizontal view.
+const ExTh = ({ children }) => (
+  <th className="text-left py-2 px-2.5 text-xs font-bold uppercase tracking-wide whitespace-nowrap"
+    style={{ color: 'var(--color-text-tertiary)' }}>{children}</th>
+);
+const ExTd = ({ value, mono, truncate }) => (
+  <td className={`py-2 px-2.5 text-text-secondary ${mono ? 'font-mono text-[10px]' : ''} ${truncate ? 'max-w-[200px] truncate' : 'whitespace-nowrap'}`}
+    title={truncate && value ? String(value) : undefined}>{(value === 0 || value) ? value : '—'}</td>
+);
+const dt = (d) => d ? new Date(d).toLocaleString() : null;
+
 // ─── Interactive MiniCalendar ─────────────────────────────────────────────────
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_ABBR    = ['S','M','T','W','T','F','S'];
@@ -308,6 +319,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const [todayXfers, setTodayXfers]         = useState(0);
   const [todayLoading, setTodayLoading]     = useState(true);
   const [exportLoading, setExportLoading]   = useState(false);
+  const [expanded, setExpanded]             = useState(true); // full horizontal detail (admin dashboard)
   const debounceRef  = useRef(null);
   const dataTableRef = useRef(null);
 
@@ -766,6 +778,11 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               {total.toLocaleString()} record{total!==1?'s':''}
               {total > LIMIT ? ` · p${page}/${totalPages}` : ''}
             </span>
+            <button onClick={() => setExpanded(v => !v)} title="Toggle full detail columns"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all hover:scale-105"
+              style={{ backgroundColor: expanded ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-surface)', color: 'var(--color-primary-700)', border: '1px solid var(--color-border)' }}>
+              <Layers size={11} />{expanded ? 'Compact' : 'Expanded'}
+            </button>
             {total > 0 && (
               <button
                 onClick={handleExport}
@@ -796,6 +813,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="monthly_payment" sort={sort} onSort={toggleSort}>Monthly</Th>
                   <Th col="sale_date"       sort={sort} onSort={toggleSort}>Sale Date</Th>
                   <Th col="created_at"      sort={sort} onSort={toggleSort}>Created</Th>
+                  {expanded && <>
+                    <ExTh>Phone 2</ExTh><ExTh>Email</ExTh><ExTh>Address</ExTh>
+                    <ExTh>Year</ExTh><ExTh>Make</ExTh><ExTh>Model</ExTh><ExTh>Miles</ExTh><ExTh>VIN</ExTh>
+                    <ExTh>Disposition</ExTh><ExTh>Down</ExTh><ExTh>Due Note</ExTh>
+                    <ExTh>Submitted</ExTh><ExTh>Reviewed</ExTh><ExTh>Updated</ExTh>
+                  </>}
                 </tr>
               </thead>
               <tbody>
@@ -810,7 +833,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={10} className="py-10 text-center text-text-secondary text-xs">No sales match the current filters.</td></tr>
+                  <tr><td colSpan={expanded?24:10} className="py-10 text-center text-text-secondary text-xs">No sales match the current filters.</td></tr>
                 ) : (
                   sorted.map(s => (
                     <tr key={s.id} onClick={() => setDetailSale(s)}
@@ -840,6 +863,13 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">
                         {new Date(s.created_at).toLocaleDateString()}
                       </td>
+                      {expanded && <>
+                        <ExTd value={s.customer_phone_2} /><ExTd value={s.customer_email} truncate /><ExTd value={s.customer_address} truncate />
+                        <ExTd value={s.car_year} /><ExTd value={s.car_make} /><ExTd value={s.car_model} />
+                        <ExTd value={s.car_miles ? Number(s.car_miles).toLocaleString() : null} /><ExTd value={s.car_vin} mono />
+                        <ExTd value={s.closer_disposition} /><ExTd value={s.down_payment ? `$${s.down_payment}` : null} /><ExTd value={s.payment_due_note} truncate />
+                        <ExTd value={dt(s.submitted_for_review_at)} /><ExTd value={dt(s.compliance_reviewed_at)} /><ExTd value={dt(s.updated_at)} />
+                      </>}
                     </tr>
                   ))
                 )}
@@ -858,6 +888,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="company_name"         sort={sort} onSort={toggleSort}>Company</Th>
                   <Th col="sale_reference_no"    sort={sort} onSort={toggleSort}>Sale Ref</Th>
                   <Th col="created_at"           sort={sort} onSort={toggleSort}>Created</Th>
+                  {expanded && <>
+                    <ExTh>Phone 2</ExTh><ExTh>Email</ExTh><ExTh>Address</ExTh>
+                    <ExTh>Year</ExTh><ExTh>Make</ExTh><ExTh>Model</ExTh><ExTh>Miles</ExTh><ExTh>VIN</ExTh><ExTh>Updated</ExTh>
+                  </>}
                 </tr>
               </thead>
               <tbody>
@@ -872,7 +906,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={9} className="py-10 text-center text-text-secondary text-xs">No transfers match the current filters.</td></tr>
+                  <tr><td colSpan={expanded?18:9} className="py-10 text-center text-text-secondary text-xs">No transfers match the current filters.</td></tr>
                 ) : (
                   sorted.map(t => {
                     const fd = t.form_data||{};
@@ -913,6 +947,15 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                         <td className="py-2 px-2.5 text-text-secondary">{t.company_name||'—'}</td>
                         <td className="py-2 px-2.5 font-mono text-[10px] text-text-tertiary">{t.sale_reference_no||'—'}</td>
                         <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">{new Date(t.created_at).toLocaleDateString()}</td>
+                        {expanded && (() => {
+                          const addr = [fd.Address, fd.City, fd.State, fd.Zip].filter(Boolean).join(', ') || fd.customer_address;
+                          const miles = fd.CarMiles || fd.car_miles;
+                          return <>
+                            <ExTd value={fd.Phone2 || fd.customer_phone_2} /><ExTd value={fd.Email || fd.customer_email} truncate /><ExTd value={addr} truncate />
+                            <ExTd value={fd.CarYear || fd.car_year} /><ExTd value={fd.CarMake || fd.car_make} /><ExTd value={fd.CarModel || fd.car_model} />
+                            <ExTd value={miles ? Number(miles).toLocaleString() : null} /><ExTd value={fd.CarVin || fd.car_vin} mono /><ExTd value={dt(t.updated_at)} />
+                          </>;
+                        })()}
                       </tr>
                     );
                   })
@@ -933,6 +976,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                   <Th col="status"        sort={sort} onSort={toggleSort}>Status</Th>
                   <th className="py-2 px-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color:'var(--color-text-secondary)' }}>Notes</th>
                   <Th col="created_at"    sort={sort} onSort={toggleSort}>Created</Th>
+                  {expanded && <><ExTh>Timezone</ExTh><ExTh>Source</ExTh></>}
                 </tr>
               </thead>
               <tbody>
@@ -947,7 +991,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                     </tr>
                   ))
                 ) : sorted.length===0 ? (
-                  <tr><td colSpan={9} className="py-10 text-center text-text-secondary text-xs">No callbacks match the current filters.</td></tr>
+                  <tr><td colSpan={expanded?11:9} className="py-10 text-center text-text-secondary text-xs">No callbacks match the current filters.</td></tr>
                 ) : (
                   sorted.map(c => (
                     <tr key={c.id}
@@ -978,6 +1022,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">
                         {new Date(c.created_at).toLocaleDateString()}
                       </td>
+                      {expanded && <><ExTd value={c.user_timezone} /><ExTd value={c.source} /></>}
                     </tr>
                   ))
                 )}
