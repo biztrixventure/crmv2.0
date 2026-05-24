@@ -347,6 +347,17 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </select>
       );
     }
+    // Rate Call — admin-configurable dropdown (comma-separated options in Form Builder)
+    if (field.field_type === 'sale_call_review') {
+      const opts = (field.options && field.options.length > 0) ? field.options : ['Excellent', 'Good', 'Average', 'Poor', 'Bad'];
+      return (
+        <select value={val} onChange={onChange} required={field.is_required}
+          className={`input ${errClass}`}>
+          <option value="">Rate the call…</option>
+          {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
+        </select>
+      );
+    }
     if (field.field_type === 'zip') {
       return (
         <div className="relative">

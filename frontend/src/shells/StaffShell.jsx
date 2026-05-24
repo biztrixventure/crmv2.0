@@ -642,20 +642,6 @@ const StaffShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
-                              {hasPermission('submit_call_review') && (
-                                <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
-                                  <Star size={11} className="inline mr-1" />Rate
-                                </button>
-                              )}
-                              {hasPermission('submit_call_dispo') && (
-                                <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
-                                  <MessageSquare size={11} className="inline mr-1" />Dispo
-                                </button>
-                              )}
                               {hasPermission('delete_transfer') && (
                                 <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchXferTab()); } }}
                                   className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
@@ -853,22 +839,6 @@ const StaffShell = () => {
                             )}
                           </div>
                         )}
-                        <div className="flex gap-2 mt-2">
-                          {hasPermission('submit_call_review') && (
-                            <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
-                              className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 hover:bg-primary-50 transition-all"
-                              style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
-                              <Star size={11} /> Rate Call
-                            </button>
-                          )}
-                          {hasPermission('submit_call_dispo') && (
-                            <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
-                              className="flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 hover:bg-info-50 transition-all"
-                              style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
-                              <MessageSquare size={11} /> Set Dispo
-                            </button>
-                          )}
-                        </div>
                       </div>
                     ))}
                   </div>

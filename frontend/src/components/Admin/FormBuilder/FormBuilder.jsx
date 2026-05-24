@@ -53,6 +53,7 @@ const CLOSER_DEAL_FIELDS = [
   { name: 'SaleFronter',        label: 'Fronter',          field_type: 'sale_fronter',         is_required: false },
   { name: 'SaleDate',           label: 'Sale Date',        field_type: 'sale_date',            is_required: false },
   { name: 'SaleDisposition', label: 'Closer Disposition', field_type: 'sale_disposition', is_required: false, options: ['Sale', 'No Sale', 'Callback', 'Not Interested', 'Voicemail', 'Other'] },
+  { name: 'SaleCallReview', label: 'Rate Call', field_type: 'sale_call_review', is_required: false, options: ['Excellent', 'Good', 'Average', 'Poor', 'Bad'] },
 ];
 
 const TYPE_ICONS = {
@@ -62,6 +63,7 @@ const TYPE_ICONS = {
   sale_down_payment: DollarSign, sale_monthly_payment: DollarSign,
   sale_payment_due_note: AlignLeft, sale_reference_no: Hash,
   sale_fronter: Users, sale_date: Calendar, sale_disposition: List, sale_status: List,
+  sale_call_review: ListChecks,
 };
 const TYPE_LABELS = {
   text: 'Text', email: 'Email', number: 'Number', tel: 'Phone',
@@ -70,6 +72,7 @@ const TYPE_LABELS = {
   sale_down_payment: 'Down Payment', sale_monthly_payment: 'Monthly Payment',
   sale_payment_due_note: 'Payment Due Note', sale_reference_no: 'Reference No',
   sale_fronter: 'Fronter', sale_date: 'Sale Date', sale_disposition: 'Closer Disposition', sale_status: 'Closer Disposition',
+  sale_call_review: 'Rate Call',
 };
 const SPAN_LABEL = { 1: '1/5', 2: '2/5', 3: '3/5', 4: '4/5', 5: 'Full' };
 const SPAN_CLASS  = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4', 5: 'col-span-5' };
@@ -677,7 +680,7 @@ const FieldCard = ({
 
   useEffect(() => () => clearTimeout(removeTimer.current), []);
   const isSale   = field.field_type === 'sale_client' || field.field_type === 'sale_plan';
-  const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_disposition','sale_status'].includes(field.field_type);
+  const isCloserDeal = ['sale_down_payment','sale_monthly_payment','sale_payment_due_note','sale_reference_no','sale_fronter','sale_date','sale_disposition','sale_status','sale_call_review'].includes(field.field_type);
   const mappingCount = field.field_type === 'sale_plan' && Array.isArray(field.options) ? field.options.length : 0;
 
   const commitLabel = () => {
@@ -821,7 +824,7 @@ const FieldCard = ({
         )}
 
         {/* Edit options button for sale_disposition / sale_status */}
-        {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status') && !editingOptions && (
+        {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && !editingOptions && (
           <button onClick={() => { setOptionsVal((field.options || []).join(', ')); setEditingOptions(true); }}
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0 hover:opacity-80"
             style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
@@ -851,7 +854,7 @@ const FieldCard = ({
       </div>
 
       {/* Inline options editor for sale_disposition / sale_status */}
-      {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status') && editingOptions && (
+      {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && editingOptions && (
         <div className="px-3 pb-2.5 flex items-center gap-1.5">
           <input value={optionsVal} onChange={e => setOptionsVal(e.target.value)}
             placeholder="Sale, No Sale, Callback, …"
@@ -1421,7 +1424,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   <input disabled type="text" placeholder="MBH4220SBN" className="input opacity-70 font-mono uppercase" />
                 ) : field.field_type === 'sale_fronter' ? (
                   <select disabled className="input opacity-70"><option>Select fronter…</option></select>
-                ) : (field.field_type === 'sale_disposition' || field.field_type === 'sale_status') ? (
+                ) : (field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') ? (
                   <select disabled className="input opacity-70">
                     <option>Select disposition…</option>
                     {(field.options && field.options.length > 0
