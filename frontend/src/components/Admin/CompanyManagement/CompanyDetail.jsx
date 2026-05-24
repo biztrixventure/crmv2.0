@@ -68,8 +68,25 @@ const SortTh = ({ col, sort, onSort, children }) => {
   );
 };
 
+// Extra columns for the expanded (horizontal) view — superadmin + managers only.
+const EXPAND_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'operations_manager', 'fronter_manager', 'closer_manager', 'manager', 'compliance_manager'];
+const ExTh = ({ children }) => (
+  <th className="px-3 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap"
+    style={{ color: 'var(--color-text-tertiary)' }}>{children}</th>
+);
+const ExTd = ({ value, mono, truncate }) => (
+  <td className={`px-3 py-2.5 text-xs text-text-secondary ${mono ? 'font-mono' : ''} ${truncate ? 'max-w-[220px] truncate' : 'whitespace-nowrap'}`}
+    title={truncate && value ? String(value) : undefined}>{(value === 0 || value) ? value : '—'}</td>
+);
+const dt = (d) => d ? new Date(d).toLocaleString() : null;
+
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type, companyType }) => {
+  const { user, hasPermission } = useAuth();
+  const canExpand = EXPAND_ROLES.includes(user?.role);
+  const canFin    = hasPermission('view_financial_data');
+  const [expanded, setExpanded] = useState(canExpand); // on by default for superadmin/managers
+  const isExpanded = canExpand && expanded;
   const [rows, setRows]               = useState([]);
   const [total, setTotal]             = useState(0);
   const [loading, setLoading]         = useState(false);
@@ -214,6 +231,14 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
             {exportLoading ? 'Exporting…' : 'Export CSV'}
           </button>
         )}
+        {canExpand && (
+          <button onClick={() => setExpanded(v => !v)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}
+            title="Toggle full detail columns">
+            {isExpanded ? 'Compact view' : 'Expanded view'}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -235,21 +260,36 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                   <SortTh col="closer"          sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <SortTh col="status"          sort={sort} onSort={toggleSort}>Status</SortTh>
                   <SortTh col="created_at"      sort={sort} onSort={toggleSort}>Date</SortTh>
+                  {isExpanded && <>
+                    <ExTh>Phone 2</ExTh><ExTh>Email</ExTh><ExTh>Address</ExTh><ExTh>Client</ExTh><ExTh>Plan</ExTh>
+                    <ExTh>Miles</ExTh><ExTh>VIN</ExTh><ExTh>Disposition</ExTh>
+                    {canFin && <><ExTh>Down</ExTh><ExTh>Due Note</ExTh></>}
+                    <ExTh>Sale Date</ExTh><ExTh>Submitted</ExTh><ExTh>Reviewed</ExTh><ExTh>Updated</ExTh>
+                  </>}
                 </tr></thead>
                 <tbody>
                   {displayRows.map(r => (
                     <tr key={r.id} onClick={() => setSelected(r)}
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      <td className="px-3 py-2.5 font-semibold text-text">{r.customer_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.customer_phone||'—'}</td>
+                      <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">{r.customer_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.customer_phone||'—'}</td>
                       <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{r.reference_no||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{[r.car_year,r.car_make,r.car_model].filter(Boolean).join(' ')||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{[r.car_year,r.car_make,r.car_model].filter(Boolean).join(' ')||'—'}</td>
                       <td className="px-3 py-2.5 text-xs font-semibold text-success-600">{r.monthly_payment?`$${r.monthly_payment}`:'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.fronter_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.closer_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.fronter_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.closer_name||'—'}</td>
                       <td className="px-3 py-2.5"><Badge variant={SALE_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
-                      <td className="px-3 py-2.5 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-tertiary whitespace-nowrap">{new Date(r.created_at).toLocaleDateString()}</td>
+                      {isExpanded && <>
+                        <ExTd value={r.customer_phone_2} /><ExTd value={r.customer_email} truncate /><ExTd value={r.customer_address} truncate />
+                        <ExTd value={r.client_name} /><ExTd value={r.plan} />
+                        <ExTd value={r.car_miles ? Number(r.car_miles).toLocaleString() : null} /><ExTd value={r.car_vin} mono />
+                        <ExTd value={r.closer_disposition} />
+                        {canFin && <><ExTd value={r.down_payment ? `$${r.down_payment}` : null} /><ExTd value={r.payment_due_note} truncate /></>}
+                        <ExTd value={r.sale_date ? new Date(r.sale_date).toLocaleDateString() : null} />
+                        <ExTd value={dt(r.submitted_for_review_at)} /><ExTd value={dt(r.compliance_reviewed_at)} /><ExTd value={dt(r.updated_at)} />
+                      </>}
                     </tr>
                   ))}
                 </tbody>
@@ -265,23 +305,39 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                   <SortTh col="status"     sort={sort} onSort={toggleSort}>Status</SortTh>
                   <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Rejections</th>
                   <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
+                  {isExpanded && <>
+                    <ExTh>Phone 2</ExTh><ExTh>Email</ExTh><ExTh>Address</ExTh>
+                    <ExTh>Year</ExTh><ExTh>Make</ExTh><ExTh>Model</ExTh><ExTh>Miles</ExTh><ExTh>VIN</ExTh>
+                    <ExTh>Sale Status</ExTh><ExTh>Sale Ref</ExTh><ExTh>Updated</ExTh>
+                  </>}
                 </tr></thead>
                 <tbody>
                   {displayRows.map(r => (
                     <tr key={r.id} onClick={() => setSelected(r)}
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      <td className="px-3 py-2.5 font-semibold text-text">
+                      <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">
                         {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'—'}
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.form_data?.Phone||r.form_data?.customer_phone||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.created_by_name||r.fronter_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.form_data?.Phone||r.form_data?.customer_phone||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.created_by_name||r.fronter_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">
                         {r.assigned_closer_name || (r.closer ? `${r.closer.first_name||''} ${r.closer.last_name||''}`.trim() : '') || '—'}
                       </td>
                       <td className="px-3 py-2.5"><Badge variant={TRANSFER_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary">{r.rejection_count>0?`${r.rejection_count}×`:'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-tertiary">{new Date(r.created_at).toLocaleDateString()}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-tertiary whitespace-nowrap">{new Date(r.created_at).toLocaleDateString()}</td>
+                      {isExpanded && (() => {
+                        const fd = r.form_data || {};
+                        const addr = [fd.Address, fd.City, fd.State, fd.Zip].filter(Boolean).join(', ') || fd.customer_address;
+                        const miles = fd.CarMiles || fd.car_miles;
+                        return <>
+                          <ExTd value={fd.Phone2 || fd.customer_phone_2} /><ExTd value={fd.Email || fd.customer_email} truncate /><ExTd value={addr} truncate />
+                          <ExTd value={fd.CarYear || fd.car_year} /><ExTd value={fd.CarMake || fd.car_make} /><ExTd value={fd.CarModel || fd.car_model} />
+                          <ExTd value={miles ? Number(miles).toLocaleString() : null} /><ExTd value={fd.CarVin || fd.car_vin} mono />
+                          <ExTd value={r.sale_status} /><ExTd value={r.sale_reference_no} mono /><ExTd value={dt(r.updated_at)} />
+                        </>;
+                      })()}
                     </tr>
                   ))}
                 </tbody>
@@ -297,6 +353,9 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                     <SortTh col="closer"      sort={sort} onSort={toggleSort}>Closer</SortTh>
                     <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled</SortTh>
                     <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
+                    {isExpanded && <>
+                      <ExTh>Timezone</ExTh><ExTh>Source</ExTh><ExTh>Notes</ExTh><ExTh>Created</ExTh>
+                    </>}
                   </tr>
                 </thead>
                 <tbody>
@@ -339,6 +398,10 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                             {r.status?.replace(/_/g,' ')}
                           </Badge>
                         </td>
+                        {isExpanded && <>
+                          <ExTd value={r.user_timezone} /><ExTd value={r.source} /><ExTd value={r.notes} truncate />
+                          <ExTd value={dt(r.created_at)} />
+                        </>}
                       </tr>
                     );
                   })}
