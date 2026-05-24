@@ -17,7 +17,7 @@ const DevCredit = () => {
         />
       )}
       <p className="text-center text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-        Built by{' '}
+        © {new Date().getFullYear()} Vertex Pakistan CRM. All rights reserved. | Developed by{' '}
         <a
           href="https://github.com/abdulmanan69"
           target="_blank"
@@ -25,7 +25,7 @@ const DevCredit = () => {
           className="font-medium hover:underline transition-colors"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          ABDUL MANAN ;)
+          Abdul Manan
         </a>
       </p>
     </div>
