@@ -93,6 +93,11 @@ app.use(helmet({
   },
 }));
 
+// Chat attachment uploads carry a base64-encoded file (≤10MB binary ≈ 13.3MB
+// encoded) — give this one route a larger JSON limit before the global parser
+// below claims the body. Registered first so it wins for this path.
+app.use('/api/chat/upload', express.json({ limit: '16mb' }));
+
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
 app.use(express.json({ limit: '8mb' }));

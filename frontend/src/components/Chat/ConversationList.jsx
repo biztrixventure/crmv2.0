@@ -55,7 +55,7 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
           const isActive = c.id === activeId;
           const preview = c.last_message
             ? (c.last_message.deleted ? 'Message deleted'
-              : `${c.last_message.sender_id === meId ? 'You: ' : ''}${c.last_message.body || ''}`)
+              : `${c.last_message.sender_id === meId ? 'You: ' : ''}${c.last_message.body || '📎 Attachment'}`)
             : 'No messages yet';
           return (
             <button key={c.id} onClick={() => onSelect(c)}

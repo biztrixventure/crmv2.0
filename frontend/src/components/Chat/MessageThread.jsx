@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone, FileText, Download, UserPlus } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
+import { sanitizeChatHtml } from '../../utils/chatHtml';
 import Avatar from './Avatar';
 import PresenceDot from './PresenceDot';
 import Composer from './Composer';
@@ -28,9 +29,29 @@ const TypingDots = ({ names }) => (
   </div>
 );
 
+const Attachment = ({ a, mine }) => {
+  if (a.kind === 'image') {
+    return (
+      <a href={a.url} target="_blank" rel="noopener noreferrer" className="block">
+        <img src={a.url} alt={a.name} className="rounded-lg" style={{ maxWidth: 260, maxHeight: 240, objectFit: 'cover' }} />
+      </a>
+    );
+  }
+  return (
+    <a href={a.url} target="_blank" rel="noopener noreferrer" download
+      className="flex items-center gap-2 px-2.5 py-2 rounded-lg transition-opacity hover:opacity-90"
+      style={{ backgroundColor: mine ? 'rgba(255,255,255,0.18)' : 'var(--color-bg-secondary)', border: mine ? 'none' : '1px solid var(--color-border)' }}>
+      <FileText size={16} style={{ color: mine ? 'white' : 'var(--color-primary-600)' }} />
+      <span className="text-xs truncate" style={{ maxWidth: 170, color: mine ? 'white' : 'var(--color-text)' }}>{a.name}</span>
+      <Download size={13} style={{ color: mine ? 'rgba(255,255,255,0.8)' : 'var(--color-text-tertiary)' }} />
+    </a>
+  );
+};
+
 const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
   const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
+  const mentioned = !mine && Array.isArray(m.mentions) && m.mentions.includes(meId);
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
       <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -55,9 +76,23 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
               color: m.deleted ? 'var(--color-text-tertiary)' : mine ? 'white' : 'var(--color-text)',
               border: m.deleted ? '1px dashed var(--color-border)' : mine ? 'none' : '1px solid var(--color-border)',
               borderBottomRightRadius: mine ? 4 : 16, borderBottomLeftRadius: mine ? 16 : 4,
-              opacity: m.pending ? 0.6 : 1, boxShadow: m.deleted ? 'none' : 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.06))',
+              opacity: m.pending ? 0.6 : 1,
+              boxShadow: m.deleted ? 'none' : mentioned ? '0 0 0 2px var(--color-primary-400)' : 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.06))',
             }}>
-              {m.deleted ? <span className="text-sm italic">message deleted</span> : <span className="text-sm whitespace-pre-wrap">{m.body}</span>}
+              {m.deleted ? (
+                <span className="text-sm italic">message deleted</span>
+              ) : (
+                <>
+                  {m.body_html
+                    ? <div className="bsx-msg text-sm" dangerouslySetInnerHTML={{ __html: sanitizeChatHtml(m.body_html) }} />
+                    : m.body ? <span className="text-sm whitespace-pre-wrap">{m.body}</span> : null}
+                  {m.attachments?.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mt-1.5">
+                      {m.attachments.map((a, i) => <Attachment key={i} a={a} mine={mine} />)}
+                    </div>
+                  )}
+                </>
+              )}
               <span className="block text-right mt-0.5" style={{ fontSize: 10, opacity: 0.75, color: mine && !m.deleted ? 'rgba(255,255,255,0.85)' : 'var(--color-text-tertiary)' }}>
                 {clockTime(m.created_at)}{m.edited && !m.deleted ? ' · edited' : ''}
                 {mine && m.error ? <AlertCircle size={11} className="inline ml-1" /> : mine && !m.pending && !m.deleted ? <Check size={11} className="inline ml-1" /> : null}
@@ -98,7 +133,7 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
   );
 });
 
-const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent }) => {
+const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, onInvite }) => {
   const nameMap = useMemo(() => {
     const m = {};
     (conversation.members || []).forEach(c => { m[c.id] = c.id === meId ? 'You' : c.name; });
@@ -157,7 +192,16 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent }
 
   return (
     <div className="flex flex-col h-full">
-      <style>{`@keyframes bsxTyping{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}.bsx-typing-dot{animation:bsxTyping 1.1s infinite ease-in-out}`}</style>
+      <style>{`
+        @keyframes bsxTyping{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}
+        .bsx-typing-dot{animation:bsxTyping 1.1s infinite ease-in-out}
+        .bsx-msg img{max-width:260px;max-height:240px;border-radius:8px;margin:3px 0}
+        .bsx-msg a{color:inherit;text-decoration:underline}
+        .bsx-msg ul{list-style:disc;padding-left:1.15rem;margin:2px 0}
+        .bsx-msg ol{list-style:decimal;padding-left:1.15rem;margin:2px 0}
+        .bsx-msg p{margin:2px 0}
+        .bsx-msg .bsx-mention{background:var(--color-primary-100);color:var(--color-primary-700);border-radius:5px;padding:0 3px;font-weight:600}
+      `}</style>
 
       {/* Header */}
       <div className="flex items-center gap-3 px-3 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
@@ -176,6 +220,13 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent }
           </p>
           {typingNames.length ? <TypingDots names={typingNames} /> : <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{subtitle}</p>}
         </div>
+        {conversation.type === 'group' && conversation.my_role === 'admin' && (
+          <button onClick={() => onInvite?.(conversation)} title="Invite members"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white flex-shrink-0"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <UserPlus size={14} /> Invite
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -205,7 +256,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent }
         })}
       </div>
 
-      <Composer onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} />
+      <Composer onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members} />
     </div>
   );
 };

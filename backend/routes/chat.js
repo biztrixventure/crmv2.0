@@ -18,11 +18,43 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { findOrCreateDM, ensureMembers, pushNewMessage, getUserCards, searchDirectory } = require('../utils/chatService');
+const { findOrCreateDM, ensureMembers, pushNewMessage, pushMentions, createInvites, getUserCards, searchDirectory } = require('../utils/chatService');
 
 const router = express.Router();
 
 const MAX_BODY = 4000;
+const MAX_HTML = 40000;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;   // 10MB
+const ATTACH_BUCKET = 'chat-attachments';
+
+// Defence-in-depth server-side scrub. The authoritative XSS control is the
+// client rendering every message through DOMPurify, but we still strip the
+// obvious script/handler vectors before persisting.
+function scrubHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  return html
+    .replace(/<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi, '')
+    .replace(/<\s*\/?(iframe|object|embed|link|meta|style|form)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+    .replace(/javascript:/gi, '')
+    .slice(0, MAX_HTML);
+}
+
+// Normalize a client-supplied attachments array into trusted rows. URLs are
+// restricted to http(s) so a crafted javascript:/data: link can't be rendered.
+function cleanAttachments(input) {
+  if (!Array.isArray(input)) return null;
+  const out = input.slice(0, 10).map(a => ({
+    url:  String(a?.url || '').slice(0, 2000),
+    name: String(a?.name || 'file').slice(0, 255),
+    type: String(a?.type || '').slice(0, 120),
+    size: Number(a?.size) || 0,
+    kind: a?.kind === 'image' ? 'image' : 'file',
+  })).filter(a => /^https?:\/\//i.test(a.url));
+  return out.length ? out : null;
+}
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 async function getMembership(conversationId, userId) {
@@ -67,7 +99,7 @@ router.get('/conversations', asyncHandler(async (req, res) => {
 
   const { data: myMemberships } = await supabaseAdmin
     .from('conversation_members')
-    .select('conversation_id, last_read_at, is_muted')
+    .select('conversation_id, last_read_at, is_muted, member_role')
     .eq('user_id', uid);
 
   const convIds = (myMemberships || []).map(m => m.conversation_id);
@@ -112,6 +144,7 @@ router.get('/conversations', asyncHandler(async (req, res) => {
       title: titleFor(conv, memberCards, uid),
       is_locked: conv.is_locked,
       is_muted: myMem.is_muted || false,
+      my_role: myMem.member_role || 'member',
       last_message_at: conv.last_message_at,
       unread: unread || 0,
       members: memberCards,
@@ -149,9 +182,9 @@ router.post('/conversations', [
     return res.status(201).json({ conversation: conv });
   }
 
-  // group
+  // group — the creator is the sole admin; everyone else is INVITED, not added.
+  // They join only after accepting their invite.
   const others = memberIds.filter(id => id !== uid);
-  if (!others.length) return res.status(400).json({ error: 'A group needs at least one other member' });
   const title = (req.body.title || '').trim() || 'Group';
 
   const { data: conv, error } = await supabaseAdmin
@@ -159,8 +192,118 @@ router.post('/conversations', [
   if (error) return res.status(500).json({ error: error.message });
 
   await ensureMembers(conv.id, [uid], 'admin');
-  await ensureMembers(conv.id, others, 'member');
-  res.status(201).json({ conversation: conv });
+  const invited = await createInvites(conv.id, uid, others);
+  res.status(201).json({ conversation: conv, invited });
+}));
+
+// ── POST /chat/conversations/:id/invites — admin invites users to a group ──────
+router.post('/conversations/:id/invites', [
+  body('invitee_ids').isArray({ min: 1 }),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'invitee_ids array required' });
+
+  const convId = req.params.id;
+  const [membership, { data: conv }] = await Promise.all([
+    getMembership(convId, req.user.id),
+    supabaseAdmin.from('conversations').select('id, type').eq('id', convId).maybeSingle(),
+  ]);
+  if (!membership || !conv) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (conv.type !== 'group') return res.status(400).json({ error: 'Only groups support invites' });
+  if (membership.member_role !== 'admin') return res.status(403).json({ error: 'Only the group admin can invite members' });
+
+  const invited = await createInvites(convId, req.user.id, req.body.invitee_ids);
+  res.status(201).json({ invited });
+}));
+
+// ── GET /chat/invites — my pending group invitations ──────────────────────────
+router.get('/invites', asyncHandler(async (req, res) => {
+  const { data: invites } = await supabaseAdmin
+    .from('conversation_invites')
+    .select('id, conversation_id, inviter_id, created_at')
+    .eq('invitee_id', req.user.id).eq('status', 'pending')
+    .order('created_at', { ascending: false });
+
+  if (!invites?.length) return res.json({ invites: [] });
+
+  const convIds = [...new Set(invites.map(i => i.conversation_id))];
+  const [{ data: convs }, cards] = await Promise.all([
+    supabaseAdmin.from('conversations').select('id, title, type').in('id', convIds),
+    getUserCards(invites.map(i => i.inviter_id)),
+  ]);
+  const convById = Object.fromEntries((convs || []).map(c => [c.id, c]));
+
+  res.json({
+    invites: invites
+      .filter(i => convById[i.conversation_id])               // skip deleted groups
+      .map(i => ({
+        id: i.id,
+        conversation_id: i.conversation_id,
+        group_title: convById[i.conversation_id]?.title || 'Group',
+        inviter_name: cards.get(i.inviter_id)?.name || 'Someone',
+        created_at: i.created_at,
+      })),
+  });
+}));
+
+// ── POST /chat/invites/:id/accept — join the group ────────────────────────────
+router.post('/invites/:id/accept', asyncHandler(async (req, res) => {
+  const { data: invite } = await supabaseAdmin
+    .from('conversation_invites').select('*').eq('id', req.params.id).maybeSingle();
+  if (!invite || invite.invitee_id !== req.user.id) return res.status(404).json({ error: 'Invite not found' });
+  if (invite.status !== 'pending') return res.status(400).json({ error: 'Invite already handled' });
+
+  await ensureMembers(invite.conversation_id, [req.user.id], 'member');
+  await supabaseAdmin.from('conversation_invites')
+    .update({ status: 'accepted', responded_at: new Date().toISOString() }).eq('id', invite.id);
+
+  const { data: conv } = await supabaseAdmin
+    .from('conversations').select('*').eq('id', invite.conversation_id).maybeSingle();
+  res.json({ conversation: conv });
+}));
+
+// ── POST /chat/invites/:id/decline ────────────────────────────────────────────
+router.post('/invites/:id/decline', asyncHandler(async (req, res) => {
+  const { data: invite } = await supabaseAdmin
+    .from('conversation_invites').select('id, invitee_id, status').eq('id', req.params.id).maybeSingle();
+  if (!invite || invite.invitee_id !== req.user.id) return res.status(404).json({ error: 'Invite not found' });
+
+  await supabaseAdmin.from('conversation_invites')
+    .update({ status: 'declined', responded_at: new Date().toISOString() }).eq('id', invite.id);
+  res.json({ message: 'declined' });
+}));
+
+// ── POST /chat/upload — base64 file → Supabase Storage → public URL ───────────
+router.post('/upload', [
+  body('data').isString().notEmpty(),
+  body('name').isString().trim().notEmpty(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'data and name are required' });
+  if (await isBanned(req.user.id)) return res.status(403).json({ error: 'You are banned from chat' });
+
+  // Accept either a bare base64 string or a data URL.
+  const raw = req.body.data.includes(',') ? req.body.data.split(',').pop() : req.body.data;
+  let buffer;
+  try { buffer = Buffer.from(raw, 'base64'); } catch { return res.status(400).json({ error: 'Invalid file data' }); }
+  if (!buffer.length)               return res.status(400).json({ error: 'Empty file' });
+  if (buffer.length > MAX_FILE_BYTES) return res.status(400).json({ error: 'File exceeds the 10MB limit' });
+
+  const type = String(req.body.type || 'application/octet-stream').slice(0, 120);
+  const safeName = req.body.name.replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'file';
+  const path = `${req.user.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+
+  const { error: upErr } = await supabaseAdmin.storage
+    .from(ATTACH_BUCKET).upload(path, buffer, { contentType: type, upsert: false });
+  if (upErr) return res.status(500).json({ error: upErr.message });
+
+  const { data: pub } = supabaseAdmin.storage.from(ATTACH_BUCKET).getPublicUrl(path);
+  res.status(201).json({
+    attachment: {
+      url: pub.publicUrl, name: req.body.name.slice(0, 255), type, size: buffer.length,
+      kind: type.startsWith('image/') ? 'image' : 'file',
+    },
+  });
 }));
 
 // ── GET /chat/conversations/:id/messages — paginated history ──────────────────
@@ -171,7 +314,7 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 50);
   let q = supabaseAdmin
     .from('messages')
-    .select('id, conversation_id, sender_id, body, created_at, edited_at, deleted_at')
+    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, created_at, edited_at, deleted_at')
     .eq('conversation_id', req.params.id)
     .order('created_at', { ascending: false })
     .limit(limit + 1);
@@ -203,6 +346,9 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
     sender_id: m.sender_id,
     sender_name: cards.get(m.sender_id)?.name || 'User',
     body: m.deleted_at ? null : m.body,
+    body_html: m.deleted_at ? null : (m.body_html || null),
+    attachments: m.deleted_at ? null : (m.attachments || null),
+    mentions: m.mentions || null,
     deleted: !!m.deleted_at,
     edited: !!m.edited_at,
     created_at: m.created_at,
@@ -241,18 +387,29 @@ router.post('/messages/:id/react', [
 }));
 
 // ── POST /chat/conversations/:id/messages — send ──────────────────────────────
+// Accepts plain `body`, rich `body_html`, `attachments[]`, and `mentions[]`.
+// A message is valid if it has any text OR at least one attachment.
 router.post('/conversations/:id/messages', [
-  body('body').isString().trim().notEmpty().isLength({ max: MAX_BODY }),
+  body('body').optional({ nullable: true }).isString().isLength({ max: MAX_BODY }),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
-  if (!errs.isEmpty()) return res.status(400).json({ error: 'Message is empty or too long' });
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'Message text is too long' });
 
   const convId = req.params.id;
   const uid = req.user.id;
 
+  const text        = (req.body.body || '').trim();
+  const html        = scrubHtml(req.body.body_html);
+  const attachments = cleanAttachments(req.body.attachments);
+  const mentions    = Array.isArray(req.body.mentions)
+    ? [...new Set(req.body.mentions.filter(id => typeof id === 'string'))].slice(0, 50)
+    : null;
+
+  if (!text && !attachments) return res.status(400).json({ error: 'Message is empty' });
+
   const [membership, { data: conv }, banned] = await Promise.all([
     getMembership(convId, uid),
-    supabaseAdmin.from('conversations').select('id, is_locked, type').eq('id', convId).maybeSingle(),
+    supabaseAdmin.from('conversations').select('id, is_locked, type, title').eq('id', convId).maybeSingle(),
     isBanned(uid),
   ]);
 
@@ -267,8 +424,8 @@ router.post('/conversations/:id/messages', [
 
   const { data: msg, error } = await supabaseAdmin
     .from('messages')
-    .insert({ conversation_id: convId, sender_id: uid, body: req.body.body.trim() })
-    .select('id, conversation_id, sender_id, body, created_at, edited_at, deleted_at').single();
+    .insert({ conversation_id: convId, sender_id: uid, body: text || null, body_html: html, attachments, mentions })
+    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, created_at, edited_at, deleted_at').single();
   if (error) return res.status(500).json({ error: error.message });
 
   // Sender card + member ids for push (fire-and-forget).
@@ -277,13 +434,18 @@ router.post('/conversations/:id/messages', [
   const memberIds = (members || []).map(m => m.user_id);
   const cards = await getUserCards([uid]);
   const senderName = cards.get(uid)?.name || 'New message';
+  const preview = text || (attachments ? `📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : '');
 
-  pushNewMessage({ conversationId: convId, senderId: uid, senderName, body: msg.body, memberIds });
+  pushNewMessage({ conversationId: convId, senderId: uid, senderName, body: preview, memberIds });
+  if (mentions?.length) {
+    pushMentions({ conversationId: convId, senderId: uid, senderName, convTitle: conv.title, mentionIds: mentions, body: preview });
+  }
 
   res.status(201).json({
     message: {
       id: msg.id, conversation_id: msg.conversation_id, sender_id: msg.sender_id,
-      sender_name: senderName, body: msg.body, deleted: false, edited: false, created_at: msg.created_at,
+      sender_name: senderName, body: msg.body, body_html: msg.body_html, attachments: msg.attachments,
+      mentions: msg.mentions, deleted: false, edited: false, created_at: msg.created_at,
     },
   });
 }));

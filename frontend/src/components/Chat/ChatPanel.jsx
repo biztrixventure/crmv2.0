@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, MessagesSquare } from 'lucide-react';
+import { toast } from 'sonner';
 import client from '../../api/client';
 import { usePresence } from '../../hooks/usePresence';
 import ConversationList from './ConversationList';
 import MessageThread from './MessageThread';
 import NewChatPicker from './NewChatPicker';
+import InvitesBanner from './InvitesBanner';
+import InvitePicker from './InvitePicker';
 
 // Full chat window: dim backdrop + opaque docked panel. On large screens it's a
 // two-pane layout (conversation list always visible alongside the open thread,
@@ -15,6 +18,9 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('list');   // 'list' | 'new'
   const [active, setActive] = useState(null);
+  const [invites, setInvites] = useState([]);
+  const [inviteBusy, setInviteBusy] = useState(null);
+  const [inviteConv, setInviteConv] = useState(null);   // admin "invite to group" modal
   const pollRef = useRef(null);
   const onlineIds = usePresence(open);
 
@@ -25,15 +31,41 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     finally { setLoading(false); }
   }, []);
 
+  const loadInvites = useCallback(async () => {
+    try { const r = await client.get('chat/invites'); setInvites(r.data.invites || []); }
+    catch { /* non-critical */ }
+  }, []);
+
+  const acceptInvite = useCallback(async (inv) => {
+    setInviteBusy(inv.id);
+    try {
+      const r = await client.post(`chat/invites/${inv.id}/accept`);
+      setInvites(prev => prev.filter(i => i.id !== inv.id));
+      const list = await load();
+      const conv = list?.find(c => c.id === inv.conversation_id);
+      setActive(conv || (r.data.conversation ? { ...r.data.conversation, my_role: 'member' } : null));
+      setView('list');
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not accept invite'); }
+    finally { setInviteBusy(null); }
+  }, [load]);
+
+  const declineInvite = useCallback(async (inv) => {
+    setInviteBusy(inv.id);
+    try { await client.post(`chat/invites/${inv.id}/decline`); setInvites(prev => prev.filter(i => i.id !== inv.id)); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not decline invite'); }
+    finally { setInviteBusy(null); }
+  }, []);
+
   // Refresh the LIST on a slow cadence while open. Intentionally does NOT touch
   // the open `active` conversation — that kept re-rendering the thread and made
   // messages flicker. Lock/mute changes apply on next open.
   useEffect(() => {
     if (!open) { clearInterval(pollRef.current); return; }
     load();
-    pollRef.current = setInterval(load, 20_000);
+    loadInvites();
+    pollRef.current = setInterval(() => { load(); loadInvites(); }, 20_000);
     return () => clearInterval(pollRef.current);
-  }, [open, load]);
+  }, [open, load, loadInvites]);
 
   const openConversation = (c) => {
     setConversations(prev => prev.map(x => x.id === c.id ? { ...x, unread: 0 } : x));
@@ -51,7 +83,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     const meCard = { id: meId, name: 'You' };
     const active = conv.type === 'group'
       ? {
-          id: conv.id, type: 'group', title: conv.title || 'Group', is_locked: conv.is_locked,
+          id: conv.id, type: 'group', title: conv.title || 'Group', is_locked: conv.is_locked, my_role: 'admin',
           members: [meCard, ...(groupMembers || []).map(s => ({ id: s.id, name: s.name }))], other: null,
         }
       : {
@@ -94,14 +126,17 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
             style={{ borderRight: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
             {view === 'new'
               ? <NewChatPicker onClose={() => setView('list')} onCreated={onCreated} />
-              : <ConversationList conversations={conversations} onlineIds={onlineIds} meId={meId}
-                  activeId={active?.id} onSelect={openConversation} onNewChat={onNewChat} loading={loading} />}
+              : <>
+                  <InvitesBanner invites={invites} onAccept={acceptInvite} onDecline={declineInvite} busyId={inviteBusy} />
+                  <ConversationList conversations={conversations} onlineIds={onlineIds} meId={meId}
+                    activeId={active?.id} onSelect={openConversation} onNewChat={onNewChat} loading={loading} />
+                </>}
           </div>
 
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} />
+              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onInvite={setInviteConv} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>
@@ -114,6 +149,10 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           </div>
         </div>
       </aside>
+
+      {inviteConv && (
+        <InvitePicker conversation={inviteConv} onClose={() => setInviteConv(null)} onInvited={load} />
+      )}
     </>,
     document.body,
   );

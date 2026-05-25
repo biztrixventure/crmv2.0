@@ -90,6 +90,52 @@ async function pushNewMessage({ conversationId, senderId, senderName, body, memb
   }).catch(() => {});
 }
 
+/**
+ * Create (or revive) pending invites for a set of users to a group.
+ * Skips users who are already members. Re-inviting a declined user flips it back
+ * to pending. Returns the number of invites created/revived.
+ */
+async function createInvites(conversationId, inviterId, inviteeIds) {
+  const ids = [...new Set((inviteeIds || []).filter(Boolean))].filter(id => id !== inviterId);
+  if (!ids.length) return 0;
+
+  // Exclude users who are already members.
+  const { data: existingMembers } = await supabaseAdmin
+    .from('conversation_members').select('user_id')
+    .eq('conversation_id', conversationId).in('user_id', ids);
+  const memberSet = new Set((existingMembers || []).map(m => m.user_id));
+  const targets = ids.filter(id => !memberSet.has(id));
+  if (!targets.length) return 0;
+
+  const rows = targets.map(invitee_id => ({
+    conversation_id: conversationId,
+    invitee_id,
+    inviter_id: inviterId,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    responded_at: null,
+  }));
+  // Upsert so a previously declined/accepted invite is re-opened as pending.
+  await supabaseAdmin
+    .from('conversation_invites')
+    .upsert(rows, { onConflict: 'conversation_id,invitee_id', ignoreDuplicates: false });
+  return targets.length;
+}
+
+/** Web Push to users @mentioned in a message (best-effort, never blocks). */
+function pushMentions({ conversationId, senderId, senderName, convTitle, mentionIds, body }) {
+  const recipients = (mentionIds || []).filter(id => id && id !== senderId);
+  if (!recipients.length) return;
+  const where = convTitle ? ` in ${convTitle}` : '';
+  const preview = (body || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  sendPushToUsers(recipients, {
+    title: `${senderName || 'Someone'} mentioned you${where}`,
+    body:  preview || 'You were mentioned in a message',
+    tag:   `chat_mention_${conversationId}`,
+    data:  { conversation_id: conversationId, type: 'chat_mention' },
+  }).catch(() => {});
+}
+
 // Pretty role label from a role level, e.g. "closer_manager" → "Closer Manager".
 const labelize = (s) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -180,6 +226,8 @@ module.exports = {
   findOrCreateDM,
   ensureMembers,
   pushNewMessage,
+  pushMentions,
+  createInvites,
   logModeration,
   getUserCards,
   searchDirectory,

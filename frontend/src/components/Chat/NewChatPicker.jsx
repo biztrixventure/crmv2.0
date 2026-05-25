@@ -69,6 +69,9 @@ const NewChatPicker = ({ onClose, onCreated }) => {
       {groupMode && (
         <div className="px-4 pt-3 flex-shrink-0">
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Group name (optional)" className="input" />
+          <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+            You'll be the group admin. People you pick are <strong>invited</strong> — they join after accepting.
+          </p>
           {selected.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {selected.map(s => (
@@ -117,7 +120,7 @@ const NewChatPicker = ({ onClose, onCreated }) => {
         <div className="p-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
           <button onClick={createGroup} disabled={creating || !selected.length}
             className="w-full py-2.5 rounded-xl font-bold text-sm text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
-            {creating ? 'Creating…' : `Create group${selected.length ? ` (${selected.length})` : ''}`}
+            {creating ? 'Creating…' : `Create & invite${selected.length ? ` (${selected.length})` : ''}`}
           </button>
         </div>
       )}

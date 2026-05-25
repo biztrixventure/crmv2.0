@@ -88,6 +88,9 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     id: row.id, conversation_id: row.conversation_id, sender_id: row.sender_id,
     sender_name: nameOf(row.sender_id),
     body: row.deleted_at ? null : row.body,
+    body_html: row.deleted_at ? null : (row.body_html || null),
+    attachments: row.deleted_at ? null : (row.attachments || null),
+    mentions: row.mentions || null,
     deleted: !!row.deleted_at, edited: !!row.edited_at,
     created_at: row.created_at, reactions: [],
   }), [nameOf]);
@@ -138,17 +141,22 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     finally { setLoadingOlder(false); }
   }, [conversationId, hasMore, loadingOlder]);
 
-  // ── optimistic send ────────────────────────────────────────────────────────
-  const sendMessage = useCallback(async (text) => {
-    const bodyText = (text || '').trim();
-    if (!bodyText || !conversationId) return;
+  // ── optimistic send (accepts a rich payload or a plain string) ──────────────
+  const sendMessage = useCallback(async (payload) => {
+    const p = typeof payload === 'string' ? { body: payload } : (payload || {});
+    const bodyText = (p.body || '').trim();
+    const hasAttachments = Array.isArray(p.attachments) && p.attachments.length > 0;
+    if ((!bodyText && !p.body_html && !hasAttachments) || !conversationId) return;
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setMessages(prev => dedupe([...prev, {
       id: tempId, conversation_id: conversationId, sender_id: meId, sender_name: 'You',
-      body: bodyText, deleted: false, edited: false, created_at: new Date().toISOString(), reactions: [], pending: true,
+      body: bodyText || null, body_html: p.body_html || null, attachments: p.attachments || null, mentions: p.mentions || null,
+      deleted: false, edited: false, created_at: new Date().toISOString(), reactions: [], pending: true,
     }]));
     try {
-      const res = await client.post(`chat/conversations/${conversationId}/messages`, { body: bodyText });
+      const res = await client.post(`chat/conversations/${conversationId}/messages`, {
+        body: bodyText, body_html: p.body_html || null, attachments: p.attachments || null, mentions: p.mentions || null,
+      });
       setMessages(prev => dedupe(prev.filter(m => m.id !== tempId).concat({ ...res.data.message, reactions: [] })));
     } catch (err) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, pending: false, error: true } : m));
@@ -215,6 +223,9 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
             if (!payload.new) return;
             const msg = { id: payload.new.id, conversation_id: payload.new.conversation_id, sender_id: payload.new.sender_id,
               sender_name: nameOf(payload.new.sender_id), body: payload.new.deleted_at ? null : payload.new.body,
+              body_html: payload.new.deleted_at ? null : (payload.new.body_html || null),
+              attachments: payload.new.deleted_at ? null : (payload.new.attachments || null),
+              mentions: payload.new.mentions || null,
               deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at, created_at: payload.new.created_at, reactions: [] };
             setMessages(prev => dedupe([...prev, msg]));
             dropTyping(msg.sender_id);
@@ -224,7 +235,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
           (payload) => {
             if (!payload.new) return;
             setMessages(prev => prev.map(m => m.id === payload.new.id
-              ? { ...m, body: payload.new.deleted_at ? null : payload.new.body, deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at }
+              ? { ...m, body: payload.new.deleted_at ? null : payload.new.body,
+                  body_html: payload.new.deleted_at ? null : (payload.new.body_html || null),
+                  attachments: payload.new.deleted_at ? null : (payload.new.attachments || null),
+                  deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at }
               : m));
           })
         .on('broadcast', { event: 'typing' }, ({ payload }) => {
