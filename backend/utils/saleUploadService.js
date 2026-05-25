@@ -466,19 +466,25 @@ async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, 
     const { data, error } = await supabaseAdmin.from('sales').insert(slice).select('id, transfer_id, company_id, closer_id, closer_disposition');
     if (error) throw new Error(error.message);
     inserted += (data || []).length;
-    // Mirror manual side effects per inserted sale.
+    // Mirror manual side effects per inserted sale. The Supabase query builder is
+    // a thenable but has no .catch — await in try/catch so a side-effect failure
+    // is swallowed (and never aborts the upload) while still actually running.
     for (const s of (data || [])) {
-      supabaseAdmin.from('disposition_actions').insert({
-        transfer_id: s.transfer_id, company_id: s.company_id, user_id: s.closer_id,
-        disposition_name: 'Sent to Compliance', color: '#f59e0b',
-        note: s.closer_disposition ? `Disposition: ${s.closer_disposition}` : 'Sale submitted to compliance (bulk upload)',
-        setter_role: 'closer',
-      }).catch(() => {});
+      try {
+        await supabaseAdmin.from('disposition_actions').insert({
+          transfer_id: s.transfer_id, company_id: s.company_id, user_id: s.closer_id,
+          disposition_name: 'Sent to Compliance', color: '#f59e0b',
+          note: s.closer_disposition ? `Disposition: ${s.closer_disposition}` : 'Sale submitted to compliance (bulk upload)',
+          setter_role: 'closer',
+        });
+      } catch { /* non-critical */ }
       // Complete the transfer AND stamp the closer who handled it, so the
       // fronter sees the closer's name (same field the manual flow now sets).
       const tUpd = { status: 'completed', updated_at: new Date().toISOString() };
       if (s.closer_id) { tUpd.assigned_closer_id = s.closer_id; tUpd.assigned_to = s.closer_id; }
-      supabaseAdmin.from('transfers').update(tUpd).eq('id', s.transfer_id).catch(() => {});
+      try {
+        await supabaseAdmin.from('transfers').update(tUpd).eq('id', s.transfer_id);
+      } catch { /* non-critical */ }
     }
   }
 
