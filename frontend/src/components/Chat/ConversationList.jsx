@@ -64,7 +64,7 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
               onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
               onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent'; }}>
               <div className="relative flex-shrink-0">
-                <Avatar name={c.title} group={c.type !== 'dm'} size={44} />
+                <Avatar name={c.title} group={c.type !== 'dm'} src={c.type === 'group' ? c.image_url : null} size={44} />
                 {c.type === 'dm' && (
                   <span className="absolute -bottom-0.5 -right-0.5"><PresenceDot online={online} size={12} /></span>
                 )}

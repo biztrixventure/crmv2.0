@@ -8,7 +8,7 @@ import ConversationList from './ConversationList';
 import MessageThread from './MessageThread';
 import NewChatPicker from './NewChatPicker';
 import InvitesBanner from './InvitesBanner';
-import InvitePicker from './InvitePicker';
+import GroupSettingsModal from './GroupSettingsModal';
 
 // Full chat window: dim backdrop + opaque docked panel. On large screens it's a
 // two-pane layout (conversation list always visible alongside the open thread,
@@ -20,7 +20,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
   const [active, setActive] = useState(null);
   const [invites, setInvites] = useState([]);
   const [inviteBusy, setInviteBusy] = useState(null);
-  const [inviteConv, setInviteConv] = useState(null);   // admin "invite to group" modal
+  const [settingsConv, setSettingsConv] = useState(null);   // group settings modal
   const pollRef = useRef(null);
   const onlineIds = usePresence(open);
 
@@ -84,6 +84,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     const active = conv.type === 'group'
       ? {
           id: conv.id, type: 'group', title: conv.title || 'Group', is_locked: conv.is_locked, my_role: 'admin',
+          description: conv.description || null, image_url: conv.image_url || null, only_admins_post: !!conv.only_admins_post,
           members: [meCard, ...(groupMembers || []).map(s => ({ id: s.id, name: s.name }))], other: null,
         }
       : {
@@ -136,7 +137,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onInvite={setInviteConv} />
+              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>
@@ -150,8 +151,19 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
         </div>
       </aside>
 
-      {inviteConv && (
-        <InvitePicker conversation={inviteConv} onClose={() => setInviteConv(null)} onInvited={load} />
+      {settingsConv && (
+        <GroupSettingsModal
+          conversation={settingsConv}
+          meId={meId}
+          onClose={() => setSettingsConv(null)}
+          onUpdated={(fields) => {
+            setActive(a => (a && a.id === settingsConv.id ? { ...a, ...fields } : a));
+            setSettingsConv(s => (s ? { ...s, ...fields } : s));
+            load();
+          }}
+          onLeft={() => { const id = settingsConv.id; setSettingsConv(null); setActive(a => (a?.id === id ? null : a)); load(); }}
+          onDeleted={() => { const id = settingsConv.id; setSettingsConv(null); setActive(a => (a?.id === id ? null : a)); load(); }}
+        />
       )}
     </>,
     document.body,

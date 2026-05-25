@@ -142,6 +142,9 @@ router.get('/conversations', asyncHandler(async (req, res) => {
       id: conv.id,
       type: conv.type,
       title: titleFor(conv, memberCards, uid),
+      description: conv.description || null,
+      image_url: conv.image_url || null,
+      only_admins_post: !!conv.only_admins_post,
       is_locked: conv.is_locked,
       is_muted: myMem.is_muted || false,
       my_role: myMem.member_role || 'member',
@@ -306,6 +309,146 @@ router.post('/upload', [
   });
 }));
 
+// ── GET /chat/conversations/:id — group detail (members + roles + settings) ───
+router.get('/conversations/:id', asyncHandler(async (req, res) => {
+  const convId = req.params.id;
+  const membership = await getMembership(convId, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'Not a member of this conversation' });
+
+  const [{ data: conv }, { data: memberRows }] = await Promise.all([
+    supabaseAdmin.from('conversations').select('*').eq('id', convId).maybeSingle(),
+    supabaseAdmin.from('conversation_members').select('user_id, member_role, joined_at')
+      .eq('conversation_id', convId).order('joined_at', { ascending: true }),
+  ]);
+  if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+  const cards = await getUserCards((memberRows || []).map(m => m.user_id));
+  const members = (memberRows || []).map(m => ({
+    ...(cards.get(m.user_id) || { id: m.user_id, name: 'User', role: '', company: '' }),
+    member_role: m.member_role,
+    joined_at: m.joined_at,
+  }));
+
+  res.json({
+    conversation: {
+      id: conv.id, type: conv.type, title: conv.title,
+      description: conv.description || null, image_url: conv.image_url || null,
+      only_admins_post: !!conv.only_admins_post, is_locked: conv.is_locked,
+      my_role: membership.member_role, created_by: conv.created_by, members,
+    },
+  });
+}));
+
+// ── PATCH /chat/conversations/:id — admin edits name/description/logo/policy ───
+router.patch('/conversations/:id', asyncHandler(async (req, res) => {
+  const convId = req.params.id;
+  const [membership, { data: conv }] = await Promise.all([
+    getMembership(convId, req.user.id),
+    supabaseAdmin.from('conversations').select('id, type').eq('id', convId).maybeSingle(),
+  ]);
+  if (!membership || !conv) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (conv.type !== 'group') return res.status(400).json({ error: 'Only groups can be edited' });
+  if (membership.member_role !== 'admin') return res.status(403).json({ error: 'Only the group admin can change group settings' });
+
+  const updates = { updated_at: new Date().toISOString() };
+  if (req.body.title       !== undefined) updates.title            = String(req.body.title).trim().slice(0, 120) || 'Group';
+  if (req.body.description !== undefined) updates.description      = req.body.description ? String(req.body.description).slice(0, 1000) : null;
+  if (req.body.image_url   !== undefined) updates.image_url        = req.body.image_url ? String(req.body.image_url).slice(0, 2000) : null;
+  if (req.body.only_admins_post !== undefined) updates.only_admins_post = req.body.only_admins_post === true;
+
+  const { data, error } = await supabaseAdmin
+    .from('conversations').update(updates).eq('id', convId).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ conversation: data });
+}));
+
+// ── DELETE /chat/conversations/:id — admin deletes the group for everyone ──────
+router.delete('/conversations/:id', asyncHandler(async (req, res) => {
+  const convId = req.params.id;
+  const [membership, { data: conv }] = await Promise.all([
+    getMembership(convId, req.user.id),
+    supabaseAdmin.from('conversations').select('id, type').eq('id', convId).maybeSingle(),
+  ]);
+  if (!membership || !conv) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (conv.type !== 'group') return res.status(400).json({ error: 'Only groups can be deleted' });
+  if (membership.member_role !== 'admin') return res.status(403).json({ error: 'Only the group admin can delete the group' });
+
+  // ON DELETE CASCADE clears members, messages, reactions and invites.
+  const { error } = await supabaseAdmin.from('conversations').delete().eq('id', convId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'deleted' });
+}));
+
+// ── POST /chat/conversations/:id/leave — leave a group (admin succession) ─────
+router.post('/conversations/:id/leave', asyncHandler(async (req, res) => {
+  const convId = req.params.id;
+  const uid = req.user.id;
+  const [membership, { data: conv }] = await Promise.all([
+    getMembership(convId, uid),
+    supabaseAdmin.from('conversations').select('id, type').eq('id', convId).maybeSingle(),
+  ]);
+  if (!membership || !conv) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (conv.type !== 'group') return res.status(400).json({ error: 'Only groups can be left' });
+
+  await supabaseAdmin.from('conversation_members').delete()
+    .eq('conversation_id', convId).eq('user_id', uid);
+
+  // Admin succession: promote a remaining member so the group always has an admin.
+  if (membership.member_role === 'admin') {
+    const { data: remaining } = await supabaseAdmin
+      .from('conversation_members').select('user_id, member_role, joined_at')
+      .eq('conversation_id', convId).order('joined_at', { ascending: true });
+
+    if (!remaining?.length) {
+      // Last person out — remove the empty group entirely.
+      await supabaseAdmin.from('conversations').delete().eq('id', convId);
+      return res.json({ left: true, deleted: true });
+    }
+    if (!remaining.some(m => m.member_role === 'admin')) {
+      // Designated successor (if a valid remaining member) else the longest-standing one.
+      const pick = remaining.find(m => m.user_id === req.body?.new_admin_id) || remaining[0];
+      await supabaseAdmin.from('conversation_members')
+        .update({ member_role: 'admin' }).eq('conversation_id', convId).eq('user_id', pick.user_id);
+    }
+  }
+  res.json({ left: true });
+}));
+
+// ── DELETE /chat/conversations/:id/members/:userId — admin removes a member ───
+router.delete('/conversations/:id/members/:userId', asyncHandler(async (req, res) => {
+  const { id: convId, userId } = req.params;
+  const [membership, { data: conv }] = await Promise.all([
+    getMembership(convId, req.user.id),
+    supabaseAdmin.from('conversations').select('id, type').eq('id', convId).maybeSingle(),
+  ]);
+  if (!membership || !conv) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (conv.type !== 'group') return res.status(400).json({ error: 'Only group members can be removed' });
+  if (membership.member_role !== 'admin') return res.status(403).json({ error: 'Only the group admin can remove members' });
+  if (userId === req.user.id) return res.status(400).json({ error: 'Use “Leave group” to remove yourself' });
+
+  await supabaseAdmin.from('conversation_members').delete()
+    .eq('conversation_id', convId).eq('user_id', userId);
+  // Drop any stale pending invite so they can be re-invited cleanly.
+  await supabaseAdmin.from('conversation_invites').delete()
+    .eq('conversation_id', convId).eq('invitee_id', userId);
+  res.json({ message: 'removed' });
+}));
+
+// ── POST /chat/conversations/:id/members/:userId/promote — make co-admin ──────
+router.post('/conversations/:id/members/:userId/promote', asyncHandler(async (req, res) => {
+  const { id: convId, userId } = req.params;
+  const membership = await getMembership(convId, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'Not a member of this conversation' });
+  if (membership.member_role !== 'admin') return res.status(403).json({ error: 'Only an admin can promote members' });
+
+  const target = await getMembership(convId, userId);
+  if (!target) return res.status(404).json({ error: 'That user is not a member' });
+
+  await supabaseAdmin.from('conversation_members')
+    .update({ member_role: 'admin' }).eq('conversation_id', convId).eq('user_id', userId);
+  res.json({ message: 'promoted' });
+}));
+
 // ── GET /chat/conversations/:id/messages — paginated history ──────────────────
 router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const membership = await getMembership(req.params.id, req.user.id);
@@ -409,7 +552,7 @@ router.post('/conversations/:id/messages', [
 
   const [membership, { data: conv }, banned] = await Promise.all([
     getMembership(convId, uid),
-    supabaseAdmin.from('conversations').select('id, is_locked, type, title').eq('id', convId).maybeSingle(),
+    supabaseAdmin.from('conversations').select('id, is_locked, type, title, only_admins_post').eq('id', convId).maybeSingle(),
     isBanned(uid),
   ]);
 
@@ -417,6 +560,10 @@ router.post('/conversations/:id/messages', [
   if (banned)            return res.status(403).json({ error: 'You are banned from chat' });
   if (conv.is_locked)    return res.status(403).json({ error: 'This room is locked' });
   if (membership.is_muted) return res.status(403).json({ error: 'You are muted in this conversation' });
+  // Group "only admins can post" policy.
+  if (conv.type === 'group' && conv.only_admins_post && membership.member_role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can post in this group' });
+  }
   // Broadcasts are one-way: only an admin member (the superadmin who sent it) may post.
   if (conv.type === 'broadcast' && membership.member_role !== 'admin') {
     return res.status(403).json({ error: 'This is a broadcast announcement — replies are disabled.' });

@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone, FileText, Download, UserPlus } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { sanitizeChatHtml } from '../../utils/chatHtml';
 import Avatar from './Avatar';
@@ -133,7 +133,7 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
   );
 });
 
-const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, onInvite }) => {
+const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, onOpenSettings }) => {
   const nameMap = useMemo(() => {
     const m = {};
     (conversation.members || []).forEach(c => { m[c.id] = c.id === meId ? 'You' : c.name; });
@@ -183,7 +183,8 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   const disabledReason = banned ? 'You are banned from chat'
     : isBroadcast ? 'Broadcast announcement — read only'
     : conversation.is_locked ? 'This room is locked by an admin'
-    : conversation.is_muted ? 'You are muted in this conversation' : null;
+    : conversation.is_muted ? 'You are muted in this conversation'
+    : (conversation.type === 'group' && conversation.only_admins_post && conversation.my_role !== 'admin') ? 'Only admins can post in this group' : null;
 
   const subtitle = typingNames.length ? null
     : isBroadcast ? 'Announcement'
@@ -210,7 +211,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
           <ArrowLeft size={18} />
         </button>
         <div className="relative flex-shrink-0">
-          <Avatar name={conversation.title} group={conversation.type !== 'dm'} size={38} />
+          <Avatar name={conversation.title} group={conversation.type !== 'dm'} src={conversation.type === 'group' ? conversation.image_url : null} size={38} />
           {conversation.type === 'dm' && <span className="absolute -bottom-0.5 -right-0.5"><PresenceDot online={online} size={11} /></span>}
         </div>
         <div className="flex-1 min-w-0">
@@ -220,11 +221,11 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
           </p>
           {typingNames.length ? <TypingDots names={typingNames} /> : <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{subtitle}</p>}
         </div>
-        {conversation.type === 'group' && conversation.my_role === 'admin' && (
-          <button onClick={() => onInvite?.(conversation)} title="Invite members"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white flex-shrink-0"
-            style={{ background: 'var(--gradient-sidebar)' }}>
-            <UserPlus size={14} /> Invite
+        {conversation.type === 'group' && (
+          <button onClick={() => onOpenSettings?.(conversation)} title="Group settings"
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <Settings size={17} />
           </button>
         )}
       </div>
