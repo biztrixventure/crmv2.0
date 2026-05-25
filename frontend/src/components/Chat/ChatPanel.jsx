@@ -41,10 +41,27 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     setActive(c);
   };
   const onNewChat = () => { setActive(null); setView('new'); };
-  const onCreated = async (conversationId) => {
-    const list = await load();
-    setActive(list?.find(c => c.id === conversationId) || { id: conversationId, type: 'dm', title: '', members: [] });
+
+  // Open the conversation straight from the picker's response. A new DM has no
+  // messages yet, so it's intentionally absent from the list (it appears once a
+  // message is sent) — we build the active thread from the picker selection so it
+  // still opens with the right title/members. The background load() refreshes the
+  // list for existing/group conversations.
+  const onCreated = (conv, otherUser, groupMembers) => {
+    const meCard = { id: meId, name: 'You' };
+    const active = conv.type === 'group'
+      ? {
+          id: conv.id, type: 'group', title: conv.title || 'Group', is_locked: conv.is_locked,
+          members: [meCard, ...(groupMembers || []).map(s => ({ id: s.id, name: s.name }))], other: null,
+        }
+      : {
+          id: conv.id, type: 'dm', title: otherUser?.name || 'Direct message', is_locked: conv.is_locked,
+          members: otherUser ? [meCard, { id: otherUser.id, name: otherUser.name }] : [meCard],
+          other: otherUser ? { id: otherUser.id, name: otherUser.name } : null,
+        };
+    setActive(active);
     setView('list');
+    load();
   };
 
   if (!open) return null;
@@ -84,7 +101,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} />
+              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>

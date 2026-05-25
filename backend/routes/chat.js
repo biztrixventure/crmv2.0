@@ -122,7 +122,12 @@ router.get('/conversations', asyncHandler(async (req, res) => {
     };
   }));
 
-  res.json({ conversations: enriched });
+  // A DM only belongs in the recent list once it has at least one message — a
+  // freshly-clicked-but-unspoken DM stays hidden until someone actually sends.
+  // (Groups/broadcasts are deliberately created, so they always show.)
+  const visible = enriched.filter(c => !(c.type === 'dm' && !c.last_message));
+
+  res.json({ conversations: visible });
 }));
 
 // ── POST /chat/conversations — DM (find-or-create) or group ───────────────────

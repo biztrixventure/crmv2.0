@@ -98,7 +98,7 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
   );
 });
 
-const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
+const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent }) => {
   const nameMap = useMemo(() => {
     const m = {};
     (conversation.members || []).forEach(c => { m[c.id] = c.id === meId ? 'You' : c.name; });
@@ -135,6 +135,13 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
     if (next != null && next.trim() && next.trim() !== m.body) { try { await editMessage(m.id, next); } catch { /* ignore */ } }
   }, [editMessage]);
   const onDelete = useCallback((m) => { if (window.confirm('Delete this message?')) deleteMessage(m.id); }, [deleteMessage]);
+
+  // After a successful send, nudge the parent to refresh the conversation list so
+  // a brand-new DM (hidden until it has a message) appears immediately.
+  const handleSend = useCallback(async (text) => {
+    await sendMessage(text);
+    onSent?.();
+  }, [sendMessage, onSent]);
 
   const isBroadcast = conversation.type === 'broadcast';
   const online = conversation.other && onlineIds?.has(conversation.other.id);
@@ -198,7 +205,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned }) => {
         })}
       </div>
 
-      <Composer onSend={sendMessage} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} />
+      <Composer onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} />
     </div>
   );
 };

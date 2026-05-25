@@ -36,7 +36,7 @@ const NewChatPicker = ({ onClose, onCreated }) => {
     setCreating(true); setErr('');
     try {
       const r = await client.post('chat/conversations', { type: 'dm', member_ids: [u.id] });
-      onCreated(r.data.conversation.id);
+      onCreated(r.data.conversation, u);
     } catch (e) { setErr(e.response?.data?.error || 'Could not start chat'); setCreating(false); }
   };
 
@@ -47,7 +47,7 @@ const NewChatPicker = ({ onClose, onCreated }) => {
       const r = await client.post('chat/conversations', {
         type: 'group', title: title.trim() || 'Group', member_ids: selected.map(s => s.id),
       });
-      onCreated(r.data.conversation.id);
+      onCreated(r.data.conversation, null, selected);
     } catch (e) { setErr(e.response?.data?.error || 'Could not create group'); setCreating(false); }
   };
 
