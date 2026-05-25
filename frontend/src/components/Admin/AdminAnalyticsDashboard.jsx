@@ -347,7 +347,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     setLoading(true);
     try {
       if (dataTab === 'sales') {
-        const params = { page: p, limit: LIMIT,
+        const params = { page: p, limit: LIMIT, sort_by: sort.col, sort_dir: sort.dir,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { user_ids: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
@@ -358,7 +358,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         const r = await client.get('compliance/sales', { params });
         setRows(r.data.sales || []); setTotal(r.data.total || 0);
       } else if (dataTab === 'transfers') {
-        const params = { page: p, limit: LIMIT,
+        const params = { page: p, limit: LIMIT, sort_by: sort.col, sort_dir: sort.dir,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { closer_id: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
@@ -368,7 +368,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         const r = await client.get('compliance/transfers', { params });
         setRows(r.data.transfers || []); setTotal(r.data.total || 0);
       } else {
-        const params = { page: p, limit: LIMIT,
+        const params = { page: p, limit: LIMIT, sort_by: sort.col, sort_dir: sort.dir,
           company_type: filters.companyId ? undefined : cbType,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { user_ids: filters.closerId }),
@@ -383,39 +383,21 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       }
     } catch { setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, [dataTab, filters, cbType, page, date_from, date_to]);
+  }, [dataTab, filters, cbType, page, date_from, date_to, sort.col, sort.dir]);
 
+  // Refetch from page 1 whenever filters, tab, date range OR sort change — sorting
+  // is applied server-side across the whole filtered dataset, not just this page.
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { setPage(1); fetchRows(1); }, filters.search ? 350 : 0);
-  }, [filters, dataTab, date_from, date_to]);
+  }, [filters, dataTab, date_from, date_to, sort.col, sort.dir]);
 
   useEffect(() => { fetchRows(); }, [page]);
 
   const toggleSort = col => setSort(p => ({ col, dir: p.col === col && p.dir === 'desc' ? 'asc' : 'desc' }));
 
-  const sorted = [...rows].sort((a, b) => {
-    if (dataTab === 'callbacks' && sort.col === 'priority') {
-      const W = { High: 3, Medium: 2, Low: 1 };
-      const av = W[a.priority] || 0, bv = W[b.priority] || 0;
-      return sort.dir === 'asc' ? av - bv : bv - av;
-    }
-    if (sort.col === 'fronter') {
-      const av = a.company_type === 'fronter' ? (a.user_name || '') : '';
-      const bv = b.company_type === 'fronter' ? (b.user_name || '') : '';
-      const cmp = av.localeCompare(bv);
-      return sort.dir === 'asc' ? cmp : -cmp;
-    }
-    if (sort.col === 'closer') {
-      const av = a.company_type === 'closer' ? (a.user_name || '') : '';
-      const bv = b.company_type === 'closer' ? (b.user_name || '') : '';
-      const cmp = av.localeCompare(bv);
-      return sort.dir === 'asc' ? cmp : -cmp;
-    }
-    let av = a[sort.col] ?? '', bv = b[sort.col] ?? '';
-    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
-    return sort.dir === 'asc' ? cmp : -cmp;
-  });
+  // Rows already arrive globally sorted from the server (sort_by/sort_dir).
+  const sorted = rows;
 
   const setFilter     = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const clearFilters  = () => {

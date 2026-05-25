@@ -20,79 +20,65 @@ router.get(
     try {
       const stats = {};
 
-      // Transfer stats
-      let transferQuery = supabaseAdmin
-        .from('transfers')
-        .select('id, status', { count: 'exact' });
-
-      // Closer-side roles (closer company): query by assigned_closer_id, not company_id
+      const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
       const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
-      if (isCloserSide && companyId) {
-        // Fetch user IDs in their (closer) company, filter transfers by those assigned_closer_ids
+
+      // Closer-side company user ids (for assigned_closer_id / closer_id scoping).
+      let coUserIds = [];
+      if (isCloserSide && companyId && userRole !== 'closer') {
         const { data: coUsers } = await supabaseAdmin
           .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
-        const coUserIds = (coUsers || []).map(u => u.user_id);
-        if (userRole === 'closer') {
-          transferQuery = transferQuery.eq('assigned_closer_id', userId);
-        } else if (coUserIds.length > 0) {
-          transferQuery = transferQuery.in('assigned_closer_id', coUserIds);
-        } else {
-          // No users in company — zero result shortcut
-          transferQuery = transferQuery.eq('id', '00000000-0000-0000-0000-000000000000');
-        }
-      } else {
-        if (companyId) transferQuery = transferQuery.eq('company_id', companyId);
-        if (userRole === 'fronter') transferQuery = transferQuery.eq('created_by', userId);
-      }
-      // Managers and admins see all company transfers
-
-      const { data: transfers, count: transferCount } = await transferQuery;
-
-      stats.totalTransfers = transferCount || 0;
-      stats.pendingTransfers = (transfers || []).filter(t => t.status === 'pending').length;
-      stats.assignedTransfers = (transfers || []).filter(t => t.status === 'assigned').length;
-      stats.completedTransfers = (transfers || []).filter(t => t.status === 'completed').length;
-
-      // Sales stats — role-scoped to avoid leaking cross-company data.
-      let sales = [];
-      const transferIds = (transfers || []).map(t => t.id).filter(Boolean);
-
-      if (['superadmin', 'readonly_admin'].includes(userRole)) {
-        // Global view — all sales
-        const { data: salesData } = await supabaseAdmin.from('sales').select('id, status');
-        sales = salesData || [];
-      } else if (userRole === 'closer') {
-        // Closer sees only their own sales
-        const { data: salesData } = await supabaseAdmin
-          .from('sales').select('id, status').eq('closer_id', userId);
-        sales = salesData || [];
-      } else if (isCloserSide && companyId) {
-        // Closer-side managers / compliance: scope by closer_id across all company users.
-        // Sales from the fronter pipeline have the fronter company's company_id,
-        // so company_id = closerCompanyId would miss them. Use closer_id instead.
-        const { data: coUsers } = await supabaseAdmin
-          .from('user_company_roles').select('user_id')
-          .eq('company_id', companyId).eq('is_active', true);
-        const closerUserIds = (coUsers || []).map(u => u.user_id);
-        if (closerUserIds.length > 0) {
-          const { data: salesData } = await supabaseAdmin
-            .from('sales').select('id, status').in('closer_id', closerUserIds);
-          sales = salesData || [];
-        }
-      } else if (transferIds.length > 0) {
-        // Fronter / fronter managers: only sales linked to their company's transfers
-        const { data: salesData } = await supabaseAdmin
-          .from('sales').select('id, status').in('transfer_id', transferIds);
-        sales = salesData || [];
+        coUserIds = (coUsers || []).map(u => u.user_id);
       }
 
-      const salesCount = sales.length;
+      // ── Transfer stats — COUNT queries so figures are never capped at the
+      //    1000-row fetch limit (the old code counted statuses inside a fetched
+      //    array, so "Pending" only reflected the first 1000 transfers). ──────────
+      const scopeTransfers = (q) => {
+        if (isCloserSide && companyId) {
+          if (userRole === 'closer') return q.eq('assigned_closer_id', userId);
+          if (coUserIds.length) return q.in('assigned_closer_id', coUserIds);
+          return q.eq('id', ZERO_UUID);
+        }
+        if (companyId) q = q.eq('company_id', companyId);
+        if (userRole === 'fronter') q = q.eq('created_by', userId);
+        return q;
+      };
+      const xferCount = (status) => {
+        let q = scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }));
+        if (status) q = q.eq('status', status);
+        return q;
+      };
+      const [tAll, tPending, tAssigned, tCompleted] = await Promise.all([
+        xferCount(), xferCount('pending'), xferCount('assigned'), xferCount('completed'),
+      ]);
+      stats.totalTransfers     = tAll.count || 0;
+      stats.pendingTransfers   = tPending.count || 0;
+      stats.assignedTransfers  = tAssigned.count || 0;
+      stats.completedTransfers = tCompleted.count || 0;
 
-      stats.totalSales = salesCount || 0;
-      stats.openSales = (sales || []).filter(s => s.status === 'open').length;
-      stats.closedWon = (sales || []).filter(s => s.status === 'closed_won').length;
-      stats.closedLost = (sales || []).filter(s => s.status === 'closed_lost').length;
-      stats.awaitingCompliance = (sales || []).filter(s => s.status === 'pending_review').length;
+      // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
+      const scopeSales = (q) => {
+        if (['superadmin', 'readonly_admin'].includes(userRole)) return q;              // global
+        if (userRole === 'closer') return q.eq('closer_id', userId);                    // own sales
+        if (isCloserSide && companyId) return coUserIds.length ? q.in('closer_id', coUserIds) : q.eq('id', ZERO_UUID);
+        // Fronter / fronter managers: fronter-pipeline sales carry the fronter company_id.
+        if (companyId) return q.eq('company_id', companyId);
+        return q.eq('id', ZERO_UUID);
+      };
+      const saleCount = (status) => {
+        let q = scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }));
+        if (status) q = q.eq('status', status);
+        return q;
+      };
+      const [sAll, sOpen, sWon, sLost, sReview] = await Promise.all([
+        saleCount(), saleCount('open'), saleCount('closed_won'), saleCount('closed_lost'), saleCount('pending_review'),
+      ]);
+      stats.totalSales         = sAll.count || 0;
+      stats.openSales          = sOpen.count || 0;
+      stats.closedWon          = sWon.count || 0;
+      stats.closedLost         = sLost.count || 0;
+      stats.awaitingCompliance = sReview.count || 0;
 
       // Conversion rate: compliance-approved sales / total transfers
       stats.conversionRate = stats.totalTransfers > 0
