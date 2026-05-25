@@ -13,6 +13,11 @@
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.6",
+    "@fullcalendar/daygrid": "^6.1.20",
+    "@fullcalendar/interaction": "^6.1.20",
+    "@fullcalendar/list": "^6.1.20",
+    "@fullcalendar/react": "^6.1.20",
+    "@fullcalendar/timegrid": "^6.1.20",
     "@supabase/supabase-js": "^2.38.4",
     "axios": "^1.6.0",
     "cytoscape": "^3.33.3",

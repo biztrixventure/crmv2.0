@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -18,9 +18,11 @@ import TransfersTab        from '../components/Compliance/TransfersTab';
 import CallbacksTab        from '../components/Compliance/CallbacksTab';
 import ReviewsTab          from '../components/Compliance/ReviewsTab';
 import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
+import EventsCalendar      from '../components/Calendar/EventsCalendar';
 
 const TABS = [
   { key: 'companies', label: 'Companies',    icon: Building2 },
+  { key: 'calendar',  label: 'Calendar',     icon: CalendarDays },
   { key: 'queue',     label: 'Review Queue', icon: Clock },
   { key: 'sales',     label: 'All Sales',    icon: FileText },
   { key: 'transfers', label: 'Transfers',    icon: ArrowRight },
@@ -112,6 +114,9 @@ const ComplianceShell = () => {
             onRefresh={loadCompanies}
             onNavigate={navigateTo}
           />
+        )}
+        {activeTab === 'calendar' && (
+          <EventsCalendar canEdit={false} />
         )}
         {activeTab === 'queue' && (
           <QueueTab companyList={companyList} />

@@ -21,6 +21,7 @@ import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsMa
 import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
+import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
 // ============================================================================
@@ -48,6 +49,7 @@ const AdminPanel = () => {
 
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
+    { id: "calendar",    label: "Calendar"     },
     ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
@@ -93,6 +95,7 @@ const AdminPanel = () => {
           ) : (
             <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
               {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
+              {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
               {activeTab === "sale-search" && <LeadIntelligence />}
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "faqs"        && <FAQManager />}

@@ -11,7 +11,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
-  ChevronLeft, ChevronRight, HelpCircle,
+  ChevronLeft, ChevronRight, HelpCircle, CalendarDays,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -109,6 +109,7 @@ const StaffShell = () => {
 
   // Cross-role nav
   const crossNavItems = [
+    { key: 'calendar', label: 'Calendar', icon: CalendarDays },
     ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
       ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
     ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')

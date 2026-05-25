@@ -1,11 +1,12 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
     label: 'Overview',
     items: [
-      { id: 'dashboard',    label: 'Dashboard',    icon: BarChart3  },
+      { id: 'dashboard',    label: 'Dashboard',    icon: BarChart3   },
+      { id: 'calendar',     label: 'Calendar',     icon: CalendarDays },
     ],
   },
   {

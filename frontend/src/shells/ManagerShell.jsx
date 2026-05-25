@@ -33,6 +33,7 @@ import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
 import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
+import EventsCalendar from "../components/Calendar/EventsCalendar";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -109,7 +110,8 @@ const ManagerShell = () => {
 
   // ── Tab logic ─────────────────────────────────────────────────────────────
   const TABS = [
-    { key: 'overview',     label: 'Overview',        icon: TrendingUp, always: true },
+    { key: 'overview',     label: 'Overview',        icon: TrendingUp,   always: true },
+    { key: 'calendar',     label: 'Calendar',        icon: CalendarDays, always: true },
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
     ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && isEnabled('sales')
@@ -1061,6 +1063,7 @@ const ManagerShell = () => {
         {activeTab === 'search'    && <SaleSearch />}
         {activeTab === 'faqs'      && (hasPermission('manage_faqs') ? <FAQManager /> : <FAQPanel />)}
         {activeTab === 'scripts'   && (hasPermission('manage_faqs') ? <ScriptManager /> : <ScriptPanel />)}
+        {activeTab === 'calendar'  && <EventsCalendar canEdit={false} />}
         {activeTab === 'team'      && <TeamManagementPanel companyId={companyId} />}
         {activeTab === 'roles'     && <RoleManagementPanel companyId={companyId} />}
         {activeTab === 'reviews'   && <ReviewsPanel companyId={companyId} />}

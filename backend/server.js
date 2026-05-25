@@ -39,6 +39,7 @@ const marqueeRoutes             = require('./routes/marquee');
 const spiffRoutes               = require('./routes/spiff');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
+const eventsRoutes              = require('./routes/events');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
@@ -211,6 +212,8 @@ app.use('/api/spiff',              authMiddleware, spiffRoutes);
 // moderation always works); user routes behind the per-company 'chat' flag.
 app.use('/api/chat/admin',         authMiddleware, chatAdminRoutes);
 app.use('/api/chat',               authMiddleware, requireFeature('chat'), chatRoutes);
+// Events calendar — reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
+app.use('/api/events',             authMiddleware, eventsRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)
