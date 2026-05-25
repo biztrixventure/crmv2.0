@@ -416,9 +416,22 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     setExportLoading(true);
     try {
       const today = todayET();
+      // Page through the API in 1000-row batches (PostgREST caps each response at
+      // 1000 regardless of the requested limit) so the export covers EVERY matching
+      // record in the range, not just the first page.
+      const fetchAllPages = async (endpoint, baseParams, key) => {
+        const PAGE = 1000; let pageN = 1; const all = [];
+        for (;;) {
+          const r = await client.get(endpoint, { params: { ...baseParams, page: pageN, limit: PAGE } });
+          const batch = r.data[key] || [];
+          all.push(...batch);
+          if (batch.length < PAGE || pageN >= 200) break;   // safety: ≤ 200k rows
+          pageN++;
+        }
+        return all;
+      };
       if (dataTab === 'sales') {
         const params = {
-          limit: 5000, page: 1,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { user_ids: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
@@ -426,8 +439,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ...(date_to           && { date_to }),
           ...(filters.search    && { search: filters.search }),
         };
-        const r = await client.get('compliance/sales', { params });
-        const rows = (r.data.sales || []).map(s => [
+        const rows = (await fetchAllPages('compliance/sales', params, 'sales')).map(s => [
           s.customer_name || '', s.customer_phone || '', s.customer_email || '',
           s.reference_no || '',
           SALE_LABEL[s.status] || s.status || '',
@@ -444,15 +456,13 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           `sales_export_${today}.csv`);
       } else if (dataTab === 'transfers') {
         const params = {
-          limit: 5000, page: 1,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { closer_id: filters.closerId }),
           ...(filters.status    && { status: filters.status }),
           ...(date_from         && { date_from }),
           ...(date_to           && { date_to }),
         };
-        const r = await client.get('compliance/transfers', { params });
-        const rows = (r.data.transfers || []).map(t => {
+        const rows = (await fetchAllPages('compliance/transfers', params, 'transfers')).map(t => {
           const fd = t.form_data || {};
           const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName||''}`.trim() : '') || '';
           const phone = fd.customer_phone || fd.Phone || '';
@@ -468,7 +478,6 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           `transfers_export_${today}.csv`);
       } else {
         const params = {
-          limit: 5000, page: 1,
           company_type: filters.companyId ? undefined : cbType,
           ...(filters.companyId && { company_id: filters.companyId }),
           ...(filters.closerId  && { user_ids: filters.closerId }),
@@ -478,8 +487,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ...(date_from         && { date_from }),
           ...(date_to           && { date_to }),
         };
-        const r = await client.get('compliance/callbacks', { params });
-        const rows = (r.data.callbacks || []).map(c => [
+        const rows = (await fetchAllPages('compliance/callbacks', params, 'callbacks')).map(c => [
           c.customer_name || '', c.customer_phone || '',
           c.callback_at ? new Date(c.callback_at).toLocaleString() : '',
           CB_STATUS_LABEL[c.status] || c.status || '',
@@ -760,11 +768,19 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               {total.toLocaleString()} record{total!==1?'s':''}
               {total > LIMIT ? ` · p${page}/${totalPages}` : ''}
             </span>
-            <button onClick={() => setExpanded(v => !v)} title="Toggle full detail columns"
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all hover:scale-105"
-              style={{ backgroundColor: expanded ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-surface)', color: 'var(--color-primary-700)', border: '1px solid var(--color-border)' }}>
-              <Layers size={11} />{expanded ? 'Compact' : 'Expanded'}
-            </button>
+            {/* View-mode toggle — the active mode is highlighted so it's clear which is on */}
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }} title="Table detail level">
+              {[{ k: false, l: 'Compact' }, { k: true, l: 'Expanded' }].map(o => (
+                <button key={o.l} onClick={() => setExpanded(o.k)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                  style={{
+                    background: expanded === o.k ? 'var(--gradient-sidebar)' : 'transparent',
+                    color:      expanded === o.k ? '#fff' : 'var(--color-text-secondary)',
+                  }}>
+                  <Layers size={11} />{o.l}
+                </button>
+              ))}
+            </div>
             {total > 0 && (
               <button
                 onClick={handleExport}

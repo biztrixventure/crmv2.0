@@ -9,7 +9,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -34,6 +34,7 @@ import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
+import ManagerExportModal from "../components/Manager/ManagerExportModal";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -143,6 +144,7 @@ const ManagerShell = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [activeNav, setActiveNav] = useState('dashboard');
+  const [exportOpen, setExportOpen] = useState(false);
 
   // ── Overview data ─────────────────────────────────────────────────────────
   const [fronterLb, setFronterLb]       = useState([]);
@@ -398,11 +400,19 @@ const ManagerShell = () => {
             <h2 className="text-3xl font-bold mb-1 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
             <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
-          <button onClick={loadOverview} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold transition-all hover:bg-bg-secondary"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <RefreshCw size={16} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              <FileSpreadsheet size={16} /> Export
+            </button>
+            <button onClick={loadOverview} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold transition-all hover:bg-bg-secondary"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <RefreshCw size={16} /> Refresh
+            </button>
+          </div>
         </div>
+
+        {exportOpen && <ManagerExportModal onClose={() => setExportOpen(false)} agents={companyAgents} />}
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
