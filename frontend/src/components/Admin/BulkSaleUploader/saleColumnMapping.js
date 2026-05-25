@@ -77,6 +77,44 @@ function mapToSaleColumns(fd) {
   };
 }
 
+// Is this a date-bearing field? (sale_date hits a real DATE column server-side.)
+const isDateField = (f) => f.field_type === 'date' || f.field_type === 'sale_date';
+
+// Decide a date column's orientation from the values that make it unambiguous:
+// any first-part > 12 ⇒ day-first (DD/MM); any second-part > 12 ⇒ month-first.
+function detectDayFirst(values) {
+  let dmy = 0, mdy = 0;
+  for (const v of values) {
+    const m = String(v ?? '').match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-]\d{2,4}/);
+    if (!m) continue;
+    const a = +m[1], b = +m[2];
+    if (a > 12 && b <= 12) dmy++; else if (b > 12 && a <= 12) mdy++;
+  }
+  return dmy > mdy;
+}
+
+// Convert a spreadsheet date to ISO 'YYYY-MM-DD' using the detected orientation.
+// Leaves anything it can't parse untouched (the server sanitizes as a backstop).
+function toIsoDate(value, dayFirst) {
+  const s = String(value ?? '').trim();
+  if (!s || s === '-') return s;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})/);
+  if (m) {
+    const a = +m[1], b = +m[2]; let y = +m[3]; if (y < 100) y += 2000;
+    let day, mon;
+    if (a > 12 && b <= 12)      { day = a; mon = b; }
+    else if (b > 12 && a <= 12) { mon = a; day = b; }
+    else if (dayFirst)          { day = a; mon = b; }
+    else                        { mon = a; day = b; }
+    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  return s;
+}
+
 export function applyMapping(rows, mapping, formFields, phoneKey) {
   const dyn = dynamicFields(formFields);
   const mappedHeaders = new Set([
@@ -85,9 +123,21 @@ export function applyMapping(rows, mapping, formFields, phoneKey) {
   ]);
   const fieldByType = (t) => formFields.find(f => f.field_type === t);
 
+  // Detect each mapped date column's orientation once, across all rows.
+  const dayFirstByKey = {};
+  dyn.filter(isDateField).forEach(f => {
+    const h = mapping[f.key];
+    if (h) dayFirstByKey[f.key] = detectDayFirst(rows.map(r => r[h]));
+  });
+
   return rows.map(r => {
     const form_data = {};
-    dyn.forEach(f => { const h = mapping[f.key]; const v = h ? String(r[h] ?? '').trim() : ''; if (v !== '') form_data[f.key] = v; });
+    dyn.forEach(f => {
+      const h = mapping[f.key];
+      let v = h ? String(r[h] ?? '').trim() : '';
+      if (v && isDateField(f)) v = toIsoDate(v, dayFirstByKey[f.key]);
+      if (v !== '') form_data[f.key] = v;
+    });
     Object.keys(r).forEach(h => { if (mappedHeaders.has(h)) return; const v = r[h]; if (v !== '' && v != null) form_data[h] = v; });
 
     const dynVal = (type) => { const f = fieldByType(type); return f ? (form_data[f.name] || '') : ''; };

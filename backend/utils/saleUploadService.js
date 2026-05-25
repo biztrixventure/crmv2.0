@@ -14,6 +14,51 @@ const summarizeTransfer = (t, salesByTransfer) => {
   };
 };
 
+// Normalize an arbitrary spreadsheet date value to a Postgres-safe 'YYYY-MM-DD'
+// (or null). Spreadsheets export dates in many shapes — ISO, M/D/Y, D/M/Y,
+// Excel serial numbers — and a raw "13/05/2026" handed straight to a `date`
+// column throws (month 13). Detect day-first vs month-first per value where the
+// numbers make it unambiguous; the frontend already disambiguates the rest
+// column-wide before sending. Returns null when it can't be parsed (caller then
+// falls back to today) so a bad cell never aborts the whole upload.
+function toIsoDate(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s || s === '-') return null;
+
+  // ISO 'YYYY-MM-DD' (optionally with time) — already safe.
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+  // D/M/Y or M/D/Y with / . or - separators.
+  m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})/);
+  if (m) {
+    const a = +m[1], b = +m[2];
+    let y = +m[3]; if (y < 100) y += 2000;
+    let day, mon;
+    if (a > 12 && b <= 12)      { day = a; mon = b; }   // unambiguously day-first
+    else if (b > 12 && a <= 12) { mon = a; day = b; }   // unambiguously month-first
+    else                        { mon = a; day = b; }   // ambiguous → month-first (frontend normalizes real files)
+    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return null;
+  }
+
+  // Excel serial number (days since 1899-12-30).
+  if (/^\d{4,6}$/.test(s)) {
+    const serial = +s;
+    if (serial > 20000 && serial < 80000) {
+      const d = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+
+  // Last resort: let the engine try (handles "May 20 2026", etc.).
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 // Generate a reference number like the manual flow (sales.js generateReferenceNo).
 function generateReferenceNo() {
   const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -376,7 +421,7 @@ function buildSaleRow(row, batchId) {
     payment_due_note:   row.payment_due_note || null,
     reference_no:       (row.reference_no && String(row.reference_no).trim()) || generateReferenceNo(),
     client_name:        row.client_name || null,
-    sale_date:          row.sale_date ? String(row.sale_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    sale_date:          toIsoDate(row.sale_date) || new Date().toISOString().slice(0, 10),
     form_data:          row.form_data || null,
     closer_disposition: row.closer_disposition || null,
     compliance_note:    row.compliance_note || null,
@@ -448,7 +493,7 @@ async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, 
       if (['car_year', 'car_miles'].includes(c.field)) patch[c.field] = parseInt(c.next, 10) || null;
       else if (['down_payment', 'monthly_payment'].includes(c.field)) patch[c.field] = parseFloat(c.next) || null;
       else if (c.field === 'car_vin') patch[c.field] = String(c.next).toUpperCase();
-      else if (c.field === 'sale_date') patch[c.field] = String(c.next).slice(0, 10);
+      else if (c.field === 'sale_date') patch[c.field] = toIsoDate(c.next) || new Date().toISOString().slice(0, 10);
       else patch[c.field] = c.next;
     });
     patch.edit_history = [...history, {
