@@ -72,8 +72,13 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
 
   const approve = async (sale) => {
     setApproving(sale.id);
-    try { await client.post(`sales/${sale.id}/compliance-approve`); load(); }
-    catch { /* user retries */ } finally { setApproving(null); }
+    try {
+      const r = await client.post(`sales/${sale.id}/compliance-approve`);
+      // Instant feedback: flip the row to its new status (badge + Approve→Update), then resync.
+      const updated = r.data?.sale;
+      if (updated) setSales(list => list.map(x => x.id === sale.id ? { ...x, ...updated } : x));
+      load();
+    } catch { /* user retries */ } finally { setApproving(null); }
   };
 
   const openReturn = (s) => { setReturnTarget(s); setReturnNote(''); setReturnMsg(''); };

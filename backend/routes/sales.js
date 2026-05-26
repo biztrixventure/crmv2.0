@@ -343,16 +343,19 @@ router.post(
     logger.success('CREATE_SALE', `${createdSales.length} sale(s) created for transfer=${transfer_id || 'none'} primary=${primarySale.id}`);
 
     // Auto-log "Sent to Compliance" disposition once on the linked transfer
+    // (await — the query builder has no .catch; never throw on a logging failure).
     if (transfer_id) {
-      supabaseAdmin.from('disposition_actions').insert({
-        transfer_id,
-        company_id:       companyId,
-        user_id:          userId,
-        disposition_name: 'Sent to Compliance',
-        color:            '#f59e0b',
-        note:             closer_disposition ? `Disposition: ${closer_disposition}` : 'Sale submitted to compliance',
-        setter_role:      req.user.role || null,
-      }).catch(err => logger.error('DISPO_AUTO', 'sale create dispo log failed', err));
+      try {
+        await supabaseAdmin.from('disposition_actions').insert({
+          transfer_id,
+          company_id:       companyId,
+          user_id:          userId,
+          disposition_name: 'Sent to Compliance',
+          color:            '#f59e0b',
+          note:             closer_disposition ? `Disposition: ${closer_disposition}` : 'Sale submitted to compliance',
+          setter_role:      req.user.role || null,
+        });
+      } catch (err) { logger.error('DISPO_AUTO', 'sale create dispo log failed', err); }
     }
 
     res.status(201).json({
@@ -648,17 +651,21 @@ router.post('/:id/compliance-approve', asyncHandler(async (req, res) => {
   const reviewerName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'Compliance';
   notifications.onSaleApproved({ sale: updated, reviewerName }).catch(() => {});
 
-  // Auto-log "Approved" disposition on the linked transfer
+  // Auto-log "Approved" disposition on the linked transfer. The Supabase query
+  // builder is a thenable with no .catch — await in try/catch so a logging
+  // failure never throws and 500s an approval that already succeeded.
   if (sale.transfer_id) {
-    supabaseAdmin.from('disposition_actions').insert({
-      transfer_id:      sale.transfer_id,
-      company_id:       sale.company_id,
-      user_id:          userId,
-      disposition_name: sale.closer_disposition || 'Approved',
-      color:            '#22c55e',
-      note:             `Approved by compliance (${reviewerName})`,
-      setter_role:      userRole,
-    }).catch(err => logger.error('DISPO_AUTO', 'approve dispo log failed', err));
+    try {
+      await supabaseAdmin.from('disposition_actions').insert({
+        transfer_id:      sale.transfer_id,
+        company_id:       sale.company_id,
+        user_id:          userId,
+        disposition_name: sale.closer_disposition || 'Approved',
+        color:            '#22c55e',
+        note:             `Approved by compliance (${reviewerName})`,
+        setter_role:      userRole,
+      });
+    } catch (err) { logger.error('DISPO_AUTO', 'approve dispo log failed', err); }
   }
 
   logger.success('COMPLIANCE_APPROVE', `Sale ${id} approved by ${userId}`);
@@ -721,17 +728,20 @@ router.post('/:id/compliance-return', [
   const reviewerName = authUser?.user?.user_metadata?.first_name || authUser?.user?.email || 'Compliance';
   notifications.onSaleReturned({ sale: updated, reviewerName, note }).catch(() => {});
 
-  // Auto-log "Needs Revision" disposition on the linked transfer
+  // Auto-log "Needs Revision" disposition on the linked transfer (await — the
+  // query builder has no .catch; swallow logging errors without 500ing the return).
   if (sale.transfer_id) {
-    supabaseAdmin.from('disposition_actions').insert({
-      transfer_id:      sale.transfer_id,
-      company_id:       sale.company_id,
-      user_id:          userId,
-      disposition_name: 'Needs Revision',
-      color:            '#ef4444',
-      note:             note,
-      setter_role:      userRole,
-    }).catch(err => logger.error('DISPO_AUTO', 'return dispo log failed', err));
+    try {
+      await supabaseAdmin.from('disposition_actions').insert({
+        transfer_id:      sale.transfer_id,
+        company_id:       sale.company_id,
+        user_id:          userId,
+        disposition_name: 'Needs Revision',
+        color:            '#ef4444',
+        note:             note,
+        setter_role:      userRole,
+      });
+    } catch (err) { logger.error('DISPO_AUTO', 'return dispo log failed', err); }
   }
 
   logger.success('COMPLIANCE_RETURN', `Sale ${id} returned by ${userId} with note`);

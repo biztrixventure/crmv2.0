@@ -42,6 +42,8 @@ const QueueTab = ({ companyList }) => {
     setApproving(sale.id); setApproveMsg('');
     try {
       await client.post(`sales/${sale.id}/compliance-approve`);
+      // Instant feedback: drop the approved sale out of the queue, then resync.
+      setQueue(q => q.filter(x => x.id !== sale.id));
       load();
     } catch (err) {
       setApproveMsg(err.response?.data?.error || 'Failed to approve');
