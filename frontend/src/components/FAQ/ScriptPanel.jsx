@@ -5,6 +5,7 @@ import {
 import { useScripts } from '../../hooks/useScripts';
 import { useSearchTools } from '../../hooks/useSearchTools';
 import { rankItems } from '../../utils/smartSearch';
+import RichView from '../UI/RichView';
 
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
@@ -51,28 +52,38 @@ const TopicButton = ({ active, label, count, icon: Icon, onClick }) => (
   </button>
 );
 
+const stripHtml = (h) => (h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const sectionMatches = (sec, q) => {
   const ql = (q || '').trim().toLowerCase();
   if (!ql) return false;
-  return `${sec.heading} ${sec.tags} ${sec.content}`.toLowerCase().includes(ql);
+  return `${sec.heading} ${sec.tags} ${stripHtml(sec.content)}`.toLowerCase().includes(ql);
 };
 
 const ScriptCard = ({ script, open, onToggle, q }) => {
+  const [tagFilter, setTagFilter] = useState('');
   const sections = Array.isArray(script.sections) ? script.sections : [];
-  const matched  = q ? sections.filter(s => sectionMatches(s, q)) : [];
+  const ql = (q || '').trim().toLowerCase();
+  const matched = ql ? sections.filter(s => sectionMatches(s, q)) : [];
+  const isOpen  = open || (!!ql && matched.length > 0);   // auto-open on a search hit
+
+  const hasTag = (sec, t) => splitKeywords(sec.tags).some(x => x.toLowerCase() === t);
+  // Click a tag → show ONLY that heading's paragraph; else a search shows only
+  // matching paragraphs; otherwise the whole script.
+  const visible = tagFilter ? sections.filter(s => hasTag(s, tagFilter))
+    : (ql && matched.length ? matched : sections);
+
   return (
   <div className="rounded-2xl overflow-hidden transition-all duration-200"
-    style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${open ? 'var(--color-primary-300)' : 'var(--color-border)'}`, boxShadow: open ? 'var(--shadow-md)' : 'none' }}>
+    style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${isOpen ? 'var(--color-primary-300)' : 'var(--color-border)'}`, boxShadow: isOpen ? 'var(--shadow-md)' : 'none' }}>
     <button onClick={onToggle} className="w-full flex items-start gap-3 p-4 sm:p-5 text-left">
       <span className="mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
-        style={{ backgroundColor: open ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)' }}>
-        <MessageSquareText size={15} style={{ color: open ? 'white' : 'var(--color-primary-600)' }} />
+        style={{ backgroundColor: isOpen ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)' }}>
+        <MessageSquareText size={15} style={{ color: isOpen ? 'white' : 'var(--color-primary-600)' }} />
       </span>
       <div className="flex-1 min-w-0">
         <p className="font-semibold leading-snug" style={{ color: 'var(--color-text)' }}>{highlight(script.title, q)}</p>
-        {!open && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{script.content}</p>}
-        {/* When collapsed + searching, point to the heading(s) that matched */}
-        {!open && matched.length > 0 && (
+        {!isOpen && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{script.content}</p>}
+        {!isOpen && matched.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {matched.slice(0, 4).map((s, i) => (
               <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
@@ -82,7 +93,7 @@ const ScriptCard = ({ script, open, onToggle, q }) => {
         )}
         {splitKeywords(script.keywords).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
-            {splitKeywords(script.keywords).slice(0, open ? 99 : 6).map(k => (
+            {splitKeywords(script.keywords).slice(0, isOpen ? 99 : 6).map(k => (
               <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>
             ))}
@@ -90,30 +101,58 @@ const ScriptCard = ({ script, open, onToggle, q }) => {
         )}
       </div>
       <ChevronDown size={18} className="flex-shrink-0 mt-1 transition-transform duration-200"
-        style={{ color: 'var(--color-text-tertiary)', transform: open ? 'rotate(180deg)' : 'none' }} />
+        style={{ color: 'var(--color-text-tertiary)', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
     </button>
-    {open && (
+    {isOpen && (
       <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] animate-fade-in space-y-3">
-        <div className="flex justify-end"><CopyButton text={script.content} /></div>
-        <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{highlight(script.content, q)}</p>
-        {sections.map((sec, i) => {
+        {script.content && (
+          <>
+            <div className="flex justify-end"><CopyButton text={script.content} /></div>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{highlight(script.content, q)}</p>
+          </>
+        )}
+
+        {/* Tag filter bar — set by clicking a heading's tag */}
+        {tagFilter && (
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            Showing only headings tagged
+            <span className="px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{tagFilter}</span>
+            <button onClick={() => setTagFilter('')} className="font-semibold underline">show all</button>
+          </div>
+        )}
+
+        {visible.map((sec, i) => {
           const hit = sectionMatches(sec, q);
           return (
             <div key={i} className="rounded-xl p-3"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: `1px solid ${hit ? 'var(--color-primary-400)' : 'var(--color-border)'}`, boxShadow: hit ? '0 0 0 2px var(--color-primary-100)' : 'none' }}>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{highlight(sec.heading || '', q)}</p>
-                {sec.content && <CopyButton text={sec.content} />}
+                {sec.content && <CopyButton text={stripHtml(sec.content)} />}
               </div>
               {splitKeywords(sec.tags).length > 0 && (
                 <div className="flex flex-wrap gap-1 my-1.5">
-                  {splitKeywords(sec.tags).map(t => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{t}</span>)}
+                  {splitKeywords(sec.tags).map(t => {
+                    const tl = t.toLowerCase();
+                    const active = tagFilter === tl;
+                    return (
+                      <button key={t} onClick={() => setTagFilter(active ? '' : tl)}
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-0.5 transition-all hover:scale-105"
+                        style={{ backgroundColor: active ? 'var(--color-primary-600)' : 'var(--color-primary-100)', color: active ? '#fff' : 'var(--color-primary-700)' }}
+                        title="Show only this heading">
+                        <Tag size={8} /> {t}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
-              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text-secondary)' }}>{highlight(sec.content || '', q)}</p>
+              <RichView html={sec.content} className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }} />
             </div>
           );
         })}
+        {visible.length === 0 && (
+          <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No heading tagged “{tagFilter}”.</p>
+        )}
       </div>
     )}
   </div>
@@ -139,7 +178,7 @@ const ScriptPanel = () => {
     () => (topic ? scripts.filter(s => splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) : scripts),
     [scripts, topic],
   );
-  const secText = (s, part) => (Array.isArray(s.sections) ? s.sections.map(x => x[part] || '').join('  ') : '');
+  const secText = (s, part) => (Array.isArray(s.sections) ? s.sections.map(x => part === 'content' ? stripHtml(x.content) : (x[part] || '')).join('  ') : '');
   const filtered = useMemo(() => rankItems(query, topicScoped, [
     { get: s => s.title,    weight: 5 },
     { get: s => s.keywords, weight: 4 },
