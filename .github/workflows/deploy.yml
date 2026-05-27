@@ -61,4 +61,29 @@ jobs:
         run: supabase db push --dry-run
 
       - name: Apply migrations
-        run: supabase db push
+        id: push
+        run: |
+          set -o pipefail
+          supabase db push 2>&1 | tee migrate.log
+
+      # On failure, write the exact error to the job summary AND upload it as an
+      # artifact, so the error is machine-readable (an AI/IDE can fetch the log
+      # via the GitHub API instead of you copy-pasting it).
+      - name: Surface migration error
+        if: failure()
+        run: |
+          {
+            echo "## ❌ Migration failed";
+            echo "";
+            echo '```';
+            tail -n 80 migrate.log 2>/dev/null || echo "(no log captured)";
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload migration log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-log
+          path: migrate.log
+          if-no-files-found: ignore
