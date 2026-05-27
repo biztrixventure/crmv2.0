@@ -38,5 +38,8 @@ export function useRuleEngine(data, { enabled = true } = {}) {
     setTip(null);
   }, []);
 
-  return { tip, dismiss };
+  // Force-show a tip on demand (mascot click → contextual help). Bypasses cooldown.
+  const show = useCallback((t) => { if (t) { markTipShown(t.id); setTip(t); } }, []);
+
+  return { tip, dismiss, show };
 }

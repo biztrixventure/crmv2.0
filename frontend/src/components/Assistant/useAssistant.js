@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { setPage } from './behaviorStore';
 import { useBehaviorTracker } from './useBehaviorTracker';
 import { useRuleEngine } from './useRuleEngine';
+import { helpFor } from './rules';
 
 const POS_KEY  = 'crm_assistant_pos_v1';
 const PREF_KEY = 'crm_assistant_prefs_v1';
@@ -41,15 +43,26 @@ function highlightTarget(selector) {
 export function useAssistant() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const role = user?.role || 'guest';
+  const page = routeToPage(location.pathname);
   const { data } = useBehaviorTracker();
+
+  // Rules read role + page, so guidance is tailored per user type.
+  const augmented = useMemo(() => ({ ...data, role }), [data, role]);
 
   const [prefs, setPrefs] = useState(() => ({ muted: false, minimized: false, tooltipsOff: false, ...readJSON(PREF_KEY, {}) }));
   useEffect(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
-  const { tip, dismiss } = useRuleEngine(data, { enabled: !prefs.muted && !prefs.tooltipsOff && !prefs.minimized });
+  const { tip, dismiss, show } = useRuleEngine(augmented, { enabled: !prefs.muted && !prefs.tooltipsOff && !prefs.minimized });
+
+  // On-demand "how do I use this?" — set lazily via ref so the drag handler
+  // (defined below) can trigger it on a click without ordering issues.
+  const helpRef = useRef(() => {});
+  useEffect(() => { helpRef.current = () => { if (!prefs.muted) show(helpFor(role, page)); }; }, [show, role, page, prefs.muted]);
 
   // Route → page context.
-  useEffect(() => { setPage(routeToPage(location.pathname)); }, [location.pathname]);
+  useEffect(() => { setPage(page); }, [page]);
 
   // ── position + drag (no dep; pointer events + rAF) ──────────────────────────
   const [pos, setPos] = useState(() => {
@@ -82,6 +95,8 @@ export function useAssistant() {
     setDragging(false);
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
+    // A click (no drag) = "help me with this screen".
+    if (!drag.current.moved) helpRef.current?.();
     // Snap to the nearest left/right edge.
     setPos(prev => {
       const mid = prev.x + SIZE / 2;
@@ -133,6 +148,7 @@ export function useAssistant() {
     toggleTooltips: () => setPrefs(p => ({ ...p, tooltipsOff: !p.tooltipsOff })),
     tip: prefs.muted || prefs.tooltipsOff || prefs.minimized ? null : tip,
     acceptTip, dismissTip: dismiss,
-    mascotState, data,
+    showHelp: () => helpRef.current?.(),
+    mascotState, data, role,
   };
 }

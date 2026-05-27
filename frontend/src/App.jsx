@@ -2,7 +2,7 @@ import { lazy, Suspense, useContext } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
-import { FeatureFlagsProvider } from "./contexts/FeatureFlagsContext";
+import { FeatureFlagsProvider, useFeatureFlags } from "./contexts/FeatureFlagsContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
@@ -56,6 +56,8 @@ const DashboardRedirect = () => {
 
 const AppContent = () => {
   const { isAuthenticated } = useAuth();
+  const { isEnabled } = useFeatureFlags();
+  const assistantOn = isEnabled('crm_assistant');   // superadmin system-wide toggle (Features tab)
 
   return (
     <Router>
@@ -95,8 +97,8 @@ const AppContent = () => {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      {/* Floating CRM assistant mascot — only when signed in */}
-      {isAuthenticated && (
+      {/* Floating CRM assistant mascot — signed in + enabled by superadmin (Features → crm_assistant) */}
+      {isAuthenticated && assistantOn && (
         <Suspense fallback={null}><MascotAssistant /></Suspense>
       )}
     </Router>

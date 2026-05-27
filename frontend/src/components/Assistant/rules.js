@@ -1,75 +1,101 @@
 /**
- * rules — the mascot's rule-based "intelligence" (no AI). Each rule:
- *   id        unique key (used for cooldown + ignore suppression)
- *   priority  higher wins when several match
- *   kind      'alert' | 'tip' | 'happy'  (drives mascot animation)
- *   cond(d)   pure predicate over the behavior snapshot
- *   message   short, friendly, slightly funny line
- *   action?   { label, goto?, target? }  optional CTA (navigate / highlight element)
+ * rules — the mascot's rule-based "intelligence" (no AI).
+ *   id / priority / kind('alert'|'tip'|'happy') / cond(d) / message / action?
+ * `d` includes role + page so guidance is tailored per user type.
  *
- * Add rules freely — they're plain objects, evaluated top-down by priority.
+ * Two layers:
+ *   RULES   — auto-fire (idle, missed callbacks, per-role welcome). Evaluated by priority.
+ *   helpFor — on-demand "how do I use this?" for the current role + page (mascot click).
  */
+const isManager = (r) => ['closer_manager', 'fronter_manager', 'operations_manager', 'company_admin'].includes(r);
+const isAdmin   = (r) => ['superadmin', 'readonly_admin'].includes(r);
+
 export const RULES = [
-  {
-    id: 'idle_long', priority: 90, kind: 'alert',
-    cond: (d) => d.idleTime > 600,
-    message: "Still there? I'll take a nap 😴 (mute me anytime).",
-  },
-  {
-    id: 'missed_callbacks', priority: 80, kind: 'alert',
-    cond: (d) => d.missedCallbacks > 3,
-    message: "👀 You're ignoring callbacks… they miss you too.",
-    action: { label: 'Open callbacks', target: '[data-assistant="callbacks"]' },
-  },
-  {
-    id: 'idle_mid', priority: 60, kind: 'tip',
-    cond: (d) => d.idleTime > 180 && d.idleTime <= 600,
-    message: "You there? The CRM is getting lonely 😄",
-  },
-  {
-    id: 'lead_note_hint', priority: 55, kind: 'tip',
-    cond: (d) => (d.page === 'leads' || d.page === 'transfers') && !d.recentTypes.includes('note_added'),
-    message: "Opened a lead? Drop a note so future-you remembers 👀",
-    action: { label: 'Add note', target: '[data-assistant="add-note"]' },
-  },
-  {
-    id: 'sales_create_hint', priority: 50, kind: 'tip',
-    cond: (d) => d.page === 'sales',
-    message: "That 'Create' button? Yeah… click it. Trust me 😏",
-    action: { label: 'Show me', target: '[data-assistant="create-sale"]' },
-  },
-  {
-    id: 'productive', priority: 40, kind: 'happy',
-    cond: (d) => d.eventsToday >= 40 && d.idleTime < 60,
-    message: "You're on fire today 🚀 keep it rolling.",
-  },
-  {
-    id: 'welcome', priority: 10, kind: 'tip',
-    cond: (d) => (d.pageVisits?.dashboard || 0) <= 1 && d.page === 'dashboard',
-    message: "Hey! I'm Trix 🐾 — I'll nudge you when something needs love. Drag me anywhere.",
-  },
+  // ── behavioural alerts (role-agnostic) ──────────────────────────────────────
+  { id: 'idle_long', priority: 95, kind: 'alert', cond: (d) => d.idleTime > 600,
+    message: "Still there? I'll take a nap 😴 (mute me anytime)." },
+  { id: 'missed_callbacks', priority: 90, kind: 'alert', cond: (d) => d.missedCallbacks > 3,
+    message: "👀 You're ignoring callbacks… they miss you too.", action: { label: 'Open callbacks', target: '[data-assistant="callbacks"]' } },
+  { id: 'idle_mid', priority: 60, kind: 'tip', cond: (d) => d.idleTime > 180 && d.idleTime <= 600,
+    message: "You there? The CRM is getting lonely 😄" },
+  { id: 'productive', priority: 40, kind: 'happy', cond: (d) => d.eventsToday >= 40 && d.idleTime < 60,
+    message: "You're on fire today 🚀 keep it rolling." },
+
+  // ── per-role welcome (once per session, first dashboard visit) ──────────────
+  { id: 'welcome_fronter', priority: 30, kind: 'tip',
+    cond: (d) => d.role === 'fronter' && d.page === 'dashboard',
+    message: "Hey, I'm Trix 🐾 Fronter HQ: create a transfer to hand a lead to a closer. Click me anytime for a how-to.",
+    action: { label: 'Show create', target: '[data-assistant="create-transfer"]' } },
+  { id: 'welcome_closer', priority: 30, kind: 'tip',
+    cond: (d) => d.role === 'closer' && d.page === 'dashboard',
+    message: "Hey, I'm Trix 🐾 Closer mode: work 'Assigned Transfers', then log the deal in 'My Sales'. Click me for help on any screen.",
+    action: { label: 'Got it' } },
+  { id: 'welcome_manager', priority: 30, kind: 'tip',
+    cond: (d) => isManager(d.role) && d.page === 'dashboard',
+    message: "Hi, I'm Trix 🐾 Manager view: team transfers, sales, reviews, reports + Export up top. Click me to learn any tab.",
+    action: { label: 'Got it' } },
+  { id: 'welcome_compliance', priority: 30, kind: 'tip',
+    cond: (d) => d.role === 'compliance_manager' && (d.page === 'compliance' || d.page === 'dashboard'),
+    message: "Hi, I'm Trix 🐾 Compliance: the Review Queue holds pending sales — Approve or Return with a note. Click me for details.",
+    action: { label: 'Got it' } },
+  { id: 'welcome_admin', priority: 30, kind: 'tip',
+    cond: (d) => isAdmin(d.role) && (d.page === 'admin' || d.page === 'dashboard'),
+    message: "Hey, I'm Trix 🐾 Superadmin: I can explain Companies, Users, Form Builder, Bulk Upload, Features & Chat. Click me on any screen.",
+    action: { label: 'Got it' } },
 ];
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/**
- * Pick the best tip to show, or null. Respects: a global min-gap (no spam),
- * 24h suppression of ignored tips, and never repeating the immediately-previous
- * tip. `sessionShown` is a Set of ids already shown this session.
- */
 export function pickTip(data, { now = Date.now(), minGapMs = 30000, sessionShown = new Set() } = {}) {
-  if (now - (data.lastTipAt || 0) < minGapMs) return null;       // don't spam
-
+  if (now - (data.lastTipAt || 0) < minGapMs) return null;
   const candidates = RULES
     .filter(r => {
       if (typeof r.cond !== 'function' || !r.cond(data)) return false;
       const ignoredAt = data.ignoredTips?.[r.id];
-      if (ignoredAt && now - ignoredAt < DAY) return false;        // user dismissed it recently
-      if (r.id === data.lastTipId) return false;                   // don't repeat back-to-back
-      if (sessionShown.has(r.id) && r.kind !== 'alert') return false; // show non-alerts once/session
+      if (ignoredAt && now - ignoredAt < DAY) return false;
+      if (r.id === data.lastTipId) return false;
+      if (sessionShown.has(r.id) && r.kind !== 'alert') return false;
       return true;
     })
     .sort((a, b) => b.priority - a.priority);
-
   return candidates[0] || null;
+}
+
+// ── On-demand contextual help (mascot click) ───────────────────────────────────
+// Page-level "how do I use this?" tailored to role. Always available; ignores
+// cooldown because the user explicitly asked.
+const PAGE_HELP = {
+  dashboard: {
+    fronter:    "This is your dashboard. Hit ‘Create Transfer’ to send a lead to a closer, then track it under ‘My Leads’. Each transfer needs a phone + customer + car.",
+    closer:     "Two tabs: ‘Assigned Transfers’ (leads to work) and ‘My Sales’ (deals you closed). Open a transfer, set a disposition, then add the sale.",
+    _manager:   "Tabs across the top: Overview, Team Transfers, Team Sales, Callbacks, Reviews, Reports. ‘Export’ downloads any of them (date range + filters).",
+    compliance_manager: "Tabs: Companies, Review Queue, All Sales, Transfers, Callbacks, Reviews, Numbers. Review Queue = sales awaiting your approval.",
+    _admin:     "Use the left sidebar: Dashboard, Calendar, Companies, Users, Form Builder, Bulk Upload, FAQs, Features, Chat Control. Ask me on any of them.",
+  },
+  transfers: {
+    _any: "Transfers = leads handed from fronter to closer. Filter by status/date, click a row for full detail. Duplicate same-number leads can be merged in the cleanup tool.",
+    fronter: "Create a transfer with the customer + car + phone. Re-touching the same lead within 30 days updates the existing one; older = a new transfer.",
+  },
+  sales: {
+    closer: "Add a sale from a worked transfer: plan, down/monthly payment, reference. On submit it goes to Compliance as ‘pending review’.",
+    _any: "Sales are closed deals linked to a transfer. Status flows pending_review → closed_won (approved) or needs_revision (returned).",
+  },
+  callbacks: { _any: "Scheduled callbacks. Times are stored in your local zone. Mark done when handled — ignoring them piles up and I’ll nag you 😄." },
+  compliance: { _any: "Review Queue = pending sales. ‘Approve’ → closed_won; ‘Return’ sends it back to the closer with your note. All Sales lets you edit any status." },
+  chat: { _any: "Global chat. DMs appear after the first message. Groups are invite-only — admins invite, you accept. Type ‘/’ for saved replies, ‘@’ to mention." },
+  admin: { _admin: "Sidebar sections: Companies (+users/roles), Form Builder (the transfer/sale fields), Bulk Upload (CSV import), Features (toggle modules — including me), Chat Control." },
+  manager: { _any: "Manager tabs cover your whole team. ‘Export’ pulls Sales/Transfers/Callbacks/Users with date + status + agent filters, no row cap." },
+  leads: { _any: "Open a lead to see detail; add a note so the next person has context. Don’t forget to set a disposition." },
+};
+
+export function helpFor(role, page) {
+  const bucket = PAGE_HELP[page] || PAGE_HELP.dashboard;
+  const msg =
+    bucket[role] ||
+    (isManager(role) && bucket._manager) ||
+    (isAdmin(role) && bucket._admin) ||
+    bucket._any ||
+    bucket.closer || bucket.fronter ||
+    "Drag me anywhere. I’ll nudge you when something needs attention — click me on any screen for tips.";
+  return { id: `help_${page}_${role}`, kind: 'tip', message: msg, action: { label: 'Thanks!' } };
 }

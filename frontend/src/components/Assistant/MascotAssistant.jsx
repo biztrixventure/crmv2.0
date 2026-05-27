@@ -100,7 +100,7 @@ const MascotAssistant = () => {
         className={`crm-assistant-mascot is-${a.mascotState} ${a.dragging ? 'is-dragging' : ''}`}
         onPointerDown={a.onHandlePointerDown}
         style={{ cursor: a.dragging ? 'grabbing' : 'grab' }}
-        title="Drag me anywhere"
+        title="Click me for help on this screen · drag to move"
       >
         <MascotSVG state={a.mascotState} />
       </div>
