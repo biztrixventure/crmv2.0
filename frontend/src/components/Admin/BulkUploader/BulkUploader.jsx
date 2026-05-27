@@ -3,6 +3,7 @@ import { UploadCloud, CheckCircle2, RotateCcw } from 'lucide-react';
 import { Alert, Button } from '../../UI';
 import { useBulkUpload } from './useBulkUpload';
 import FileRequirementsGuide from './FileRequirementsGuide';
+import UploadBestPractices from './UploadBestPractices';
 import FileDropzone from './FileDropzone';
 import ColumnMapper from './ColumnMapper';
 import ValidationSummary from './ValidationSummary';
@@ -35,14 +36,18 @@ const BulkUploader = () => {
       {u.step === 'guide' && (
         <>
           <FileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
+          <UploadBestPractices kind="transfer" fields={u.fields} startOpen />
           <FileDropzone onFile={u.onFile} busy={u.busy} />
         </>
       )}
 
       {/* Step 2 — column mapping */}
       {u.step === 'mapping' && (
-        <ColumnMapper fields={u.fields} headers={u.headers} mapping={u.mapping} setMap={u.setMap}
-          onContinue={u.confirmMapping} onBack={u.reset} error={u.error} busy={u.busy} />
+        <>
+          <UploadBestPractices kind="transfer" fields={u.fields} />
+          <ColumnMapper fields={u.fields} headers={u.headers} mapping={u.mapping} setMap={u.setMap}
+            onContinue={u.confirmMapping} onBack={u.reset} error={u.error} busy={u.busy} />
+        </>
       )}
 
       {/* Step 3 — validation summary + conflicts */}

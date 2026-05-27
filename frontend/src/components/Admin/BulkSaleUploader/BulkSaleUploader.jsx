@@ -6,6 +6,7 @@ import FileDropzone from '../BulkUploader/FileDropzone';
 import UploadProgress from '../BulkUploader/UploadProgress';
 import BatchManager from '../BulkUploader/BatchManager';
 import SaleFileRequirementsGuide from './SaleFileRequirementsGuide';
+import UploadBestPractices from '../BulkUploader/UploadBestPractices';
 import SaleColumnMapper from './SaleColumnMapper';
 import SaleValidationSummary from './SaleValidationSummary';
 
@@ -32,13 +33,17 @@ const BulkSaleUploader = () => {
       {u.step === 'guide' && (
         <>
           <SaleFileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
+          <UploadBestPractices kind="sale" fields={u.fields} startOpen />
           <FileDropzone onFile={u.onFile} busy={u.busy} />
         </>
       )}
 
       {u.step === 'mapping' && (
-        <SaleColumnMapper fields={u.fields} headers={u.headers} mapping={u.mapping} setMap={u.setMap}
-          onContinue={u.confirmMapping} onBack={u.reset} error={u.error} busy={u.busy} />
+        <>
+          <UploadBestPractices kind="sale" fields={u.fields} />
+          <SaleColumnMapper fields={u.fields} headers={u.headers} mapping={u.mapping} setMap={u.setMap}
+            onContinue={u.confirmMapping} onBack={u.reset} error={u.error} busy={u.busy} />
+        </>
       )}
 
       {u.step === 'review' && (
