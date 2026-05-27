@@ -15,6 +15,16 @@
 @keyframes crmBounce { 0%,100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-9px) scale(1.05); } }
 @keyframes crmShake  { 0%,100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-3px) rotate(-4deg); } 75% { transform: translateX(3px) rotate(4deg); } }
 
+/* One-shot "pop" reaction when the mascot switches context / shows a new tip.
+   Declared AFTER the state rules so it wins for its ~0.6s lifetime. */
+.crm-assistant-mascot.crm-pop { animation: crmPop 0.6s ease; }
+@keyframes crmPop {
+  0% { transform: scale(1) rotate(0); }
+  30% { transform: scale(1.18) rotate(-5deg); }
+  60% { transform: scale(0.95) rotate(4deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
 /* Blinking eyelids */
 .crm-eyelid { transform-origin: center; animation: crmBlink 4.2s infinite; }
 @keyframes crmBlink { 0%,94%,100% { transform: scaleY(0); } 96%,98% { transform: scaleY(1); } }

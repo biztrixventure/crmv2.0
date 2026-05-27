@@ -99,9 +99,6 @@ const StaffShell = () => {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [activeNav, setActiveNav] = useState('dashboard');
 
-  // Report the active section to the assistant for section-specific guidance.
-  useEffect(() => { window.crmAssistant?.setSection?.(activeNav); }, [activeNav]);
-
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
   const { sales, total: salesTotal, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
@@ -199,6 +196,17 @@ const StaffShell = () => {
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [closerSection, setCloserSection]   = useState('assigned'); // 'assigned' | 'sales'
+
+  // Report the most specific active context to the mascot: a cross-role section
+  // (calendar/team/…), the closer's Assigned/My-Sales sub-toggle, or the active
+  // dashboard tab (callbacks, transfers, faqs, …) — so guidance is tab-specific.
+  useEffect(() => {
+    let sec;
+    if (activeNav !== 'dashboard') sec = activeNav;
+    else if (activeTab === 'sales') sec = closerSection === 'assigned' ? 'closer_assigned' : 'my_sales';
+    else sec = activeTab;
+    window.crmAssistant?.setSection?.(sec);
+  }, [activeNav, activeTab, closerSection]);
   const [transfersPage, setTransfersPage]   = useState(1);  // fronter My Leads + closer Assigned
   const [closerSalesPage, setCloserSalesPage] = useState(1);
   const [leadSearchQ, setLeadSearchQ]       = useState(''); // debounced server search for leads

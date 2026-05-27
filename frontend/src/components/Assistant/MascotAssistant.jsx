@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Volume2, VolumeX, Minus, MessageSquare, MessageSquareOff } from 'lucide-react';
 import { useAssistant } from './useAssistant';
 import AssistantTooltip from './AssistantTooltip';
@@ -28,6 +28,15 @@ const MascotSVG = ({ state }) => {
       {/* ears */}
       <ellipse cx="16" cy="22" rx="6" ry="10" fill="#a8885c" transform="rotate(-20 16 22)" />
       <ellipse cx="56" cy="22" rx="6" ry="10" fill="#a8885c" transform="rotate(20 56 22)" />
+      {/* eyebrows — angled for alert, raised for happy (emotional expression) */}
+      {state === 'alert' && (<>
+        <line x1="21" y1="27" x2="32" y2="29" stroke="#3b2f1c" strokeWidth="2" strokeLinecap="round" />
+        <line x1="51" y1="27" x2="40" y2="29" stroke="#3b2f1c" strokeWidth="2" strokeLinecap="round" />
+      </>)}
+      {state === 'happy' && (<>
+        <path d="M22 27 q5 -3 10 0" stroke="#3b2f1c" strokeWidth="2" fill="none" strokeLinecap="round" />
+        <path d="M40 27 q5 -3 10 0" stroke="#3b2f1c" strokeWidth="2" fill="none" strokeLinecap="round" />
+      </>)}
       {/* eyes */}
       <circle cx="27" cy="36" r="8" fill="#fff" />
       <circle cx="45" cy="36" r="8" fill="#fff" />
@@ -58,6 +67,19 @@ const CtrlBtn = ({ title, onClick, children }) => (
 const MascotAssistant = () => {
   const a = useAssistant();
   const [hover, setHover] = useState(false);
+
+  // Play a one-shot "pop" whenever the mascot surfaces a new tip (context switch
+  // or fresh guidance) — a little emotional reaction to the user's navigation.
+  const [react, setReact] = useState(false);
+  const lastTipId = useRef(null);
+  useEffect(() => {
+    const id = a.tip?.id;
+    if (!id || id === lastTipId.current) return;
+    lastTipId.current = id;
+    setReact(true);
+    const t = setTimeout(() => setReact(false), 650);
+    return () => clearTimeout(t);
+  }, [a.tip?.id]);
 
   // Minimized → a small restore puck on the bottom edge.
   if (a.prefs.minimized) {
@@ -97,7 +119,7 @@ const MascotAssistant = () => {
 
       {/* Mascot (drag handle) */}
       <div
-        className={`crm-assistant-mascot is-${a.mascotState} ${a.dragging ? 'is-dragging' : ''}`}
+        className={`crm-assistant-mascot is-${a.mascotState} ${a.dragging ? 'is-dragging' : ''} ${react ? 'crm-pop' : ''}`}
         onPointerDown={a.onHandlePointerDown}
         style={{ cursor: a.dragging ? 'grabbing' : 'grab' }}
         title="Click me for help on this screen · drag to move"
