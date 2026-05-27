@@ -7,6 +7,7 @@ import UpdateBanner from "../components/UI/UpdateBanner";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
+import { vehicleFieldIssues } from "../utils/vehicleValidation";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -427,6 +428,9 @@ const StaffShell = () => {
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
     setTransferError('');
+    // Vehicle sanity guard — block obviously shifted columns (bad year / numeric make).
+    const vIssue = Object.values(vehicleFieldIssues((fields || []).filter(f => f.show_to_fronter !== false), formData))[0];
+    if (vIssue) { setTransferError(vIssue); return; }
     setTransferSubmitting(true);
     try {
       const res = await createTransfer({ ...formData });

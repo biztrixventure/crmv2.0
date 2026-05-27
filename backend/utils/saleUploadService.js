@@ -253,6 +253,20 @@ function resolveRow(row, index) {
 // Loose year|make|model key for comparing a sale row to a transfer/sale.
 const ymmKey = (y, mk, md) => [y, mk, md].map(v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
 const upper  = (v) => String(v || '').trim().toUpperCase();
+// Flag a likely column shift in an uploaded row: a Car Year that isn't a real
+// year, or a numeric Car Make (e.g. the year landed in the make column).
+function carColumnWarning(row) {
+  const year = String(row?.car_year ?? '').trim();
+  const make = String(row?.car_make ?? '').trim();
+  if (year) {
+    const digits = year.replace(/\D/g, '');
+    const n = parseInt(digits, 10);
+    if (digits.length !== 4 || n < 1900 || n > 2100) return `Car Year "${year}" isn't a valid year — the car columns may be shifted in your file.`;
+  }
+  if (make && /^\d+(\.\d+)?$/.test(make)) return `Car Make "${make}" is a number — the car columns may be shifted in your file.`;
+  return null;
+}
+
 const transferVin = (t) => upper(t.form_data?.VIN || t.form_data?.car_vin);
 const transferYmm = (t) => ymmKey(t.form_data?.CarYear ?? t.form_data?.car_year, t.form_data?.CarMake ?? t.form_data?.car_make, t.form_data?.CarModel ?? t.form_data?.car_model);
 
@@ -430,6 +444,9 @@ async function classifyChunk(rows) {
         notes.push(`Linked to 1 of ${r._xfers.length} transfers for this number — ${best.why}. Change it below if needed.`);
       }
     }
+    // Column-shift guard: flag implausible car data for a human to verify.
+    const carWarn = carColumnWarning(r);
+    if (carWarn) { base.match_warning = true; notes.push(`⚠ ${carWarn}`); }
     if (notes.length) base.match_note = notes.join(' ');
 
     // Expose what was matched + the alternatives so the review screen can show

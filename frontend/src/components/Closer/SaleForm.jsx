@@ -3,6 +3,7 @@ import { DollarSign, Users, Calendar, Hash, FileText, Building2, Car, Plus, X } 
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
+import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -176,6 +177,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         if (!car[f.name]?.toString().trim()) e[`x${i}:${f.name}`] = 'Required';
       });
     });
+    // Vehicle sanity guard (catches shifted columns: bad year / numeric make).
+    Object.assign(e, vehicleFieldIssues(fields, formData));
+    extraCars.forEach((car, i) => Object.assign(e, vehicleFieldIssues(carFields, car, `x${i}:`)));
     setErrors(e);
     return Object.keys(e).length === 0;
   };
