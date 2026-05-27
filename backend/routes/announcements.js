@@ -32,7 +32,10 @@ async function notifyTargets(announcement) {
     is_read: false,
   }));
   for (let i = 0; i < rows.length; i += 500) {
-    await supabaseAdmin.from('notifications').insert(rows.slice(i, i + 500)).catch(() => {});
+    // await + try/catch: the Supabase builder has no .catch (it would throw a
+    // TypeError and the notifications would never insert).
+    try { await supabaseAdmin.from('notifications').insert(rows.slice(i, i + 500)); }
+    catch { /* non-critical */ }
   }
 }
 
