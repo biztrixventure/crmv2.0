@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -19,6 +19,7 @@ import CallbacksTab        from '../components/Compliance/CallbacksTab';
 import ReviewsTab          from '../components/Compliance/ReviewsTab';
 import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
+import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
 
 const TABS = [
   { key: 'companies', label: 'Companies',    icon: Building2 },
@@ -40,6 +41,7 @@ const ComplianceShell = () => {
 
   const [activeTab, setActiveTab]   = useState('companies');
   const [tabInit, setTabInit]       = useState({});
+  const [infoOpen, setInfoOpen]     = useState(false);
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
@@ -92,8 +94,9 @@ const ComplianceShell = () => {
       <EngagementBanners />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        {/* Tab bar */}
-        <div className="flex flex-wrap gap-1 p-1 rounded-xl mb-6 w-fit"
+        {/* Tab bar (+ superadmin numbers-info button) */}
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {TABS.map(t => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
@@ -108,6 +111,16 @@ const ComplianceShell = () => {
             </button>
           ))}
         </div>
+          {user?.role === 'superadmin' && (
+            <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+              <Info size={15} /> Numbers info
+            </button>
+          )}
+        </div>
+
+        {infoOpen && <ComplianceInfoModal onClose={() => setInfoOpen(false)} />}
 
         {/* Tab content */}
         {activeTab === 'companies' && (
