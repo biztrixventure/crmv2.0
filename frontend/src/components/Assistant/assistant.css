@@ -1,0 +1,40 @@
+/* CRM mascot ("Trix") — lightweight CSS/SVG animations, no Lottie dependency.
+   States: idle (float + blink), talking (bob), happy (bounce), alert (shake). */
+
+.crm-assistant-root { position: fixed; z-index: 2147483600; touch-action: none; }
+
+.crm-assistant-mascot { will-change: transform; transform-origin: center bottom; }
+.crm-assistant-mascot.is-idle    { animation: crmFloat 3.6s ease-in-out infinite; }
+.crm-assistant-mascot.is-talking { animation: crmBob 0.7s ease-in-out infinite; }
+.crm-assistant-mascot.is-happy   { animation: crmBounce 0.6s ease-in-out infinite; }
+.crm-assistant-mascot.is-alert   { animation: crmShake 0.5s ease-in-out infinite; }
+.crm-assistant-mascot.is-dragging { animation: none; cursor: grabbing; }
+
+@keyframes crmFloat  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes crmBob    { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-3px) rotate(2deg); } }
+@keyframes crmBounce { 0%,100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-9px) scale(1.05); } }
+@keyframes crmShake  { 0%,100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-3px) rotate(-4deg); } 75% { transform: translateX(3px) rotate(4deg); } }
+
+/* Blinking eyelids */
+.crm-eyelid { transform-origin: center; animation: crmBlink 4.2s infinite; }
+@keyframes crmBlink { 0%,94%,100% { transform: scaleY(0); } 96%,98% { transform: scaleY(1); } }
+
+/* Speech bubble entrance */
+.crm-assistant-bubble { animation: crmBubbleIn 0.18s ease-out; transform-origin: bottom; }
+@keyframes crmBubbleIn { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Soft glow the assistant puts around a UI element it's pointing at */
+.crm-assistant-glow {
+  outline: 2px solid var(--color-primary-500, #a8885c) !important;
+  outline-offset: 2px;
+  border-radius: 10px;
+  animation: crmGlow 1.2s ease-in-out infinite;
+}
+@keyframes crmGlow {
+  0%,100% { box-shadow: 0 0 0 0 rgba(168,136,92,0.45); }
+  50%     { box-shadow: 0 0 0 6px rgba(168,136,92,0.0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crm-assistant-mascot, .crm-eyelid, .crm-assistant-glow { animation: none !important; }
+}

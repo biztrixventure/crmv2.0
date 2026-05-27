@@ -18,6 +18,7 @@ const StaffShell      = lazy(() => import("./shells/StaffShell"));
 const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
 const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
+const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
 const PageSpinner = () => (
   <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
@@ -94,6 +95,10 @@ const AppContent = () => {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
+      {/* Floating CRM assistant mascot — only when signed in */}
+      {isAuthenticated && (
+        <Suspense fallback={null}><MascotAssistant /></Suspense>
+      )}
     </Router>
   );
 };
