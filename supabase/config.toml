@@ -1,0 +1,46 @@
+# Supabase CLI project configuration.
+# Docs: https://supabase.com/docs/guides/cli/config
+#
+# This file makes the project reproducible: `supabase start` spins up a local
+# Postgres/Auth/Studio stack identical to production, and migrations in
+# ./migrations are the single source of truth for the schema.
+#
+# `project_id` is the local project name (not the remote ref). The remote project
+# is selected at deploy time via `supabase link --project-ref <ref>`.
+project_id = "biztrix-crm-v2"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+# Match production: PostgREST caps every response at this many rows.
+max_rows = 5000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+# Seed data is applied automatically on `supabase db reset` (local only).
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = true
+
+[realtime]
+enabled = true

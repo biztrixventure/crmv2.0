@@ -1,0 +1,64 @@
+name: Deploy DB migrations
+
+# Pushes pending Supabase migrations to the linked project on merge to main.
+# Schema changes flow ONLY through supabase/migrations/*.sql — never the dashboard.
+#
+# Required GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN  – personal access token (supabase.com/dashboard/account/tokens)
+#   SUPABASE_PROJECT_ID    – the project ref (e.g. abcdwxyz...) from the project URL
+#   SUPABASE_DB_PASSWORD   – the database password for that project
+#
+# Tip: gate this behind a GitHub "production" Environment with required reviewers
+# so a human approves before migrations hit prod.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-migrate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Safety gate: block obviously destructive statements from ever auto-deploying.
+      - name: Block destructive SQL
+        run: |
+          if grep -rEin '(drop[[:space:]]+table|drop[[:space:]]+column|truncate[[:space:]]|drop[[:space:]]+schema)' supabase/migrations; then
+            echo "::error::Destructive statement detected in migrations. Remove it or deploy manually after review."
+            exit 1
+          fi
+          echo "No destructive statements found."
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_ID"
+
+      # --dry-run prints the SQL that WOULD run, for the deploy log/audit.
+      - name: Show pending migrations (dry run)
+        run: supabase db push --dry-run
+
+      - name: Apply migrations
+        run: supabase db push
