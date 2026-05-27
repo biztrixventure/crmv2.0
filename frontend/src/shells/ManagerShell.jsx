@@ -146,6 +146,9 @@ const ManagerShell = () => {
   const [activeNav, setActiveNav] = useState('dashboard');
   const [exportOpen, setExportOpen] = useState(false);
 
+  // Report the active section to the assistant for section-specific guidance.
+  useEffect(() => { window.crmAssistant?.setSection?.(activeNav !== 'dashboard' ? activeNav : activeTab); }, [activeTab, activeNav]);
+
   // ── Overview data ─────────────────────────────────────────────────────────
   const [fronterLb, setFronterLb]       = useState([]);
   const [closerLb, setCloserLb]         = useState([]);

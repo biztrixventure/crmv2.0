@@ -88,7 +88,46 @@ const PAGE_HELP = {
   leads: { _any: "Open a lead to see detail; add a note so the next person has context. Don’t forget to set a disposition." },
 };
 
-export function helpFor(role, page) {
+// Fine-grained help for each sidebar SECTION (admin/manager/compliance/staff
+// tabs). Keyed by the tab key the shells report via window.crmAssistant.setSection.
+// Section content is the same whatever the role — the section defines the task.
+const SECTION_HELP = {
+  // shared / staff + manager
+  overview:    "Team overview: KPI cards (transfers, sales, approved, pending) + leaderboards. Set the date range top-right and everything recalculates. Use the tabs to drill in.",
+  dashboard:   "Your home base. Move around with the sidebar/tabs — click me on any section for specifics about it.",
+  calendar:    "Company event calendar. Superadmins create & drag events; everyone else sees them. Switch Month / Week / Day / List with the buttons top-right.",
+  transfers:   "Transfers = leads a fronter hands to a closer. Filter by status / date / agent; click a row for full detail. Duplicate same-number leads can be merged in the cleanup tool.",
+  team_sales:  "Team Sales: every deal your team closed. Filter by status / agent / date, click a row for detail, and use Export to download (no row cap).",
+  my_sales:    "My Sales: deals you closed. Add a new one from a worked transfer; track its approval status (pending → approved/returned) here.",
+  callbacks:   "Callbacks: scheduled follow-ups. Pick a date & time (saved in your timezone), attach the number + a note, and mark Done when handled. Missed callbacks pile up — clear them daily or I'll nag 😄.",
+  reports:     "Reports: fronter/closer performance + company totals over the date range you pick. Great for spotting who needs coaching.",
+  reviews:     "Call Reviews: quality ratings on calls. Filter by agent; open one to see the score, notes, and the linked transfer.",
+  team:        "Team: your company's users. Create accounts, edit details, activate/deactivate, and assign each person a role.",
+  roles:       "Roles: define what each role can do via permission toggles. Editing a role changes it for everyone who has it — change carefully.",
+  forms:       "Form Builder: the fields fronters fill (transfer) and closers fill (sale). Drag to reorder, mark required, set the type. Changes apply across the app instantly.",
+  numbers:     "Callback Numbers: phone lists assigned to agents with call history + ownership. Upload a list, reassign numbers, and track attempts.",
+  search:      "Search sales by customer, phone, reference, or VIN (type 2+ characters). Fast lookups + audits.",
+  'sale-search': "Lead/Sale search across all companies — by name, phone, reference, or VIN. Handy for audits and quick lookups.",
+  activity_log:"Activity Log: a timeline of team actions (transfers, sales, dispositions). Filter by agent to audit who did what.",
+  faqs:        "FAQs: the help articles your team sees. Add / edit Q&A here; they appear in the staff help panels.",
+  scripts:     "Scripts: call scripts for agents. Create and categorize them; agents open them from their script panel.",
+  // superadmin
+  companies:   "Companies + their users & roles. Expand a company to see members, add users, assign roles, and toggle features per company.",
+  'bulk-upload': "Bulk Upload: import transfers or sales from CSV/Excel. Download the template, map columns, review the matches, then confirm. Read the best-practices panel first — I'll guide each step.",
+  announcements:"Announcements: broadcast a banner/message to chosen roles or companies. Rich text + priority; controls who sees it and when it reshows.",
+  marquee:     "Marquee: the scrolling ticker atop dashboards. Add lines and choose who sees them.",
+  spiff:       "SPIFF: sales incentives/contests. Set a target + reward; agents get a live progress widget.",
+  chat:        "Chat Control: moderate the global chat — ban/mute users, lock rooms, and review the moderation audit log.",
+  features:    "Feature Flags: turn modules on/off globally (the default) or per company. This is also where you enable/disable me — the CRM Assistant.",
+  // compliance
+  queue:       "Review Queue: sales awaiting your approval, oldest first. Approve → closed_won, or Return with a note to send it back to the closer.",
+  sales:       "All Sales: full sale management across every company. Search/filter, edit a status with a reason, and export.",
+};
+
+export function helpFor(role, page, section) {
+  if (section && SECTION_HELP[section]) {
+    return { id: `help_sec_${section}`, kind: 'tip', message: SECTION_HELP[section], action: { label: 'Thanks!' } };
+  }
   const bucket = PAGE_HELP[page] || PAGE_HELP.dashboard;
   const msg =
     bucket[role] ||

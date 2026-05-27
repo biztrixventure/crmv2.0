@@ -36,6 +36,7 @@ const DEFAULT = {
 let state = load();
 let lastActivity = Date.now();
 let page = 'unknown';
+let section = null;          // fine-grained UI section (sidebar tab) reported by shells
 const listeners = new Set();
 let saveTimer = null;
 let bc = null;
@@ -94,6 +95,16 @@ export function setPage(name) {
   save(); notify();
 }
 
+// Shells report their active sidebar tab so guidance can be section-specific
+// (admin/manager/compliance tabs are SPA state, not routes).
+export function setSection(key) {
+  const k = key || null;
+  if (k === section) return;
+  section = k;
+  resetIdle();
+  notify();
+}
+
 export function track(type, meta = {}) {
   if (!type) return;
   const ts = Date.now();
@@ -125,6 +136,7 @@ export function getData() {
   const recentTypes = state.recent.slice(0, 12).map(r => r.type);
   return {
     page,
+    section,
     idleTime,
     missedCallbacks: state.missedCallbacks,
     notesAdded: state.notesAdded,

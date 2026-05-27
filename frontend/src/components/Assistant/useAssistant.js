@@ -59,7 +59,24 @@ export function useAssistant() {
   // On-demand "how do I use this?" — set lazily via ref so the drag handler
   // (defined below) can trigger it on a click without ordering issues.
   const helpRef = useRef(() => {});
-  useEffect(() => { helpRef.current = () => { if (!prefs.muted) show(helpFor(role, page)); }; }, [show, role, page, prefs.muted]);
+  useEffect(() => { helpRef.current = () => { if (!prefs.muted) show(helpFor(role, page, data.section)); }; }, [show, role, page, data.section, prefs.muted]);
+
+  // Auto-show contextual guidance once per section/page per session, shortly
+  // after landing — so every sidebar section greets the user with relevant help.
+  const tipRef = useRef(tip);
+  useEffect(() => { tipRef.current = tip; }, [tip]);
+  const autoShown = useRef(new Set());
+  const ctxKey = data.section || page;
+  useEffect(() => {
+    if (prefs.muted || prefs.tooltipsOff || prefs.minimized || !ctxKey) return;
+    if (autoShown.current.has(ctxKey)) return;
+    const t = setTimeout(() => {
+      if (tipRef.current) return;                 // don't override an active tip
+      autoShown.current.add(ctxKey);
+      show(helpFor(role, page, data.section));
+    }, 1300);
+    return () => clearTimeout(t);
+  }, [ctxKey, role, page, data.section, prefs.muted, prefs.tooltipsOff, prefs.minimized, show]);
 
   // Route → page context.
   useEffect(() => { setPage(page); }, [page]);

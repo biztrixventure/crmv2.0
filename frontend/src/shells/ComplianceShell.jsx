@@ -40,6 +40,9 @@ const ComplianceShell = () => {
 
   const [activeTab, setActiveTab]   = useState('companies');
   const [tabInit, setTabInit]       = useState({});
+
+  // Report the active section to the assistant for section-specific guidance.
+  useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
   const [companyList, setCompanyList] = useState([]);
   const [loadingCo, setLoadingCo]   = useState(false);
 

@@ -47,6 +47,9 @@ const AdminPanel = () => {
     return () => document.removeEventListener('admin-nav', handler);
   }, []);
 
+  // Tell the assistant which section is open so its guidance is section-specific.
+  useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
+
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
     { id: "calendar",    label: "Calendar"     },

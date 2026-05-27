@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { track as storeTrack, getData, subscribe, resetIdle } from './behaviorStore';
+import { track as storeTrack, getData, subscribe, resetIdle, setSection } from './behaviorStore';
 
 /**
  * useBehaviorTracker — React view over the behavior store.
@@ -29,6 +29,7 @@ export function useBehaviorTracker() {
     // Global imperative API for existing CRM code: window.crmAssistant.track(...)
     window.crmAssistant = window.crmAssistant || {};
     window.crmAssistant.track = (type, meta) => storeTrack(type, meta);
+    window.crmAssistant.setSection = (key) => setSection(key);
 
     return () => { unsub(); clearInterval(tick); cancelAnimationFrame(raf.current); document.removeEventListener('click', onClick, true); };
   }, [refresh]);

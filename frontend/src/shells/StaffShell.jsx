@@ -97,6 +97,9 @@ const StaffShell = () => {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [activeNav, setActiveNav] = useState('dashboard');
 
+  // Report the active section to the assistant for section-specific guidance.
+  useEffect(() => { window.crmAssistant?.setSection?.(activeNav); }, [activeNav]);
+
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
   const { sales, total: salesTotal, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
