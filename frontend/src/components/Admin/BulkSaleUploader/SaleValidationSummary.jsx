@@ -32,21 +32,36 @@ const Collapsible = ({ icon: Icon, color, title, rows, render }) => {
 // switch to another candidate (duplicate transfers for the same phone).
 const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
   const items = newSales.map((r, idx) => ({ r, idx })).filter(x => x.r.match_note || (x.r.candidate_transfers || []).length > 1);
-  const [open, setOpen] = useState(false);
+  // Rows whose vehicle didn't match any transfer go first — they need a human look.
+  items.sort((a, b) => (b.r.match_warning ? 1 : 0) - (a.r.match_warning ? 1 : 0));
+  const warnCount = items.filter(x => x.r.match_warning).length;
+  const [open, setOpen] = useState(warnCount > 0);   // auto-expand when something needs attention
   if (!items.length) return null;
 
   return (
     <div className="rounded-2xl p-4" style={{ backgroundColor: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.25)' }}>
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color: '#7c3aed' }}><Wand2 size={15} /> Auto-matched — review what the system picked ({items.length})</span>
+        <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color: '#7c3aed' }}>
+          <Wand2 size={15} /> Auto-matched — review what the system picked ({items.length})
+          {warnCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold flex items-center gap-1" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+              <AlertTriangle size={11} /> {warnCount} need{warnCount === 1 ? 's' : ''} attention
+            </span>
+          )}
+        </span>
         <ChevronDown size={16} className="transition-transform" style={{ color: '#7c3aed', transform: open ? 'rotate(180deg)' : 'none' }} />
       </button>
       {open && (
         <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
           {items.map(({ r, idx }) => (
-            <div key={idx} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'} <span className="font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {rowLabel(r)}</span></p>
-              {r.match_note && <p className="text-xs mt-0.5" style={{ color: '#7c3aed' }}>{r.match_note}</p>}
+            <div key={idx} className="rounded-xl p-3" style={r.match_warning
+              ? { backgroundColor: '#fffbeb', border: '1px solid #fbbf24' }
+              : { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                {r.match_warning && <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0 }} />}
+                {r.customer_name || '—'} <span className="font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {rowLabel(r)}</span>
+              </p>
+              {r.match_note && <p className="text-xs mt-0.5" style={{ color: r.match_warning ? '#b45309' : '#7c3aed' }}>{r.match_note}</p>}
               <div className="flex items-center gap-2 mt-2 text-xs">
                 <ArrowRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                 {(r.candidate_transfers || []).length > 1 ? (

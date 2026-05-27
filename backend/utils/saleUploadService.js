@@ -295,10 +295,14 @@ function pickBestTransfer(row, candidates, salesByTransfer) {
     return a.t.id < b.t.id ? -1 : 1;
   });
   const best = scored[0];
-  const why = best.reasons.length ? best.reasons.join('+')
-    : best.onOrBefore ? 'latest on/before sale date'
-    : best.hasSale ? 'earliest' : 'earliest unused';
-  return { transfer: best.t, why };
+  const saleHasVehicle = !!(saleVin || hasYmm);
+  const vehicleMatched = best.reasons.includes('VIN') || best.reasons.includes('car');
+  // Human-readable reason for the review screen.
+  const why = best.reasons.includes('VIN') ? 'matched by VIN'
+    : best.reasons.includes('car')        ? 'matched by car (year/make/model)'
+    : best.onOrBefore                     ? 'most recent transfer on/before the sale date'
+    : best.hasSale                        ? 'earliest transfer' : 'earliest unused transfer';
+  return { transfer: best.t, why, saleHasVehicle, vehicleMatched };
 }
 
 // Pick which existing sale on the chosen transfer this row updates (multi-car
@@ -417,7 +421,14 @@ async function classifyChunk(rows) {
     if (r._xfers.length > 1) {
       const best = pickBestTransfer(r, r._xfers, salesByTransfer);
       transfer = best.transfer;
-      notes.push(`Auto-picked 1 of ${r._xfers.length} duplicate transfers for this phone (by ${best.why}) — review before confirming.`);
+      if (best.saleHasVehicle && !best.vehicleMatched) {
+        // The sale carries a vehicle, but it matched none of the duplicate
+        // transfers — link to the best guess but flag it loudly for a human check.
+        base.match_warning = true;
+        notes.push(`⚠ This sale's vehicle doesn't match any of the ${r._xfers.length} transfers for this number. Linked to the ${best.why} — please verify, or pick the correct transfer below.`);
+      } else {
+        notes.push(`Linked to 1 of ${r._xfers.length} transfers for this number — ${best.why}. Change it below if needed.`);
+      }
     }
     if (notes.length) base.match_note = notes.join(' ');
 
