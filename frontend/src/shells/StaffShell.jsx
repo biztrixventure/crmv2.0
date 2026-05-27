@@ -8,6 +8,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import { vehicleFieldIssues } from "../utils/vehicleValidation";
+import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../utils/formAssist";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -440,6 +441,7 @@ const StaffShell = () => {
           : action === 'created_reengaged' ? 'New transfer created — this number was last contacted over 30 days ago.'
           : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
           : 'Transfer created.');
+      rememberValues((fields || []).filter(f => f.show_to_fronter !== false), formData);
       setShowCreateForm(false);
       setFormData({});
       setZipFronterInfo(null);
@@ -1103,6 +1105,10 @@ const StaffShell = () => {
                       <div className="grid grid-cols-1 sm:grid-cols-5 items-start gap-x-4 gap-y-5">
                         {fields.filter(f => f.show_to_fronter !== false).sort((a, b) => (a.order || 0) - (b.order || 0)).map(field => {
                           const spanClass = { 1: 'sm:col-span-1', 2: 'sm:col-span-2', 3: 'sm:col-span-3', 4: 'sm:col-span-4', 5: 'sm:col-span-5' }[field.column_span] || 'sm:col-span-1';
+                          // Auto-capitalize on blur + offer past values (datalist) for repeatable fields.
+                          const fmtBlur = () => { const f = smartFormat(field, formData[field.name]); if (f !== (formData[field.name] || '')) setFormData(p => ({ ...p, [field.name]: f })); };
+                          const sug = isSuggestable(field) ? suggestionsFor(field.name) : [];
+                          const listId = sug.length ? `fft-${field.name}` : undefined;
                           return (
                             <div key={field.id} className={`self-start ${spanClass}`}>
                               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5"
@@ -1112,7 +1118,7 @@ const StaffShell = () => {
                               </label>
                               {field.field_type === 'textarea' ? (
                                 <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                                  className="input resize-none" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
+                                  onBlur={fmtBlur} className="input resize-none" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
                               ) : field.field_type === 'select' ? (
                                 <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
@@ -1151,9 +1157,13 @@ const StaffShell = () => {
                                   )}
                                 </div>
                               ) : (
-                                <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type}
-                                  value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                                  className="input" required={field.is_required} placeholder={field.placeholder || ''} />
+                                <>
+                                  <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type}
+                                    value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                    onBlur={fmtBlur} list={listId}
+                                    className="input" required={field.is_required} placeholder={field.placeholder || ''} />
+                                  {listId && <datalist id={listId}>{sug.map(s => <option key={s} value={s} />)}</datalist>}
+                                </>
                               )}
                             </div>
                           );

@@ -4,6 +4,7 @@ import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
+import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -230,6 +231,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       // base so a blank field on car #2 doesn't inherit car #1's vehicle data.
       additional_cars: extraCars.map(car => buildCarPayload({ ...personalData, ...car })),
     });
+    // Remember repeatable values (city/make/model/plan…) for future autocomplete.
+    rememberValues(fields, formData);
+    extraCars.forEach(car => rememberValues(carFields, car));
   };
 
   // Render a single dynamic field input.
@@ -240,10 +244,15 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     const onChange = e => setValue(field.name, e.target.value);
     const ph = field.placeholder || `Enter ${field.label.toLowerCase()}`;
     const errClass = errors[errKey] ? 'ring-2 ring-red-400/60 border-red-400' : '';
+    // Auto-capitalize on blur; offer past values for repeatable fields (datalist).
+    const onBlur = () => { const f = smartFormat(field, values[field.name]); if (f !== (values[field.name] || '')) setValue(field.name, f); };
+    const sug = isSuggestable(field) ? suggestionsFor(field.name) : [];
+    const listId = sug.length ? `ff-${errKey}` : undefined;
+    const Dl = listId ? <datalist id={listId}>{sug.map(s => <option key={s} value={s} />)}</datalist> : null;
 
     if (field.field_type === 'textarea') {
       return (
-        <textarea value={val} onChange={onChange} rows={3}
+        <textarea value={val} onChange={onChange} onBlur={onBlur} rows={3}
           required={field.is_required} placeholder={ph}
           className={`input resize-none ${errClass}`} />
       );
@@ -387,9 +396,12 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
       : field.field_type;
     return (
-      <input type={inputType} value={val} onChange={onChange}
-        required={field.is_required} placeholder={ph}
-        className={`input ${errClass}`} />
+      <>
+        <input type={inputType} value={val} onChange={onChange} onBlur={onBlur}
+          required={field.is_required} placeholder={ph} list={listId}
+          className={`input ${errClass}`} />
+        {Dl}
+      </>
     );
   };
 
