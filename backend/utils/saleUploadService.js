@@ -2,6 +2,19 @@ const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
 const { normPhone, normName, getReference: getXferReference, buildIndex: buildXferIndex, resolveRow: resolveXferRow } = require('./uploadService');
 
+// Retry a Supabase read a few times with backoff. Transient timeouts/5xx on the
+// heavy transfer/sales reads were intermittently failing a whole validation chunk
+// (the route threw → the frontend marked all 100 rows "unmatched"), which is why
+// re-running the same file would suddenly validate clean.
+async function withRetry(fn, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn(); }
+    catch (e) { lastErr = e; if (i < attempts - 1) await new Promise(r => setTimeout(r, 300 * (i + 1))); }
+  }
+  throw lastErr;
+}
+
 // Compact view of a transfer for the review screen (which one was matched +
 // the alternatives when the phone had duplicates).
 const summarizeTransfer = (t, salesByTransfer) => {
@@ -118,15 +131,43 @@ async function fetchTransfersForCompanies(companyIds) {
   if (!companyIds.length) return [];
   const all = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await withRetry(() => supabaseAdmin
       .from('transfers').select('id, company_id, created_by, created_at, status, form_data')
-      .in('company_id', companyIds).range(from, from + 999);
+      .in('company_id', companyIds).range(from, from + 999));
     if (error) throw new Error(error.message);
     if (!data || !data.length) break;
     all.push(...data);
     if (data.length < 1000) break;
   }
   return all;
+}
+
+// Per-company transfer cache (60s TTL). A single upload sends many validation
+// chunks for the same companies; without this each chunk re-paginated EVERY
+// transfer (thousands of rows), which was slow and gave transient errors more
+// chances to fire. Now each company's transfers are fetched once per minute.
+const TRANSFER_TTL = 60000;
+const _coTransfers = new Map();   // company_id -> { data: [], at }
+
+async function getTransfersForCompaniesCached(companyIds) {
+  const ids = [...new Set(companyIds)];
+  const now = Date.now();
+  const out = [];
+  const stale = [];
+  for (const cid of ids) {
+    const entry = _coTransfers.get(cid);
+    if (entry && now - entry.at < TRANSFER_TTL) out.push(...entry.data);
+    else stale.push(cid);
+  }
+  if (stale.length) {
+    const fetched = await fetchTransfersForCompanies(stale);
+    const byCo = {};
+    stale.forEach(cid => { byCo[cid] = []; });
+    fetched.forEach(t => { (byCo[t.company_id] = byCo[t.company_id] || []).push(t); });
+    stale.forEach(cid => _coTransfers.set(cid, { data: byCo[cid] || [], at: Date.now() }));
+    out.push(...fetched);
+  }
+  return out;
 }
 
 // ============================================================================
@@ -304,7 +345,7 @@ async function classifyChunk(rows) {
   // file states is still matched (a common real case) instead of falsely reported
   // "no transfer". Multiple company+phone hits stay ambiguous for manual review.
   const companyIds = [...new Set(resolved.map(r => r._r.company_id))];
-  const xfers = await fetchTransfersForCompanies(companyIds);
+  const xfers = await getTransfersForCompaniesCached(companyIds);
 
   const keyCFP = (cid, uid, phone) => `${cid}|${uid}|${normPhone(phone)}`;
   const keyCP  = (cid, phone) => `${cid}|${normPhone(phone)}`;
@@ -329,9 +370,18 @@ async function classifyChunk(rows) {
   });
   let salesByTransfer = new Map();
   if (matchedTransferIds.length) {
-    const { data: sales } = await supabaseAdmin
-      .from('sales').select('*').in('transfer_id', [...new Set(matchedTransferIds)]);
-    (sales || []).forEach(s => { (salesByTransfer.get(s.transfer_id) || salesByTransfer.set(s.transfer_id, []).get(s.transfer_id)).push(s); });
+    const uniqIds = [...new Set(matchedTransferIds)];
+    const sales = [];
+    // Page through in id-batches with retry — large in() lists + transient errors
+    // were another way a chunk could fail and get re-reported as unmatched.
+    for (let i = 0; i < uniqIds.length; i += 300) {
+      const slice = uniqIds.slice(i, i + 300);
+      const { data, error } = await withRetry(() => supabaseAdmin
+        .from('sales').select('*').in('transfer_id', slice));
+      if (error) throw new Error(error.message);
+      sales.push(...(data || []));
+    }
+    sales.forEach(s => { (salesByTransfer.get(s.transfer_id) || salesByTransfer.set(s.transfer_id, []).get(s.transfer_id)).push(s); });
   }
 
   const newSales = [], updates = [], skipped = [], ambiguous = [];
@@ -539,6 +589,9 @@ async function createTransferFromRow(row) {
     .insert({ company_id: r.company_id, created_by: r.fronter_user_id, assigned_to: null, assigned_closer_id: null, status: 'pending', normalized_phone: normPhone(cli) || null, form_data: fd })
     .select('id, company_id, created_by, created_at, status, form_data').single();
   if (error) return { ok: false, reason: error.message };
+  // Bust the transfer cache for this company so the immediate re-validation of
+  // this row sees the transfer we just created.
+  _coTransfers.delete(r.company_id);
   return { ok: true, transfer: data };
 }
 

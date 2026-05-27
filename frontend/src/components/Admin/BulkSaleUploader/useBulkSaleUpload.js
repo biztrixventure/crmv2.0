@@ -98,18 +98,24 @@ export function useBulkSaleUpload() {
     setProgress({ phase: 'validate', done: 0, total });
     for (let i = 0; i < total; i += CHUNK) {
       const chunk = toSend.slice(i, i + CHUNK);
-      try {
-        const { data } = await client.post('sale-uploads/validate-chunk', { rows: chunk });
+      // Retry a chunk once on a transient failure before giving up — the backend
+      // also retries its DB reads, so a chunk reaching this catch is rare.
+      let data = null, lastErr = null;
+      for (let attempt = 0; attempt < 2 && !data; attempt++) {
+        try { data = (await client.post('sale-uploads/validate-chunk', { rows: chunk })).data; }
+        catch (e) { lastErr = e; if (attempt === 0) await new Promise(r => setTimeout(r, 600)); }
+      }
+      if (data) {
         agg.newSales.push(...(data.newSales || []));
         agg.updates.push(...(data.updates || []));
         agg.skipped.push(...(data.skipped || []));
         agg.unmatched.push(...(data.unmatched || []));
         agg.ambiguous.push(...(data.ambiguous || []));
-      } catch (e) {
+      } else {
         // Don't lose a chunk on a transient failure — list it as unmatched so
         // the user can re-run instead of silently skipping those sales.
         failed += chunk.length;
-        agg.unmatched.push(...chunk.map(r => ({ ...r, reason: apiErr(e, 'Could not be validated (server/network error). Re-run to re-check this row.') })));
+        agg.unmatched.push(...chunk.map(r => ({ ...r, reason: apiErr(lastErr, 'Could not be validated (server/network error). Re-run to re-check this row.') })));
       }
       setProgress({ phase: 'validate', done: Math.min(i + CHUNK, total), total });
     }
