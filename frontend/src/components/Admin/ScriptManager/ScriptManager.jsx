@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   FileText, Plus, Search, Edit2, Trash2, X, ChevronDown,
-  Tag, Eye, EyeOff, MessageSquareText, Users, Headphones, PhoneOutgoing,
+  Tag, Eye, EyeOff, MessageSquareText, Users, Headphones, PhoneOutgoing, SlidersHorizontal,
 } from 'lucide-react';
 import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useScripts } from '../../../hooks/useScripts';
+import SearchSettings from '../SearchSettings';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -33,10 +34,14 @@ const ScriptModal = ({ script, onClose, onSave }) => {
     keywords: script?.keywords || '',
     audience: script?.audience || 'both',
     is_active: script?.is_active ?? true,
+    sections: Array.isArray(script?.sections) ? script.sections : [],
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const addSection    = () => setForm(f => ({ ...f, sections: [...f.sections, { heading: '', tags: '', content: '' }] }));
+  const updateSection = (i, k, v) => setForm(f => ({ ...f, sections: f.sections.map((s, idx) => idx === i ? { ...s, [k]: v } : s) }));
+  const removeSection = (i) => setForm(f => ({ ...f, sections: f.sections.filter((_, idx) => idx !== i) }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -85,6 +90,27 @@ const ScriptModal = ({ script, onClose, onSave }) => {
               </select>
             </div>
           </div>
+          {/* Tagged headings: each surfaces on its own when its tags match a search */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}><Tag size={12} /> Tagged headings (optional)</label>
+              <button type="button" onClick={addSection} className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}><Plus size={13} /> Add heading</button>
+            </div>
+            <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Break the script into headings and tag each. When an agent searches a word matching a heading's tags, that paragraph surfaces on its own.</p>
+            <div className="space-y-2">
+              {form.sections.map((sec, i) => (
+                <div key={i} className="rounded-xl p-3 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <input value={sec.heading} onChange={e => updateSection(i, 'heading', e.target.value)} placeholder="Heading (e.g. Price Objection)" className="input flex-1" />
+                    <button type="button" onClick={() => removeSection(i)} className="p-1.5 rounded-lg flex-shrink-0" style={{ color: '#ef4444' }} title="Remove heading"><Trash2 size={14} /></button>
+                  </div>
+                  <input value={sec.tags} onChange={e => updateSection(i, 'tags', e.target.value)} placeholder="Tags for this heading: price, expensive, cost" className="input" />
+                  <AutoResizeTextarea value={sec.content} onChange={e => updateSection(i, 'content', e.target.value)} minRows={2} maxRows={10} placeholder="The paragraph agents read for this heading…" className="input" />
+                </div>
+              ))}
+            </div>
+          </div>
+
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Visible to agents</span>
@@ -115,6 +141,7 @@ const ScriptManager = () => {
   const [modal, setModal]       = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [confirm, setConfirm]   = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
 
   const load = () => fetchScripts({ include_inactive: true, audience: audience || undefined, q: search.trim() || undefined });
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience]);
@@ -162,6 +189,17 @@ const ScriptManager = () => {
         {search && <button type="button" onClick={() => { setSearch(''); fetchScripts({ include_inactive: true, audience: audience || undefined }); }} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>}
       </form>
 
+      {/* Search settings live here (no separate tab): synonyms + analytics */}
+      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <button onClick={() => setShowSearch(v => !v)} className="w-full flex items-center justify-between p-4">
+          <span className="flex items-center gap-2 text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            <SlidersHorizontal size={16} style={{ color: 'var(--color-primary-600)' }} /> Search settings — synonyms &amp; analytics
+          </span>
+          <ChevronDown size={18} className="transition-transform" style={{ color: 'var(--color-text-tertiary)', transform: showSearch ? 'rotate(180deg)' : 'none' }} />
+        </button>
+        {showSearch && <div className="px-4 pb-4"><SearchSettings embedded /></div>}
+      </div>
+
       {loading ? (
         <div className="space-y-2.5">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-bg-secondary)' }} />)}</div>
       ) : scripts.length === 0 ? (
@@ -200,8 +238,19 @@ const ScriptManager = () => {
                   </div>
                 </div>
                 {open && (
-                  <div className="px-4 pb-4 pl-[2.85rem] animate-fade-in">
+                  <div className="px-4 pb-4 pl-[2.85rem] animate-fade-in space-y-3">
                     <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{s.content}</p>
+                    {Array.isArray(s.sections) && s.sections.map((sec, i) => (
+                      <div key={i} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                        <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{sec.heading}</p>
+                        {sec.tags && (
+                          <div className="flex flex-wrap gap-1 my-1">
+                            {splitKeywords(sec.tags).map(t => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{t}</span>)}
+                          </div>
+                        )}
+                        <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text-secondary)' }}>{sec.content}</p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

@@ -22,7 +22,6 @@ import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
-import SearchSettings from "../components/Admin/SearchSettings";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
 // ============================================================================
@@ -60,7 +59,6 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "search",      label: "Search" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "bulk-upload", label: "Bulk Upload" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "announcements", label: "Announcements" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "marquee",       label: "Marquee"       }] : []),
@@ -105,7 +103,6 @@ const AdminPanel = () => {
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
-              {activeTab === "search"      && <SearchSettings />}
               {activeTab === "bulk-upload" && <BulkUploadHub />}
               {activeTab === "announcements" && <AnnouncementsManager />}
               {activeTab === "marquee"       && <MarqueeManager />}

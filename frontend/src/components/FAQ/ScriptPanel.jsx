@@ -51,7 +51,16 @@ const TopicButton = ({ active, label, count, icon: Icon, onClick }) => (
   </button>
 );
 
-const ScriptCard = ({ script, open, onToggle, q }) => (
+const sectionMatches = (sec, q) => {
+  const ql = (q || '').trim().toLowerCase();
+  if (!ql) return false;
+  return `${sec.heading} ${sec.tags} ${sec.content}`.toLowerCase().includes(ql);
+};
+
+const ScriptCard = ({ script, open, onToggle, q }) => {
+  const sections = Array.isArray(script.sections) ? script.sections : [];
+  const matched  = q ? sections.filter(s => sectionMatches(s, q)) : [];
+  return (
   <div className="rounded-2xl overflow-hidden transition-all duration-200"
     style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${open ? 'var(--color-primary-300)' : 'var(--color-border)'}`, boxShadow: open ? 'var(--shadow-md)' : 'none' }}>
     <button onClick={onToggle} className="w-full flex items-start gap-3 p-4 sm:p-5 text-left">
@@ -62,6 +71,15 @@ const ScriptCard = ({ script, open, onToggle, q }) => (
       <div className="flex-1 min-w-0">
         <p className="font-semibold leading-snug" style={{ color: 'var(--color-text)' }}>{highlight(script.title, q)}</p>
         {!open && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{script.content}</p>}
+        {/* When collapsed + searching, point to the heading(s) that matched */}
+        {!open && matched.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {matched.slice(0, 4).map((s, i) => (
+              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
+                style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>↳ {s.heading || 'section'}</span>
+            ))}
+          </div>
+        )}
         {splitKeywords(script.keywords).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {splitKeywords(script.keywords).slice(0, open ? 99 : 6).map(k => (
@@ -75,13 +93,32 @@ const ScriptCard = ({ script, open, onToggle, q }) => (
         style={{ color: 'var(--color-text-tertiary)', transform: open ? 'rotate(180deg)' : 'none' }} />
     </button>
     {open && (
-      <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] animate-fade-in">
-        <div className="flex justify-end mb-2"><CopyButton text={script.content} /></div>
-        <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{script.content}</p>
+      <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] animate-fade-in space-y-3">
+        <div className="flex justify-end"><CopyButton text={script.content} /></div>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{highlight(script.content, q)}</p>
+        {sections.map((sec, i) => {
+          const hit = sectionMatches(sec, q);
+          return (
+            <div key={i} className="rounded-xl p-3"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: `1px solid ${hit ? 'var(--color-primary-400)' : 'var(--color-border)'}`, boxShadow: hit ? '0 0 0 2px var(--color-primary-100)' : 'none' }}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{highlight(sec.heading || '', q)}</p>
+                {sec.content && <CopyButton text={sec.content} />}
+              </div>
+              {splitKeywords(sec.tags).length > 0 && (
+                <div className="flex flex-wrap gap-1 my-1.5">
+                  {splitKeywords(sec.tags).map(t => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{t}</span>)}
+                </div>
+              )}
+              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text-secondary)' }}>{highlight(sec.content || '', q)}</p>
+            </div>
+          );
+        })}
       </div>
     )}
   </div>
-);
+  );
+};
 
 const ScriptPanel = () => {
   const { scripts, loading, error, fetchScripts } = useScripts();
@@ -102,10 +139,13 @@ const ScriptPanel = () => {
     () => (topic ? scripts.filter(s => splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) : scripts),
     [scripts, topic],
   );
+  const secText = (s, part) => (Array.isArray(s.sections) ? s.sections.map(x => x[part] || '').join('  ') : '');
   const filtered = useMemo(() => rankItems(query, topicScoped, [
     { get: s => s.title,    weight: 5 },
     { get: s => s.keywords, weight: 4 },
+    { get: s => `${secText(s, 'heading')}  ${secText(s, 'tags')}`, weight: 4 },  // tagged headings
     { get: s => s.content,  weight: 2 },
+    { get: s => secText(s, 'content'), weight: 2 },
   ], synMap), [topicScoped, query, synMap]);
 
   useEffect(() => { logSearch(query, filtered.length); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -5,19 +5,21 @@ import client from '../../api/client';
 
 // Superadmin search tooling: manage synonym groups (query expansion) + view
 // search analytics (top queries, zero-result gaps) for FAQs and Scripts.
-const SearchSettings = () => {
+const SearchSettings = ({ embedded = false }) => {
   const [tab, setTab] = useState('synonyms');
   return (
-    <div className="space-y-5 animate-fade-in max-w-5xl">
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <Search size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Search Settings</h2>
-            <p className="text-sm text-white/80">Tune FAQ &amp; Script search relevance and see what agents look for.</p>
+    <div className={`space-y-5 ${embedded ? '' : 'animate-fade-in max-w-5xl'}`}>
+      {!embedded && (
+        <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
+          <div className="relative z-10 flex items-center gap-2.5">
+            <Search size={22} className="text-white" />
+            <div>
+              <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Search Settings</h2>
+              <p className="text-sm text-white/80">Tune FAQ &amp; Script search relevance and see what agents look for.</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {[{ k: 'synonyms', l: 'Synonyms', icon: Network }, { k: 'analytics', l: 'Analytics', icon: BarChart3 }].map(t => (

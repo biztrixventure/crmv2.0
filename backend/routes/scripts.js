@@ -9,6 +9,28 @@ const router = express.Router();
 
 const VALID_AUDIENCE = ['closer', 'fronter', 'both'];
 
+// Normalize tagged sections: [{ heading, content, tags }]. Sanitized + capped.
+function cleanSections(input) {
+  if (!Array.isArray(input)) return null;
+  const out = input.slice(0, 50).map(s => ({
+    heading: String(s?.heading || '').slice(0, 200),
+    content: String(s?.content || '').slice(0, 8000),
+    tags:    String(s?.tags || '').slice(0, 500),
+  })).filter(s => s.heading.trim() || s.content.trim());
+  return out;
+}
+
+// Insert/update that tolerates the `sections` column not being migrated yet:
+// on a schema error we retry without it so the rest of the script still saves.
+async function writeScript(op, row) {
+  let res = await op(row);
+  if (res.error && row.sections !== undefined && /column .*sections|schema cache/i.test(res.error.message || '')) {
+    const { sections, ...rest } = row;
+    res = await op(rest);
+  }
+  return res;
+}
+
 // Which script audiences a viewer may see, derived from their role.
 function viewerAudiences(role) {
   if (['fronter', 'fronter_manager'].includes(role)) return ['fronter', 'both'];
@@ -62,17 +84,17 @@ router.post('/', [
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
-  const { title, content, keywords, audience } = req.body;
-  const { data, error } = await supabaseAdmin
-    .from('scripts')
-    .insert({
-      title:      title.trim(),
-      content:    content.trim(),
-      keywords:   keywords?.trim() || null,
-      audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
-      created_by: req.user.id,
-    })
-    .select().single();
+  const { title, content, keywords, audience, sections } = req.body;
+  const row = {
+    title:      title.trim(),
+    content:    content.trim(),
+    keywords:   keywords?.trim() || null,
+    audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
+    created_by: req.user.id,
+    sections:   cleanSections(sections),
+  };
+  const { data, error } = await writeScript(
+    (r) => supabaseAdmin.from('scripts').insert(r).select().single(), row);
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json({ script: data });
@@ -99,9 +121,10 @@ router.put('/:id', [
   if (req.body.keywords  !== undefined) updates.keywords  = req.body.keywords?.trim() || null;
   if (req.body.audience  !== undefined) updates.audience  = req.body.audience;
   if (req.body.is_active !== undefined) updates.is_active = req.body.is_active;
+  if (req.body.sections  !== undefined) updates.sections  = cleanSections(req.body.sections);
 
-  const { data, error } = await supabaseAdmin
-    .from('scripts').update(updates).eq('id', req.params.id).select().single();
+  const { data, error } = await writeScript(
+    (r) => supabaseAdmin.from('scripts').update(r).eq('id', req.params.id).select().single(), updates);
   if (error)  return res.status(500).json({ error: error.message });
   if (!data)  return res.status(404).json({ error: 'Script not found' });
   res.json({ script: data });

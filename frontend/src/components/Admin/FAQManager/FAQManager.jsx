@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   HelpCircle, Plus, Search, Edit2, Trash2, X, ChevronDown,
-  Tag, Eye, EyeOff, BookOpen, Users, Headphones, PhoneOutgoing,
+  Tag, Eye, EyeOff, BookOpen, Users, Headphones, PhoneOutgoing, SlidersHorizontal,
 } from 'lucide-react';
 import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useFaqs } from '../../../hooks/useFaqs';
+import SearchSettings from '../SearchSettings';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -111,6 +112,7 @@ const StatTile = ({ label, value, color, active, onClick }) => (
 const FAQManager = () => {
   const { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq } = useFaqs();
   const [search, setSearch]     = useState('');
+  const [showSearch, setShowSearch] = useState(false);
   const [audience, setAudience] = useState('');
   const [modal, setModal]       = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -161,6 +163,17 @@ const FAQManager = () => {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search questions, answers, keywords…" className="input pl-10 pr-9 w-full" />
         {search && <button type="button" onClick={() => { setSearch(''); fetchFaqs({ include_inactive: true, audience: audience || undefined }); }} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>}
       </form>
+
+      {/* Search settings live here (no separate tab): synonyms + analytics */}
+      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <button onClick={() => setShowSearch(v => !v)} className="w-full flex items-center justify-between p-4">
+          <span className="flex items-center gap-2 text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            <SlidersHorizontal size={16} style={{ color: 'var(--color-primary-600)' }} /> Search settings — synonyms &amp; analytics
+          </span>
+          <ChevronDown size={18} className="transition-transform" style={{ color: 'var(--color-text-tertiary)', transform: showSearch ? 'rotate(180deg)' : 'none' }} />
+        </button>
+        {showSearch && <div className="px-4 pb-4"><SearchSettings embedded /></div>}
+      </div>
 
       {loading ? (
         <div className="space-y-2.5">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--color-bg-secondary)' }} />)}</div>
