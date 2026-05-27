@@ -257,10 +257,13 @@ const transferVin = (t) => upper(t.form_data?.VIN || t.form_data?.car_vin);
 const transferYmm = (t) => ymmKey(t.form_data?.CarYear ?? t.form_data?.car_year, t.form_data?.CarMake ?? t.form_data?.car_make, t.form_data?.CarModel ?? t.form_data?.car_model);
 
 // Duplicate transfers for the same phone are almost always the SAME lead entered
-// twice, so which one a sale attaches to rarely changes the deal — but we still
-// pick deterministically (and prefer a transfer with no sale yet so a real 2nd
-// car lands on its own transfer). Score, then break ties by earliest created_at
-// → id so the same transfer always wins on a re-run.
+// twice. We pick deterministically: a real car/VIN match dominates; a transfer
+// with no sale yet is preferred (so a genuine 2nd car lands on its own transfer);
+// and the final tie-break favours the MOST RECENT transfer that was created on or
+// before the sale date — i.e. the transfer that plausibly produced this sale —
+// rather than blindly the latest (which could even post-date the sale) or the
+// earliest. Falls back to earliest if none predates the sale, and to id for a
+// fully stable order on re-runs.
 function pickBestTransfer(row, candidates, salesByTransfer) {
   const saleVin  = upper(row.car_vin);
   const saleYmm  = ymmKey(row.car_year, row.car_make, row.car_model);
@@ -274,15 +277,27 @@ function pickBestTransfer(row, candidates, salesByTransfer) {
     const hasSale = (salesByTransfer.get(t.id) || []).length > 0;
     if (!hasSale) score += 25;
     const created = (t.created_at || '').slice(0, 10);
-    if (saleDate && created && created <= saleDate) score += 15;
-    return { t, score, reasons, created, hasSale };
+    const onOrBefore = !!(saleDate && created && created <= saleDate);
+    if (onOrBefore) score += 15;
+    return { t, score, reasons, created, hasSale, onOrBefore };
   });
-  scored.sort((a, b) =>
-    b.score - a.score ||
-    (a.created < b.created ? -1 : a.created > b.created ? 1 : 0) ||
-    (a.t.id < b.t.id ? -1 : 1));
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    // Prefer transfers created on/before the sale date…
+    if (saleDate && a.onOrBefore !== b.onOrBefore) return a.onOrBefore ? -1 : 1;
+    if (saleDate && a.onOrBefore && b.onOrBefore) {
+      // …and among those, the LATEST (closest to the sale) wins.
+      if (a.created !== b.created) return a.created < b.created ? 1 : -1;
+    } else if (a.created !== b.created) {
+      // No qualifying date: fall back to the earliest for stability.
+      return a.created < b.created ? -1 : 1;
+    }
+    return a.t.id < b.t.id ? -1 : 1;
+  });
   const best = scored[0];
-  const why = best.reasons.length ? best.reasons.join('+') : (best.hasSale ? 'earliest' : 'earliest unused');
+  const why = best.reasons.length ? best.reasons.join('+')
+    : best.onOrBefore ? 'latest on/before sale date'
+    : best.hasSale ? 'earliest' : 'earliest unused';
   return { transfer: best.t, why };
 }
 

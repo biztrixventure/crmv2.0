@@ -167,9 +167,27 @@ export function applyMapping(rows, mapping, formFields, phoneKey) {
 
 export const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 
+// Demo/template CSV — built as a SUPERSET of the transfer template: the shared
+// columns (company, fronter, then the customer/car form fields) come first in the
+// same order a transfer file uses, and the sale-only columns (deal fields, closer,
+// compliance note, status) are appended. So the common columns line up across both
+// uploaders and a single source export can feed either one.
 export function sampleTemplateCsv(formFields, phoneKey) {
-  const fields = buildFields(formFields, phoneKey);
-  const headers = fields.map(f => f.key);
+  const dyn = dynamicFields(formFields);
+  const isSale = (f) => String(f.field_type || '').startsWith('sale_');
+  const fronterDyn = dyn.filter(f => !isSale(f));   // shared with transfers (customer + car)
+  const saleDyn    = dyn.filter(f => isSale(f));    // sale-only deal fields
+
+  const ordered = [
+    { key: 'fronter_name',    label: 'Fronter Name' },
+    { key: 'company_name',    label: 'Company Name' },
+    ...fronterDyn,
+    ...saleDyn,
+    { key: 'closer_name',     label: 'Closer Name' },
+    { key: 'compliance_note', label: 'Compliance Note' },
+    { key: 'status',          label: 'Sale / Approval Status' },
+  ];
+
   const sampleFor = (f) => {
     if (f.key === phoneKey || ['phone', 'tel'].includes(f.field_type)) return '5551234567';
     if (f.key === 'fronter_name') return 'John Smith';
@@ -184,5 +202,7 @@ export function sampleTemplateCsv(formFields, phoneKey) {
     if (f.field_type === 'sale_reference_no') return 'MBH4220SBN';
     return `Sample ${f.label}`;
   };
-  return [headers, fields.map(sampleFor)].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+
+  const headers = ordered.map(f => f.key);
+  return [headers, ordered.map(sampleFor)].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
 }
