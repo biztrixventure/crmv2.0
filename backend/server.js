@@ -40,6 +40,7 @@ const spiffRoutes               = require('./routes/spiff');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
 const eventsRoutes              = require('./routes/events');
+const searchRoutes              = require('./routes/search');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { supabaseAdmin: _saForSync } = require('./config/database');
@@ -219,6 +220,8 @@ app.use('/api/chat/admin',         authMiddleware, chatAdminRoutes);
 app.use('/api/chat',               authMiddleware, requireFeature('chat'), chatRoutes);
 // Events calendar — reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
 app.use('/api/events',             authMiddleware, eventsRoutes);
+// FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)
+app.use('/api/search',             authMiddleware, searchRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

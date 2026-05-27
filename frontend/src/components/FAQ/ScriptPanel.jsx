@@ -3,6 +3,8 @@ import {
   FileText, Search, ChevronDown, X, Tag, LayoutGrid, Copy, Check, MessageSquareText,
 } from 'lucide-react';
 import { useScripts } from '../../hooks/useScripts';
+import { useSearchTools } from '../../hooks/useSearchTools';
+import { rankItems } from '../../utils/smartSearch';
 
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
@@ -86,6 +88,7 @@ const ScriptPanel = () => {
   const [query, setQuery]     = useState('');
   const [topic, setTopic]     = useState('');
   const [expanded, setExpanded] = useState(null);
+  const { synMap, logSearch } = useSearchTools('script');
 
   useEffect(() => { fetchScripts(); }, [fetchScripts]);
 
@@ -95,14 +98,17 @@ const ScriptPanel = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [scripts]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return scripts.filter(s => {
-      if (topic && !splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) return false;
-      if (!q) return true;
-      return s.title.toLowerCase().includes(q) || s.content.toLowerCase().includes(q) || (s.keywords || '').toLowerCase().includes(q);
-    });
-  }, [scripts, query, topic]);
+  const topicScoped = useMemo(
+    () => (topic ? scripts.filter(s => splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) : scripts),
+    [scripts, topic],
+  );
+  const filtered = useMemo(() => rankItems(query, topicScoped, [
+    { get: s => s.title,    weight: 5 },
+    { get: s => s.keywords, weight: 4 },
+    { get: s => s.content,  weight: 2 },
+  ], synMap), [topicScoped, query, synMap]);
+
+  useEffect(() => { logSearch(query, filtered.length); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearFilters = () => { setQuery(''); setTopic(''); };
   const hasFilters = query || topic;

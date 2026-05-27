@@ -3,6 +3,8 @@ import {
   HelpCircle, Search, ChevronDown, X, Tag, LayoutGrid, BookOpen,
 } from 'lucide-react';
 import { useFaqs } from '../../hooks/useFaqs';
+import { useSearchTools } from '../../hooks/useSearchTools';
+import { rankItems } from '../../utils/smartSearch';
 
 const AUDIENCE_LABEL = { closer: 'Closer', fronter: 'Fronter', both: 'General' };
 
@@ -93,6 +95,7 @@ const FAQPanel = () => {
   const [audience, setAudience] = useState('');
   const [topic, setTopic]       = useState('');     // selected keyword/topic
   const [expanded, setExpanded] = useState(null);
+  const { synMap, logSearch }   = useSearchTools('faq');
 
   useEffect(() => { fetchFaqs(); }, [fetchFaqs]);
 
@@ -117,18 +120,19 @@ const FAQPanel = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [audienceScoped]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return audienceScoped.filter(f => {
-      if (topic && !splitKeywords(f.keywords).some(k => k.toLowerCase() === topic)) return false;
-      if (!q) return true;
-      return (
-        f.question.toLowerCase().includes(q) ||
-        f.answer.toLowerCase().includes(q) ||
-        (f.keywords || '').toLowerCase().includes(q)
-      );
-    });
-  }, [audienceScoped, query, topic]);
+  // Topic filter first, then intelligent ranked search (synonym-aware).
+  const topicScoped = useMemo(
+    () => (topic ? audienceScoped.filter(f => splitKeywords(f.keywords).some(k => k.toLowerCase() === topic)) : audienceScoped),
+    [audienceScoped, topic],
+  );
+  const filtered = useMemo(() => rankItems(query, topicScoped, [
+    { get: f => f.question, weight: 5 },
+    { get: f => f.keywords, weight: 4 },
+    { get: f => f.answer,   weight: 2 },
+  ], synMap), [topicScoped, query, synMap]);
+
+  // Track searches for the superadmin analytics (debounced inside the hook).
+  useEffect(() => { logSearch(query, filtered.length); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearFilters = () => { setQuery(''); setTopic(''); };
   const hasFilters = query || topic;

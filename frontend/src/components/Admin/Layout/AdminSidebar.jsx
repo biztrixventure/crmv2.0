@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, Search } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -24,7 +24,8 @@ const NAV_SECTIONS = [
   {
     label: 'Intelligence',
     items: [
-      { id: 'sale-search', label: 'Lead Search', icon: Network },
+      { id: 'sale-search', label: 'Lead Search',    icon: Network },
+      { id: 'search',      label: 'Search Settings', icon: Search },
     ],
   },
   {
