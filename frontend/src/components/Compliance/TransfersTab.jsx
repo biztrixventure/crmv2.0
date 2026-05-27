@@ -7,6 +7,8 @@ const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revisio
 const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
 import { Badge } from '../UI';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 import ExportModal from './ExportModal';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
@@ -16,6 +18,10 @@ import {
 } from './shared';
 
 const TransfersTab = ({ companyList, initCompany = '' }) => {
+  const { user } = useAuth();
+  const isSuper = user?.role === 'superadmin';
+  const [mgBusy, setMgBusy] = useState(false);
+  const [mgStatus, setMgStatus] = useState('');
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(false);
@@ -65,6 +71,23 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
   };
 
+  // Superadmin cross-company management (backend allows superadmin to bypass scope).
+  useEffect(() => { setMgStatus(detail?.status || ''); }, [detail]);
+  const doDeleteTransfer = async () => {
+    if (!detail || !window.confirm('Delete this transfer? Any linked sale is removed too (cascade). This cannot be undone.')) return;
+    setMgBusy(true);
+    try { await client.delete(`transfers/${detail.id}`); toast.success('Transfer deleted'); setDetail(null); load(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Delete failed'); }
+    finally { setMgBusy(false); }
+  };
+  const doUpdateTransferStatus = async () => {
+    if (!detail || !mgStatus || mgStatus === detail.status) return;
+    setMgBusy(true);
+    try { await client.put(`transfers/${detail.id}`, { status: mgStatus }); toast.success('Transfer status updated'); setDetail(null); load(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Update failed'); }
+    finally { setMgBusy(false); }
+  };
+
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
     const res = await client.get('compliance/transfers', {
       params: { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
@@ -83,7 +106,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
     <div>
       <TabHeader
         title="All Transfers"
-        subtitle="Read-only view of lead transfers across all companies"
+        subtitle={isSuper ? 'Lead transfers across all companies — open a record to edit status or delete' : 'Read-only view of lead transfers across all companies'}
         onRefresh={() => { setPage(1); load(); }}
         onExport={() => setExportOpen(true)}
       />
@@ -257,7 +280,25 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                 </section>
               )}
             </div>
-            <div className="px-6 pb-6 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <div className="px-6 pb-6 pt-3 flex-shrink-0 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {isSuper && (
+                <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select value={mgStatus} onChange={e => setMgStatus(e.target.value)} className="input text-sm" style={{ height: 36, maxWidth: 200 }}>
+                      {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+                    </select>
+                    <button onClick={doUpdateTransferStatus} disabled={mgBusy || mgStatus === detail.status}
+                      className="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
+                      Save status
+                    </button>
+                    <button onClick={doDeleteTransfer} disabled={mgBusy}
+                      className="px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50 ml-auto" style={{ color: '#dc2626', backgroundColor: 'rgba(220,38,38,0.08)' }}>
+                      Delete transfer
+                    </button>
+                  </div>
+                </div>
+              )}
               <button onClick={() => setDetail(null)}
                 className="w-full py-2.5 rounded-xl border font-semibold text-sm"
                 style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
