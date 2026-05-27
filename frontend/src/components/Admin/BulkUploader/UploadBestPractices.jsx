@@ -31,6 +31,14 @@ const TYPE_RULES = {
 };
 const ruleFor = (ft) => TYPE_RULES[ft] || 'Plain text.';
 
+// Which side captures this field: fronter (transfer form) vs closer (sale form).
+const originOf = (f) => {
+  if (['closer_name', 'compliance_note', 'status'].includes(f.key)) return 'closer';
+  if (String(f.field_type || '').startsWith('sale_')) return 'closer';
+  if (f.show_to_fronter === false) return 'closer';
+  return 'fronter';
+};
+
 const Section = ({ icon: Icon, title, defaultOpen = false, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -152,22 +160,41 @@ const UploadBestPractices = ({ kind = 'transfer', fields = [], startOpen = false
           </Section>
 
           <Section icon={ListChecks} title="7. Field-by-field rules">
+            {isSale && (
+              <p className="text-xs mb-2">
+                <span className="px-1.5 py-0.5 rounded font-bold mr-1" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>Fronter</span>
+                columns come from the transfer (customer &amp; car);
+                <span className="px-1.5 py-0.5 rounded font-bold mx-1" style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>Closer</span>
+                columns are the deal/sale fields the closer fills in.
+              </p>
+            )}
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
               {fields.length === 0 ? (
                 <p className="p-3 text-xs">Field list loads from the form configuration.</p>
-              ) : fields.map((f, i) => (
-                <div key={f.key} className="flex items-start gap-2 px-3 py-2"
-                  style={{ borderTop: i ? '1px solid var(--color-border)' : 'none', backgroundColor: i % 2 ? 'var(--color-bg-secondary)' : 'transparent' }}>
-                  <div className="flex-shrink-0" style={{ minWidth: 150 }}>
-                    <Code>{f.key}</Code>
-                    {f.required
-                      ? <span className="text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-success-100,#dcfce7)', color: 'var(--color-success-700,#15803d)' }}>REQUIRED</span>
-                      : <span className="text-[9px] ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>optional</span>}
-                    {f.isPhone && <span className="text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match key</span>}
+              ) : fields.map((f, i) => {
+                const origin = originOf(f);
+                return (
+                  <div key={f.key} className="flex items-start gap-2 px-3 py-2"
+                    style={{ borderTop: i ? '1px solid var(--color-border)' : 'none', backgroundColor: i % 2 ? 'var(--color-bg-secondary)' : 'transparent' }}>
+                    <div className="flex-shrink-0" style={{ minWidth: 168 }}>
+                      <Code>{f.key}</Code>
+                      {isSale && (
+                        <span className="text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold"
+                          style={origin === 'closer'
+                            ? { backgroundColor: '#ede9fe', color: '#6d28d9' }
+                            : { backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                          {origin === 'closer' ? 'CLOSER' : 'FRONTER'}
+                        </span>
+                      )}
+                      {f.required
+                        ? <span className="text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-success-100,#dcfce7)', color: 'var(--color-success-700,#15803d)' }}>REQUIRED</span>
+                        : <span className="text-[9px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>optional</span>}
+                      {f.isPhone && <span className="text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match key</span>}
+                    </div>
+                    <span className="text-xs">{ruleFor(f.field_type)}</span>
                   </div>
-                  <span className="text-xs">{ruleFor(f.field_type)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
               Rules reflect your current form configuration, so they stay accurate as fields change.

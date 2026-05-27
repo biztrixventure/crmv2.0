@@ -14,9 +14,15 @@ const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
 // fields). Includes sale_* deal fields. New form fields appear automatically.
 export function dynamicFields(formFields) {
   return (formFields || []).map(f => ({
-    key: f.name, label: f.label || f.name, required: !!f.is_required, control: false, field_type: f.field_type,
+    key: f.name, label: f.label || f.name, required: !!f.is_required, control: false,
+    field_type: f.field_type, show_to_fronter: f.show_to_fronter,
   }));
 }
+
+// True for a field that lives ONLY on the closer/sale form (a sale_* deal field,
+// OR a non-sale field hidden from the fronter, e.g. Age / Monthly_Date / Plan_Duration).
+export const isCloserOnlyField = (f) =>
+  String(f.field_type || '').startsWith('sale_') || f.show_to_fronter === false;
 
 export function detectPhoneKey(formFields) {
   const list = dynamicFields(formFields);
@@ -174,15 +180,17 @@ export const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 // uploaders and a single source export can feed either one.
 export function sampleTemplateCsv(formFields, phoneKey) {
   const dyn = dynamicFields(formFields);
-  const isSale = (f) => String(f.field_type || '').startsWith('sale_');
-  const fronterDyn = dyn.filter(f => !isSale(f));   // shared with transfers (customer + car)
-  const saleDyn    = dyn.filter(f => isSale(f));    // sale-only deal fields
+  // Shared block = the SAME fields the fronter/transfer form uses (visible to
+  // fronter AND not a sale field) so these columns line up byte-for-byte with the
+  // transfer template. Everything closer-only (sale_* + fronter-hidden) is appended.
+  const fronterDyn = dyn.filter(f => !isCloserOnlyField(f));
+  const closerDyn  = dyn.filter(f => isCloserOnlyField(f));
 
   const ordered = [
     { key: 'fronter_name',    label: 'Fronter Name' },
     { key: 'company_name',    label: 'Company Name' },
     ...fronterDyn,
-    ...saleDyn,
+    ...closerDyn,
     { key: 'closer_name',     label: 'Closer Name' },
     { key: 'compliance_note', label: 'Compliance Note' },
     { key: 'status',          label: 'Sale / Approval Status' },
