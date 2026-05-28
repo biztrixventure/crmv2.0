@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
 import EngagementBanners from '../components/Engagement/EngagementBanners';
 import { useNotifications } from '../hooks/useNotifications';
@@ -39,7 +39,12 @@ const ComplianceShell = () => {
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
 
-  const [activeTab, setActiveTab]   = useState('companies');
+  // Honor an initial-tab hint passed via router state (the AdminPanel sidebar
+  // links straight into specific tabs, e.g. "All Sales", so superadmin lands on
+  // the right view instead of always on Companies).
+  const location = useLocation();
+  const initialTab = TABS.find(t => t.key === location.state?.tab)?.key || 'companies';
+  const [activeTab, setActiveTab]   = useState(initialTab);
   const [tabInit, setTabInit]       = useState({});
   const [infoOpen, setInfoOpen]     = useState(false);
 

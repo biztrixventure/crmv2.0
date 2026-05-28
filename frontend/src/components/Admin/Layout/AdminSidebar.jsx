@@ -1,12 +1,23 @@
 import React from 'react';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall } from 'lucide-react';
 
+// Items with an `href` navigate to another shell instead of switching an
+// internal admin tab. `state.tab` pre-selects a tab inside the target shell.
 const NAV_SECTIONS = [
   {
     label: 'Overview',
     items: [
       { id: 'dashboard',    label: 'Dashboard',    icon: BarChart3   },
       { id: 'calendar',     label: 'Calendar',     icon: CalendarDays },
+    ],
+  },
+  {
+    label: 'Cross-Company',
+    items: [
+      { id: 'cc-sales',     label: 'All Sales',     icon: DollarSign,  href: '/compliance', state: { tab: 'sales'     } },
+      { id: 'cc-transfers', label: 'All Transfers', icon: ArrowRight,  href: '/compliance', state: { tab: 'transfers' } },
+      { id: 'cc-callbacks', label: 'All Callbacks', icon: PhoneCall,   href: '/compliance', state: { tab: 'callbacks' } },
     ],
   },
   {
@@ -45,6 +56,7 @@ const NAV_SECTIONS = [
 ];
 
 const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) => {
+  const navigate = useNavigate();
   return (
     <aside className="w-64 flex-shrink-0 flex flex-col"
       style={{
@@ -72,7 +84,7 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
                   return (
                     <button
                       key={item.id}
-                      onClick={() => onTabChange(item.id)}
+                      onClick={() => item.href ? navigate(item.href, { state: item.state }) : onTabChange(item.id)}
                       className="w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-3 group"
                       style={{
                         background: isActive ? 'var(--gradient-sidebar)' : 'transparent',

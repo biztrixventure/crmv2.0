@@ -53,6 +53,13 @@ const AdminPanel = () => {
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
     { id: "calendar",    label: "Calendar"     },
+    // Superadmin cross-company shortcuts → ComplianceShell (which lists every
+    // company's sales/transfers/callbacks). Backend already grants full CRUD.
+    ...(user?.role === 'superadmin' ? [
+      { id: "cc-sales",     label: "All Sales"     },
+      { id: "cc-transfers", label: "All Transfers" },
+      { id: "cc-callbacks", label: "All Callbacks" },
+    ] : []),
     ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),

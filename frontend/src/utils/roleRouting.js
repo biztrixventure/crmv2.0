@@ -88,8 +88,15 @@ export const hasRoleAccess = (userRole, requiredRole) => {
 
   if (normUser === normRequired) return true;
 
-  // Platform admins: only admin routes
-  if (normUser === 'superadmin' || normUser === 'readonlyadmin') {
+  // Superadmin: unrestricted. Backend already grants cross-company CRUD on every
+  // resource, so let the frontend reach every shell (compliance for cross-company
+  // sales/transfers/callbacks lists; manager/staff shells for inspecting a single
+  // company's day-to-day flows) instead of forcing API-only access.
+  if (normUser === 'superadmin') return true;
+
+  // Read-only admin stays pinned to /admin — they have no business in shells
+  // that expose write actions.
+  if (normUser === 'readonlyadmin') {
     return normRequired === 'admin';
   }
 
