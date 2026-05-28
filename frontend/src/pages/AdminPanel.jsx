@@ -70,7 +70,10 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                   ? [{ id: "announcements", label: "Announcements" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "marquee",       label: "Marquee"       }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "spiff",         label: "SPIFF"         }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "chat",          label: "Chat Control"  }] : []),
+    // Chat Control stays visible for readonly_admin per spec — view-only is
+    // enforced by the backend readonlyGuard, so the moderation panel will
+    // 403 any ban/unban POST without us hiding the screen.
+    ...(user?.role === 'superadmin' || isReadOnly      ? [{ id: "chat",          label: "Chat Control"  }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
   ];
 

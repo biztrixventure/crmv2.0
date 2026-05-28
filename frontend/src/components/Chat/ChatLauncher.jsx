@@ -9,10 +9,13 @@ import ChatPanel from './ChatPanel';
 // Self-contained: gated by the user being present and the 'chat' flag enabled,
 // so a single placement in each header lights up chat for every shell.
 const ChatLauncher = () => {
-  const { user } = useAuth();
+  const { user, isReadOnly } = useAuth();
   const { isEnabled } = useFeatureFlags();
   const [open, setOpen] = useState(false);
-  const enabled = !!user?.id && isEnabled('chat');
+  // readonly_admin can't send messages (backend readonlyGuard would 403 the
+  // POST anyway), so hide the launcher entirely instead of showing a button
+  // that opens a panel they can only stare at.
+  const enabled = !!user?.id && !isReadOnly && isEnabled('chat');
   const { total, banned, refresh } = useChatUnread(enabled);
 
   if (!enabled) return null;

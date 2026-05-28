@@ -7,6 +7,7 @@ require('dotenv').config({ path: '.env.local' });
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/authMiddleware');
+const { readonlyGuard } = require('./middleware/readonlyGuard');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -187,41 +188,41 @@ app.use('/api/auth', authRoutes);
 // PROTECTED ROUTES (auth required)
 // ============================================================================
 
-app.use('/api/users', authMiddleware, usersRoutes);
-app.use('/api/companies', authMiddleware, companiesRoutes);
-app.use('/api/roles', authMiddleware, rolesRoutes);
-app.use('/api/forms', authMiddleware, formsRoutes);
-app.use('/api/transfers', authMiddleware, transfersRoutes);
-app.use('/api/sales', authMiddleware, salesRoutes);
-app.use('/api/sale-configs', authMiddleware, saleConfigsRoutes);
-app.use('/api/callbacks',   authMiddleware, callbacksRoutes);
-app.use('/api/push',        authMiddleware, pushRoutes);
-app.use('/api/stats',       authMiddleware, statsRoutes);
-app.use('/api/notifications', authMiddleware, notificationsRoutes);
-app.use('/api/reviews',      authMiddleware, reviewsRoutes);
-app.use('/api/number-lists',      authMiddleware, numberListsRoutes);
-app.use('/api/callback-numbers',  authMiddleware, callbackNumbersRoutes);
-app.use('/api/feature-flags',     authMiddleware, featureFlagsRoutes);
-app.use('/api/compliance',        authMiddleware, complianceRoutes);
-app.use('/api/activity-logs',       authMiddleware, activityLogsRoutes);
-app.use('/api/lead-intelligence',    authMiddleware, leadIntelligenceRoutes);
-app.use('/api/disposition-configs', authMiddleware, dispositionConfigsRoutes);
-app.use('/api/zipcode',            authMiddleware, zipcodeRoutes);
-app.use('/api/faqs',               authMiddleware, faqsRoutes);
-app.use('/api/scripts',            authMiddleware, scriptsRoutes);
-app.use('/api/uploads',            authMiddleware, uploadsRoutes);
-app.use('/api/sale-uploads',       authMiddleware, saleUploadsRoutes);
-app.use('/api/announcements',      authMiddleware, announcementsRoutes);
-app.use('/api/marquee',            authMiddleware, marqueeRoutes);
-app.use('/api/spiff',              authMiddleware, spiffRoutes);
+app.use('/api/users', authMiddleware, readonlyGuard, usersRoutes);
+app.use('/api/companies', authMiddleware, readonlyGuard, companiesRoutes);
+app.use('/api/roles', authMiddleware, readonlyGuard, rolesRoutes);
+app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
+app.use('/api/transfers', authMiddleware, readonlyGuard, transfersRoutes);
+app.use('/api/sales', authMiddleware, readonlyGuard, salesRoutes);
+app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
+app.use('/api/callbacks',   authMiddleware, readonlyGuard, callbacksRoutes);
+app.use('/api/push',        authMiddleware, readonlyGuard, pushRoutes);
+app.use('/api/stats',       authMiddleware, readonlyGuard, statsRoutes);
+app.use('/api/notifications', authMiddleware, readonlyGuard, notificationsRoutes);
+app.use('/api/reviews',      authMiddleware, readonlyGuard, reviewsRoutes);
+app.use('/api/number-lists',      authMiddleware, readonlyGuard, numberListsRoutes);
+app.use('/api/callback-numbers',  authMiddleware, readonlyGuard, callbackNumbersRoutes);
+app.use('/api/feature-flags',     authMiddleware, readonlyGuard, featureFlagsRoutes);
+app.use('/api/compliance',        authMiddleware, readonlyGuard, complianceRoutes);
+app.use('/api/activity-logs',       authMiddleware, readonlyGuard, activityLogsRoutes);
+app.use('/api/lead-intelligence',    authMiddleware, readonlyGuard, leadIntelligenceRoutes);
+app.use('/api/disposition-configs', authMiddleware, readonlyGuard, dispositionConfigsRoutes);
+app.use('/api/zipcode',            authMiddleware, readonlyGuard, zipcodeRoutes);
+app.use('/api/faqs',               authMiddleware, readonlyGuard, faqsRoutes);
+app.use('/api/scripts',            authMiddleware, readonlyGuard, scriptsRoutes);
+app.use('/api/uploads',            authMiddleware, readonlyGuard, uploadsRoutes);
+app.use('/api/sale-uploads',       authMiddleware, readonlyGuard, saleUploadsRoutes);
+app.use('/api/announcements',      authMiddleware, readonlyGuard, announcementsRoutes);
+app.use('/api/marquee',            authMiddleware, readonlyGuard, marqueeRoutes);
+app.use('/api/spiff',              authMiddleware, readonlyGuard, spiffRoutes);
 // Chat — admin routes mounted first (superadmin-gated, no feature gate so
 // moderation always works); user routes behind the per-company 'chat' flag.
-app.use('/api/chat/admin',         authMiddleware, chatAdminRoutes);
-app.use('/api/chat',               authMiddleware, requireFeature('chat'), chatRoutes);
+app.use('/api/chat/admin',         authMiddleware, readonlyGuard, chatAdminRoutes);
+app.use('/api/chat',               authMiddleware, readonlyGuard, requireFeature('chat'), chatRoutes);
 // Events calendar — reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
-app.use('/api/events',             authMiddleware, eventsRoutes);
+app.use('/api/events',             authMiddleware, readonlyGuard, eventsRoutes);
 // FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)
-app.use('/api/search',             authMiddleware, searchRoutes);
+app.use('/api/search',             authMiddleware, readonlyGuard, searchRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

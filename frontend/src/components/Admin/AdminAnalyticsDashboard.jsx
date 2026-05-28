@@ -781,7 +781,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 </button>
               ))}
             </div>
-            {total > 0 && (
+            {total > 0 && !isReadOnly && (
               <button
                 onClick={handleExport}
                 disabled={exportLoading}

@@ -135,9 +135,14 @@ export const AuthProvider = ({ children }) => {
     return Array.isArray(user.permissions) && user.permissions.includes(name);
   }, [user]);
 
+  // Centralized read-only flag — components gate Create/Update/Delete UI on
+  // this and the backend's readonlyGuard middleware enforces the same rule
+  // server-side, so a hidden button can't be re-enabled via devtools.
+  const isReadOnly = user?.role === 'readonly_admin';
+
   return (
     <AuthContext.Provider value={{
-      user, token, login, logout, updateUser, hasPermission,
+      user, token, login, logout, updateUser, hasPermission, isReadOnly,
       isRefreshing, isAuthenticated: !!user && !!token,
     }}>
       {children}
