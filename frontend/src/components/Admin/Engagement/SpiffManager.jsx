@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Trophy, Plus, Edit2, Trash2, X, BarChart3, Medal } from 'lucide-react';
+import { Trophy, Plus, Edit2, Trash2, X, BarChart3, Medal, Zap } from 'lucide-react';
 import { Button, Alert, Badge } from '../../UI';
 import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
@@ -9,7 +9,23 @@ const METRICS = [
   { v: 'calls_made', l: 'Calls Made' }, { v: 'demos_booked', l: 'Demos Booked' }, { v: 'custom', l: 'Custom…' },
 ];
 const KNOWN = METRICS.map(m => m.v).filter(v => v !== 'custom');
-const blank = { title: '', description: '', metric: 'deals_closed', target_value: 10, reward_amount: '', reward_description: '', target_company_ids: [], target_roles: [], target_user_ids: [], status: 'active', starts_at: '', ends_at: '' };
+
+// `metric_source` decides where the score comes from:
+//   manual    → typed in per-participant (legacy behavior)
+//   transfers → live count of completed transfers attributed to created_by
+//   sales     → live count of sales attributed to closer_id (closed/pending statuses)
+//   revenue   → live sum of monthly_payment on closed_won/sold sales
+// Picking an auto source also pre-fills the human-readable `metric` label below.
+const METRIC_SOURCES = [
+  { v: 'manual',    l: 'Manual entry',                  hint: 'Scores typed in per participant. Use only when activity isn’t tracked in the CRM.' },
+  { v: 'transfers', l: 'Auto: Transfers completed',     hint: 'Counts transfers each participant created within the campaign window.', label: 'transfers' },
+  { v: 'sales',     l: 'Auto: Sales closed',            hint: 'Counts sales each participant closed within the campaign window.',     label: 'sales_closed' },
+  { v: 'revenue',   l: 'Auto: Revenue (monthly)',       hint: 'Sums monthly_payment on each participant’s closed_won/sold sales.', label: 'revenue' },
+];
+const SOURCE_LABEL = Object.fromEntries(METRIC_SOURCES.map(s => [s.v, s.l]));
+const isAuto = (s) => s && s !== 'manual';
+
+const blank = { title: '', description: '', metric: 'deals_closed', metric_source: 'manual', target_value: 10, reward_amount: '', reward_description: '', target_company_ids: [], target_roles: [], target_user_ids: [], status: 'active', starts_at: '', ends_at: '' };
 const MEDAL = ['#f59e0b', '#94a3b8', '#b45309'];
 
 const Modal = ({ row, reference, onClose, onSave }) => {
@@ -47,10 +63,20 @@ const Modal = ({ row, reference, onClose, onSave }) => {
             <input value={form.title} onChange={e => set('title', e.target.value)} className="input" placeholder="May Deal Sprint" /></div>
           <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Description</label>
             <input value={form.description} onChange={e => set('description', e.target.value)} className="input" placeholder="Optional" /></div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Source <span style={{ color: '#ef4444' }}>*</span></label>
+            <select value={form.metric_source} onChange={e => {
+              const src = e.target.value;
+              const preset = METRIC_SOURCES.find(s => s.v === src);
+              setForm(f => ({ ...f, metric_source: src, ...(preset?.label ? { metric: preset.label } : {}) }));
+              if (preset?.label) { setMetricSel('custom'); setCustomMetric(preset.label); }
+            }} className="input">{METRIC_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}</select>
+            <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{METRIC_SOURCES.find(s => s.v === form.metric_source)?.hint}</p>
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Metric</label>
-              <select value={metricSel} onChange={e => setMetricSel(e.target.value)} className="input">{METRICS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
-              {metricSel === 'custom' && <input value={customMetric} onChange={e => setCustomMetric(e.target.value)} className="input mt-1.5" placeholder="custom_metric" />}
+            <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Label</label>
+              <select value={metricSel} onChange={e => setMetricSel(e.target.value)} className="input" disabled={isAuto(form.metric_source)}>{METRICS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
+              {metricSel === 'custom' && <input value={customMetric} onChange={e => setCustomMetric(e.target.value)} className="input mt-1.5" placeholder="custom_metric" disabled={isAuto(form.metric_source)} />}
             </div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Target value <span style={{ color: '#ef4444' }}>*</span></label>
               <input type="number" value={form.target_value} onChange={e => set('target_value', e.target.value)} className="input" /></div>
@@ -102,13 +128,20 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <form onSubmit={addEntry} className="flex items-end gap-2 rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-            <div className="flex-1"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Participant</label>
-              <select value={uid} onChange={e => setUid(e.target.value)} className="input text-sm"><option value="">Select user…</option>{(reference.users || []).map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.company_name ? ` (${u.company_name})` : ''}</option>)}</select></div>
-            <div className="w-28"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Score</label>
-              <input type="number" value={val} onChange={e => setVal(e.target.value)} className="input text-sm" /></div>
-            <Button type="submit" variant="primary" disabled={saving || !uid || val === ''}>Set</Button>
-          </form>
+          {isAuto(campaign.metric_source) ? (
+            <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-primary-50, #f5f3ff)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <Zap size={14} style={{ color: 'var(--color-primary-600)', marginTop: 1, flexShrink: 0 }} />
+              <span><strong>Auto-computed</strong> — scores update from real activity ({SOURCE_LABEL[campaign.metric_source]}) within the campaign window. Manual entry is disabled.</span>
+            </div>
+          ) : (
+            <form onSubmit={addEntry} className="flex items-end gap-2 rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+              <div className="flex-1"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Participant</label>
+                <select value={uid} onChange={e => setUid(e.target.value)} className="input text-sm"><option value="">Select user…</option>{(reference.users || []).map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.company_name ? ` (${u.company_name})` : ''}</option>)}</select></div>
+              <div className="w-28"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Score</label>
+                <input type="number" value={val} onChange={e => setVal(e.target.value)} className="input text-sm" /></div>
+              <Button type="submit" variant="primary" disabled={saving || !uid || val === ''}>Set</Button>
+            </form>
+          )}
 
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {!data ? <p className="text-sm text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>Loading…</p>
@@ -116,7 +149,7 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
             : data.leaderboard.map(e => {
               const pct = Math.min(100, Math.round((Number(e.value) / target) * 100));
               return (
-                <div key={e.id} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <div key={e.user_id || e.id} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
                       {e.rank <= 3 ? <Medal size={15} style={{ color: MEDAL[e.rank - 1] }} /> : <span className="w-4 text-center text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{e.rank}</span>}
@@ -175,7 +208,18 @@ const SpiffManager = () => {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{c.title}</td>
+                  <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <div className="flex items-center gap-1.5">
+                      {c.title}
+                      {isAuto(c.metric_source) && (
+                        <span title={`Auto-computed from ${SOURCE_LABEL[c.metric_source]}`}
+                          className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                          <Zap size={10} /> Auto
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>{String(c.metric).replace(/_/g, ' ')}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.target_value}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.reward_description || (c.reward_amount ? `$${c.reward_amount}` : '—')}</td>

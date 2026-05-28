@@ -9,7 +9,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -35,7 +35,8 @@ import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import ManagerExportModal from "../components/Manager/ManagerExportModal";
-const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
+const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
+const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
@@ -135,6 +136,10 @@ const ManagerShell = () => {
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
+    // SPIFFs — company admins / managers can run incentives scoped to their
+    // company. Superadmin still uses /admin's SPIFF tab for cross-company.
+    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+      ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
@@ -1087,6 +1092,11 @@ const ManagerShell = () => {
               <FormBuilder />
             </Suspense>
           </div>
+        )}
+        {activeTab === 'spiffs'    && (
+          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <SpiffManager />
+          </Suspense>
         )}
         <DevCredit />
       </main>
