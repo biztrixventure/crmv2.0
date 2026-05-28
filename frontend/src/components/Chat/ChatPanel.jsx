@@ -72,7 +72,7 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     setView('list');
     setActive(c);
   };
-  const onNewChat = () => { setActive(null); setView('new'); };
+  const onNewGroup = () => { setActive(null); setView('new'); };
 
   // Open the conversation straight from the picker's response. A new DM has no
   // messages yet, so it's intentionally absent from the list (it appears once a
@@ -95,6 +95,15 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     setActive(active);
     setView('list');
     load();
+  };
+
+  // Start (or reopen) a DM straight from the conversation-list search — no
+  // separate "New" screen. The DM appears in the list once a message is sent.
+  const startDM = async (user) => {
+    try {
+      const r = await client.post('chat/conversations', { type: 'dm', member_ids: [user.id] });
+      onCreated(r.data.conversation, user);
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not start chat'); }
   };
 
   if (!open) return null;
@@ -126,11 +135,11 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
           <div className={`flex-col w-full lg:w-[330px] lg:flex-shrink-0 ${active ? 'hidden lg:flex' : 'flex'}`}
             style={{ borderRight: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
             {view === 'new'
-              ? <NewChatPicker onClose={() => setView('list')} onCreated={onCreated} />
+              ? <NewChatPicker onClose={() => setView('list')} onCreated={onCreated} groupOnly />
               : <>
                   <InvitesBanner invites={invites} onAccept={acceptInvite} onDecline={declineInvite} busyId={inviteBusy} />
                   <ConversationList conversations={conversations} onlineIds={onlineIds} meId={meId}
-                    activeId={active?.id} onSelect={openConversation} onNewChat={onNewChat} loading={loading} />
+                    activeId={active?.id} onSelect={openConversation} onStartDM={startDM} onNewGroup={onNewGroup} loading={loading} />
                 </>}
           </div>
 

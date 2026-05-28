@@ -4,12 +4,13 @@ import client from '../../api/client';
 import Avatar from './Avatar';
 
 // Searchable global directory → start a DM (1 user) or a group (many + title).
-const NewChatPicker = ({ onClose, onCreated }) => {
+// `groupOnly` locks it to group creation (DM starts now live in the conversation-list search).
+const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState([]);   // [{id,name,role,company}]
-  const [groupMode, setGroupMode] = useState(false);
+  const [groupMode, setGroupMode] = useState(groupOnly);
   const [title, setTitle] = useState('');
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState('');
@@ -57,13 +58,15 @@ const NewChatPicker = ({ onClose, onCreated }) => {
       <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary" style={{ color: 'var(--color-text-secondary)' }}><ArrowLeft size={18} /></button>
         <h3 className="font-bold text-sm flex-1" style={{ color: 'var(--color-text)' }}>{groupMode ? 'New group' : 'New chat'}</h3>
-        <button
-          onClick={() => { setGroupMode(g => !g); setSelected([]); setErr(''); }}
-          className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1.5"
-          style={{ backgroundColor: groupMode ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', color: groupMode ? 'var(--color-primary-700)' : 'var(--color-text-secondary)' }}
-        >
-          <Users size={13} /> {groupMode ? 'Group on' : 'Group'}
-        </button>
+        {!groupOnly && (
+          <button
+            onClick={() => { setGroupMode(g => !g); setSelected([]); setErr(''); }}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1.5"
+            style={{ backgroundColor: groupMode ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', color: groupMode ? 'var(--color-primary-700)' : 'var(--color-text-secondary)' }}
+          >
+            <Users size={13} /> {groupMode ? 'Group on' : 'Group'}
+          </button>
+        )}
       </div>
 
       {groupMode && (
