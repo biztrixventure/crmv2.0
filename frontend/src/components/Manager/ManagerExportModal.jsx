@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Download, Loader2, FileSpreadsheet, DollarSign, Send, PhoneCall, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { saleExportColumns, saleToRow } from '../Admin/BulkSaleUploader/saleColumnMapping';
 
 // CSV download (client-side, no row cap).
 function downloadCSV(rows, headers, filename) {
@@ -16,7 +17,6 @@ function downloadCSV(rows, headers, filename) {
 
 const SALE_STATUS = [['','All'],['open','Open'],['pending_review','In Review'],['needs_revision','Needs Revision'],['closed_won','Approved'],['closed_lost','Lost'],['cancelled','Cancelled'],['follow_up','Follow Up']];
 const XFER_STATUS = [['','All'],['pending','Pending'],['assigned','Assigned'],['completed','Completed'],['rejected','Rejected'],['cancelled','Cancelled']];
-const SALE_LABEL = Object.fromEntries(SALE_STATUS);
 
 const TYPES = [
   { key: 'sales',     label: 'Sales',     icon: DollarSign, date: true,  status: SALE_STATUS, agent: true  },
@@ -61,14 +61,18 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
       let rows = [], headers = [], data = [];
 
       if (type === 'sales') {
-        data = await fetchAll('sales', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'sales');
-        headers = ['Customer','Phone','Email','Reference','Status','Closer','Company','Plan','Monthly','Sale Date','Created'];
-        rows = data.map(s => [
-          s.customer_name || '', s.customer_phone || '', s.customer_email || '', s.reference_no || '',
-          SALE_LABEL[s.status] || s.status || '', s.closer_name || '', s.companies?.name || s.company_name || '',
-          s.plan || '', s.monthly_payment ? `$${s.monthly_payment}` : '',
-          fmtD(s.sale_date), fmtD(s.created_at),
+        // Headers + per-row values are derived from the same schema the bulk
+        // sale uploader expects, so an exported file round-trips through the
+        // uploader without manual header re-mapping. snake_case keys = bulk-
+        // upload field keys = export headers.
+        const [salesData, ffRes] = await Promise.all([
+          fetchAll('sales', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'sales'),
+          client.get('forms/fields').catch(() => ({ data: { fields: [] } })),
         ]);
+        data = salesData;
+        const cols = saleExportColumns(ffRes.data.fields || []);
+        headers = cols.map(c => c.key);
+        rows = data.map(s => saleToRow(s, cols));
       } else if (type === 'transfers') {
         data = await fetchAll('transfers', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'transfers');
         headers = ['Customer','Phone','Transfer Status','Fronter','Closer','Sale Ref','Created'];

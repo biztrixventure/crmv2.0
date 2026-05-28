@@ -173,44 +173,100 @@ export function applyMapping(rows, mapping, formFields, phoneKey) {
 
 export const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 
-// Demo/template CSV — built as a SUPERSET of the transfer template: the shared
-// columns (company, fronter, then the customer/car form fields) come first in the
-// same order a transfer file uses, and the sale-only columns (deal fields, closer,
-// compliance note, status) are appended. So the common columns line up across both
-// uploaders and a single source export can feed either one.
-export function sampleTemplateCsv(formFields, phoneKey) {
+// Canonical sale export schema — drives BOTH the template CSV and the actual
+// sales export so an exported file can be re-uploaded without any header
+// remapping. SUPERSET of the transfer template: shared columns (company,
+// fronter, then customer/car form fields) come first in the same order as a
+// transfer file; sale-only columns (deal fields, closer, compliance note,
+// status) are appended.
+//
+// Returns ordered columns: [{ key, source, field_type? }].
+//   source: 'control' (a control field like fronter_name)
+//         | 'form_dyn' (a form_fields-defined field, value lives in form_data)
+//
+// `key` is the snake_case header used both in the export and as the auto-map
+// target on re-upload, so the round-trip is byte-for-byte 1:1.
+export function saleExportColumns(formFields) {
   const dyn = dynamicFields(formFields);
-  // Shared block = the SAME fields the fronter/transfer form uses (visible to
-  // fronter AND not a sale field) so these columns line up byte-for-byte with the
-  // transfer template. Everything closer-only (sale_* + fronter-hidden) is appended.
-  const fronterDyn = dyn.filter(f => !isCloserOnlyField(f));
-  const closerDyn  = dyn.filter(f => isCloserOnlyField(f));
-
-  const ordered = [
-    { key: 'fronter_name',    label: 'Fronter Name' },
-    { key: 'company_name',    label: 'Company Name' },
+  const fronterDyn = dyn.filter(f => !isCloserOnlyField(f)).map(f => ({ key: f.key, source: 'form_dyn', field_type: f.field_type }));
+  const closerDyn  = dyn.filter(f =>  isCloserOnlyField(f)).map(f => ({ key: f.key, source: 'form_dyn', field_type: f.field_type }));
+  return [
+    { key: 'fronter_name',    source: 'control' },
+    { key: 'company_name',    source: 'control' },
     ...fronterDyn,
     ...closerDyn,
-    { key: 'closer_name',     label: 'Closer Name' },
-    { key: 'compliance_note', label: 'Compliance Note' },
-    { key: 'status',          label: 'Sale / Approval Status' },
+    { key: 'closer_name',     source: 'control' },
+    { key: 'compliance_note', source: 'control' },
+    { key: 'status',          source: 'control' },
   ];
+}
 
-  const sampleFor = (f) => {
-    if (f.key === phoneKey || ['phone', 'tel'].includes(f.field_type)) return '5551234567';
-    if (f.key === 'fronter_name') return 'John Smith';
-    if (f.key === 'company_name') return 'Acme Auto Warranty';
-    if (f.key === 'closer_name') return 'Mike Closer';
-    if (f.key === 'status') return 'pending_review';
-    if (f.key === 'compliance_note') return '';
-    if (f.field_type === 'date' || f.field_type === 'sale_date') return '2026-05-20';
-    if (f.field_type === 'email') return 'customer@example.com';
-    if (f.field_type === 'sale_down_payment') return '500';
-    if (f.field_type === 'sale_monthly_payment') return '150';
-    if (f.field_type === 'sale_reference_no') return 'MBH4220SBN';
-    return `Sample ${f.label}`;
+// Reverse map: form_fields `field_type` → the canonical sales TABLE column the
+// bulk uploader writes that field into. Used as a fallback so a sale created
+// manually (no form_data persisted) still exports a sensible value.
+const SALE_TYPED_COL_BY_FIELD_TYPE = {
+  sale_plan: 'plan',
+  sale_down_payment: 'down_payment',
+  sale_monthly_payment: 'monthly_payment',
+  sale_payment_due_note: 'payment_due_note',
+  sale_reference_no: 'reference_no',
+  sale_client: 'client_name',
+  sale_date: 'sale_date',
+  sale_disposition: 'closer_disposition',
+  sale_status: 'closer_disposition',
+  phone: 'customer_phone',
+  tel: 'customer_phone',
+  email: 'customer_email',
+};
+
+// Pull the value for one export column from a `/sales` API record.
+// Prefers form_data (where bulk-uploaded sales store everything), falls back to
+// the typed column when the field_type maps to one, then a same-named typed col
+// (covers customer_name / customer_phone / car_*), then blank.
+export function saleToValue(sale, col) {
+  if (col.source === 'control') {
+    switch (col.key) {
+      case 'fronter_name':    return sale.fronter_name || '';
+      case 'company_name':    return sale.companies?.name || sale.company_name || '';
+      case 'closer_name':     return sale.closer_name || '';
+      case 'compliance_note': return sale.compliance_note || '';
+      case 'status':          return sale.status || '';
+      default: return '';
+    }
+  }
+  // form_dyn: try form_data first, then typed column fallbacks.
+  const fd = sale.form_data || {};
+  if (fd[col.key] != null && fd[col.key] !== '') return fd[col.key];
+  const typed = SALE_TYPED_COL_BY_FIELD_TYPE[col.field_type];
+  if (typed && sale[typed] != null && sale[typed] !== '') return sale[typed];
+  if (sale[col.key] != null && sale[col.key] !== '') return sale[col.key];
+  return '';
+}
+
+// Convert one sale → row values aligned with the given column schema.
+export function saleToRow(sale, columns) {
+  return columns.map(col => saleToValue(sale, col));
+}
+
+const SAMPLE_BY_TYPE = {
+  date: '2026-05-20', sale_date: '2026-05-20', email: 'customer@example.com',
+  sale_down_payment: '500', sale_monthly_payment: '150', sale_reference_no: 'MBH4220SBN',
+};
+const SAMPLE_BY_CONTROL = {
+  fronter_name: 'John Smith', company_name: 'Acme Auto Warranty',
+  closer_name: 'Mike Closer', status: 'pending_review', compliance_note: '',
+};
+
+// Demo/template CSV — shape identical to the live export so a downloaded
+// template + a downloaded export are interchangeable.
+export function sampleTemplateCsv(formFields, phoneKey) {
+  const cols = saleExportColumns(formFields);
+  const sampleFor = (c) => {
+    if (c.source === 'control') return SAMPLE_BY_CONTROL[c.key] ?? '';
+    if (c.key === phoneKey || ['phone', 'tel'].includes(c.field_type)) return '5551234567';
+    if (SAMPLE_BY_TYPE[c.field_type]) return SAMPLE_BY_TYPE[c.field_type];
+    return `Sample ${c.key}`;
   };
-
-  const headers = ordered.map(f => f.key);
-  return [headers, ordered.map(sampleFor)].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const headers = cols.map(c => c.key);
+  return [headers, cols.map(sampleFor)].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
 }
