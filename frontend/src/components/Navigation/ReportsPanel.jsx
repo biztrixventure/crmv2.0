@@ -50,7 +50,7 @@ const ReportsPanel = ({ companyId }) => {
 
   const [fronters,   setFronters]   = useState([]);
   const [closers,    setClosers]    = useState([]);
-  const [summary,    setSummary]    = useState({ transfers: 0, sales: 0, won: 0, pending: 0, revenue: 0 });
+  const [summary,    setSummary]    = useState({ transfers: 0, sales: 0, won: 0, pending: 0, monthly: 0, down: 0, revenue: 0 });
   const [loading,    setLoading]    = useState(false);
   const [activeTab,  setActiveTab]  = useState('fronters');
   const [dateRange,  setDateRange]  = useState(() => getPresetRange('30d'));
@@ -75,16 +75,24 @@ const ReportsPanel = ({ companyId }) => {
       const saleByXfer = {};
       allS.forEach(s => { if (s.transfer_id) saleByXfer[s.transfer_id] = s; });
 
-      // Summary stats (use server totals for accuracy)
-      const revenue = allS
+      // Summary stats (use server totals for accuracy).
+      // Revenue counts BOTH monthly_payment and down_payment on closed-won/sold
+      // sales — closers earn on the upfront fee too, so leaving down_payment
+      // out makes the dashboard understate their generated revenue.
+      const monthly = allS
         .filter(s => ['sold', 'closed_won'].includes(s.status))
         .reduce((sum, s) => sum + Number(s.monthly_payment || 0), 0);
+      const down = allS
+        .filter(s => ['sold', 'closed_won'].includes(s.status))
+        .reduce((sum, s) => sum + Number(s.down_payment || 0), 0);
       setSummary({
         transfers: tRes.data.total || 0,
         sales:     sRes.data.total || 0,
         won:       (soldRes.data.total || 0) + (wonRes.data.total || 0),
         pending:   pendRes.data.total || 0,
-        revenue,
+        monthly,
+        down,
+        revenue: monthly + down,
       });
 
       // Fronter stats — sort by converted, then total
@@ -100,15 +108,20 @@ const ReportsPanel = ({ companyId }) => {
       });
       setFronters(Object.values(fm).sort((a, b) => b.converted - a.converted || b.total - a.total));
 
-      // Closer stats
+      // Closer stats — track monthly + down separately AND combined so the UI
+      // can break them out without re-scanning the list.
       const cm = {};
       allS.forEach(s => {
         const k = s.closer_id; if (!k) return;
-        if (!cm[k]) cm[k] = { id: k, name: s.closer_name || k.slice(0, 8), total: 0, won: 0, revenue: 0 };
+        if (!cm[k]) cm[k] = { id: k, name: s.closer_name || k.slice(0, 8), total: 0, won: 0, monthly: 0, down: 0, revenue: 0 };
         cm[k].total++;
         if (['sold', 'closed_won'].includes(s.status)) {
           cm[k].won++;
-          cm[k].revenue += Number(s.monthly_payment || 0);
+          const m = Number(s.monthly_payment || 0);
+          const d = Number(s.down_payment || 0);
+          cm[k].monthly += m;
+          cm[k].down    += d;
+          cm[k].revenue += m + d;
         }
       });
       setClosers(Object.values(cm).sort((a, b) => b.won - a.won));
@@ -133,9 +146,11 @@ const ReportsPanel = ({ companyId }) => {
         closers.map((c, i) => [
           i + 1, c.name, c.total, c.won,
           c.total > 0 ? `${Math.round((c.won / c.total) * 100)}%` : '0%',
+          `$${c.monthly.toLocaleString()}`,
+          `$${c.down.toLocaleString()}`,
           `$${c.revenue.toLocaleString()}`,
         ]),
-        ['Rank', 'Name', 'Sales', 'Won', 'Win Rate', 'Monthly Rev'],
+        ['Rank', 'Name', 'Sales', 'Won', 'Win Rate', 'Monthly Rev', 'Down Payment', 'Total Rev'],
         `closers_report_${today}.csv`
       );
     }
@@ -194,10 +209,13 @@ const ReportsPanel = ({ companyId }) => {
               </span>
             </div>
             {hasPermission('view_financial_data') && summary.revenue > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" title={`Monthly: $${summary.monthly.toLocaleString()} · Down: $${summary.down.toLocaleString()}`}>
                 <DollarSign size={14} style={{ color: 'var(--color-success-600)' }} />
-                <span className="text-sm text-text-secondary">Est. monthly revenue:</span>
+                <span className="text-sm text-text-secondary">Total revenue (monthly + down):</span>
                 <span className="text-sm font-bold text-success-600">${summary.revenue.toLocaleString()}</span>
+                <span className="text-xs text-text-tertiary">
+                  (${summary.monthly.toLocaleString()}/mo + ${summary.down.toLocaleString()} down)
+                </span>
               </div>
             )}
           </div>
@@ -395,10 +413,16 @@ const ReportsPanel = ({ companyId }) => {
                         <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>won</p>
                       </div>
                       {hasPermission('view_financial_data') && (
-                        <div>
-                          <p className="text-xs font-bold text-primary-600">${c.revenue.toLocaleString()}</p>
-                          <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>/mo rev</p>
-                        </div>
+                        <>
+                          <div>
+                            <p className="text-xs font-bold text-warning-600">${c.down.toLocaleString()}</p>
+                            <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>down</p>
+                          </div>
+                          <div title={`Monthly: $${c.monthly.toLocaleString()} · Down: $${c.down.toLocaleString()}`}>
+                            <p className="text-xs font-bold text-primary-600">${c.revenue.toLocaleString()}</p>
+                            <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>total rev</p>
+                          </div>
+                        </>
                       )}
                     </div>
                     {/* Win rate */}
