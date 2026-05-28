@@ -9,7 +9,10 @@ const SIZE = 72;
 // The mascot SVG — a friendly gold blob with blinking eyes + an antenna whose
 // tip colour reflects the current state.
 const MascotSVG = ({ state }) => {
-  const tip = state === 'alert' ? '#ef4444' : state === 'happy' ? '#22c55e' : '#fde68a';
+  const tip = state === 'alert' ? '#ef4444'
+    : state === 'happy' ? '#22c55e'
+    : state === 'dizzy' ? '#a855f7'
+    : '#fde68a';
   return (
     <svg width={SIZE} height={SIZE} viewBox="0 0 72 72" style={{ display: 'block', filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.25))' }}>
       <defs>
@@ -40,18 +43,32 @@ const MascotSVG = ({ state }) => {
       {/* eyes */}
       <circle cx="27" cy="36" r="8" fill="#fff" />
       <circle cx="45" cy="36" r="8" fill="#fff" />
-      <circle cx="28" cy="37" r="3.6" fill="#3b2f1c" />
-      <circle cx="46" cy="37" r="3.6" fill="#3b2f1c" />
-      {/* eyelids (blink) */}
-      <rect className="crm-eyelid" x="19" y="28" width="16" height="9" rx="4.5" fill="#c9a86a" />
-      <rect className="crm-eyelid" x="37" y="28" width="16" height="9" rx="4.5" fill="#c9a86a" />
+      {state === 'dizzy' ? (
+        // Spiral pupils + crossed-out look for the dizzy expression.
+        <>
+          <path d="M24 36 q3 -3 6 0 q-3 3 -6 0 q3 -6 9 0" stroke="#3b2f1c" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          <path d="M42 36 q3 -3 6 0 q-3 3 -6 0 q3 -6 9 0" stroke="#3b2f1c" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          <circle cx="28" cy="37" r="3.6" fill="#3b2f1c" />
+          <circle cx="46" cy="37" r="3.6" fill="#3b2f1c" />
+          {/* eyelids (blink) */}
+          <rect className="crm-eyelid" x="19" y="28" width="16" height="9" rx="4.5" fill="#c9a86a" />
+          <rect className="crm-eyelid" x="37" y="28" width="16" height="9" rx="4.5" fill="#c9a86a" />
+        </>
+      )}
       {/* cheeks */}
       <circle cx="20" cy="46" r="3.5" fill="#e8b4b8" opacity="0.7" />
       <circle cx="52" cy="46" r="3.5" fill="#e8b4b8" opacity="0.7" />
-      {/* mouth — smile, or 'o' when alert */}
-      {state === 'alert'
-        ? <circle cx="36" cy="50" r="3.5" fill="#3b2f1c" />
-        : <path d={state === 'happy' ? 'M28 48 q8 9 16 0' : 'M30 49 q6 5 12 0'} stroke="#3b2f1c" strokeWidth="2.5" fill="none" strokeLinecap="round" />}
+      {/* mouth — smile, 'o' for alert, wavy for dizzy */}
+      {state === 'alert' ? (
+        <circle cx="36" cy="50" r="3.5" fill="#3b2f1c" />
+      ) : state === 'dizzy' ? (
+        <path d="M28 50 q2 -3 4 0 q2 3 4 0 q2 -3 4 0 q2 3 4 0" stroke="#3b2f1c" strokeWidth="2" fill="none" strokeLinecap="round" />
+      ) : (
+        <path d={state === 'happy' ? 'M28 48 q8 9 16 0' : 'M30 49 q6 5 12 0'} stroke="#3b2f1c" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      )}
     </svg>
   );
 };
@@ -97,7 +114,7 @@ const MascotAssistant = () => {
 
   return (
     <div
-      className="crm-assistant-root"
+      className={`crm-assistant-root ${a.dragging ? 'is-dragging-root' : ''}`}
       style={{ left: a.pos.x, top: a.pos.y, width: SIZE, height: SIZE }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

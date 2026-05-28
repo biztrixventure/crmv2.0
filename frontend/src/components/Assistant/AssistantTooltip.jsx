@@ -34,33 +34,37 @@ const AssistantTooltip = ({ tip, side = 'right', onAccept, onDismiss }) => {
           transform: 'rotate(45deg)',
         }}
       />
-      <button onClick={() => onDismiss(true)} title="Dismiss (don't show again today)"
-        className="absolute top-2 right-2 p-0.5 rounded-md hover:opacity-70"
-        style={{ color: 'var(--color-text-tertiary)' }}>
-        <X size={13} />
-      </button>
-
-      <p className="text-sm pr-4 leading-snug" style={{ color: 'var(--color-text)' }}>{tip.message}</p>
-
-      <div className="flex items-center gap-2 mt-2.5">
-        {tip.action ? (
-          <button onClick={onAccept}
-            className="text-xs font-bold px-2.5 py-1 rounded-lg text-white"
-            style={{ background: 'var(--gradient-sidebar)' }}>
-            {tip.action.label || 'Show me'}
-          </button>
-        ) : (
-          <button onClick={() => onDismiss(false)}
-            className="text-xs font-bold px-2.5 py-1 rounded-lg text-white"
-            style={{ background: 'var(--gradient-sidebar)' }}>
-            Got it
-          </button>
-        )}
-        <button onClick={() => onDismiss(false)} className="text-xs font-semibold px-1.5 py-1 rounded-lg"
+      {!tip.sarcastic && (
+        <button onClick={() => onDismiss(true)} title="Dismiss (don't show again today)"
+          className="absolute top-2 right-2 p-0.5 rounded-md hover:opacity-70"
           style={{ color: 'var(--color-text-tertiary)' }}>
-          Later
+          <X size={13} />
         </button>
-      </div>
+      )}
+
+      <p className="text-sm pr-4 leading-snug" style={{ color: 'var(--color-text)', fontStyle: tip.sarcastic ? 'italic' : 'normal' }}>{tip.message}</p>
+
+      {!tip.sarcastic && (
+        <div className="flex items-center gap-2 mt-2.5">
+          {tip.action ? (
+            <button onClick={onAccept}
+              className="text-xs font-bold px-2.5 py-1 rounded-lg text-white"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              {tip.action.label || 'Show me'}
+            </button>
+          ) : (
+            <button onClick={() => onDismiss(false)}
+              className="text-xs font-bold px-2.5 py-1 rounded-lg text-white"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              Got it
+            </button>
+          )}
+          <button onClick={() => onDismiss(false)} className="text-xs font-semibold px-1.5 py-1 rounded-lg"
+            style={{ color: 'var(--color-text-tertiary)' }}>
+            Later
+          </button>
+        </div>
+      )}
     </div>
   );
 };
