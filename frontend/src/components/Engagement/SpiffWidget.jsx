@@ -3,6 +3,7 @@ import { Trophy, Medal, Clock } from 'lucide-react';
 import client from '../../api/client';
 import { supabase } from '../../api/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import RichView from '../UI/RichView';
 
 const MEDAL = ['#f59e0b', '#94a3b8', '#b45309'];
 
@@ -54,6 +55,7 @@ const SpiffWidget = () => {
                   🎁 {c.reward_description || `$${c.reward_amount}`}
                 </p>
               )}
+              {c.description && <RichView html={c.description} className="text-xs" style={{ color: 'var(--color-text-secondary)' }} />}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span style={{ color: 'var(--color-text-secondary)' }}>Your progress</span>
@@ -67,7 +69,7 @@ const SpiffWidget = () => {
                 <div className="space-y-1 pt-1">
                   <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Leaderboard</p>
                   {c.leaderboard.slice(0, 5).map(e => (
-                    <div key={e.id} className="flex items-center justify-between text-sm">
+                    <div key={e.user_id || e.id} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                         {e.rank <= 3 ? <Medal size={13} style={{ color: MEDAL[e.rank - 1] }} /> : <span className="w-3.5 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{e.rank}</span>}
                         <span className={e.user_id === user?.id ? 'font-bold' : ''}>{e.name}{e.user_id === user?.id ? ' (you)' : ''}</span>

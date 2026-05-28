@@ -54,13 +54,22 @@ export const MultiSelect = ({ label, options, selected = [], onChange, searchabl
   );
 };
 
-// Audience picker. withType=true → announcement-style (Global/Role/Users/Company
-// radio + the one relevant select). withType=false → marquee/spiff style (three
-// optional selects; empty = everyone).
-const AudienceTargetPicker = ({ value, onChange, reference, withType = false }) => {
+// Audience picker.
+//   withType=true        → announcement-style (Global/Role/Users/Company radio).
+//   hierarchical=true    → pick Companies first, then Users from the selected
+//                          companies (so a SPIFF creator never sees users from
+//                          companies they didn't pick).
+//   restrictToCompanyId  → lock the company picker to a single company (used to
+//                          stop a non-superadmin from targeting other companies).
+const AudienceTargetPicker = ({ value, onChange, reference, withType = false, hierarchical = false, restrictToCompanyId = null }) => {
   const roleOpts    = (reference.roles || []).map(r => ({ value: r, label: r.replace(/_/g, ' ') }));
-  const companyOpts = (reference.companies || []).map(c => ({ value: c.id, label: c.name }));
-  const userOpts    = (reference.users || []).map(u => ({ value: u.user_id, label: u.name, sub: u.email || u.company_name || '' }));
+  const allCompanyOpts = (reference.companies || []).map(c => ({ value: c.id, label: c.name }));
+  // When the picker is restricted, only that company is offered (and it's
+  // forced selected — see the useEffect-style guard below the early return).
+  const companyOpts = restrictToCompanyId
+    ? allCompanyOpts.filter(c => c.value === restrictToCompanyId)
+    : allCompanyOpts;
+  const userOpts    = (reference.users || []).map(u => ({ value: u.user_id, label: u.name, sub: u.email || u.company_name || '', company_id: u.company_id }));
   const set = (patch) => onChange({ ...value, ...patch });
 
   if (withType) {
@@ -82,6 +91,58 @@ const AudienceTargetPicker = ({ value, onChange, reference, withType = false }) 
         {value.target_type === 'role'    && <MultiSelect label="Roles"     options={roleOpts}    selected={value.target_roles || []}       onChange={v => set({ target_roles: v })} />}
         {value.target_type === 'users'   && <MultiSelect label="Users"     options={userOpts}    selected={value.target_user_ids || []}    onChange={v => set({ target_user_ids: v })} searchable placeholder="Search by name or email…" />}
         {value.target_type === 'company' && <MultiSelect label="Companies" options={companyOpts} selected={value.target_company_ids || []} onChange={v => set({ target_company_ids: v })} />}
+      </div>
+    );
+  }
+
+  if (hierarchical) {
+    // Step 1: lock or let the user pick companies. Step 2: only users from
+    // those companies are shown — selecting a user from elsewhere is impossible
+    // by construction, so the backend's company-scope rejection never fires.
+    const selectedCompanies = value.target_company_ids || [];
+    const companyById = new Map(allCompanyOpts.map(c => [c.value, c.label]));
+    const scopedUsers = selectedCompanies.length
+      ? userOpts.filter(u => selectedCompanies.includes(u.company_id))
+      : [];
+    // Prune any previously-selected users that no longer belong to a selected
+    // company so the saved payload always matches what the UI is showing.
+    const cleanedUserIds = (value.target_user_ids || [])
+      .filter(uid => scopedUsers.some(u => u.value === uid));
+
+    return (
+      <div className="space-y-3">
+        <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+          {restrictToCompanyId
+            ? 'Targets your company. Pick the specific users (or leave empty for everyone in your company).'
+            : 'Pick companies first, then choose users from those companies. Leave Users empty to target everyone in the selected companies.'}
+        </p>
+        <MultiSelect
+          label={restrictToCompanyId ? 'Company' : 'Companies'}
+          options={companyOpts}
+          selected={selectedCompanies}
+          onChange={v => {
+            // If a company is unselected, drop any of its users from target_user_ids.
+            const keep = (value.target_user_ids || []).filter(uid => {
+              const u = userOpts.find(o => o.value === uid);
+              return u && v.includes(u.company_id);
+            });
+            set({ target_company_ids: v, target_user_ids: keep });
+          }}
+        />
+        <MultiSelect label="Roles (optional)" options={roleOpts} selected={value.target_roles || []} onChange={v => set({ target_roles: v })} />
+        {selectedCompanies.length === 0 ? (
+          <div className="rounded-lg p-3 text-xs" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px dashed var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+            Pick at least one company to choose specific users.
+          </div>
+        ) : (
+          <MultiSelect
+            label={`Users (${scopedUsers.length} in ${selectedCompanies.length} selected ${selectedCompanies.length === 1 ? 'company' : 'companies'})`}
+            options={scopedUsers.map(u => ({ ...u, sub: `${u.sub}${u.company_id && companyById.get(u.company_id) ? ` · ${companyById.get(u.company_id)}` : ''}` }))}
+            selected={cleanedUserIds}
+            onChange={v => set({ target_user_ids: v })}
+            searchable placeholder="Search by name or email…"
+          />
+        )}
       </div>
     );
   }

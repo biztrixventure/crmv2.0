@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Trophy, Plus, Edit2, Trash2, X, BarChart3, Medal, Zap } from 'lucide-react';
 import { Button, Alert, Badge } from '../../UI';
+import RichTextEditor from '../../UI/RichTextEditor';
+import RichView from '../../UI/RichView';
 import client from '../../../api/client';
+import { useAuth } from '../../../contexts/AuthContext';
 import AudienceTargetPicker from './AudienceTargetPicker';
+
+// Plain-text preview for compact UI surfaces (table cells, lists). Mirrors
+// RichView's "has tags?" heuristic so legacy plain-text descriptions stay
+// readable.
+const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
 const METRICS = [
   { v: 'deals_closed', l: 'Deals Closed' }, { v: 'revenue', l: 'Revenue' },
@@ -28,8 +36,17 @@ const isAuto = (s) => s && s !== 'manual';
 const blank = { title: '', description: '', metric: 'deals_closed', metric_source: 'manual', target_value: 10, reward_amount: '', reward_description: '', target_company_ids: [], target_roles: [], target_user_ids: [], status: 'active', starts_at: '', ends_at: '' };
 const MEDAL = ['#f59e0b', '#94a3b8', '#b45309'];
 
-const Modal = ({ row, reference, onClose, onSave }) => {
-  const init = row ? { ...blank, ...row, starts_at: row.starts_at ? row.starts_at.slice(0, 16) : '', ends_at: row.ends_at ? row.ends_at.slice(0, 16) : '' } : blank;
+const Modal = ({ row, reference, onClose, onSave, viewer }) => {
+  const isSuperadmin = viewer?.role === 'superadmin';
+  const myCompanyId  = viewer?.company_id || null;
+  // For a non-superadmin creating a NEW SPIFF, pre-pin the company so the
+  // hierarchical picker only ever offers users from their own company.
+  const seededBlank = !row && !isSuperadmin && myCompanyId
+    ? { ...blank, target_company_ids: [myCompanyId] }
+    : blank;
+  const init = row
+    ? { ...blank, ...row, starts_at: row.starts_at ? row.starts_at.slice(0, 16) : '', ends_at: row.ends_at ? row.ends_at.slice(0, 16) : '' }
+    : seededBlank;
   const [form, setForm] = useState(init);
   const [customMetric, setCustomMetric] = useState(row && !KNOWN.includes(row.metric) ? row.metric : '');
   const [metricSel, setMetricSel] = useState(row ? (KNOWN.includes(row.metric) ? row.metric : 'custom') : 'deals_closed');
@@ -61,8 +78,10 @@ const Modal = ({ row, reference, onClose, onSave }) => {
           {err && <Alert type="error" message={err} />}
           <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Title <span style={{ color: '#ef4444' }}>*</span></label>
             <input value={form.title} onChange={e => set('title', e.target.value)} className="input" placeholder="May Deal Sprint" /></div>
-          <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Description</label>
-            <input value={form.description} onChange={e => set('description', e.target.value)} className="input" placeholder="Optional" /></div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Description</label>
+            <RichTextEditor value={form.description || ''} onChange={(html) => set('description', html)} placeholder="Optional — bold, lists, links supported." minHeight={120} />
+          </div>
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Source <span style={{ color: '#ef4444' }}>*</span></label>
             <select value={form.metric_source} onChange={e => {
@@ -95,7 +114,13 @@ const Modal = ({ row, reference, onClose, onSave }) => {
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Status</label>
               <select value={form.status} onChange={e => set('status', e.target.value)} className="input"><option value="draft">Draft</option><option value="active">Active</option><option value="ended">Ended</option></select></div>
           </div>
-          <AudienceTargetPicker value={form} onChange={v => setForm(f => ({ ...f, ...v }))} reference={reference} />
+          <AudienceTargetPicker
+            value={form}
+            onChange={v => setForm(f => ({ ...f, ...v }))}
+            reference={reference}
+            hierarchical
+            restrictToCompanyId={isSuperadmin ? null : myCompanyId}
+          />
           <div className="flex gap-3 pt-2"><Button type="button" variant="secondary" onClick={onClose} className="flex-1">Cancel</Button><Button type="submit" variant="primary" disabled={saving} className="flex-1">{saving ? 'Saving…' : row ? 'Save' : 'Create'}</Button></div>
         </form>
       </div>
@@ -128,6 +153,12 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
           <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
         </div>
         <div className="p-6 space-y-4">
+          {campaign.description && (
+            <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Description</p>
+              <RichView html={campaign.description} className="text-sm" style={{ color: 'var(--color-text)' }} />
+            </div>
+          )}
           {isAuto(campaign.metric_source) ? (
             <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-primary-50, #f5f3ff)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <Zap size={14} style={{ color: 'var(--color-primary-600)', marginTop: 1, flexShrink: 0 }} />
@@ -169,6 +200,7 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
 };
 
 const SpiffManager = () => {
+  const { user } = useAuth();
   const [rows, setRows] = useState([]);
   const [reference, setReference] = useState({ roles: [], companies: [], users: [] });
   const [loading, setLoading] = useState(false);
@@ -208,8 +240,8 @@ const SpiffManager = () => {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>
-                    <div className="flex items-center gap-1.5">
+                  <td className="px-4 py-3" style={{ color: 'var(--color-text)' }}>
+                    <div className="flex items-center gap-1.5 font-semibold">
                       {c.title}
                       {isAuto(c.metric_source) && (
                         <span title={`Auto-computed from ${SOURCE_LABEL[c.metric_source]}`}
@@ -219,6 +251,14 @@ const SpiffManager = () => {
                         </span>
                       )}
                     </div>
+                    {c.description && (() => {
+                      const text = stripHtml(c.description);
+                      return text ? (
+                        <p className="text-xs mt-0.5 line-clamp-2" title={text} style={{ color: 'var(--color-text-tertiary)' }}>
+                          {text.length > 120 ? `${text.slice(0, 117)}…` : text}
+                        </p>
+                      ) : null;
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>{String(c.metric).replace(/_/g, ' ')}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.target_value}</td>
@@ -238,7 +278,7 @@ const SpiffManager = () => {
         </div>
       )}
 
-      {modal && <Modal row={modal.row} reference={reference} onClose={() => setModal(null)} onSave={save} />}
+      {modal && <Modal row={modal.row} reference={reference} onClose={() => setModal(null)} onSave={save} viewer={user} />}
       {detail && <DetailModal campaign={detail} reference={reference} onClose={() => setDetail(null)} onChanged={load} />}
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
