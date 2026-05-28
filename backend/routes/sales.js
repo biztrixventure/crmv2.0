@@ -564,15 +564,19 @@ router.put(
 // POST /sales/:id/submit-review — Closer submits sale for compliance review
 // ============================================================================
 router.post('/:id/submit-review', asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { id } = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { id }   = req.params;
 
   const { data: sale, error } = await supabaseAdmin
     .from('sales').select('*').eq('id', id).single();
   if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
 
   const isOwner = sale.created_by === userId || sale.closer_id === userId;
-  if (!isOwner) return res.status(403).json({ error: 'Only the sale owner can submit for review' });
+  // Superadmin can submit any sale for review on the owner's behalf.
+  if (!isOwner && userRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Only the sale owner can submit for review' });
+  }
 
   if (!['open', 'needs_revision'].includes(sale.status)) {
     return res.status(400).json({ error: `Cannot submit a sale with status "${sale.status}" for review` });

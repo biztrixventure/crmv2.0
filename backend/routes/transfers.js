@@ -587,7 +587,8 @@ router.post('/:id/reject', [
   if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
 
   const { id } = req.params;
-  const userId  = req.user.id;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
   const { reason } = req.body;
 
   const { data: existing, error: fetchErr } = await supabaseAdmin
@@ -598,8 +599,8 @@ router.post('/:id/reject', [
 
   if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
-  // Only the assigned closer can reject
-  if (existing.assigned_closer_id !== userId) {
+  // Only the assigned closer (or a superadmin acting on their behalf) can reject.
+  if (existing.assigned_closer_id !== userId && userRole !== 'superadmin') {
     return res.status(403).json({ error: 'Only the assigned closer can reject this transfer' });
   }
 

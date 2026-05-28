@@ -181,6 +181,11 @@ router.post('/',
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
 
     const userId    = req.user.id;
+    const superadmin = await isSuperAdmin(userId);
+    // Superadmin can create on behalf of any user/company; everyone else is
+    // pinned to themselves and their own company (with body.company_id only
+    // honored if it matches their own).
+    const ownerId   = superadmin && req.body.user_id ? req.body.user_id : userId;
     const companyId = req.body.company_id || req.user.company_id;
 
     if (!companyId) return res.status(400).json({ error: 'company_id required' });
@@ -188,7 +193,7 @@ router.post('/',
     const { data, error } = await supabaseAdmin
       .from('callbacks')
       .insert({
-        user_id:           userId,
+        user_id:           ownerId,
         company_id:        companyId,
         customer_name:     req.body.customer_name,
         customer_phone:    req.body.customer_phone    || null,
