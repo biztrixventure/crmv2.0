@@ -268,8 +268,16 @@ const SpiffManager = () => {
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.participant_count}</td>
                   <td className="px-4 py-3"><div className="flex items-center gap-1">
                     <button onClick={() => setDetail(c)} title="Leaderboard / scores" className="p-1.5 rounded hover:bg-bg-secondary"><BarChart3 size={15} style={{ color: 'var(--color-primary-600)' }} /></button>
-                    <button onClick={() => setModal({ row: c })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                    <button onClick={() => setConfirm(c)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    {/* Non-superadmin viewers cannot edit/delete a campaign the superadmin
+                        created, even when it targets their company — mirrors backend canTouch. */}
+                    {(user?.role === 'superadmin' || !c.created_by_superadmin) ? (
+                      <>
+                        <button onClick={() => setModal({ row: c })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
+                        <button onClick={() => setConfirm(c)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                      </>
+                    ) : (
+                      <span title="Created by a superadmin — only superadmins can edit or delete this campaign." className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>Locked</span>
+                    )}
                   </div></td>
                 </tr>
               ))}

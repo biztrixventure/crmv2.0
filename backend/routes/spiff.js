@@ -54,9 +54,40 @@ async function validateScopedTargeting(req, body) {
   return null;
 }
 
-// Company-scope check for editing/deleting an existing campaign.
-function canTouch(req, campaign) {
+// Batch-resolve which of these user IDs are superadmins, so the /manage list
+// can tell the frontend "hide Edit/Delete on this row" without N round trips.
+async function findSuperadminIds(userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  const out = new Set();
+  if (!ids.length) return out;
+  const { data } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, custom_roles(level)')
+    .in('user_id', ids)
+    .eq('is_active', true);
+  (data || []).filter(r => r.custom_roles?.level === 'superadmin').forEach(r => out.add(r.user_id));
+
+  // Fall back to env-stamped superadmin emails (system superadmin has no
+  // user_company_roles entry — see isSuperAdmin in models/helpers).
+  const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+  if (emails.length) {
+    try {
+      const { data: a } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+      (a?.users || []).forEach(u => { if (emails.includes(u.email) && ids.includes(u.id)) out.add(u.id); });
+    } catch { /* best-effort */ }
+  }
+  return out;
+}
+
+// Has the caller earned the right to edit/delete this campaign?
+// - Superadmin: always.
+// - Else: campaign must NOT have been created by a superadmin AND must be
+//   scoped to the caller's company. Otherwise a company manager could quietly
+//   delete a platform-wide incentive the superadmin just launched, which is
+//   exactly the bug this guard was added to stop.
+async function canTouch(req, campaign) {
   if (req._isSuperadmin) return true;
+  if (campaign.created_by && await isSuperAdmin(campaign.created_by)) return false;
   const cos = campaign.target_company_ids || [];
   return cos.length === 1 && cos[0] === req.user.company_id;
 }
@@ -108,6 +139,8 @@ router.get('/manage', manageAccess, asyncHandler(async (req, res) => {
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
+  const superCreators = await findSuperadminIds((data || []).map(c => c.created_by));
+
   const out = [];
   for (const c of (data || [])) {
     let participant_count = 0;
@@ -119,7 +152,7 @@ router.get('/manage', manageAccess, asyncHandler(async (req, res) => {
         .from('spiff_entries').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id);
       participant_count = count || 0;
     }
-    out.push({ ...c, participant_count });
+    out.push({ ...c, participant_count, created_by_superadmin: superCreators.has(c.created_by) });
   }
   res.json({ campaigns: out });
 }));
@@ -147,7 +180,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', manageAccess, asyncHandler(async (req, res) => {
   const { data: campaign, error } = await supabaseAdmin.from('spiff_campaigns').select('*').eq('id', req.params.id).single();
   if (error || !campaign) return res.status(404).json({ error: 'Not found' });
-  if (!canTouch(req, campaign)) return res.status(403).json({ error: 'Out of scope' });
+  if (!(await canTouch(req, campaign))) return res.status(403).json({ error: 'Out of scope' });
   res.json({ campaign, leaderboard: await leaderboardFor(campaign) });
 }));
 
@@ -190,7 +223,7 @@ router.post('/', manageAccess, [
 router.put('/:id', manageAccess, asyncHandler(async (req, res) => {
   const { data: existing } = await supabaseAdmin.from('spiff_campaigns').select('*').eq('id', req.params.id).single();
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (!canTouch(req, existing)) return res.status(403).json({ error: 'Out of scope' });
+  if (!(await canTouch(req, existing))) return res.status(403).json({ error: 'Out of scope' });
 
   // If targeting is being changed, re-validate scope against the NEW values.
   const b = req.body;
@@ -220,7 +253,7 @@ router.put('/:id', manageAccess, asyncHandler(async (req, res) => {
 router.delete('/:id', manageAccess, asyncHandler(async (req, res) => {
   const { data: existing } = await supabaseAdmin.from('spiff_campaigns').select('*').eq('id', req.params.id).single();
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (!canTouch(req, existing)) return res.status(403).json({ error: 'Out of scope' });
+  if (!(await canTouch(req, existing))) return res.status(403).json({ error: 'Out of scope' });
 
   const { error } = await supabaseAdmin.from('spiff_campaigns').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });

@@ -110,10 +110,32 @@ const ManagerShell = () => {
   const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
+  // ── Cross-role top nav (matches StaffShell pattern) ───────────────────────
+  // These sit in the AppHeader top-nav row alongside Dashboard. Selecting one
+  // hides the dashboard content area and renders <CrossRoleContent> instead.
+  // Mirrors StaffShell.crossNavItems gating so a manager who lacks a permission
+  // doesn't see the item.
+  const crossNavItems = [
+    { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+    ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
+      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')
+      ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
+    ...(hasPermission('manage_forms') && isEnabled('form_builder')
+      ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
+    ...((hasPermission('view_all_call_reviews') || hasPermission('view_call_reviews')) && isEnabled('call_reviews')
+      ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
+      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+  ];
+
   // ── Tab logic ─────────────────────────────────────────────────────────────
+  // Inline tabs here are workflow-specific (team transfers/sales/callbacks/
+  // numbers/spiffs/activity_log/faqs/scripts). Cross-role admin surfaces
+  // (Calendar/Team/Roles/Forms/Reviews/Reports) have moved to crossNavItems
+  // above so the dashboard tab bar doesn't carry duplicate destinations.
   const TABS = [
     { key: 'overview',     label: 'Overview',        icon: TrendingUp,   always: true },
-    { key: 'calendar',     label: 'Calendar',        icon: CalendarDays, always: true },
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
     ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && isEnabled('sales')
@@ -122,16 +144,6 @@ const ManagerShell = () => {
       ? [{ key: 'my_sales',   label: 'My Sales',       icon: DollarSign }] : []),
     ...(hasPermission('view_team_callbacks') && isEnabled('callbacks')
       ? [{ key: 'callbacks',  label: 'Team Callbacks', icon: Phone      }] : []),
-    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
-      ? [{ key: 'reports',    label: 'Reports',        icon: BarChart3  }] : []),
-    ...((hasPermission('view_all_call_reviews') || hasPermission('view_call_reviews')) && isEnabled('call_reviews')
-      ? [{ key: 'reviews',    label: 'Reviews',        icon: Star       }] : []),
-    ...(hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
-      ? [{ key: 'team',       label: 'Team',           icon: Users      }] : []),
-    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')
-      ? [{ key: 'roles',      label: 'Roles',          icon: Shield     }] : []),
-    ...(hasPermission('manage_forms') && isEnabled('form_builder')
-      ? [{ key: 'forms',      label: 'Form Builder',   icon: FileText   }] : []),
     ...((hasPermission('manage_callback_numbers') || hasPermission('view_team_callback_numbers') || hasPermission('reassign_callback_numbers')) && (isEnabled('callback_numbers') || isEnabled('number_assignment'))
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
@@ -394,7 +406,7 @@ const ManagerShell = () => {
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
-        navItems={[]} activeNav={activeNav} onNavChange={setActiveNav}
+        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
       />
 
       <EngagementBanners />
