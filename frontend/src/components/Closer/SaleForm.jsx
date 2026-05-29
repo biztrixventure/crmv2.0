@@ -5,6 +5,8 @@ import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
+import { normalize as normalizeField, maxLengthFor, isCarMake, isCarModel, classify as classifyField } from '../../utils/formFieldNorm';
+import VehicleSelect from '../Form/VehicleSelect';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -118,6 +120,20 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const [zipInfo,    setZipInfo]    = useState(null);
   const zipTimer = useRef(null);
 
+  // Vehicle registry — fed by the superadmin's /vehicles config. Used by the
+  // Make/Model fields below to render a typeahead with the curated options.
+  // Falls back to free text when the registry is empty (no API call cost
+  // beyond mount; cached for the form's lifetime).
+  const [vehicleTree, setVehicleTree] = useState([]);   // [{id,name,models:[{id,name}]}]
+  useEffect(() => {
+    client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
+  }, []);
+  const makesList = vehicleTree.map(m => m.name);
+  const modelsForMake = (makeName) => {
+    const mk = vehicleTree.find(m => m.name.toLowerCase() === String(makeName || '').toLowerCase());
+    return (mk?.models || []).map(m => m.name);
+  };
+
   const setDynField = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
@@ -133,14 +149,32 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const addCar    = () => setExtraCars(prev => [...prev, {}]);
   const removeCar = (idx) => setExtraCars(prev => prev.filter((_, i) => i !== idx));
 
-  const handleZipChange = (fieldName, val) => {
+  const handleZipChange = (fieldName, raw) => {
+    // Force-strip to digits + 5-cap up front — paste of "90210-1234" trims to
+    // "90210" cleanly, and a wholly non-numeric paste lands on "" rather than
+    // poisoning the field with garbage.
+    const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
     setDynField(fieldName, val);
     clearTimeout(zipTimer.current);
-    if (val.replace(/\D/g, '').length < 5) { setZipInfo(null); return; }
+
+    // Backspace below 5 → clear both the local zipInfo hint AND any city/state
+    // values we previously autofilled, so the form never shows stale geo data.
+    if (val.length < 5) {
+      setZipInfo(null);
+      setFormData(prev => {
+        const next = { ...prev };
+        const cityF  = fields.find(f => ['City','city','customer_city'].includes(f.name));
+        const stateF = fields.find(f => ['State','state','customer_state'].includes(f.name));
+        if (cityF)  next[cityF.name]  = '';
+        if (stateF) next[stateF.name] = '';
+        return next;
+      });
+      return;
+    }
     zipTimer.current = setTimeout(async () => {
       setZipLoading(true);
       try {
-        const res = await client.get(`zipcode/${val.trim()}`);
+        const res = await client.get(`zipcode/${val}`);
         setZipInfo(res.data);
         setFormData(prev => {
           const next = { ...prev };
@@ -152,7 +186,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         });
       } catch { setZipInfo(null); }
       finally { setZipLoading(false); }
-    }, 500);
+    }, 400);
   };
 
   // Fields that duplicate per car (superadmin-controlled). Everything else is
@@ -371,20 +405,20 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </select>
       );
     }
-    if (field.field_type === 'zip') {
+    if (field.field_type === 'zip' || classifyField(field) === 'zip') {
       return (
         <div className="relative">
-          <input type="text" value={val}
+          <input type="text" inputMode="numeric" value={val}
             onChange={e => handleZipChange(field.name, e.target.value)}
             required={field.is_required} placeholder={ph || 'e.g. 90210'}
-            className={`input pr-8 ${errClass}`} maxLength={10} />
+            className={`input pr-8 ${errClass}`} maxLength={5} />
           {zipLoading && (
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2"
                 style={{ borderColor: 'var(--color-primary-600)' }} />
             </div>
           )}
-          {zipLoading === false && zipInfo && val.replace(/\D/g, '').length >= 5 && (
+          {zipLoading === false && zipInfo && val.length === 5 && (
             <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
               {zipInfo.city}, {zipInfo.state}
             </p>
@@ -392,13 +426,55 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       );
     }
+    // Car Make / Model — typeahead against the superadmin's /vehicles registry.
+    // Model is scoped by the currently-typed make from the same form scope (car
+    // block or main form). Free text still allowed via Enter so backfill works
+    // even when the registry doesn't carry that exact spelling.
+    if (isCarMake(field)) {
+      return (
+        <VehicleSelect
+          mode="make"
+          value={val}
+          makes={makesList}
+          onChange={(v) => onChange({ target: { value: v } })}
+          placeholder={ph || 'Type make…'}
+        />
+      );
+    }
+    if (isCarModel(field)) {
+      // Find sibling make field in the same field scope. `fields` is the full
+      // list — caller (default branch) only renders per-field, so any /make/
+      // sibling at the top level is the active one.
+      const makeF = (fields || []).find(f => isCarMake(f));
+      const activeMake = makeF ? (formData[makeF.name] || '') : '';
+      return (
+        <VehicleSelect
+          mode="model"
+          value={val}
+          models={modelsForMake(activeMake)}
+          requireMake
+          onChange={(v) => onChange({ target: { value: v } })}
+          placeholder={ph || 'Type model…'}
+        />
+      );
+    }
+
+    // Generic text/number/email/phone/etc. — pipe through the normalizer so
+    // phone strips parens/dashes, vin uppercases and clips at 17, name strips
+    // digits, etc. The classify helper picks the rule once per field.
     const inputType =
       field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
       : field.field_type;
+    const ml = maxLengthFor(field);
+    const normalizedOnChange = (e) => {
+      const next = normalizeField(field, e.target.value);
+      onChange({ target: { value: next } });
+    };
     return (
       <>
-        <input type={inputType} value={val} onChange={onChange} onBlur={onBlur}
+        <input type={inputType} value={val} onChange={normalizedOnChange} onBlur={onBlur}
           required={field.is_required} placeholder={ph} list={listId}
+          maxLength={ml}
           className={`input ${errClass}`} />
         {Dl}
       </>

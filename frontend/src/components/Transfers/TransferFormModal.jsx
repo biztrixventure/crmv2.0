@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Send, FileText } from 'lucide-react';
 import { Button } from '../UI';
+import client from '../../api/client';
+import { normalize as normalizeField, maxLengthFor, classify as classifyField, isCarMake, isCarModel } from '../../utils/formFieldNorm';
+import VehicleSelect from '../Form/VehicleSelect';
 
 const TransferFormModal = ({
   isOpen, onClose,
@@ -13,9 +16,60 @@ const TransferFormModal = ({
   const [selectedCloser, setSelectedCloser] = useState('');
   const [error, setError]               = useState('');
 
+  // Zip → city/state autofill (same UX as SaleForm).
+  const [zipLoading, setZipLoading] = useState(false);
+  const [zipInfo,    setZipInfo]    = useState(null);
+  const zipTimer = useRef(null);
+
+  // Vehicle registry for make/model typeaheads.
+  const [vehicleTree, setVehicleTree] = useState([]);
+  useEffect(() => {
+    if (!isOpen) return;
+    client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
+  }, [isOpen]);
+  const makesList = vehicleTree.map(m => m.name);
+  const modelsForMake = (makeName) => {
+    const mk = vehicleTree.find(m => m.name.toLowerCase() === String(makeName || '').toLowerCase());
+    return (mk?.models || []).map(m => m.name);
+  };
+
   if (!isOpen) return null;
 
   const setField = (name, val) => setFormData(p => ({ ...p, [name]: val }));
+
+  const handleZipChange = (fieldName, raw) => {
+    const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
+    setField(fieldName, val);
+    clearTimeout(zipTimer.current);
+    if (val.length < 5) {
+      setZipInfo(null);
+      setFormData(prev => {
+        const next = { ...prev };
+        const cityF  = fields.find(f => ['City','city','customer_city'].includes(f.name));
+        const stateF = fields.find(f => ['State','state','customer_state'].includes(f.name));
+        if (cityF)  next[cityF.name]  = '';
+        if (stateF) next[stateF.name] = '';
+        return next;
+      });
+      return;
+    }
+    zipTimer.current = setTimeout(async () => {
+      setZipLoading(true);
+      try {
+        const res = await client.get(`zipcode/${val}`);
+        setZipInfo(res.data);
+        setFormData(prev => {
+          const next = { ...prev };
+          const cityF  = fields.find(f => ['City','city','customer_city'].includes(f.name));
+          const stateF = fields.find(f => ['State','state','customer_state'].includes(f.name));
+          if (cityF)  next[cityF.name]  = res.data.city;
+          if (stateF) next[stateF.name] = res.data.state;
+          return next;
+        });
+      } catch { setZipInfo(null); }
+      finally { setZipLoading(false); }
+    }, 400);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -110,10 +164,43 @@ const TransferFormModal = ({
                               {opts.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                             </select>
                           );
+                        } else if (classifyField(field) === 'zip') {
+                          input = (
+                            <div className="relative">
+                              <input type="text" inputMode="numeric" value={val} maxLength={5}
+                                onChange={e => handleZipChange(field.name, e.target.value)}
+                                required={field.is_required}
+                                placeholder={field.placeholder || 'e.g. 90210'} className="input pr-8" />
+                              {zipLoading && (
+                                <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2"
+                                    style={{ borderColor: 'var(--color-primary-600)' }} />
+                                </div>
+                              )}
+                              {!zipLoading && zipInfo && val.length === 5 && (
+                                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                                  {zipInfo.city}, {zipInfo.state}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        } else if (isCarMake(field)) {
+                          input = <VehicleSelect mode="make" value={val} makes={makesList}
+                            onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type make…'} />;
+                        } else if (isCarModel(field)) {
+                          const makeF = fields.find(f => isCarMake(f));
+                          const activeMake = makeF ? (formData[makeF.name] || '') : '';
+                          input = <VehicleSelect mode="model" value={val} models={modelsForMake(activeMake)} requireMake
+                            onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type model…'} />;
                         } else {
+                          // Normalize on change so phone strips brackets/dashes, VIN
+                          // uppercases + clips at 17, name strips digits, etc.
                           const type = field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
                             : field.field_type === 'zip' ? 'text' : field.field_type;
-                          input = <input type={type} value={val} onChange={onChange} required={field.is_required}
+                          const ml = maxLengthFor(field);
+                          const normalizedOnChange = e => setField(field.name, normalizeField(field, e.target.value));
+                          input = <input type={type} value={val} onChange={normalizedOnChange} required={field.is_required}
+                            maxLength={ml}
                             placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input" />;
                         }
 

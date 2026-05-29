@@ -10,15 +10,26 @@ const US_STATES = [
   'VA','WA','WV','WI','WY','DC',
 ];
 
-// Curated list of common US car makes for the make-picker grid. Same UX as
-// the state grid — tap to multi-select.
-const CAR_MAKES = [
-  'Acura','Alfa Romeo','Audi','BMW','Buick','Cadillac','Chevrolet','Chrysler',
-  'Dodge','Fiat','Ford','Genesis','GMC','Honda','Hyundai','Infiniti','Jaguar',
-  'Jeep','Kia','Land Rover','Lexus','Lincoln','Mazda','Mercedes-Benz','Mini',
-  'Mitsubishi','Nissan','Polestar','Porsche','Ram','Rivian','Subaru','Tesla',
-  'Toyota','Volkswagen','Volvo',
-];
+// Forms store the full state name ("New York"); the analyzer chip grid shows
+// initials for compactness. These maps let us display "NY" in the grid while
+// sending "New York" to the backend `in` filter so the WHERE clause actually
+// matches what's in form_data.
+const STATE_INITIAL_TO_FULL = {
+  AL: 'Alabama',        AK: 'Alaska',        AZ: 'Arizona',        AR: 'Arkansas',
+  CA: 'California',     CO: 'Colorado',      CT: 'Connecticut',    DE: 'Delaware',
+  FL: 'Florida',        GA: 'Georgia',       HI: 'Hawaii',         ID: 'Idaho',
+  IL: 'Illinois',       IN: 'Indiana',       IA: 'Iowa',           KS: 'Kansas',
+  KY: 'Kentucky',       LA: 'Louisiana',     ME: 'Maine',          MD: 'Maryland',
+  MA: 'Massachusetts',  MI: 'Michigan',      MN: 'Minnesota',      MS: 'Mississippi',
+  MO: 'Missouri',       MT: 'Montana',       NE: 'Nebraska',       NV: 'Nevada',
+  NH: 'New Hampshire',  NJ: 'New Jersey',    NM: 'New Mexico',     NY: 'New York',
+  NC: 'North Carolina', ND: 'North Dakota',  OH: 'Ohio',           OK: 'Oklahoma',
+  OR: 'Oregon',         PA: 'Pennsylvania',  RI: 'Rhode Island',   SC: 'South Carolina',
+  SD: 'South Dakota',   TN: 'Tennessee',     TX: 'Texas',          UT: 'Utah',
+  VT: 'Vermont',        VA: 'Virginia',      WA: 'Washington',     WV: 'West Virginia',
+  WI: 'Wisconsin',      WY: 'Wyoming',       DC: 'District of Columbia',
+};
+const STATE_FULL_TO_INITIAL = Object.fromEntries(Object.entries(STATE_INITIAL_TO_FULL).map(([k, v]) => [v.toLowerCase(), k]));
 
 // Routing each form_field's `field_type` to a control kind drives the whole UI
 // without per-field hard-coding — a new field_type in form_fields shows up as
@@ -129,15 +140,28 @@ const Label = ({ children, sub }) => (
   </label>
 );
 
-const FieldControl = ({ field, value, onChange }) => {
+const FieldControl = ({ field, value, onChange, vehicleMakes = [] }) => {
   const kind = kindFor(field);
   const set = (v) => onChange(v);
 
   if (kind === 'state') {
-    return <StateGrid value={value || []} onChange={set} states={US_STATES} />;
+    // Storage: full names (so the IN filter matches form_data values).
+    // Display: initials in the chip grid (compact). Translate both ways.
+    const valueAsInitials = (value || []).map(full => STATE_FULL_TO_INITIAL[String(full).toLowerCase()] || full);
+    return (
+      <StateGrid
+        value={valueAsInitials}
+        onChange={(initials) => set(initials.map(i => STATE_INITIAL_TO_FULL[i] || i))}
+        states={US_STATES}
+      />
+    );
   }
   if (kind === 'make') {
-    return <ChipGrid value={value || []} onChange={set} options={CAR_MAKES} cols={5} />;
+    // Use the superadmin's /vehicles registry instead of a hardcoded list, so
+    // the chip grid stays in sync with whatever the configured makes are. Falls
+    // back to an empty array (grid renders nothing) if the registry hasn't been
+    // seeded yet — the explanatory helper text in the field card kicks in.
+    return <ChipGrid value={value || []} onChange={set} options={vehicleMakes} cols={5} />;
   }
   if (kind === 'multi' || kind === 'multi_enum') {
     const options = field._enum
@@ -322,8 +346,13 @@ const DataAnalyzer = () => {
   // Filter presets
   const [presets, setPresets] = useState(readPresets);
 
+  // Vehicle registry powers the Car Make chip grid — fetched once and shared
+  // across filter renders so the filter list reflects the superadmin's
+  // /vehicles configuration instead of a hardcoded constant.
+  const [vehicleMakes, setVehicleMakes] = useState([]);
   useEffect(() => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
+    client.get('vehicles').then(r => setVehicleMakes((r.data.makes || []).map(m => m.name))).catch(() => {});
   }, []);
 
   // Reset group-by + aggregates when dataset changes (filters stay — they're
@@ -474,7 +503,7 @@ const DataAnalyzer = () => {
                       </button>
                     )}
                   </div>
-                  <FieldControl field={f} value={v} onChange={(nv) => setFilters(s => ({ ...s, [f.name]: nv }))} />
+                  <FieldControl field={f} value={v} vehicleMakes={vehicleMakes} onChange={(nv) => setFilters(s => ({ ...s, [f.name]: nv }))} />
                 </div>
               );
             })}

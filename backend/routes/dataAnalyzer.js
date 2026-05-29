@@ -60,8 +60,15 @@ function applyFilter(query, f, cfg) {
     case 'in': {
       const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null) : [];
       if (!arr.length) return query;
-      const list = arr.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',');
-      return query.filter(col, 'in', `(${list})`);
+      // Use a case-insensitive OR of ilike-equality matches instead of `in`,
+      // so a value typed as "Honda" still matches form_data containing
+      // "honda" or "HONDA". The grid uses canonical casing (Honda) but the
+      // underlying form fields predate the registry — mixed casing in the
+      // wild is the reason the original `in` filter was returning zero hits
+      // even when the breakdown clearly showed matching rows.
+      const sanitize = (x) => String(x).replace(/[(),]/g, ' ');
+      const orParts = arr.map(x => `${col}.ilike.${sanitize(x)}`).join(',');
+      return query.or(orParts);
     }
     case 'gte':         return v == null || v === '' ? query : query.filter(col, 'gte', v);
     case 'lte':         return v == null || v === '' ? query : query.filter(col, 'lte', v);
