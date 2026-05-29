@@ -18,17 +18,33 @@ const superadminOnly = asyncHandler(async (req, res, next) => {
   next();
 });
 
+// Title-case so "honda" / "HONDA" / "Honda" all land as "Honda" in the
+// registry. Matches frontend formFieldNorm so picker results stay consistent
+// with how new form submissions get normalized.
+function titleCase(s) {
+  return String(s || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 // Turn a pasted CSV / newline / pipe-separated string into a clean,
 // case-folded-deduped array of names. Tolerates extra whitespace and trailing
 // separators so users can paste straight from a spreadsheet cell.
 function parseCsv(input) {
   if (typeof input !== 'string') return [];
-  return [...new Set(
-    input
-      .split(/[,\n\r\t|;]+/)
-      .map(s => s.trim())
-      .filter(Boolean)
-  )];
+  const seen = new Set();
+  const out = [];
+  for (const raw of input.split(/[,\n\r\t|;]+/)) {
+    const name = titleCase(raw);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
 }
 
 // ── GET /vehicles — full make+model tree ─────────────────────────────────────
@@ -48,26 +64,18 @@ router.post('/makes/bulk', superadminOnly, asyncHandler(async (req, res) => {
   const names = parseCsv(req.body?.csv || '');
   if (!names.length) return res.status(400).json({ error: 'No makes parsed from input.' });
 
-  // Upsert against the case-folded unique index — Postgres handles the dedupe;
-  // if a name with different casing already exists, the new row collides on
-  // lower(name) and ON CONFLICT DO NOTHING keeps the existing one.
-  const rows = names.map(name => ({ name }));
-  const { data, error } = await supabaseAdmin
-    .from('vehicle_makes').upsert(rows, { onConflict: 'lower(name)', ignoreDuplicates: true })
-    .select();
-  // PostgREST may reject the named expression conflict target; fall back to
-  // a plain insert and swallow unique-violation errors.
-  if (error && /onConflict|on_conflict/i.test(error.message || '')) {
-    const inserted = [];
-    for (const r of rows) {
-      const { data: d, error: e } = await supabaseAdmin.from('vehicle_makes').insert(r).select().single();
-      if (!e && d) inserted.push(d);
-      // 23505 = unique_violation — silently skip the duplicate.
+  // Per-row insert + swallow 23505 unique_violation. PostgREST doesn't accept
+  // expression-based ON CONFLICT targets (lower(name)), so we let Postgres
+  // raise on the case-insensitive index and treat duplicates as a no-op.
+  const inserted = [];
+  for (const name of names) {
+    const { data, error } = await supabaseAdmin.from('vehicle_makes').insert({ name }).select().single();
+    if (!error && data) inserted.push(data);
+    else if (error && error.code !== '23505') {
+      return res.status(500).json({ error: error.message });
     }
-    return res.json({ added: inserted.length, makes: inserted });
   }
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ added: (data || []).length, makes: data || [] });
+  res.json({ added: inserted.length, makes: inserted });
 }));
 
 // ── DELETE /vehicles/makes/:id ───────────────────────────────────────────────
@@ -92,7 +100,9 @@ router.post('/models/bulk', superadminOnly, asyncHandler(async (req, res) => {
   for (const name of names) {
     const { data, error } = await supabaseAdmin.from('vehicle_models').insert({ make_id, name }).select().single();
     if (!error && data) inserted.push(data);
-    // 23505 unique-violation = already exists → skip silently.
+    else if (error && error.code !== '23505') {
+      return res.status(500).json({ error: error.message });
+    }
   }
   res.json({ added: inserted.length, models: inserted });
 }));
