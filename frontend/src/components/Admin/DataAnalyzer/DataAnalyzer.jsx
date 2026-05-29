@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2 } from 'lucide-react';
 import client from '../../../api/client';
-import StateGrid from './StateGrid';
+import StateGrid, { ChipGrid } from './StateGrid';
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -10,13 +10,27 @@ const US_STATES = [
   'VA','WA','WV','WI','WY','DC',
 ];
 
+// Curated list of common US car makes for the make-picker grid. Same UX as
+// the state grid — tap to multi-select.
+const CAR_MAKES = [
+  'Acura','Alfa Romeo','Audi','BMW','Buick','Cadillac','Chevrolet','Chrysler',
+  'Dodge','Fiat','Ford','Genesis','GMC','Honda','Hyundai','Infiniti','Jaguar',
+  'Jeep','Kia','Land Rover','Lexus','Lincoln','Mazda','Mercedes-Benz','Mini',
+  'Mitsubishi','Nissan','Polestar','Porsche','Ram','Rivian','Subaru','Tesla',
+  'Toyota','Volkswagen','Volvo',
+];
+
 // Routing each form_field's `field_type` to a control kind drives the whole UI
 // without per-field hard-coding — a new field_type in form_fields shows up as
 // a text filter until a new branch is added here.
 const kindFor = (f) => {
-  const name = String(f.name || '').toLowerCase();
+  const name  = String(f.name  || '').toLowerCase();
   const label = String(f.label || '').toLowerCase();
+  // Name/label pattern detection runs BEFORE field_type — so a `select` with
+  // name=State still becomes a state grid, and a free-text `Make` field still
+  // becomes a make grid.
   if (/state\b/.test(name) || /state\b/.test(label)) return 'state';
+  if (/make/.test(name)    || /make/.test(label))    return 'make';
   switch (f.field_type) {
     case 'select':                 return 'multi';
     case 'checkbox':               return 'bool';
@@ -122,6 +136,9 @@ const FieldControl = ({ field, value, onChange }) => {
   if (kind === 'state') {
     return <StateGrid value={value || []} onChange={set} states={US_STATES} />;
   }
+  if (kind === 'make') {
+    return <ChipGrid value={value || []} onChange={set} options={CAR_MAKES} cols={5} />;
+  }
   if (kind === 'multi' || kind === 'multi_enum') {
     const options = field._enum
       ? field.options
@@ -192,7 +209,7 @@ const buildPayload = (fields, filters) => fields
     const v = filters[f.name];
     const kind = kindFor(f);
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return null;
-    if (kind === 'state' || kind === 'multi' || kind === 'multi_enum') {
+    if (kind === 'state' || kind === 'make' || kind === 'multi' || kind === 'multi_enum') {
       return Array.isArray(v) && v.length ? { field: f.name, op: 'in', value: v } : null;
     }
     if (kind === 'bool') return { field: f.name, op: 'eq', value: v };
@@ -221,30 +238,37 @@ const StatPill = ({ label, value, tone = 'primary' }) => {
   );
 };
 
+// Guard everything — when the user toggles datasets the agg from the previous
+// request is briefly the wrong shape (sales has no `completed`/`rejected`,
+// transfers has no `won`/`down_total`), so accessing those fields blindly used
+// to crash with `Cannot read properties of undefined (reading 'toLocaleString')`.
+// Defaulting to 0 keeps the banner safe during the transition.
+const num$  = v => `$${(Number(v) || 0).toLocaleString()}`;
+const numFmt = v => (Number(v) || 0).toLocaleString();
+
 const StatsBanner = ({ dataset, agg }) => {
   if (!agg) return null;
-  const fmt$ = v => `$${(v || 0).toLocaleString()}`;
   if (dataset === 'sales') {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-        <StatPill label="Matches"      value={agg.count.toLocaleString()} />
-        <StatPill label="Won"          value={agg.won.toLocaleString()} tone="success" />
-        <StatPill label="Win Rate"     value={`${agg.win_rate}%`}        tone="success" />
-        <StatPill label="Down Total"   value={fmt$(agg.down_total)}      tone="primary" />
-        <StatPill label="Monthly Total" value={fmt$(agg.monthly_total)}  tone="primary" />
-        <StatPill label="Avg Down"     value={fmt$(agg.avg_down)}        tone="info" />
-        <StatPill label="Closers"      value={agg.distinct_closers}      tone="info" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
+        <StatPill label="Matches"       value={numFmt(agg.count)} />
+        <StatPill label="Won"           value={numFmt(agg.won)}            tone="success" />
+        <StatPill label="Win Rate"      value={`${agg.win_rate || 0}%`}    tone="success" />
+        <StatPill label="Down Total"    value={num$(agg.down_total)}       tone="primary" />
+        <StatPill label="Monthly Total" value={num$(agg.monthly_total)}    tone="primary" />
+        <StatPill label="Avg Down"      value={num$(agg.avg_down)}         tone="info" />
+        <StatPill label="Closers"       value={numFmt(agg.distinct_closers)} tone="info" />
       </div>
     );
   }
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-      <StatPill label="Matches"     value={agg.count.toLocaleString()} />
-      <StatPill label="Completed"   value={agg.completed.toLocaleString()} tone="success" />
-      <StatPill label="Completion %" value={`${agg.completion_rate}%`}    tone="success" />
-      <StatPill label="Rejected"    value={agg.rejected.toLocaleString()} tone="warning" />
-      <StatPill label="Fronters"    value={agg.distinct_fronters}         tone="info" />
-      <StatPill label="Closers"     value={agg.distinct_closers}          tone="info" />
+      <StatPill label="Matches"      value={numFmt(agg.count)} />
+      <StatPill label="Completed"    value={numFmt(agg.completed)}            tone="success" />
+      <StatPill label="Completion %" value={`${agg.completion_rate || 0}%`}   tone="success" />
+      <StatPill label="Rejected"     value={numFmt(agg.rejected)}             tone="warning" />
+      <StatPill label="Fronters"     value={numFmt(agg.distinct_fronters)}    tone="info" />
+      <StatPill label="Closers"      value={numFmt(agg.distinct_closers)}     tone="info" />
     </div>
   );
 };
@@ -302,8 +326,17 @@ const DataAnalyzer = () => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
   }, []);
 
-  // Reset group-by when dataset changes (keep filters — they're shared by name).
-  useEffect(() => { setGroupBy(DATASETS[dataset].groupOptions[0].value); setBreakdown(null); }, [dataset]);
+  // Reset group-by + aggregates when dataset changes (filters stay — they're
+  // shared by name). Clearing `agg` immediately prevents the StatsBanner from
+  // reading sales-shaped fields on the transfers branch (or vice versa) during
+  // the brief window before the new /query response lands.
+  useEffect(() => {
+    setGroupBy(DATASETS[dataset].groupOptions[0].value);
+    setBreakdown(null);
+    setAgg(null);
+    setRows([]);
+    setTotal(0);
+  }, [dataset]);
 
   // Status filter is always present (dataset-specific enum); rendered before the form_fields.
   const allFilterFields = useMemo(() => [cfg.statusField, ...fields], [cfg, fields]);
@@ -357,13 +390,13 @@ const DataAnalyzer = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="rounded-2xl p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5">
-          <Database size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Data Analyzer</h2>
-            <p className="text-sm text-white/80">Filter, aggregate, group and export across every form field.</p>
+      {/* Header — stacks on mobile so the title + button row don't fight for room. */}
+      <div className="rounded-2xl p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Database size={22} className="text-white flex-shrink-0" />
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold text-white truncate" style={{ fontFamily: 'var(--font-display)' }}>Data Analyzer</h2>
+            <p className="text-xs sm:text-sm text-white/80">Filter, aggregate, group and export across every form field.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
