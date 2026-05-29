@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database } from 'lucide-react';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -35,7 +35,8 @@ const NAV_SECTIONS = [
   {
     label: 'Intelligence',
     items: [
-      { id: 'sale-search', label: 'Lead Search', icon: Network },
+      { id: 'sale-search',   label: 'Lead Search',   icon: Network },
+      { id: 'data-analyzer', label: 'Data Analyzer', icon: Database },
     ],
   },
   {

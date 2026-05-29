@@ -38,6 +38,7 @@ const saleUploadsRoutes         = require('./routes/saleUploads');
 const announcementsRoutes       = require('./routes/announcements');
 const marqueeRoutes             = require('./routes/marquee');
 const spiffRoutes               = require('./routes/spiff');
+const dataAnalyzerRoutes        = require('./routes/dataAnalyzer');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
 const eventsRoutes              = require('./routes/events');
@@ -215,6 +216,7 @@ app.use('/api/sale-uploads',       authMiddleware, readonlyGuard, saleUploadsRou
 app.use('/api/announcements',      authMiddleware, readonlyGuard, announcementsRoutes);
 app.use('/api/marquee',            authMiddleware, readonlyGuard, marqueeRoutes);
 app.use('/api/spiff',              authMiddleware, readonlyGuard, spiffRoutes);
+app.use('/api/data-analyzer',      authMiddleware, readonlyGuard, dataAnalyzerRoutes);
 // Chat — admin routes mounted first (superadmin-gated, no feature gate so
 // moderation always works); user routes behind the per-company 'chat' flag.
 app.use('/api/chat/admin',         authMiddleware, readonlyGuard, chatAdminRoutes);

@@ -21,6 +21,7 @@ import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsMa
 import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
+import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
@@ -64,6 +65,7 @@ const AdminPanel = () => {
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "data-analyzer", label: "Data Analyzer"      }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
     ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "bulk-upload", label: "Bulk Upload" }] : []),
@@ -111,6 +113,7 @@ const AdminPanel = () => {
               {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
               {activeTab === "sale-search" && <LeadIntelligence />}
               {activeTab === "numbers"     && <NumbersIntelligence />}
+              {activeTab === "data-analyzer" && <DataAnalyzer />}
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
               {activeTab === "bulk-upload" && <BulkUploadHub />}
