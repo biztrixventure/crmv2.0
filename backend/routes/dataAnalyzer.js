@@ -1,10 +1,12 @@
 // ============================================================================
-// /data-analyzer — superadmin-only multi-field filter against sales.
+// /data-analyzer — superadmin-only multi-field analytics across sales OR
+// transfers. Drives one query engine for both datasets so the frontend doesn't
+// have to know which fields live in typed columns vs form_data JSONB.
 //
-// Filters can target either a typed sales column (customer_name, car_year,
-// down_payment, …) or any key inside the sales.form_data JSONB blob. The
-// frontend builds the filter list from form_fields so new fields show up
-// automatically; here we just dispatch each filter to the right column.
+// Endpoints
+//   POST /query       — paginated rows + aggregate stats for the active filter
+//   POST /export      — same filter, streamed as CSV (full result, no paging)
+//   POST /breakdown   — group-by counts on one field (build mini charts)
 // ============================================================================
 
 const express = require('express');
@@ -19,28 +21,37 @@ router.use(asyncHandler(async (req, res, next) => {
   next();
 }));
 
-// Sales columns we know are typed (not JSONB). Filters whose `field` is in
-// this set get routed to direct column ops; everything else is treated as a
-// form_data JSONB key.
-const TYPED_COLS = new Set([
-  'customer_name', 'customer_phone', 'customer_phone_2', 'customer_email', 'customer_address',
-  'car_year', 'car_make', 'car_model', 'car_miles', 'car_vin',
-  'plan', 'down_payment', 'monthly_payment', 'payment_due_note', 'reference_no',
-  'client_name', 'status', 'closer_id', 'fronter_id', 'company_id',
-  'sale_date', 'created_at', 'closer_disposition', 'compliance_note',
-]);
+// Per-dataset config. Typed cols get direct PostgREST ops; anything else is
+// treated as a form_data JSONB key.
+const DATASETS = {
+  sales: {
+    table: 'sales',
+    typed: new Set([
+      'id', 'transfer_id', 'created_by', 'closer_id', 'fronter_id', 'company_id', 'status',
+      'customer_name', 'customer_phone', 'customer_phone_2', 'customer_email', 'customer_address',
+      'car_year', 'car_make', 'car_model', 'car_miles', 'car_vin',
+      'plan', 'down_payment', 'monthly_payment', 'payment_due_note', 'reference_no',
+      'client_name', 'sale_date', 'closer_disposition', 'compliance_note',
+      'created_at', 'updated_at', 'submitted_for_review_at', 'compliance_reviewed_at',
+    ]),
+  },
+  transfers: {
+    table: 'transfers',
+    typed: new Set([
+      'id', 'company_id', 'created_by', 'assigned_to', 'assigned_closer_id', 'status',
+      'normalized_phone', 'rejected_by', 'rejection_reason', 'rejected_at', 'rejection_count',
+      'sale_reference_no', 'created_at', 'updated_at',
+    ]),
+  },
+};
 
 const ALLOWED_OPS = new Set(['eq', 'neq', 'in', 'gte', 'lte', 'between', 'ilike', 'is_null', 'not_is_null']);
 
-// Apply one filter to a PostgREST query. Returns the (possibly-modified) query.
-function applyFilter(query, f) {
+function applyFilter(query, f, cfg) {
   if (!f || !f.field || !ALLOWED_OPS.has(f.op)) return query;
-
-  const isTyped  = TYPED_COLS.has(f.field);
-  // For JSONB fields, target form_data->>key. PostgREST .filter() accepts that
-  // verbatim and applies operator semantics on the text value.
-  const col      = isTyped ? f.field : `form_data->>${f.field}`;
-  const v        = f.value;
+  const isTyped = cfg.typed.has(f.field);
+  const col = isTyped ? f.field : `form_data->>${f.field}`;
+  const v   = f.value;
 
   switch (f.op) {
     case 'eq':         return v == null || v === '' ? query : query.filter(col, 'eq', v);
@@ -49,12 +60,11 @@ function applyFilter(query, f) {
     case 'in': {
       const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null) : [];
       if (!arr.length) return query;
-      // PostgREST `in` syntax: (a,b,c) — quote each so commas-in-values survive.
       const list = arr.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',');
       return query.filter(col, 'in', `(${list})`);
     }
-    case 'gte':        return v == null || v === '' ? query : query.filter(col, 'gte', v);
-    case 'lte':        return v == null || v === '' ? query : query.filter(col, 'lte', v);
+    case 'gte':         return v == null || v === '' ? query : query.filter(col, 'gte', v);
+    case 'lte':         return v == null || v === '' ? query : query.filter(col, 'lte', v);
     case 'between': {
       const [lo, hi] = Array.isArray(v) ? v : [];
       let q = query;
@@ -68,46 +78,227 @@ function applyFilter(query, f) {
   }
 }
 
+function pickDataset(name) {
+  const d = DATASETS[name];
+  if (!d) return DATASETS.sales;
+  return { name, ...d };
+}
+
+// Pull ALL filtered rows up to a hard cap. Used by /export and /breakdown so
+// stats are computed against the entire match, not just the page the user
+// happens to be looking at.
+async function fetchAll(dataset, filters, cap = 10000) {
+  const cfg = pickDataset(dataset);
+  const all = [];
+  for (let from = 0; from < cap; from += 1000) {
+    let q = supabaseAdmin.from(cfg.table).select('*').order('created_at', { ascending: false });
+    for (const f of filters) q = applyFilter(q, f, cfg);
+    const { data, error } = await q.range(from, from + 999);
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < 1000) break;
+  }
+  return all;
+}
+
+// Resolve closer/fronter/company names for a result set (sales has all three;
+// transfers carries created_by + assigned_closer_id, no fronter/closer split).
+async function enrichNames(rows, dataset) {
+  const idSet = new Set();
+  const compSet = new Set();
+  if (dataset === 'sales') {
+    rows.forEach(r => {
+      if (r.closer_id)  idSet.add(r.closer_id);
+      if (r.fronter_id) idSet.add(r.fronter_id);
+      if (r.company_id) compSet.add(r.company_id);
+    });
+  } else {
+    rows.forEach(r => {
+      if (r.created_by)         idSet.add(r.created_by);
+      if (r.assigned_closer_id) idSet.add(r.assigned_closer_id);
+      if (r.company_id)         compSet.add(r.company_id);
+    });
+  }
+  const ids  = [...idSet];
+  const cIds = [...compSet];
+  const [profilesRes, companiesRes] = await Promise.all([
+    ids.length  ? supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', ids) : { data: [] },
+    cIds.length ? supabaseAdmin.from('companies').select('id,name').in('id', cIds)                              : { data: [] },
+  ]);
+  const profile = {}, company = {};
+  (profilesRes.data || []).forEach(p => { profile[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null; });
+  (companiesRes.data || []).forEach(c => { company[c.id] = c.name; });
+
+  if (dataset === 'sales') {
+    return rows.map(r => ({
+      ...r,
+      closer_name:  profile[r.closer_id]  || null,
+      fronter_name: profile[r.fronter_id] || null,
+      company_name: company[r.company_id] || null,
+    }));
+  }
+  return rows.map(r => ({
+    ...r,
+    created_by_name:      profile[r.created_by]         || null,
+    assigned_closer_name: profile[r.assigned_closer_id] || null,
+    company_name:         company[r.company_id]         || null,
+  }));
+}
+
+// Aggregate stats — computed on the FULL filtered set (capped at 10k) so the
+// banner reflects the real match, not the visible page.
+function aggregateSales(rows) {
+  let down = 0, monthly = 0, won = 0;
+  const closers = new Set();
+  rows.forEach(s => {
+    down    += Number(s.down_payment    || 0);
+    monthly += Number(s.monthly_payment || 0);
+    if (['closed_won', 'sold'].includes(s.status)) won++;
+    if (s.closer_id) closers.add(s.closer_id);
+  });
+  return {
+    count:   rows.length,
+    won,
+    win_rate: rows.length ? Math.round((won / rows.length) * 100) : 0,
+    down_total: down,
+    monthly_total: monthly,
+    avg_down:    rows.length ? Math.round(down    / rows.length) : 0,
+    avg_monthly: rows.length ? Math.round(monthly / rows.length) : 0,
+    distinct_closers: closers.size,
+  };
+}
+function aggregateTransfers(rows) {
+  const byStatus = {};
+  const fronters = new Set();
+  const closers  = new Set();
+  rows.forEach(t => {
+    byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+    if (t.created_by)         fronters.add(t.created_by);
+    if (t.assigned_closer_id) closers.add(t.assigned_closer_id);
+  });
+  return {
+    count: rows.length,
+    by_status: byStatus,
+    distinct_fronters: fronters.size,
+    distinct_closers:  closers.size,
+    completed: byStatus.completed || 0,
+    rejected:  byStatus.rejected  || 0,
+    completion_rate: rows.length ? Math.round(((byStatus.completed || 0) / rows.length) * 100) : 0,
+  };
+}
+
+// ============================================================================
+// POST /query — paginated rows + aggregates
+// ============================================================================
 router.post('/query', asyncHandler(async (req, res) => {
   const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
   const page    = Math.max(1, parseInt(req.body?.page  || 1));
   const limit   = Math.min(200, Math.max(1, parseInt(req.body?.limit || 50)));
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const cfg     = pickDataset(dataset);
 
-  let query = supabaseAdmin
-    .from('sales')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false });
-
-  for (const f of filters) query = applyFilter(query, f);
-
+  let query = supabaseAdmin.from(cfg.table).select('*', { count: 'exact' }).order('created_at', { ascending: false });
+  for (const f of filters) query = applyFilter(query, f, cfg);
   const offset = (page - 1) * limit;
   query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Enrich with closer/fronter/company names (matches /sales response shape so
-  // the frontend can reuse renderers). Cheap — same maps the sales list uses.
-  const closerIds  = [...new Set((data || []).map(s => s.closer_id).filter(Boolean))];
-  const fronterIds = [...new Set((data || []).map(s => s.fronter_id).filter(Boolean))];
-  const allUids    = [...new Set([...closerIds, ...fronterIds])];
-  const compIds    = [...new Set((data || []).map(s => s.company_id).filter(Boolean))];
+  const enriched = await enrichNames(data || [], dataset);
 
-  const [profilesRes, companiesRes] = await Promise.all([
-    allUids.length ? supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', allUids) : { data: [] },
-    compIds.length ? supabaseAdmin.from('companies').select('id,name').in('id', compIds)                               : { data: [] },
-  ]);
-  const profileMap = {}; (profilesRes.data || []).forEach(p => { profileMap[p.user_id] = p; });
-  const companyMap = {}; (companiesRes.data || []).forEach(c => { companyMap[c.id]     = c; });
+  // Aggregates run against the FULL filtered set so the banner stays honest
+  // even when the user is paging through page 5 of 20.
+  const all = await fetchAll(dataset, filters);
+  const aggregates = dataset === 'sales' ? aggregateSales(all) : aggregateTransfers(all);
 
-  const sales = (data || []).map(s => ({
-    ...s,
-    closer_name:  profileMap[s.closer_id]  ? `${profileMap[s.closer_id].first_name  || ''} ${profileMap[s.closer_id].last_name  || ''}`.trim() || null : null,
-    fronter_name: profileMap[s.fronter_id] ? `${profileMap[s.fronter_id].first_name || ''} ${profileMap[s.fronter_id].last_name || ''}`.trim() || null : null,
-    company_name: companyMap[s.company_id]?.name || null,
-  }));
+  res.json({ rows: enriched, total: count || 0, page, limit, dataset, aggregates });
+}));
 
-  res.json({ sales, total: count || 0, page, limit });
+// ============================================================================
+// POST /export — same filter, streamed as CSV (entire filtered result)
+// ============================================================================
+router.post('/export', asyncHandler(async (req, res) => {
+  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const all = await fetchAll(dataset, filters);
+  const enriched = await enrichNames(all, dataset);
+
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  let headers, rows;
+  if (dataset === 'sales') {
+    headers = ['id', 'sale_date', 'status', 'customer_name', 'customer_phone', 'customer_email',
+               'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
+               'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
+               'closer_name', 'fronter_name', 'company_name', 'created_at'];
+    rows = enriched.map(s => headers.map(h => s[h]));
+  } else {
+    headers = ['id', 'status', 'created_by_name', 'assigned_closer_name', 'company_name',
+               'normalized_phone', 'rejection_reason', 'rejection_count', 'sale_reference_no',
+               'form_data', 'created_at', 'updated_at'];
+    rows = enriched.map(t => headers.map(h => h === 'form_data' ? JSON.stringify(t.form_data || {}) : t[h]));
+  }
+  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\n');
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="data-analyzer_${dataset}_${stamp}.csv"`);
+  // UTF-8 BOM so Excel reads it correctly on Windows.
+  res.send('﻿' + csv);
+}));
+
+// ============================================================================
+// POST /breakdown — group-by counts on one field
+// Body: { dataset, filters, group_by, top: 20 }
+// ============================================================================
+router.post('/breakdown', asyncHandler(async (req, res) => {
+  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const group   = String(req.body?.group_by || 'status');
+  const top     = Math.min(50, Math.max(1, parseInt(req.body?.top || 20)));
+
+  const cfg = pickDataset(dataset);
+  const all = await fetchAll(dataset, filters);
+
+  // Resolve the field's raw value off each row, picking from the typed column
+  // when it exists and falling back to form_data.
+  const valOf = (row) => {
+    if (cfg.typed.has(group)) return row[group];
+    return row.form_data?.[group];
+  };
+
+  const counts = {};
+  for (const r of all) {
+    const v = valOf(r);
+    const key = v == null || v === '' ? '(empty)' : String(v);
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  // For company/closer/fronter id columns, swap the uuid key for a name so the
+  // chart is readable.
+  const idCols = new Set(['closer_id', 'fronter_id', 'company_id', 'created_by', 'assigned_closer_id']);
+  let labelMap = null;
+  if (idCols.has(group)) {
+    const ids = Object.keys(counts).filter(k => k !== '(empty)');
+    if (ids.length) {
+      if (group === 'company_id') {
+        const { data } = await supabaseAdmin.from('companies').select('id,name').in('id', ids);
+        labelMap = Object.fromEntries((data || []).map(c => [c.id, c.name]));
+      } else {
+        const { data } = await supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', ids);
+        labelMap = Object.fromEntries((data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.user_id]));
+      }
+    }
+  }
+
+  const items = Object.entries(counts)
+    .map(([key, count]) => ({ key, label: labelMap?.[key] || key, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, top);
+
+  res.json({ group_by: group, total: all.length, items });
 }));
 
 module.exports = router;

@@ -1,21 +1,18 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp } from 'lucide-react';
+import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2 } from 'lucide-react';
 import client from '../../../api/client';
 import StateGrid from './StateGrid';
 
-// All 50 states + DC. Used to identify "state-like" form fields and to seed
-// the StateGrid options when the form field doesn't carry an explicit list.
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
   'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
   'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
   'VA','WA','WV','WI','WY','DC',
 ];
-const STATE_SET = new Set(US_STATES);
 
 // Routing each form_field's `field_type` to a control kind drives the whole UI
-// without per-field hard-coding — adding a new field_type in form_fields just
-// shows up as a text filter until a new branch is added here.
+// without per-field hard-coding — a new field_type in form_fields shows up as
+// a text filter until a new branch is added here.
 const kindFor = (f) => {
   const name = String(f.name || '').toLowerCase();
   const label = String(f.label || '').toLowerCase();
@@ -33,13 +30,65 @@ const kindFor = (f) => {
   }
 };
 
-// Known enum lists for the few special field_types that don't carry their own
-// options. Anything else with field_type='select' uses its own options list.
-const ENUMS = {
-  sale_status: ['open', 'pending_review', 'closed_won', 'closed_lost', 'sold', 'cancelled', 'follow_up', 'needs_revision'],
+const SALE_STATUSES     = ['open', 'pending_review', 'closed_won', 'closed_lost', 'sold', 'cancelled', 'follow_up', 'needs_revision'];
+const TRANSFER_STATUSES = ['pending', 'assigned', 'completed', 'rejected', 'cancelled'];
+
+// Datasets share the same filter UI (form_fields) but get dataset-specific
+// extras like the always-on Status filter and the group-by candidates.
+const DATASETS = {
+  sales: {
+    label: 'Sales', icon: DollarSign,
+    statusField: { name: 'status', label: 'Status', field_type: 'sale_status', options: SALE_STATUSES, _enum: true },
+    columns: [
+      { key: 'customer_name', label: 'Customer' },
+      { key: 'customer_phone', label: 'Phone' },
+      { key: '_car',          label: 'Car', render: r => [r.car_year, r.car_make, r.car_model].filter(Boolean).join(' ') || '—' },
+      { key: 'plan',          label: 'Plan' },
+      { key: 'down_payment',  label: 'Down',  render: r => r.down_payment ? `$${Number(r.down_payment).toLocaleString()}` : '—' },
+      { key: 'monthly_payment', label: '/mo', render: r => r.monthly_payment ? `$${Number(r.monthly_payment).toLocaleString()}` : '—' },
+      { key: 'status',        label: 'Status' },
+      { key: 'company_name',  label: 'Company' },
+      { key: 'closer_name',   label: 'Closer' },
+      { key: 'sale_date',     label: 'Sale Date' },
+    ],
+    groupOptions: [
+      { value: 'status',     label: 'Status' },
+      { value: 'plan',       label: 'Plan' },
+      { value: 'car_make',   label: 'Car Make' },
+      { value: 'car_year',   label: 'Car Year' },
+      { value: 'closer_id',  label: 'Closer' },
+      { value: 'fronter_id', label: 'Fronter' },
+      { value: 'company_id', label: 'Company' },
+    ],
+  },
+  transfers: {
+    label: 'Transfers', icon: Send,
+    statusField: { name: 'status', label: 'Status', field_type: 'sale_status', options: TRANSFER_STATUSES, _enum: true },
+    columns: [
+      { key: '_customer', label: 'Customer', render: r => r.form_data?.customer_name || r.form_data?.FirstName || '—' },
+      { key: 'normalized_phone', label: 'Phone' },
+      { key: 'status', label: 'Status' },
+      { key: 'company_name', label: 'Company' },
+      { key: 'created_by_name', label: 'Fronter' },
+      { key: 'assigned_closer_name', label: 'Closer' },
+      { key: 'rejection_count', label: 'Rejects' },
+      { key: 'sale_reference_no', label: 'Sale Ref' },
+      { key: 'created_at', label: 'Created', render: r => r.created_at ? new Date(r.created_at).toLocaleDateString() : '—' },
+    ],
+    groupOptions: [
+      { value: 'status',             label: 'Status' },
+      { value: 'company_id',         label: 'Company' },
+      { value: 'created_by',         label: 'Fronter' },
+      { value: 'assigned_closer_id', label: 'Closer' },
+    ],
+  },
 };
 
-const SECTION = ({ title, open, onToggle, children, count }) => (
+const PRESETS_KEY = 'bsx_data_analyzer_presets_v1';
+const readPresets  = () => { try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '[]'); } catch { return []; } };
+const writePresets = (p) => { try { localStorage.setItem(PRESETS_KEY, JSON.stringify(p)); } catch { /* quota */ } };
+
+const Section = ({ title, open, onToggle, children, count }) => (
   <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
     <button type="button" onClick={onToggle}
       className="w-full flex items-center justify-between px-4 py-2.5"
@@ -66,19 +115,17 @@ const Label = ({ children, sub }) => (
   </label>
 );
 
-// One control per field, returned in a list. State for each filter lives in
-// `filters[field.name]` so a single payload feeds both the UI and the request.
 const FieldControl = ({ field, value, onChange }) => {
   const kind = kindFor(field);
-  const set  = (v) => onChange(v);
+  const set = (v) => onChange(v);
 
   if (kind === 'state') {
     return <StateGrid value={value || []} onChange={set} states={US_STATES} />;
   }
   if (kind === 'multi' || kind === 'multi_enum') {
-    const options = kind === 'multi_enum'
-      ? ENUMS[field.field_type] || []
-      : Array.isArray(field.options) ? field.options : [];
+    const options = field._enum
+      ? field.options
+      : (Array.isArray(field.options) ? field.options : []);
     const sel = new Set(value || []);
     return (
       <div className="flex flex-wrap gap-1.5">
@@ -140,7 +187,6 @@ const FieldControl = ({ field, value, onChange }) => {
   );
 };
 
-// Convert the UI filter map → backend payload.
 const buildPayload = (fields, filters) => fields
   .map(f => {
     const v = filters[f.name];
@@ -159,39 +205,155 @@ const buildPayload = (fields, filters) => fields
   })
   .filter(Boolean);
 
+const StatPill = ({ label, value, tone = 'primary' }) => {
+  const tones = {
+    primary: ['var(--color-primary-50)',  'var(--color-primary-700)'],
+    success: ['var(--color-success-50)',  'var(--color-success-700)'],
+    warning: ['var(--color-warning-50)',  'var(--color-warning-700)'],
+    info:    ['var(--color-bg-secondary)','var(--color-text-secondary)'],
+  };
+  const [bg, fg] = tones[tone] || tones.primary;
+  return (
+    <div className="rounded-lg px-3 py-2" style={{ backgroundColor: bg, border: '1px solid var(--color-border)' }}>
+      <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: fg, opacity: 0.7 }}>{label}</p>
+      <p className="text-base font-black" style={{ color: fg, letterSpacing: '-0.02em' }}>{value}</p>
+    </div>
+  );
+};
+
+const StatsBanner = ({ dataset, agg }) => {
+  if (!agg) return null;
+  const fmt$ = v => `$${(v || 0).toLocaleString()}`;
+  if (dataset === 'sales') {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+        <StatPill label="Matches"      value={agg.count.toLocaleString()} />
+        <StatPill label="Won"          value={agg.won.toLocaleString()} tone="success" />
+        <StatPill label="Win Rate"     value={`${agg.win_rate}%`}        tone="success" />
+        <StatPill label="Down Total"   value={fmt$(agg.down_total)}      tone="primary" />
+        <StatPill label="Monthly Total" value={fmt$(agg.monthly_total)}  tone="primary" />
+        <StatPill label="Avg Down"     value={fmt$(agg.avg_down)}        tone="info" />
+        <StatPill label="Closers"      value={agg.distinct_closers}      tone="info" />
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <StatPill label="Matches"     value={agg.count.toLocaleString()} />
+      <StatPill label="Completed"   value={agg.completed.toLocaleString()} tone="success" />
+      <StatPill label="Completion %" value={`${agg.completion_rate}%`}    tone="success" />
+      <StatPill label="Rejected"    value={agg.rejected.toLocaleString()} tone="warning" />
+      <StatPill label="Fronters"    value={agg.distinct_fronters}         tone="info" />
+      <StatPill label="Closers"     value={agg.distinct_closers}          tone="info" />
+    </div>
+  );
+};
+
+const Breakdown = ({ items, total }) => {
+  if (!items?.length) return <p className="text-sm italic" style={{ color: 'var(--color-text-tertiary)' }}>No data to break down.</p>;
+  const max = items[0]?.count || 1;
+  return (
+    <div className="space-y-1.5 max-h-72 overflow-y-auto">
+      {items.map(it => {
+        const pct = Math.round((it.count / max) * 100);
+        const share = total ? Math.round((it.count / total) * 100) : 0;
+        return (
+          <div key={it.key} className="text-xs">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="font-semibold truncate" style={{ color: 'var(--color-text)' }}>{it.label}</span>
+              <span style={{ color: 'var(--color-text-tertiary)' }}>
+                <strong style={{ color: 'var(--color-text-secondary)' }}>{it.count.toLocaleString()}</strong> · {share}%
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--gradient-sidebar)' }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const DataAnalyzer = () => {
-  const [fields, setFields]     = useState([]);
-  const [filters, setFilters]   = useState({});
-  const [open, setOpen]         = useState({ filters: true });
-  const [rows, setRows]         = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [page, setPage]         = useState(1);
-  const [limit]                 = useState(50);
-  const [loading, setLoading]   = useState(false);
-  const [err, setErr]           = useState('');
+  const [dataset, setDataset] = useState('sales');
+  const [fields, setFields]   = useState([]);
+  const [filters, setFilters] = useState({});
+  const [open, setOpen]       = useState({ filters: true, breakdown: true, presets: false });
+  const [rows, setRows]       = useState([]);
+  const [total, setTotal]     = useState(0);
+  const [agg, setAgg]         = useState(null);
+  const [page, setPage]       = useState(1);
+  const [limit]               = useState(50);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [err, setErr]         = useState('');
+
+  const cfg = DATASETS[dataset];
+
+  // Group-by + breakdown
+  const [groupBy, setGroupBy] = useState(cfg.groupOptions[0].value);
+  const [breakdown, setBreakdown] = useState(null);
+
+  // Filter presets
+  const [presets, setPresets] = useState(readPresets);
 
   useEffect(() => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
   }, []);
 
-  const payload = useMemo(() => buildPayload(fields, filters), [fields, filters]);
+  // Reset group-by when dataset changes (keep filters — they're shared by name).
+  useEffect(() => { setGroupBy(DATASETS[dataset].groupOptions[0].value); setBreakdown(null); }, [dataset]);
+
+  // Status filter is always present (dataset-specific enum); rendered before the form_fields.
+  const allFilterFields = useMemo(() => [cfg.statusField, ...fields], [cfg, fields]);
+
+  const payload = useMemo(() => buildPayload(allFilterFields, filters), [allFilterFields, filters]);
   const activeCount = payload.length;
 
   const run = useCallback(async (p = 1) => {
     setLoading(true); setErr('');
     try {
-      const r = await client.post('data-analyzer/query', { filters: payload, page: p, limit });
-      setRows(r.data.sales || []);
+      const r = await client.post('data-analyzer/query', { dataset, filters: payload, page: p, limit });
+      setRows(r.data.rows || []);
       setTotal(r.data.total || 0);
+      setAgg(r.data.aggregates || null);
       setPage(p);
     } catch (e) { setErr(e.response?.data?.error || 'Query failed'); }
     finally { setLoading(false); }
-  }, [payload, limit]);
+  }, [dataset, payload, limit]);
 
-  // Auto-run once on first field load so the table isn't blank.
-  useEffect(() => { if (fields.length) run(1); /* eslint-disable-next-line */ }, [fields.length]);
+  // Auto-run once when fields first load AND when dataset changes.
+  useEffect(() => { if (fields.length) run(1); /* eslint-disable-next-line */ }, [fields.length, dataset]);
 
-  const reset = () => { setFilters({}); setPage(1); };
+  const reset = () => { setFilters({}); setPage(1); setBreakdown(null); };
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const r = await client.post('data-analyzer/export', { dataset, filters: payload }, { responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      const a = Object.assign(document.createElement('a'), { href: url, download: `data-analyzer_${dataset}_${new Date().toISOString().slice(0,10)}.csv` });
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (e) { setErr(e.response?.data?.error || 'Export failed'); }
+    finally { setExporting(false); }
+  };
+
+  const runBreakdown = async () => {
+    try {
+      const r = await client.post('data-analyzer/breakdown', { dataset, filters: payload, group_by: groupBy, top: 20 });
+      setBreakdown(r.data);
+    } catch (e) { setErr(e.response?.data?.error || 'Breakdown failed'); }
+  };
+
+  const savePreset = () => {
+    const name = window.prompt('Name this preset (e.g. "Texas closed-won 2026"):');
+    if (!name?.trim()) return;
+    const next = [...presets.filter(p => p.name !== name.trim()), { name: name.trim(), dataset, filters }];
+    setPresets(next); writePresets(next);
+  };
+  const loadPreset = (p) => { setDataset(p.dataset || 'sales'); setFilters(p.filters || {}); };
+  const deletePreset = (name) => { const next = presets.filter(p => p.name !== name); setPresets(next); writePresets(next); };
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -201,13 +363,34 @@ const DataAnalyzer = () => {
           <Database size={22} className="text-white" />
           <div>
             <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Data Analyzer</h2>
-            <p className="text-sm text-white/80">Filter sales across every configured form field.</p>
+            <p className="text-sm text-white/80">Filter, aggregate, group and export across every form field.</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={reset}
-            className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Dataset toggle */}
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.3)' }}>
+            {Object.entries(DATASETS).map(([key, d]) => {
+              const Icon = d.icon;
+              const on = dataset === key;
+              return (
+                <button key={key} onClick={() => setDataset(key)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold transition-colors"
+                  style={{ backgroundColor: on ? 'white' : 'transparent', color: on ? 'var(--color-primary-700)' : 'white' }}>
+                  <Icon size={13} /> {d.label}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={reset} className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white">
             Clear ({activeCount})
+          </button>
+          <button onClick={savePreset} title="Save current filters as a preset"
+            className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white flex items-center gap-1">
+            <BookmarkPlus size={13} /> Preset
+          </button>
+          <button onClick={exportCsv} disabled={exporting || loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/90 hover:bg-white text-primary-700 disabled:opacity-50">
+            {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} CSV
           </button>
           <button onClick={() => run(1)} disabled={loading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-white text-primary-700 disabled:opacity-50">
@@ -218,13 +401,32 @@ const DataAnalyzer = () => {
 
       {err && <p className="text-sm rounded-xl p-3" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)' }}>{err}</p>}
 
+      {/* Aggregate stats banner */}
+      <StatsBanner dataset={dataset} agg={agg} />
+
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5">
-        {/* Filters panel */}
-        <SECTION title={<span className="flex items-center gap-1.5"><Filter size={14} /> Filters</span>}
-          open={open.filters} onToggle={() => setOpen(o => ({ ...o, filters: !o.filters }))} count={activeCount}>
-          {fields.length === 0
-            ? <p className="text-sm italic" style={{ color: 'var(--color-text-tertiary)' }}>Loading form fields…</p>
-            : fields.map(f => {
+        {/* Filters + Presets */}
+        <div className="space-y-3">
+          <Section title={<span className="flex items-center gap-1.5"><BookmarkPlus size={14} /> Saved Presets</span>}
+            open={open.presets} onToggle={() => setOpen(o => ({ ...o, presets: !o.presets }))} count={presets.length}>
+            {presets.length === 0
+              ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Save the current filter set with the “Preset” button above.</p>
+              : presets.map(p => (
+                <div key={p.name} className="flex items-center gap-2 text-xs">
+                  <button onClick={() => loadPreset(p)} className="flex-1 text-left px-2 py-1.5 rounded-md font-semibold truncate"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
+                    {p.name} <span className="opacity-60">({p.dataset || 'sales'})</span>
+                  </button>
+                  <button onClick={() => deletePreset(p.name)} className="p-1 rounded-md hover:bg-error-50">
+                    <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
+                  </button>
+                </div>
+              ))}
+          </Section>
+
+          <Section title={<span className="flex items-center gap-1.5"><Filter size={14} /> Filters</span>}
+            open={open.filters} onToggle={() => setOpen(o => ({ ...o, filters: !o.filters }))} count={activeCount}>
+            {allFilterFields.map(f => {
               const v = filters[f.name];
               const active = v != null && v !== '' && !(Array.isArray(v) && v.length === 0);
               return (
@@ -243,10 +445,27 @@ const DataAnalyzer = () => {
                 </div>
               );
             })}
-        </SECTION>
+          </Section>
+        </div>
 
-        {/* Results */}
+        {/* Results + Breakdown */}
         <div className="space-y-3">
+          <Section title={<span className="flex items-center gap-1.5"><BarChart3 size={14} /> Breakdown</span>}
+            open={open.breakdown} onToggle={() => setOpen(o => ({ ...o, breakdown: !o.breakdown }))}>
+            <div className="flex items-center gap-2 mb-2">
+              <Label>Group by</Label>
+              <select value={groupBy} onChange={e => setGroupBy(e.target.value)} className="input text-xs h-auto py-1">
+                {cfg.groupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <button onClick={runBreakdown}
+                className="text-xs font-bold px-3 py-1 rounded-md text-white"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                Run
+              </button>
+            </div>
+            <Breakdown items={breakdown?.items} total={breakdown?.total} />
+          </Section>
+
           <div className="rounded-xl px-4 py-2.5 flex items-center justify-between" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <strong>{total.toLocaleString()}</strong> match{total === 1 ? '' : 'es'} · page {page} of {Math.max(1, Math.ceil(total / limit))}
@@ -263,28 +482,23 @@ const DataAnalyzer = () => {
             <table className="w-full text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  {['Customer', 'Phone', 'Car', 'Plan', 'Down', '/mo', 'Status', 'Company', 'Closer', 'Sale Date'].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                  {cfg.columns.map(c => (
+                    <th key={c.key} className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading
-                  ? <tr><td colSpan={10} className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}><Loader2 size={16} className="animate-spin inline mr-1" /> Loading…</td></tr>
+                  ? <tr><td colSpan={cfg.columns.length} className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}><Loader2 size={16} className="animate-spin inline mr-1" /> Loading…</td></tr>
                   : rows.length === 0
-                    ? <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No matches.</td></tr>
-                    : rows.map(s => (
-                      <tr key={s.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td className="px-3 py-2 font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.customer_phone || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{[s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ') || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.plan || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.down_payment ? `$${Number(s.down_payment).toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.monthly_payment ? `$${Number(s.monthly_payment).toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.status || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.company_name || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.closer_name || '—'}</td>
-                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{s.sale_date || '—'}</td>
+                    ? <tr><td colSpan={cfg.columns.length} className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No matches.</td></tr>
+                    : rows.map(r => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        {cfg.columns.map(c => (
+                          <td key={c.key} className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                            {c.render ? c.render(r) : (r[c.key] ?? '—')}
+                          </td>
+                        ))}
                       </tr>
                     ))}
               </tbody>
@@ -297,4 +511,4 @@ const DataAnalyzer = () => {
 };
 
 export default DataAnalyzer;
-export { US_STATES, STATE_SET };
+export { US_STATES };
