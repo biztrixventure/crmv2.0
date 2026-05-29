@@ -72,7 +72,7 @@ const ComplianceShell = () => {
   const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <div className={`min-h-screen ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title="Compliance"

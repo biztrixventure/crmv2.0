@@ -355,7 +355,9 @@ const MappingPanel = ({ clients, plans, configLoading }) => {
   const isLoading = loading || configLoading;
 
   return (
-    <div className="max-w-3xl animate-fade-in">
+    // bsx-allow-select overrides the shell-wide bsx-no-select so creators can
+    // still copy/paste field names, options, and labels while configuring forms.
+    <div className="max-w-3xl animate-fade-in bsx-allow-select">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3 mb-6">
         <div className="flex items-center gap-3">

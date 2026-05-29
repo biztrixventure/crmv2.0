@@ -510,7 +510,7 @@ const StaffShell = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Dashboard'}

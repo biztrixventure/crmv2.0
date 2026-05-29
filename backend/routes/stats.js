@@ -61,8 +61,14 @@ router.get(
       const scopeSales = (q) => {
         if (['superadmin', 'readonly_admin'].includes(userRole)) return q;              // global
         if (userRole === 'closer') return q.eq('closer_id', userId);                    // own sales
+        // Fronter: their personal pipeline only — sales whose fronter_id is them.
+        // Without this branch the company_id filter below would surface every
+        // sale in the fronter's company, which made the dashboard show team-
+        // wide totals instead of the fronter's own numbers.
+        if (userRole === 'fronter') return q.eq('fronter_id', userId);
         if (isCloserSide && companyId) return coUserIds.length ? q.in('closer_id', coUserIds) : q.eq('id', ZERO_UUID);
-        // Fronter / fronter managers: fronter-pipeline sales carry the fronter company_id.
+        // Fronter managers and other in-company roles: fronter-pipeline sales
+        // carry the fronter company_id.
         if (companyId) return q.eq('company_id', companyId);
         return q.eq('id', ZERO_UUID);
       };

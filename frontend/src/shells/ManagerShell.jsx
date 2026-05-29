@@ -392,7 +392,7 @@ const ManagerShell = () => {
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Manager Dashboard'}
@@ -925,7 +925,7 @@ const ManagerShell = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Customer', 'Reference', 'Status', 'Fronter', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
+                        {['Customer', 'Reference', 'Status', 'Fronter', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Sale Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
                           <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -940,7 +940,10 @@ const ManagerShell = () => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.fronter_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.created_at)}</td>
+                          {/* Show the actual sale_date (carried in the bulk upload) rather
+                              than the row's created_at — created_at reflects when the row
+                              was inserted/updated, which is misleading for back-filled sales. */}
+                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.sale_date || s.created_at)}</td>
                           {hasPermission('delete_sale') && (
                             <td className="py-3 px-3">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
