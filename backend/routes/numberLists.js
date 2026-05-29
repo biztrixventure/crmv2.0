@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue } = require('../utils/searchSanitize');
+const { titleCase } = require('../utils/titleCase');
 
 const router = express.Router();
 router.use(requireFeature('number_assignment'));
@@ -287,7 +288,7 @@ router.post('/bulk', [
       fronter_id,
       assigned_by:    req.user.id,
       phone_number:   n.phone_number.toString().trim(),
-      customer_name:  n.customer_name?.toString().trim() || null,
+      customer_name:  titleCase(n.customer_name?.toString().trim()) || null,
       notes:          n.notes?.toString().trim() || null,
       list_name:      list_name.trim(),
       status:         'new',

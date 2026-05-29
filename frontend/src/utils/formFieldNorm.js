@@ -53,10 +53,19 @@ export const normalize = (field, raw) => {
       return s.replace(/\D/g, '').slice(0, 10);
     case 'vin':
       return s.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '').slice(0, 17);
-    case 'name':
-      // Strip digits; collapse runs of whitespace to one space so typing
-      // "John  Doe" doesn't double-space.
-      return s.replace(/\d+/g, '').replace(/\s+/g, ' ');
+    case 'name': {
+      // Strip digits, collapse runs of whitespace, and title-case while typing.
+      // Trailing space is preserved so the next word can start mid-keystroke
+      // without the cursor "hopping" back. Empty input passes through clean.
+      const cleaned = s.replace(/\d+/g, '').replace(/\s+/g, ' ');
+      if (!cleaned) return cleaned;
+      const trailing = cleaned.endsWith(' ') ? ' ' : '';
+      return cleaned
+        .split(' ')
+        .filter(Boolean)
+        .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ') + trailing;
+    }
     default:
       return s;
   }

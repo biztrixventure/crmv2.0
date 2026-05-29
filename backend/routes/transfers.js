@@ -7,6 +7,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { titleCaseFormData } = require('../utils/titleCase');
 
 const router = express.Router();
 
@@ -495,7 +496,8 @@ router.post('/', [
 
   const userId    = req.user.id;
   const companyId = req.user.company_id;
-  const { form_data, assigned_closer_id } = req.body;
+  const { assigned_closer_id } = req.body;
+  const form_data = titleCaseFormData(req.body.form_data);
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
@@ -710,8 +712,9 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
   // Edit form_data — append to audit trail + keep the dedup key in sync
   if (form_data) {
-    updates.form_data = form_data;
-    updates.normalized_phone = normPhone(phoneFromFD(form_data)) || null;
+    const normalized = titleCaseFormData(form_data);
+    updates.form_data = normalized;
+    updates.normalized_phone = normPhone(phoneFromFD(normalized)) || null;
     const historyEntry = {
       editor_id:    userId,
       reason:       reason || 'No reason provided',

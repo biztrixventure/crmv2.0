@@ -8,6 +8,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { titleCase } = require('../utils/titleCase');
 
 const router = express.Router();
 
@@ -195,7 +196,7 @@ router.post('/',
       .insert({
         user_id:           ownerId,
         company_id:        companyId,
-        customer_name:     req.body.customer_name,
+        customer_name:     titleCase(req.body.customer_name),
         customer_phone:    req.body.customer_phone    || null,
         customer_email:    req.body.customer_email    || null,
         notes:             req.body.notes             || null,
@@ -239,7 +240,9 @@ router.put('/:id',
     const allowed = ['status', 'notes', 'callback_at', 'customer_name', 'customer_phone', 'customer_email', 'priority'];
     const updates = {};
     for (const key of allowed) {
-      if (req.body[key] !== undefined) updates[key] = req.body[key];
+      if (req.body[key] !== undefined) {
+        updates[key] = key === 'customer_name' ? titleCase(req.body[key]) : req.body[key];
+      }
     }
 
     // When rescheduling, reset notified so push fires again

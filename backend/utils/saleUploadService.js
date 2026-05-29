@@ -1,6 +1,7 @@
 const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
 const { normPhone, normName, getReference: getXferReference, buildIndex: buildXferIndex, resolveRow: resolveXferRow } = require('./uploadService');
+const { titleCase, titleCaseFormData } = require('./titleCase');
 
 // Retry a Supabase read a few times with backoff. Transient timeouts/5xx on the
 // heavy transfer/sales reads were intermittently failing a whole validation chunk
@@ -498,7 +499,7 @@ function buildSaleRow(row, batchId) {
     fronter_id:         row.fronter_user_id,
     company_id:         row.company_id,                // inherited fronter company (like manual)
     status,
-    customer_name:      row.customer_name || null,
+    customer_name:      titleCase(row.customer_name) || null,
     customer_phone:     row.customer_phone || row.cli_number || null,
     customer_phone_2:   row.customer_phone_2 || null,
     customer_email:     row.customer_email || null,
@@ -513,9 +514,9 @@ function buildSaleRow(row, batchId) {
     monthly_payment:    num(row.monthly_payment),
     payment_due_note:   row.payment_due_note || null,
     reference_no:       (row.reference_no && String(row.reference_no).trim()) || generateReferenceNo(),
-    client_name:        row.client_name || null,
+    client_name:        titleCase(row.client_name) || null,
     sale_date:          toIsoDate(row.sale_date) || new Date().toISOString().slice(0, 10),
-    form_data:          row.form_data || null,
+    form_data:          row.form_data ? titleCaseFormData(row.form_data) : null,
     closer_disposition: row.closer_disposition || null,
     compliance_note:    row.compliance_note || null,
     submitted_for_review_at: cs.submitted_for_review_at,

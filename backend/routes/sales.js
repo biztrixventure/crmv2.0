@@ -9,6 +9,7 @@ const { hasPermission, isSuperAdmin } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 
 const router = express.Router();
 
@@ -292,12 +293,12 @@ router.post(
       closer_id:   userId,
       company_id:  companyId,
       status:      status || 'open',
-      customer_name,
+      customer_name:    titleCase(customer_name),
       customer_phone,
       customer_phone_2: customer_phone_2 || null,
       customer_email:   customer_email   || null,
       customer_address: customer_address || null,
-      client_name: client_name || null,
+      client_name: titleCase(client_name) || null,
       fronter_id:  fronter_id  || null,
       sale_date:   saleDate,
     };
@@ -315,7 +316,7 @@ router.post(
       monthly_payment:  car.monthly_payment  || null,
       payment_due_note: car.payment_due_note || null,
       reference_no:     car.reference_no     || generateReferenceNo(),
-      form_data:        car.form_data        || form_data || null,
+      form_data:        titleCaseFormData(car.form_data || form_data) || null,
       closer_disposition: car.closer_disposition || null,
     });
 
@@ -526,7 +527,7 @@ router.put(
 
     const updates = { updated_at: new Date().toISOString() };
     if (status !== undefined)          updates.status           = status;
-    if (customer_name !== undefined)   updates.customer_name    = customer_name;
+    if (customer_name !== undefined)   updates.customer_name    = titleCase(customer_name);
     if (customer_phone !== undefined)  updates.customer_phone   = customer_phone;
     if (customer_phone_2 !== undefined) updates.customer_phone_2 = customer_phone_2;
     if (customer_email !== undefined)  updates.customer_email   = customer_email;
@@ -541,10 +542,10 @@ router.put(
     if (monthly_payment !== undefined) updates.monthly_payment  = monthly_payment;
     if (payment_due_note !== undefined) updates.payment_due_note = payment_due_note;
     if (reference_no !== undefined)    updates.reference_no     = reference_no;
-    if (client_name !== undefined)     updates.client_name      = client_name;
+    if (client_name !== undefined)     updates.client_name      = titleCase(client_name);
     if (fronter_id !== undefined)          updates.fronter_id          = fronter_id;
     if (sale_date !== undefined)           updates.sale_date           = sale_date;
-    if (form_data !== undefined)           updates.form_data           = form_data;
+    if (form_data !== undefined)           updates.form_data           = titleCaseFormData(form_data);
     if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;
 
     const { data: updated, error: updateError } = await supabaseAdmin

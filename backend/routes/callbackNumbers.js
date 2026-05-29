@@ -6,6 +6,7 @@ const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue } = require('../utils/searchSanitize');
+const { titleCase } = require('../utils/titleCase');
 
 const router = express.Router();
 
@@ -299,7 +300,7 @@ router.post('/',
       .insert({
         company_id:    companyId,
         phone_number:  req.body.phone_number,
-        customer_name: req.body.customer_name || null,
+        customer_name: titleCase(req.body.customer_name) || null,
         notes:         req.body.notes         || null,
         source:        req.body.source        || 'manual',
         source_id:     req.body.source_id     || null,
@@ -514,7 +515,9 @@ router.put('/:id',
     const allowed = ['customer_name', 'notes', 'phone_number'];
     const updates = { updated_at: new Date().toISOString() };
     for (const k of allowed) {
-      if (req.body[k] !== undefined) updates[k] = req.body[k];
+      if (req.body[k] !== undefined) {
+        updates[k] = k === 'customer_name' ? titleCase(req.body[k]) : req.body[k];
+      }
     }
 
     const { data, error } = await supabaseAdmin

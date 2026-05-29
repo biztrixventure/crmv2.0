@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
+const { titleCaseFormData } = require('./titleCase');
 
 // transfer_status values guaranteed to exist in the DB enum (migration 000).
 // Anything else from the file falls back to 'pending' (same default the manual
@@ -225,7 +226,7 @@ function buildTransferRow(row, batchId) {
     status:             safeStatus(row.status),
     normalized_phone:   normPhone(cli) || null,
     form_data: {
-      ...(row.form_data || {}),
+      ...titleCaseFormData(row.form_data || {}),
       cli_number:    normPhone(cli),
       transfer_date: row.transfer_date || row.form_data?.transfer_date || null,
     },
