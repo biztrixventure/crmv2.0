@@ -19,6 +19,8 @@ import {
   Bookmark, BookOpen, Trash2, Pencil, Check,
 } from 'lucide-react';
 import DispositionManager from './DispositionManager';
+import VehicleManager from '../Vehicles/VehicleManager';
+import ClientPlanManager from '../ClientPlans/ClientPlanManager';
 import client from '../../../api/client';
 import { toast, toastError } from '../../../utils/toast';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
@@ -85,6 +87,11 @@ const FieldIcon = ({ type, size = 14 }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Sidebar
 // ─────────────────────────────────────────────────────────────────────────────
+// Legacy entries hidden (clients / plans / mapping) — superseded by the new
+// 'clients-plans' manager which combines all three into one parent→child UI
+// that mirrors the Vehicles layout. Components stay imported and the legacy
+// activeSection branches still render in case a deep link / saved state lands
+// on one — data lives in sale_configs regardless of UI surface.
 const FB_SIDEBAR = [
   {
     section: 'FORM',
@@ -93,11 +100,15 @@ const FB_SIDEBAR = [
     ],
   },
   {
+    section: 'REGISTRY',
+    items: [
+      { id: 'vehicles',      label: 'Vehicles',         icon: Car  },
+      { id: 'clients-plans', label: 'Clients & Plans',  icon: Tag  },
+    ],
+  },
+  {
     section: 'SALE CONFIG',
     items: [
-      { id: 'clients',      label: 'Clients',           icon: Tag            },
-      { id: 'plans',        label: 'Plans',             icon: ListChecks     },
-      { id: 'mapping',      label: 'Client → Plans',    icon: ArrowRight     },
       { id: 'dispositions', label: 'Dispositions',      icon: MessageSquare  },
     ],
   },
@@ -1518,6 +1529,8 @@ const FormBuilder = () => {
               configLoading={configLoading}
             />
           )}
+          {activeSection === 'vehicles'      && <VehicleManager />}
+          {activeSection === 'clients-plans' && <ClientPlanManager />}
           {activeSection === 'dispositions' && <DispositionManager />}
         </div>
       </div>

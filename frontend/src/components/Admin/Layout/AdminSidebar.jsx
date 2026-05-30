@@ -27,8 +27,9 @@ const NAV_SECTIONS = [
       { id: 'roles',        label: 'Roles',        icon: Shield     },
       { id: 'companies',    label: 'Companies',    icon: Building2  },
       { id: 'forms',        label: 'Form Builder', icon: FileText   },
-      { id: 'vehicles',     label: 'Vehicles',     icon: Car        },
-      { id: 'clients-plans', label: 'Clients & Plans', icon: Tag    },
+      // Vehicles + Clients & Plans moved into Form Builder's internal
+      // sidebar so all form-related config lives in one place. Components
+      // are still imported in AdminPanel as a fallback for deep links.
       { id: 'faqs',         label: 'FAQs',         icon: HelpCircle },
       { id: 'scripts',      label: 'Scripts',      icon: MessageSquareText },
       { id: 'bulk-upload',  label: 'Bulk Upload',  icon: UploadCloud },

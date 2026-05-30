@@ -65,8 +65,9 @@ const AdminPanel = () => {
     ] : []),
     ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "vehicles",    label: "Vehicles"           }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "clients-plans", label: "Clients & Plans"  }] : []),
+    // Vehicles + Clients & Plans live inside Form Builder's internal sidebar
+    // now. Direct tab IDs still rendered below so any saved deep link / event
+    // dispatch ('admin-nav') with those values keeps working.
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "data-analyzer", label: "Data Analyzer"      }] : []),
