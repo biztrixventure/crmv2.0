@@ -51,7 +51,15 @@ const kindFor = (f) => {
     case 'date':
     case 'sale_date':              return 'range_date';
     case 'sale_status':            return 'multi_enum';
-    default:                       return 'text';
+    default:
+      // Any field whose form_fields row carries a non-empty options[] becomes
+      // a chip-grid filter — covers sale_disposition, sale_call_review, and
+      // any future option-bearing type without per-type wiring. The string-only
+      // guard skips sale_plan which uses options as { client, plans } objects.
+      if (Array.isArray(f.options) && f.options.length > 0 && f.options.every(o => typeof o === 'string')) {
+        return 'multi';
+      }
+      return 'text';
   }
 };
 
