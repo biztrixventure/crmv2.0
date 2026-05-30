@@ -41,7 +41,14 @@ const kindFor = (f) => {
   // name=State still becomes a state grid, and a free-text `Make` field still
   // becomes a make grid.
   if (/state\b/.test(name) || /state\b/.test(label)) return 'state';
+  // Model check must run BEFORE make so "car_model" doesn't accidentally match
+  // the /make/ pattern via substring (it doesn't today, but the order keeps
+  // future renames safe).
+  if (/\bmodel\b/.test(name) || /\bmodel\b/.test(label)) return 'car_model';
   if (/make/.test(name)    || /make/.test(label))    return 'make';
+  // sale_plan is the canonical Client → Plan child. Field_type-based detection
+  // covers admin-named variants like SalePlan / CustomPlan.
+  if (f.field_type === 'sale_plan') return 'sale_plan';
   switch (f.field_type) {
     case 'select':                 return 'multi';
     case 'checkbox':               return 'bool';
@@ -148,7 +155,91 @@ const Label = ({ children, sub }) => (
   </label>
 );
 
-const FieldControl = ({ field, value, onChange, vehicleMakes = [] }) => {
+// Compute the child-field options for parent → child pairs. Returns a string
+// array when the field is a known child AND should be scoped, or null when it
+// isn't a recognized pair — caller falls back to the field's own options[].
+//
+// Today this covers two pairs: sale_client → sale_plan and car_make → car_model.
+// Adding a new pair = one extra branch here; the FieldControl plumbing already
+// passes everything needed (parent fields, current filters, vehicle tree).
+const scopedChildOptions = ({ field, fields, filters, vehicleTree }) => {
+  const kind = kindFor(field);
+
+  if (kind === 'sale_plan') {
+    const clientField = fields.find(f => f.field_type === 'sale_client');
+    const selectedClients = (clientField && Array.isArray(filters[clientField.name]))
+      ? filters[clientField.name]
+      : [];
+    const mapping = Array.isArray(field.options) ? field.options : [];
+    const isObjMap = mapping.every(o => o && typeof o === 'object' && Array.isArray(o.plans));
+    // Without a parent selection, surface every plan across every client so
+    // the user isn't forced into picking a client first. Same fallback when
+    // the field's options aren't in the {client, plans} object shape.
+    if (!isObjMap) return Array.isArray(field.options) ? field.options : [];
+    if (selectedClients.length === 0) {
+      const all = new Set();
+      mapping.forEach(o => (o.plans || []).forEach(p => all.add(p)));
+      return [...all];
+    }
+    // Union of plans across the selected parents — picking multiple clients
+    // shouldn't AND-clip plans down to nothing.
+    const out = new Set();
+    selectedClients.forEach(c => {
+      const m = mapping.find(x => String(x.client).toLowerCase() === String(c).toLowerCase());
+      if (m) (m.plans || []).forEach(p => out.add(p));
+    });
+    return [...out];
+  }
+
+  if (kind === 'car_model') {
+    const makeField = fields.find(f => kindFor(f) === 'make');
+    const selectedMakes = (makeField && Array.isArray(filters[makeField.name]))
+      ? filters[makeField.name]
+      : [];
+    if (selectedMakes.length === 0) {
+      const all = new Set();
+      (vehicleTree || []).forEach(mk => (mk.models || []).forEach(m => all.add(m.name)));
+      return [...all];
+    }
+    const out = new Set();
+    selectedMakes.forEach(name => {
+      const mk = (vehicleTree || []).find(x => x.name.toLowerCase() === String(name).toLowerCase());
+      if (mk) (mk.models || []).forEach(m => out.add(m.name));
+    });
+    return [...out];
+  }
+
+  return null;
+};
+
+// Apply a filter change and, when the change is on a parent, drop any child
+// values that no longer fit the new parent set. Keeps the UI from showing
+// "active" chips on a child that the new parent scope can't actually reach,
+// which would otherwise emit a payload no row could match.
+const onParentOrChildChange = (state, field, nextVal, allFields, vehicleTree) => {
+  const next = { ...state, [field.name]: nextVal };
+  if (field.field_type === 'sale_client') {
+    const planField = allFields.find(f => f.field_type === 'sale_plan');
+    if (planField && Array.isArray(next[planField.name]) && next[planField.name].length) {
+      const allowed = new Set(
+        scopedChildOptions({ field: planField, fields: allFields, filters: next, vehicleTree }) || []
+      );
+      next[planField.name] = next[planField.name].filter(p => allowed.has(p));
+    }
+  }
+  if (kindFor(field) === 'make') {
+    const modelField = allFields.find(f => kindFor(f) === 'car_model');
+    if (modelField && Array.isArray(next[modelField.name]) && next[modelField.name].length) {
+      const allowed = new Set(
+        scopedChildOptions({ field: modelField, fields: allFields, filters: next, vehicleTree }) || []
+      );
+      next[modelField.name] = next[modelField.name].filter(m => allowed.has(m));
+    }
+  }
+  return next;
+};
+
+const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree = [], fields = [], filters = {} }) => {
   const kind = kindFor(field);
   const set = (v) => onChange(v);
 
@@ -171,10 +262,28 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [] }) => {
     // seeded yet — the explanatory helper text in the field card kicks in.
     return <ChipGrid value={value || []} onChange={set} options={vehicleMakes} cols={5} />;
   }
+  if (kind === 'car_model') {
+    // Child of `make`: options narrow to models belonging to currently-selected
+    // makes. With no make picked the grid shows every model across the
+    // registry so a "any-make Camry" query stays possible.
+    const scoped = scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
+    return <ChipGrid value={value || []} onChange={set} options={scoped} cols={5} />;
+  }
+  if (kind === 'sale_plan') {
+    // Child of `sale_client`: options narrow to plans for the selected clients,
+    // mirroring the cascading dropdown in SaleForm. Multi-select chip layout.
+    const scoped = scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
+    return <ChipGrid value={value || []} onChange={set} options={scoped} cols={4} />;
+  }
   if (kind === 'multi' || kind === 'multi_enum') {
-    const options = field._enum
-      ? field.options
-      : (Array.isArray(field.options) ? field.options : []);
+    // Generic option-bearing field. If it happens to be the child side of a
+    // parent → child pair, prefer the scoped option list over the raw config.
+    const scoped = scopedChildOptions({ field, fields, filters, vehicleTree });
+    const options = scoped != null
+      ? scoped
+      : (field._enum
+          ? field.options
+          : (Array.isArray(field.options) ? field.options : []));
     const sel = new Set(value || []);
     return (
       <div className="flex flex-wrap gap-1.5">
@@ -241,7 +350,10 @@ const buildPayload = (fields, filters) => fields
     const v = filters[f.name];
     const kind = kindFor(f);
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return null;
-    if (kind === 'state' || kind === 'make' || kind === 'multi' || kind === 'multi_enum') {
+    if (
+      kind === 'state' || kind === 'make' || kind === 'car_model' ||
+      kind === 'sale_plan' || kind === 'multi' || kind === 'multi_enum'
+    ) {
       return Array.isArray(v) && v.length ? { field: f.name, op: 'in', value: v } : null;
     }
     if (kind === 'bool') return { field: f.name, op: 'eq', value: v };
@@ -354,13 +466,14 @@ const DataAnalyzer = () => {
   // Filter presets
   const [presets, setPresets] = useState(readPresets);
 
-  // Vehicle registry powers the Car Make chip grid — fetched once and shared
-  // across filter renders so the filter list reflects the superadmin's
-  // /vehicles configuration instead of a hardcoded constant.
-  const [vehicleMakes, setVehicleMakes] = useState([]);
+  // Vehicle registry powers the Car Make chip grid AND the Car Model child
+  // filter — keeping the full tree (not just make names) lets the Model
+  // filter scope its options to the currently-selected makes.
+  const [vehicleTree, setVehicleTree] = useState([]);
+  const vehicleMakes = useMemo(() => vehicleTree.map(m => m.name), [vehicleTree]);
   useEffect(() => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
-    client.get('vehicles').then(r => setVehicleMakes((r.data.makes || []).map(m => m.name))).catch(() => {});
+    client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
   }, []);
 
   // Reset group-by + aggregates when dataset changes (filters stay — they're
@@ -511,7 +624,15 @@ const DataAnalyzer = () => {
                       </button>
                     )}
                   </div>
-                  <FieldControl field={f} value={v} vehicleMakes={vehicleMakes} onChange={(nv) => setFilters(s => ({ ...s, [f.name]: nv }))} />
+                  <FieldControl
+                    field={f}
+                    value={v}
+                    vehicleMakes={vehicleMakes}
+                    vehicleTree={vehicleTree}
+                    fields={allFilterFields}
+                    filters={filters}
+                    onChange={(nv) => setFilters(s => onParentOrChildChange(s, f, nv, allFilterFields, vehicleTree))}
+                  />
                 </div>
               );
             })}
