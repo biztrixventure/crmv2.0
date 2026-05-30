@@ -431,28 +431,42 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     // block or main form). Free text still allowed via Enter so backfill works
     // even when the registry doesn't carry that exact spelling.
     if (isCarMake(field)) {
+      // Strict mode: only values from the superadmin /vehicles registry land
+      // in formData. Changing the make also wipes the sibling model so a
+      // "Toyota Camry" doesn't become a "Honda Camry" by mistake when the
+      // user switches makes.
       return (
         <VehicleSelect
           mode="make"
           value={val}
           makes={makesList}
-          onChange={(v) => onChange({ target: { value: v } })}
+          strict
+          onChange={(v) => {
+            onChange({ target: { value: v } });
+            // Wipe the sibling model whenever the make changes so the cascading
+            // scope doesn't leave an orphan model from the previous brand.
+            // setValue routes to the right container (main form vs additional
+            // car block) so multi-car forms behave the same.
+            const modelF = (fields || []).find(f => isCarModel(f));
+            if (modelF && v !== val) setValue(modelF.name, '');
+          }}
           placeholder={ph || 'Type make…'}
         />
       );
     }
     if (isCarModel(field)) {
-      // Find sibling make field in the same field scope. `fields` is the full
-      // list — caller (default branch) only renders per-field, so any /make/
-      // sibling at the top level is the active one.
+      // Resolve the sibling make from the SAME container the model is in —
+      // `values` is the main form on the primary car and the per-car block on
+      // additional cars, so two cars on the same sale can carry different makes.
       const makeF = (fields || []).find(f => isCarMake(f));
-      const activeMake = makeF ? (formData[makeF.name] || '') : '';
+      const activeMake = makeF ? (values[makeF.name] || '') : '';
       return (
         <VehicleSelect
           mode="model"
           value={val}
           models={modelsForMake(activeMake)}
           requireMake
+          strict
           onChange={(v) => onChange({ target: { value: v } })}
           placeholder={ph || 'Type model…'}
         />

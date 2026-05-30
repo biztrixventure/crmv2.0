@@ -14,7 +14,12 @@ import { ChevronDown, Check, AlertCircle } from 'lucide-react';
 // `value` is the currently committed string; the parent owns it. Empty model
 // list is allowed; we render a friendly "pick a make first" hint instead of
 // blocking input so backfill flows still work.
-const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models = [], requireMake = false, placeholder, disabled = false }) => {
+// `strict` enforces registry-only values: Enter without a highlighted match
+// won't commit free text, on-blur won't propagate a typed value that doesn't
+// resolve to a real option, and the "Press Enter to use …" hint flips to a
+// red "no matches" warning. Use on customer-facing forms so reports group on
+// clean values; leave off (default) anywhere a hand-typed fallback is needed.
+const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models = [], requireMake = false, placeholder, disabled = false, strict = false }) => {
   const [q, setQ]       = useState(value || '');
   const [open, setOpen] = useState(false);
   const [hi, setHi]     = useState(0);     // highlighted index in filtered list
@@ -46,8 +51,29 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
   // Clamp the highlight when the filtered list shrinks under it.
   useEffect(() => { if (hi >= filtered.length) setHi(0); }, [filtered.length, hi]);
 
+  // Case-insensitive lookup against the registry — used by both the strict
+  // commit path and the Check-mark match in the dropdown.
+  const matchInRegistry = (val) => {
+    const needle = String(val || '').trim().toLowerCase();
+    if (!needle) return '';
+    const base = (baseOptions || []).map(o => typeof o === 'string' ? o : o.name);
+    const hit = base.find(n => n && n.toLowerCase() === needle);
+    return hit || '';
+  };
+
   const commit = (val) => {
     const trimmed = (val || '').trim();
+    // Strict: only accept a value that resolves to a registry entry, otherwise
+    // snap back to the last committed value (or clear). Prevents typos from
+    // landing in the DB and breaking cascading scopes downstream.
+    if (strict && trimmed) {
+      const canonical = matchInRegistry(trimmed);
+      if (!canonical) { setQ(value || ''); setOpen(false); return; }
+      setQ(canonical);
+      setOpen(false);
+      if (onChange) onChange(canonical);
+      return;
+    }
     setQ(trimmed);
     setOpen(false);
     if (onChange) onChange(trimmed);
@@ -58,9 +84,14 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
     else if (e.key === 'ArrowUp')   { e.preventDefault(); setHi(i => Math.max(0, i - 1)); }
     else if (e.key === 'Enter')     {
       e.preventDefault();
-      // Enter commits the highlighted match if there is one, else the typed
-      // text as-is. Empty input falls through and clears the field.
-      commit(filtered[hi] != null && filtered.length > 0 ? filtered[hi] : q);
+      // Strict: only the highlighted match counts; free text is rejected.
+      // Loose: Enter commits highlight if present, else the typed text as-is.
+      if (strict) {
+        if (filtered[hi] != null && filtered.length > 0) commit(filtered[hi]);
+        // else no-op — the dropdown's no-match warning tells the user why
+      } else {
+        commit(filtered[hi] != null && filtered.length > 0 ? filtered[hi] : q);
+      }
     }
     else if (e.key === 'Escape')    { setOpen(false); }
   };
@@ -76,7 +107,15 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
         disabled={disabled}
         onChange={e => { setQ(e.target.value); setOpen(true); setHi(0); }}
         onFocus={() => setOpen(true)}
-        onBlur={() => { /* commit on blur so the field reflects the typed value even without Enter */ setTimeout(() => onChange?.(q.trim()), 100); }}
+        onBlur={() => {
+          // Defer so a click on an option's onMouseDown can commit first.
+          // Strict mode runs the typed value through matchInRegistry — bad
+          // input snaps back to the last committed value via commit().
+          setTimeout(() => {
+            if (strict) commit(q);
+            else onChange?.(q.trim());
+          }, 100);
+        }}
         onKeyDown={onKeyDown}
         placeholder={placeholder || (mode === 'make' ? 'Type a make…' : noMake ? 'Pick a make first' : 'Type a model…')}
         className="input pr-8"
@@ -92,8 +131,11 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
               <AlertCircle size={12} /> Pick a make before choosing a model.
             </div>
           ) : filtered.length === 0 ? (
-            <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>
-              No matches. Press Enter to use “{q}” anyway.
+            <div className="px-3 py-2 text-xs flex items-center gap-1.5"
+              style={{ color: strict ? 'var(--color-error-600)' : 'var(--color-text-tertiary)' }}>
+              {strict
+                ? <><AlertCircle size={12} /> Not in the {mode} registry. Add it under Admin → Vehicles first.</>
+                : <span className="italic">No matches. Press Enter to use “{q}” anyway.</span>}
             </div>
           ) : (
             filtered.map((opt, idx) => (

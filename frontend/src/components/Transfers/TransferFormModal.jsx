@@ -185,12 +185,20 @@ const TransferFormModal = ({
                             </div>
                           );
                         } else if (isCarMake(field)) {
-                          input = <VehicleSelect mode="make" value={val} makes={makesList}
-                            onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type make…'} />;
+                          // Strict + cascading clear: switching makes wipes the
+                          // sibling model so the model picker can't keep a stale
+                          // entry from the previous brand.
+                          input = <VehicleSelect mode="make" value={val} makes={makesList} strict
+                            onChange={v => {
+                              setField(field.name, v);
+                              const modelF = fields.find(f => isCarModel(f));
+                              if (modelF && v !== val) setField(modelF.name, '');
+                            }}
+                            placeholder={field.placeholder || 'Type make…'} />;
                         } else if (isCarModel(field)) {
                           const makeF = fields.find(f => isCarMake(f));
                           const activeMake = makeF ? (formData[makeF.name] || '') : '';
-                          input = <VehicleSelect mode="model" value={val} models={modelsForMake(activeMake)} requireMake
+                          input = <VehicleSelect mode="model" value={val} models={modelsForMake(activeMake)} requireMake strict
                             onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type model…'} />;
                         } else {
                           // Normalize on change so phone strips brackets/dashes, VIN
