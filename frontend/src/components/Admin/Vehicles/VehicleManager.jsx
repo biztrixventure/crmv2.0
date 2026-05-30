@@ -1,7 +1,51 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Car, Plus, Trash2, Loader2, Search, ChevronRight } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Car, Plus, Trash2, Loader2, Search, ChevronRight, Pencil, Check, X } from 'lucide-react';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
+
+// Tiny inline-edit pill — click pencil, edit, Enter/click-check to save,
+// Escape/click-X to cancel. Keeps the row layout the same width so the
+// list doesn't reflow while editing.
+const EditableName = ({ name, onSave, busy = false }) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState(name);
+  const inputRef = useRef(null);
+
+  useEffect(() => { if (editing) { setVal(name); setTimeout(() => inputRef.current?.select(), 0); } }, [editing, name]);
+
+  const save = async () => {
+    const trimmed = String(val || '').replace(/\s+/g, ' ').trim();
+    if (!trimmed || trimmed === name) { setEditing(false); return; }
+    try { await onSave(trimmed); setEditing(false); } catch { /* parent surfaces the error */ }
+  };
+
+  if (!editing) {
+    return (
+      <span className="flex-1 flex items-center gap-1.5 min-w-0">
+        <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{name}</span>
+        <button type="button" onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+          title="Rename" className="p-0.5 rounded hover:bg-bg-secondary opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity">
+          <Pencil size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex-1 flex items-center gap-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+      <input ref={inputRef} value={val} onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') save(); else if (e.key === 'Escape') setEditing(false); }}
+        disabled={busy} className="input text-sm py-1 px-1.5 flex-1 min-w-0" />
+      <button type="button" onClick={save} disabled={busy} title="Save" className="p-1 rounded hover:bg-success-50">
+        {busy ? <Loader2 size={11} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+              : <Check size={11} style={{ color: 'var(--color-success-600)' }} />}
+      </button>
+      <button type="button" onClick={() => setEditing(false)} disabled={busy} title="Cancel" className="p-1 rounded hover:bg-error-50">
+        <X size={11} style={{ color: 'var(--color-error-500)' }} />
+      </button>
+    </span>
+  );
+};
 
 // VehicleManager — Admin → Form Config → Vehicles. Two-column layout: the
 // left column is a CSV-paste box for makes + the list of makes (click to
@@ -64,6 +108,21 @@ const VehicleManager = () => {
     finally { setBusy(false); }
   };
 
+  // Rename a make / model in the registry. Existing form rows that reference
+  // the OLD name don't update (the value is denormalized into form_data /
+  // sales.car_make), but the Data Analyzer's case-insensitive match on
+  // make/model fields keeps the breakdown coherent across the rename.
+  const renameMake = async (m, name) => {
+    setErr('');
+    try { await client.put(`vehicles/makes/${m.id}`, { name }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to rename make'); throw e; }
+  };
+  const renameModel = async (m, name) => {
+    setErr('');
+    try { await client.put(`vehicles/models/${m.id}`, { name }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to rename model'); throw e; }
+  };
+
   const filteredMakes = makes.filter(m => m.name.toLowerCase().includes(makeSearch.trim().toLowerCase()));
   const activeModels  = (active?.models || []).filter(m => m.name.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
@@ -116,14 +175,12 @@ const VehicleManager = () => {
                   const on = active?.id === m.id;
                   return (
                     <div key={m.id}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors"
+                      className="group flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors"
                       style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent' }}>
-                      <button onClick={() => setActive(m)} className="flex-1 flex items-center justify-between text-left">
-                        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{m.name}</span>
-                        <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                          {m.models?.length || 0} models
-                          <ChevronRight size={12} />
-                        </span>
+                      <EditableName name={m.name} onSave={(n) => renameMake(m, n)} busy={busy} />
+                      <button onClick={() => setActive(m)} className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {m.models?.length || 0} models
+                        <ChevronRight size={12} />
                       </button>
                       <button onClick={() => deleteMake(m)} title="Delete make" className="p-1 rounded hover:bg-error-50">
                         <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
@@ -165,9 +222,9 @@ const VehicleManager = () => {
                 {activeModels.length === 0
                   ? <p className="text-xs italic py-2" style={{ color: 'var(--color-text-tertiary)' }}>No models yet.</p>
                   : activeModels.map(m => (
-                    <div key={m.id} className="flex items-center justify-between px-2.5 py-1.5 rounded-md"
+                    <div key={m.id} className="group flex items-center gap-2 justify-between px-2.5 py-1.5 rounded-md"
                       style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                      <span className="text-sm" style={{ color: 'var(--color-text)' }}>{m.name}</span>
+                      <EditableName name={m.name} onSave={(n) => renameModel(m, n)} busy={busy} />
                       <button onClick={() => deleteModel(m)} title="Delete model" className="p-1 rounded hover:bg-error-50">
                         <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
                       </button>

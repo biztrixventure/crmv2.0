@@ -70,6 +70,23 @@ router.post('/makes/bulk', superadminOnly, asyncHandler(async (req, res) => {
   res.json({ added: inserted.length, makes: inserted });
 }));
 
+// ── PUT /vehicles/makes/:id — rename a make (casing fix, typo correction) ───
+// Existing sale / transfer rows reference the make by name string, not by FK,
+// so a rename here is local to the registry and doesn't cascade. The Data
+// Analyzer already matches case-insensitively for make/model fields, so a
+// historic "Gmc" row keeps matching after the registry entry becomes "GMC".
+router.put('/makes/:id', superadminOnly, asyncHandler(async (req, res) => {
+  const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim();
+  if (!name) return res.status(400).json({ error: 'name required.' });
+  const { data, error } = await supabaseAdmin
+    .from('vehicle_makes').update({ name }).eq('id', req.params.id).select().single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: `Another make already uses "${name}"` });
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ make: data });
+}));
+
 // ── DELETE /vehicles/makes/:id ───────────────────────────────────────────────
 router.delete('/makes/:id', superadminOnly, asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('vehicle_makes').delete().eq('id', req.params.id);
@@ -97,6 +114,19 @@ router.post('/models/bulk', superadminOnly, asyncHandler(async (req, res) => {
     }
   }
   res.json({ added: inserted.length, models: inserted });
+}));
+
+// ── PUT /vehicles/models/:id — rename a model (casing fix, typo correction) ─
+router.put('/models/:id', superadminOnly, asyncHandler(async (req, res) => {
+  const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim();
+  if (!name) return res.status(400).json({ error: 'name required.' });
+  const { data, error } = await supabaseAdmin
+    .from('vehicle_models').update({ name }).eq('id', req.params.id).select().single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: `Another model already uses "${name}" for this make` });
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ model: data });
 }));
 
 // ── DELETE /vehicles/models/:id ──────────────────────────────────────────────
