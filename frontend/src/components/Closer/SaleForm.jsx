@@ -284,6 +284,41 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     const listId = sug.length ? `ff-${errKey}` : undefined;
     const Dl = listId ? <datalist id={listId}>{sug.map(s => <option key={s} value={s} />)}</datalist> : null;
 
+    // Car make/model MUST come before the generic select / textarea branches
+    // — admins frequently set CarMake to field_type=select (it IS a dropdown)
+    // and that would otherwise render a plain empty <select> instead of the
+    // VehicleSelect typeahead. Same logic as TransferFormModal, kept in sync.
+    if (isCarMake(field)) {
+      return (
+        <VehicleSelect
+          mode="make"
+          value={val}
+          makes={makesList}
+          strict
+          onChange={(v) => {
+            setValue(field.name, v);
+            const modelF = (fields || []).find(f => isCarModel(f));
+            if (modelF && v !== val) setValue(modelF.name, '');
+          }}
+          placeholder={ph || 'Type make…'}
+        />
+      );
+    }
+    if (isCarModel(field)) {
+      const makeF = (fields || []).find(f => isCarMake(f));
+      const activeMake = makeF ? (values[makeF.name] || '') : '';
+      return (
+        <VehicleSelect
+          mode="model"
+          value={val}
+          models={modelsForMake(activeMake)}
+          requireMake
+          strict
+          onChange={(v) => setValue(field.name, v)}
+          placeholder={ph || 'Type model…'}
+        />
+      );
+    }
     if (field.field_type === 'textarea') {
       return (
         <textarea value={val} onChange={onChange} onBlur={onBlur} rows={3}
@@ -426,53 +461,6 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         </div>
       );
     }
-    // Car Make / Model — typeahead against the superadmin's /vehicles registry.
-    // Model is scoped by the currently-typed make from the same form scope (car
-    // block or main form). Free text still allowed via Enter so backfill works
-    // even when the registry doesn't carry that exact spelling.
-    if (isCarMake(field)) {
-      // Strict mode: only values from the superadmin /vehicles registry land
-      // in formData. Changing the make also wipes the sibling model so a
-      // "Toyota Camry" doesn't become a "Honda Camry" by mistake when the
-      // user switches makes.
-      return (
-        <VehicleSelect
-          mode="make"
-          value={val}
-          makes={makesList}
-          strict
-          onChange={(v) => {
-            onChange({ target: { value: v } });
-            // Wipe the sibling model whenever the make changes so the cascading
-            // scope doesn't leave an orphan model from the previous brand.
-            // setValue routes to the right container (main form vs additional
-            // car block) so multi-car forms behave the same.
-            const modelF = (fields || []).find(f => isCarModel(f));
-            if (modelF && v !== val) setValue(modelF.name, '');
-          }}
-          placeholder={ph || 'Type make…'}
-        />
-      );
-    }
-    if (isCarModel(field)) {
-      // Resolve the sibling make from the SAME container the model is in —
-      // `values` is the main form on the primary car and the per-car block on
-      // additional cars, so two cars on the same sale can carry different makes.
-      const makeF = (fields || []).find(f => isCarMake(f));
-      const activeMake = makeF ? (values[makeF.name] || '') : '';
-      return (
-        <VehicleSelect
-          mode="model"
-          value={val}
-          models={modelsForMake(activeMake)}
-          requireMake
-          strict
-          onChange={(v) => onChange({ target: { value: v } })}
-          placeholder={ph || 'Type model…'}
-        />
-      );
-    }
-
     // Generic text/number/email/phone/etc. — pipe through the normalizer so
     // phone strips parens/dashes, vin uppercases and clips at 17, name strips
     // digits, etc. The classify helper picks the rule once per field.

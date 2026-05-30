@@ -133,7 +133,25 @@ const TransferFormModal = ({
                         const onChange = e => setField(field.name, e.target.value);
 
                         let input;
-                        if (field.field_type === 'textarea') {
+                        // Car make/model first — otherwise an admin who set
+                        // CarMake's field_type to "select" (perfectly natural
+                        // for a dropdown) would hit the generic select branch
+                        // below and get an empty native <select> instead of
+                        // the VehicleSelect typeahead.
+                        if (isCarMake(field)) {
+                          input = <VehicleSelect mode="make" value={val} makes={makesList} strict
+                            onChange={v => {
+                              setField(field.name, v);
+                              const modelF = fields.find(f => isCarModel(f));
+                              if (modelF && v !== val) setField(modelF.name, '');
+                            }}
+                            placeholder={field.placeholder || 'Type make…'} />;
+                        } else if (isCarModel(field)) {
+                          const makeF = fields.find(f => isCarMake(f));
+                          const activeMake = makeF ? (formData[makeF.name] || '') : '';
+                          input = <VehicleSelect mode="model" value={val} models={modelsForMake(activeMake)} requireMake strict
+                            onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type model…'} />;
+                        } else if (field.field_type === 'textarea') {
                           input = <textarea value={val} onChange={onChange} rows={3} required={field.is_required}
                             placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input resize-none" />;
                         } else if (field.field_type === 'select') {
@@ -184,22 +202,6 @@ const TransferFormModal = ({
                               )}
                             </div>
                           );
-                        } else if (isCarMake(field)) {
-                          // Strict + cascading clear: switching makes wipes the
-                          // sibling model so the model picker can't keep a stale
-                          // entry from the previous brand.
-                          input = <VehicleSelect mode="make" value={val} makes={makesList} strict
-                            onChange={v => {
-                              setField(field.name, v);
-                              const modelF = fields.find(f => isCarModel(f));
-                              if (modelF && v !== val) setField(modelF.name, '');
-                            }}
-                            placeholder={field.placeholder || 'Type make…'} />;
-                        } else if (isCarModel(field)) {
-                          const makeF = fields.find(f => isCarMake(f));
-                          const activeMake = makeF ? (formData[makeF.name] || '') : '';
-                          input = <VehicleSelect mode="model" value={val} models={modelsForMake(activeMake)} requireMake strict
-                            onChange={v => setField(field.name, v)} placeholder={field.placeholder || 'Type model…'} />;
                         } else {
                           // Normalize on change so phone strips brackets/dashes, VIN
                           // uppercases + clips at 17, name strips digits, etc.
