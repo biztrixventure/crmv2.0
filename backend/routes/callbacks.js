@@ -210,7 +210,7 @@ router.post('/',
         user_timezone:     req.body.user_timezone      || null,
         customer_timezone: req.body.customer_timezone  || null,
         customer_state:    expandState(req.body.customer_state) || null,
-        customer_city:     req.body.customer_city      || null,
+        customer_city:     titleCase(req.body.customer_city)    || null,
       })
       .select()
       .single();

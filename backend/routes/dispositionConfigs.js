@@ -3,6 +3,8 @@ const router  = express.Router();
 const { supabaseAdmin } = require('../config/database');
 const { isSuperAdmin }  = require('../models/helpers');
 const { onDispositionSubmitted } = require('../utils/notificationService');
+const { titleCase } = require('../utils/titleCase');
+const { expandState } = require('../utils/stateMap');
 
 const ADMIN_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'operations_manager'];
 
@@ -231,7 +233,7 @@ router.post('/submit-callback', async (req, res) => {
       supabaseAdmin.from('callbacks').insert({
         user_id:           userId,
         company_id:        companyId,
-        customer_name:     customerName,
+        customer_name:     titleCase(customerName),
         customer_phone:    customerPhone,
         notes:             note?.trim() || null,
         callback_at,
@@ -241,8 +243,8 @@ router.post('/submit-callback', async (req, res) => {
         source_id:         transfer_id,
         notified:          false,
         customer_timezone: customer_timezone || null,
-        customer_state:    customer_state    || null,
-        customer_city:     customer_city     || null,
+        customer_state:    expandState(customer_state) || null,
+        customer_city:     titleCase(customer_city)    || null,
       }).select().single(),
     ]);
 
