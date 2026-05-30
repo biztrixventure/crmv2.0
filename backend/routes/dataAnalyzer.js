@@ -232,22 +232,75 @@ router.post('/export', asyncHandler(async (req, res) => {
   const all = await fetchAll(dataset, filters);
   const enriched = await enrichNames(all, dataset);
 
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  // Pull form_fields so JSONB keys get a human label and a stable column order
+  // matching what the admin configured on the form. Anything that appears in
+  // form_data but isn't in form_fields is appended in name-sorted order so a
+  // legacy / orphan key still exports instead of getting silently dropped.
+  const { data: ffRows } = await supabaseAdmin
+    .from('form_fields').select('name, label, order').order('order');
+  const fieldOrder = new Map();
+  const fieldLabel = new Map();
+  (ffRows || []).forEach((f, i) => {
+    fieldOrder.set(f.name, f.order ?? i);
+    fieldLabel.set(f.name, f.label || f.name);
+  });
 
-  let headers, rows;
-  if (dataset === 'sales') {
-    headers = ['id', 'sale_date', 'status', 'customer_name', 'customer_phone', 'customer_email',
-               'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
-               'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
-               'closer_name', 'fronter_name', 'company_name', 'created_at'];
-    rows = enriched.map(s => headers.map(h => s[h]));
-  } else {
-    headers = ['id', 'status', 'created_by_name', 'assigned_closer_name', 'company_name',
-               'normalized_phone', 'rejection_reason', 'rejection_count', 'sale_reference_no',
-               'form_data', 'created_at', 'updated_at'];
-    rows = enriched.map(t => headers.map(h => h === 'form_data' ? JSON.stringify(t.form_data || {}) : t[h]));
-  }
-  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\n');
+  const esc = (v) => {
+    // Always quote so embedded commas / newlines / quotes survive Excel + Sheets.
+    // Re-serialize booleans/numbers as plain strings; objects (rare leaf in form_data)
+    // get JSON so the cell isn't "[object Object]".
+    if (v == null) return '""';
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+
+  // Base typed columns per dataset. Same as before — these stay first in the
+  // CSV so existing reports keep their column positions.
+  const TYPED_SALES = ['id', 'sale_date', 'status', 'customer_name', 'customer_phone', 'customer_email',
+    'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
+    'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
+    'closer_name', 'fronter_name', 'company_name', 'created_at'];
+  const TYPED_TRANSFERS = ['id', 'status', 'created_by_name', 'assigned_closer_name', 'company_name',
+    'normalized_phone', 'rejection_reason', 'rejection_count', 'sale_reference_no',
+    'created_at', 'updated_at'];
+
+  const typed = dataset === 'sales' ? TYPED_SALES : TYPED_TRANSFERS;
+  const typedSet = new Set(typed);
+
+  // Union of JSONB keys actually present in this result set. Skip keys that
+  // already exist as typed columns so the CSV doesn't duplicate the same
+  // value under both a typed and a JSONB name.
+  const jsonKeys = new Set();
+  enriched.forEach(r => {
+    const fd = r.form_data;
+    if (fd && typeof fd === 'object') {
+      Object.keys(fd).forEach(k => { if (!typedSet.has(k)) jsonKeys.add(k); });
+    }
+  });
+
+  // Order: configured form_fields first (by form-builder order), then any
+  // orphan keys alphabetically so the suffix is deterministic.
+  const ordered = [...jsonKeys].sort((a, b) => {
+    const aHas = fieldOrder.has(a), bHas = fieldOrder.has(b);
+    if (aHas && bHas)        return fieldOrder.get(a) - fieldOrder.get(b);
+    if (aHas !== bHas)       return aHas ? -1 : 1;
+    return a.localeCompare(b);
+  });
+
+  // Header row uses the admin-set label when one exists, raw key otherwise.
+  const headerKeys   = [...typed, ...ordered];
+  const headerLabels = headerKeys.map(k => fieldLabel.get(k) || k);
+
+  // Leaf-value normalizer for JSONB cells — JSON-encode objects/arrays so a
+  // nested value doesn't blow up the row layout, leave scalars raw.
+  const valFor = (row, key) => {
+    if (typedSet.has(key)) return row[key];
+    const fd = row.form_data;
+    return fd && typeof fd === 'object' ? fd[key] : undefined;
+  };
+
+  const rows = enriched.map(r => headerKeys.map(k => valFor(r, k)));
+  const csv = [headerLabels, ...rows].map(r => r.map(esc).join(',')).join('\n');
 
   const stamp = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
