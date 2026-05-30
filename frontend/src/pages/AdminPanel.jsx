@@ -23,6 +23,7 @@ import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
+import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
@@ -65,6 +66,7 @@ const AdminPanel = () => {
     ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
     ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "vehicles",    label: "Vehicles"           }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "clients-plans", label: "Clients & Plans"  }] : []),
     ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "data-analyzer", label: "Data Analyzer"      }] : []),
@@ -117,6 +119,7 @@ const AdminPanel = () => {
               {activeTab === "numbers"     && <NumbersIntelligence />}
               {activeTab === "data-analyzer" && <DataAnalyzer />}
               {activeTab === "vehicles"     && <VehicleManager />}
+              {activeTab === "clients-plans" && <ClientPlanManager />}
               {activeTab === "faqs"        && <FAQManager />}
               {activeTab === "scripts"     && <ScriptManager />}
               {activeTab === "bulk-upload" && <BulkUploadHub />}
