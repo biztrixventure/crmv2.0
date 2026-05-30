@@ -18,26 +18,18 @@ const superadminOnly = asyncHandler(async (req, res, next) => {
   next();
 });
 
-// Title-case so "honda" / "HONDA" / "Honda" all land as "Honda" in the
-// registry. Matches frontend formFieldNorm so picker results stay consistent
-// with how new form submissions get normalized.
-function titleCase(s) {
-  return String(s || '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-}
-
 // Turn a pasted CSV / newline / pipe-separated string into a clean,
-// case-folded-deduped array of names. Tolerates extra whitespace and trailing
-// separators so users can paste straight from a spreadsheet cell.
+// case-folded-deduped array of names. Names are preserved AS TYPED — "BMW"
+// stays "BMW", "iPad" stays "iPad" — because brand styling carries meaning
+// and was previously being clobbered to "Bmw" / "Ipad" by an auto-titlecase.
+// Dedupe is case-insensitive so the same casing-variant pasted twice still
+// collapses to one entry, but the casing of the first occurrence wins.
 function parseCsv(input) {
   if (typeof input !== 'string') return [];
   const seen = new Set();
   const out = [];
   for (const raw of input.split(/[,\n\r\t|;]+/)) {
-    const name = titleCase(raw);
+    const name = String(raw || '').replace(/\s+/g, ' ').trim();
     if (!name) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;

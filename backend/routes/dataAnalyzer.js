@@ -60,13 +60,33 @@ function applyFilter(query, f, cfg) {
     case 'in': {
       const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null).map(String) : [];
       if (!arr.length) return query;
-      // Native PostgREST `in.(...)` works for typed cols AND JSONB keys
-      // (form_data->>field). Values are wrapped in double quotes so commas /
-      // spaces in entries like "New York" or "South Carolina" survive the
-      // parser; internal quotes get backslash-escaped. Earlier OR-of-ilike
-      // attempt broke because PostgREST's or() parser doesn't accept JSONB
-      // -> operators in column refs inside an OR group, so even simple
-      // state / status chip selections were 500-ing.
+
+      // Car make / model are stored as-typed in the registry now ("BMW",
+      // "RAV4") but legacy form_data rows carry title-cased variants ("Bmw",
+      // "Rav4") from migration 059. Match case-insensitively so the chip
+      // selection grabs both. Detection by name pattern keeps the matching
+      // logic out of the per-field config — any field whose key contains
+      // "make" or "model" gets the looser comparison.
+      const isMakeOrModel = /\b(make|model)\b/i.test(f.field);
+      if (isMakeOrModel && isTyped) {
+        // Typed column → OR-of-ilike works without JSONB quirks. Quote the
+        // value so spaces / commas in entries like "Land Rover" don't split
+        // the OR parts.
+        const parts = arr.map(s => `${col}.ilike."${s.replace(/"/g, '\\"')}"`).join(',');
+        return query.or(parts);
+      }
+      if (isMakeOrModel) {
+        // JSONB key path. PostgREST's or() parser rejects raw -> operators in
+        // column refs, but accepts them when the whole column ref is quoted
+        // with " ... " — the surrounding quotes turn it into a recognized
+        // identifier. Same value-quoting as the typed branch.
+        const colQ = `"${col}"`;
+        const parts = arr.map(s => `${colQ}.ilike."${s.replace(/"/g, '\\"')}"`).join(',');
+        return query.or(parts);
+      }
+
+      // Default in.(...) for every other field — case-sensitive exact match,
+      // which is what state / status / plan filters want.
       const quoted = arr.map(s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',');
       return query.filter(col, 'in', `(${quoted})`);
     }
