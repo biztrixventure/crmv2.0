@@ -39,13 +39,22 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
   }, [open]);
 
   const baseOptions = mode === 'make' ? makes : models;
-  // Filter is case-insensitive and matches on substring so "cam" hits both
-  // "Camry" and "Maxima Camry". Limit to 50 to keep the DOM cheap on big lists.
+  // Filter is case-insensitive. Prefix matches show first ("H" → Honda,
+  // Hyundai), then substring matches as a fallback ("amry" still finds
+  // Camry) — gives the spec'd "starts with" behavior without trapping a
+  // user who remembers a model by its tail. Cap at 50 so the DOM stays
+  // light on big registries.
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const base = (baseOptions || []).map(o => typeof o === 'string' ? o : o.name);
+    const base = (baseOptions || []).map(o => typeof o === 'string' ? o : o.name).filter(Boolean);
     if (!needle) return base.slice(0, 50);
-    return base.filter(n => n && n.toLowerCase().includes(needle)).slice(0, 50);
+    const prefix = [], rest = [];
+    base.forEach(n => {
+      const lc = n.toLowerCase();
+      if (lc.startsWith(needle)) prefix.push(n);
+      else if (lc.includes(needle)) rest.push(n);
+    });
+    return [...prefix, ...rest].slice(0, 50);
   }, [q, baseOptions]);
 
   // Clamp the highlight when the filtered list shrinks under it.
