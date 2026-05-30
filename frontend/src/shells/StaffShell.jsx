@@ -1212,11 +1212,16 @@ const StaffShell = () => {
                                 </select>
                               ) : field.field_type === 'zip' ? (
                                 <div className="relative">
+                                  {/* No HTML maxLength: a 10-char paste like "90210-1234" would
+                                      be clipped to "90210-1234" → "90210" anyway by the JS
+                                      digit-strip below, but "(845) 587-6504" pasted into the
+                                      zip slot would clip to "(845)" → "845" without the digit
+                                      strip seeing the full value. Let normalize handle the cap. */}
                                   <input type="text" inputMode="numeric"
                                     value={formData[field.name] || ''}
                                     onChange={e => handleFronterZipChange(field.name, e.target.value, fields)}
                                     className="input pr-8" required={field.is_required}
-                                    placeholder={field.placeholder || 'e.g. 90210'} maxLength={5} />
+                                    placeholder={field.placeholder || 'e.g. 90210'} />
                                   {zipFronterLoading && (
                                     <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
                                       <div className="animate-spin rounded-full h-4 w-4 border-b-2"

@@ -71,14 +71,17 @@ export const normalize = (field, raw) => {
   }
 };
 
-// Per-field maxLength to pass through to the <input>. Acts as a belt-and-
-// suspenders alongside `normalize`, so even paste events that bypass the
-// JS keystroke handler are clipped at the HTML level.
+// Per-field maxLength for the <input>. Intentionally undefined for the
+// digit-stripping kinds (zip / phone / vin) — the browser's maxLength runs
+// against the RAW pre-normalized string, so a paste of "(845) 587-6504"
+// (14 chars) would be clipped to "(845) 587-" BEFORE onChange fires, and
+// our digit-strip would then land on just "845587". `normalize` handles
+// the cap on the post-stripped value, which is what we actually want.
 export const maxLengthFor = (field) => {
   const kind = classify(field);
-  if (kind === 'zip')   return 5;
-  if (kind === 'phone') return 10;
-  if (kind === 'vin')   return 17;
+  // Name fields don't reformat the paste — safe to clip raw length too,
+  // but there's no business cap. Return undefined for everything so paste
+  // → normalize gets the full input first.
   return undefined;
 };
 

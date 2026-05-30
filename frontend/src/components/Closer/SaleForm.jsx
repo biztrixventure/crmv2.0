@@ -446,7 +446,8 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           <input type="text" inputMode="numeric" value={val}
             onChange={e => handleZipChange(field.name, e.target.value)}
             required={field.is_required} placeholder={ph || 'e.g. 90210'}
-            className={`input pr-8 ${errClass}`} maxLength={5} />
+            /* No HTML maxLength — pre-strip clip would break "(845)…" paste; JS slice caps. */
+            className={`input pr-8 ${errClass}`} />
           {zipLoading && (
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2"

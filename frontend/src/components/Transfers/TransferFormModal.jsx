@@ -185,7 +185,10 @@ const TransferFormModal = ({
                         } else if (classifyField(field) === 'zip') {
                           input = (
                             <div className="relative">
-                              <input type="text" inputMode="numeric" value={val} maxLength={5}
+                              {/* No HTML maxLength — would clip a "(845) …" paste before
+                                  handleZipChange could strip non-digits, leaving the wrong
+                                  five chars. The JS slice(0,5) on stripped value is the cap. */}
+                              <input type="text" inputMode="numeric" value={val}
                                 onChange={e => handleZipChange(field.name, e.target.value)}
                                 required={field.is_required}
                                 placeholder={field.placeholder || 'e.g. 90210'} className="input pr-8" />

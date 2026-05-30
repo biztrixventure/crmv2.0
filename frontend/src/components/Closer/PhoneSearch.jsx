@@ -86,7 +86,10 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
       .finally(() => setZipCbLoading(false));
   }, [showCallback]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleZipCbChange = (val) => {
+  const handleZipCbChange = (raw) => {
+    // Strip non-digits + cap at 5 in JS (not via HTML maxLength) so a
+    // "(845) 587-6504" paste isn't clipped pre-strip to "(845)" → "845".
+    const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
     setZipCbInput(val);
     setZipCbErr('');
     clearTimeout(zipCbTimer.current);
@@ -94,7 +97,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
     zipCbTimer.current = setTimeout(async () => {
       setZipCbLoading(true);
       try {
-        const res = await client.get(`zipcode/${val.trim()}`);
+        const res = await client.get(`zipcode/${val}`);
         setZipCbInfo(res.data);
       } catch { setZipCbErr('ZIP not found'); setZipCbInfo(null); }
       finally { setZipCbLoading(false); }
@@ -218,7 +221,8 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
           {/* ZIP lookup */}
           <div className="relative">
             <input value={zipCbInput} onChange={e => handleZipCbChange(e.target.value)}
-              className="input text-xs w-full pr-7" placeholder="Customer ZIP…" maxLength={5}
+              inputMode="numeric"
+              className="input text-xs w-full pr-7" placeholder="Customer ZIP…"
               style={{ fontSize: '11px' }} />
             {zipCbLoading && (
               <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -538,8 +542,11 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
                can paste "(555) 123-4567" and the field lands as 5551234567.
                10-digit cap matches what the backend normalized_phone index
                stores, so what the user sees == what the search hits. */
+            /* No HTML maxLength: it would clip a 14-char paste like
+               "(845) 587-6504" to "(845) 587-" before this handler runs,
+               and the digit-strip below would then drop to 6 digits. The
+               slice(0, 10) on the stripped value is the real cap. */
             onChange={e => setPhone(String(e.target.value).replace(/\D/g, '').slice(0, 10))}
-            maxLength={10}
             placeholder="Phone number…"
             className="input pl-8 w-full text-sm h-9"
           />

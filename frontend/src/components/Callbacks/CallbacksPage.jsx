@@ -174,7 +174,10 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
     prevTzRef.current = displayTz;
   }, [displayTz]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleZipChange = (val) => {
+  const handleZipChange = (raw) => {
+    // Strip non-digits + clip to 5 here (not via HTML maxLength) so a paste
+    // like "(845) 587-6504" lands as "8455" → "84558" not "(845)" → "845".
+    const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
     setZipInput(val);
     setZipErr('');
     clearTimeout(zipTimerRef.current);
@@ -182,7 +185,7 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
     zipTimerRef.current = setTimeout(async () => {
       setZipLoading(true);
       try {
-        const res = await client.get(`zipcode/${val.trim()}`);
+        const res = await client.get(`zipcode/${val}`);
         setZipInfo(res.data);
       } catch {
         setZipErr('ZIP not found');
@@ -288,7 +291,8 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
             </label>
             <div className="relative">
               <input value={zipInput} onChange={e => handleZipChange(e.target.value)}
-                className="input pr-8" placeholder="e.g. 90210" maxLength={5} />
+                inputMode="numeric"
+                className="input pr-8" placeholder="e.g. 90210" />
               {zipLoading && (
                 <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2"
