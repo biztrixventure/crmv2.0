@@ -277,7 +277,7 @@ router.post(
       if (transfer.company_id) companyId = transfer.company_id;
 
       // Auto-complete the transfer; if unassigned, claim it for the closer
-      const transferUpdates = { status: 'completed', updated_at: new Date().toISOString() };
+      const transferUpdates = { status: 'completed', updated_at: new Date().toISOString(), last_modified_by: userId };
       if (!transfer.assigned_closer_id) {
         transferUpdates.assigned_closer_id = userId;
         transferUpdates.assigned_to        = userId;
@@ -291,6 +291,7 @@ router.post(
     const sharedCols = {
       transfer_id: transfer_id || null,
       created_by:  userId,
+      last_modified_by: userId,
       closer_id:   userId,
       company_id:  companyId,
       status:      status || 'open',
@@ -526,7 +527,7 @@ router.put(
       return res.status(400).json({ error: 'This status can only be set through the compliance workflow' });
     }
 
-    const updates = { updated_at: new Date().toISOString() };
+    const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
     if (status !== undefined)          updates.status           = status;
     if (customer_name !== undefined)   updates.customer_name    = titleCase(customer_name);
     if (customer_phone !== undefined)  updates.customer_phone   = customer_phone;
@@ -786,7 +787,7 @@ router.post('/:id/compliance', [
   }
 
   // Build update — only allow specific fields for compliance
-  const updates = { updated_at: new Date().toISOString() };
+  const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
   if (status) updates.status = status;
 
   // Append audit entry

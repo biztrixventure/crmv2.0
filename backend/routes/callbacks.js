@@ -197,6 +197,7 @@ router.post('/',
       .insert({
         user_id:           ownerId,
         company_id:        companyId,
+        last_modified_by:  userId,
         customer_name:     titleCase(req.body.customer_name),
         customer_phone:    req.body.customer_phone    || null,
         customer_email:    req.body.customer_email    || null,
@@ -249,6 +250,7 @@ router.put('/:id',
     // When rescheduling, reset notified so push fires again
     if (updates.callback_at) updates.notified = false;
     updates.updated_at = new Date().toISOString();
+    updates.last_modified_by = userId;
 
     const superadmin = await isSuperAdmin(userId);
     const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);

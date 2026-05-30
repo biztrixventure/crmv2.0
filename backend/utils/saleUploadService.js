@@ -496,6 +496,7 @@ function buildSaleRow(row, batchId) {
   return {
     transfer_id:        row.transfer_id,
     created_by:         row.closer_user_id,            // manual: created_by = the closer
+    last_modified_by:   row.closer_user_id,            // audit trail attributes the bulk row to the closer
     closer_id:          row.closer_user_id,
     fronter_id:         row.fronter_user_id,
     company_id:         row.company_id,                // inherited fronter company (like manual)

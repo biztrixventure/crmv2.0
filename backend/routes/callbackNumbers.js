@@ -299,6 +299,7 @@ router.post('/',
       .from('callback_numbers')
       .insert({
         company_id:    companyId,
+        last_modified_by: userId,
         phone_number:  req.body.phone_number,
         customer_name: titleCase(req.body.customer_name) || null,
         notes:         req.body.notes         || null,
@@ -387,6 +388,7 @@ router.post('/:id/attempt',
       locked_until:    newLockedUntil,
       status:          'active', // re-activates if it was claimable
       updated_at:      now.toISOString(),
+      last_modified_by: userId,
     };
 
     // If do_not_call, mark released
@@ -419,6 +421,7 @@ router.post('/:id/attempt',
       await supabaseAdmin.from('callbacks').insert({
         user_id:        userId,
         company_id:     number.company_id,
+        last_modified_by: userId,
         customer_name:  number.customer_name || number.phone_number,
         customer_phone: number.phone_number,
         notes:          remarks || null,
@@ -470,6 +473,7 @@ router.post('/:id/claim', asyncHandler(async (req, res) => {
     locked_until: lockedUntil,
     release_at:  releaseAt,
     updated_at:  now.toISOString(),
+    last_modified_by: userId,
   }).eq('id', id);
 
   // Open new claim
@@ -513,7 +517,7 @@ router.put('/:id',
     if (!isManager && existing.owner_id !== userId) return res.status(403).json({ error: 'Access denied' });
 
     const allowed = ['customer_name', 'notes', 'phone_number'];
-    const updates = { updated_at: new Date().toISOString() };
+    const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
     for (const k of allowed) {
       if (req.body[k] !== undefined) {
         updates[k] = k === 'customer_name' ? titleCase(req.body[k]) : req.body[k];
@@ -586,6 +590,7 @@ router.put('/:id/reassign',
       locked_until: lockedUntil,
       release_at:   releaseAt,
       updated_at:   now.toISOString(),
+      last_modified_by: userId,
     }).eq('id', id);
 
     // Open new claim
@@ -634,6 +639,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     owner_id:   null,
     status:     'released',
     updated_at: now.toISOString(),
+    last_modified_by: userId,
   }).eq('id', id);
 
   await logHistory(id, userId, 'status_changed', {

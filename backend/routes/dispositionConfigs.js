@@ -183,7 +183,7 @@ router.post('/submit', async (req, res) => {
     // bulk upload). Only when not already assigned and the submitter is a closer.
     if (!transfer.assigned_closer_id && req.user.role === 'closer') {
       await supabaseAdmin.from('transfers')
-        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() })
+        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString(), last_modified_by: userId })
         .eq('id', transfer_id);
     }
 
@@ -233,6 +233,7 @@ router.post('/submit-callback', async (req, res) => {
       supabaseAdmin.from('callbacks').insert({
         user_id:           userId,
         company_id:        companyId,
+        last_modified_by:  userId,
         customer_name:     titleCase(customerName),
         customer_phone:    customerPhone,
         notes:             note?.trim() || null,
@@ -255,7 +256,7 @@ router.post('/submit-callback', async (req, res) => {
     // sees who scheduled the callback rather than "Unassigned".
     if (!transfer.assigned_closer_id && req.user.role === 'closer') {
       await supabaseAdmin.from('transfers')
-        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() })
+        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString(), last_modified_by: userId })
         .eq('id', transfer_id);
     }
 

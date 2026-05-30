@@ -508,6 +508,7 @@ router.post('/', [
   const newRow = {
     company_id:         companyId,
     created_by:         userId,
+    last_modified_by:   userId,
     form_data,
     normalized_phone:   norm || null,
     assigned_closer_id: hasCloser ? assigned_closer_id : null,
@@ -540,7 +541,7 @@ router.post('/', [
         const withinWindow = (Date.now() - new Date(tfs[0].created_at).getTime()) / 86400000 <= 30;
         if (withinWindow) {
           // Case A: UPDATE the most recent transfer in place — no new row, no count.
-          const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString() };
+          const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString(), last_modified_by: userId };
           if (hasCloser) {
             updates.assigned_closer_id = assigned_closer_id;
             updates.assigned_to        = assigned_closer_id;
@@ -622,6 +623,7 @@ router.post('/:id/reject', [
       assigned_closer_id: null,
       assigned_to:        null,
       updated_at:        new Date().toISOString(),
+      last_modified_by:  userId,
     })
     .eq('id', id)
     .select()
@@ -688,7 +690,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'A reason is required when editing transfer data' });
   }
 
-  const updates = { updated_at: new Date().toISOString() };
+  const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
   if (status) updates.status = status;
 
   // Reassign to a different closer

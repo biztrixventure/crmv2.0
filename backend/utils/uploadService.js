@@ -222,6 +222,7 @@ function buildTransferRow(row, batchId) {
   return {
     company_id:         row.company_id,
     created_by:         row.fronter_user_id,   // the fronter — NOT the uploading superadmin
+    last_modified_by:   row.fronter_user_id,   // audit attributes the bulk row to the fronter, not the uploader
     assigned_to:        null,
     assigned_closer_id: null,
     status:             safeStatus(row.status),
