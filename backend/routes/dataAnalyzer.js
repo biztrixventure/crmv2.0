@@ -58,17 +58,17 @@ function applyFilter(query, f, cfg) {
     case 'neq':        return v == null || v === '' ? query : query.filter(col, 'neq', v);
     case 'ilike':      return v == null || v === '' ? query : query.filter(col, 'ilike', `%${v}%`);
     case 'in': {
-      const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null) : [];
+      const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null).map(String) : [];
       if (!arr.length) return query;
-      // Use a case-insensitive OR of ilike-equality matches instead of `in`,
-      // so a value typed as "Honda" still matches form_data containing
-      // "honda" or "HONDA". The grid uses canonical casing (Honda) but the
-      // underlying form fields predate the registry — mixed casing in the
-      // wild is the reason the original `in` filter was returning zero hits
-      // even when the breakdown clearly showed matching rows.
-      const sanitize = (x) => String(x).replace(/[(),]/g, ' ');
-      const orParts = arr.map(x => `${col}.ilike.${sanitize(x)}`).join(',');
-      return query.or(orParts);
+      // Native PostgREST `in.(...)` works for typed cols AND JSONB keys
+      // (form_data->>field). Values are wrapped in double quotes so commas /
+      // spaces in entries like "New York" or "South Carolina" survive the
+      // parser; internal quotes get backslash-escaped. Earlier OR-of-ilike
+      // attempt broke because PostgREST's or() parser doesn't accept JSONB
+      // -> operators in column refs inside an OR group, so even simple
+      // state / status chip selections were 500-ing.
+      const quoted = arr.map(s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',');
+      return query.filter(col, 'in', `(${quoted})`);
     }
     case 'gte':         return v == null || v === '' ? query : query.filter(col, 'gte', v);
     case 'lte':         return v == null || v === '' ? query : query.filter(col, 'lte', v);
@@ -211,7 +211,11 @@ router.post('/query', asyncHandler(async (req, res) => {
   query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[data-analyzer/query] supabase error', { code: error.code, message: error.message, filters });
+    return res.status(500).json({ error: error.message, code: error.code });
+  }
 
   const enriched = await enrichNames(data || [], dataset);
 
