@@ -9,6 +9,8 @@ import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import { vehicleFieldIssues } from "../utils/vehicleValidation";
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../utils/formAssist";
+import { isCarMake, isCarModel } from "../utils/formFieldNorm";
+import VehicleSelect from "../components/Form/VehicleSelect";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -196,6 +198,19 @@ const StaffShell = () => {
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [closerSection, setCloserSection]   = useState('assigned'); // 'assigned' | 'sales'
+
+  // Vehicle registry — populates the CarMake / CarModel typeahead inside the
+  // fronter's New Transfer modal. Fetched once on mount; cheap enough that we
+  // don't gate it behind showCreateForm.
+  const [vehicleTree, setVehicleTree] = useState([]);
+  useEffect(() => {
+    client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
+  }, []);
+  const vehicleMakes = vehicleTree.map(m => m.name);
+  const vehicleModelsFor = (makeName) => {
+    const mk = vehicleTree.find(m => m.name.toLowerCase() === String(makeName || '').toLowerCase());
+    return (mk?.models || []).map(m => m.name);
+  };
 
   // Report the most specific active context to the mascot: a cross-role section
   // (calendar/team/…), the closer's Assigned/My-Sales sub-toggle, or the active
@@ -1124,7 +1139,38 @@ const StaffShell = () => {
                                 {field.label}
                                 {field.is_required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
                               </label>
-                              {field.field_type === 'textarea' ? (
+                              {isCarMake(field) ? (
+                                /* CarMake → typeahead from /vehicles registry. Picking a make
+                                   wipes the sibling model so a Honda Camry can't slip through
+                                   after switching brands. MUST match before textarea/select. */
+                                <VehicleSelect mode="make"
+                                  value={formData[field.name] || ''}
+                                  makes={vehicleMakes}
+                                  strict
+                                  onChange={v => {
+                                    setFormData(prev => {
+                                      const next = { ...prev, [field.name]: v };
+                                      const modelF = fields.find(f => isCarModel(f));
+                                      if (modelF && v !== (prev[field.name] || '')) next[modelF.name] = '';
+                                      return next;
+                                    });
+                                  }}
+                                  placeholder={field.placeholder || 'Type make…'} />
+                              ) : isCarModel(field) ? (
+                                /* CarModel → typeahead scoped to the currently-selected make. */
+                                (() => {
+                                  const makeF = fields.find(f => isCarMake(f));
+                                  const activeMake = makeF ? (formData[makeF.name] || '') : '';
+                                  return (
+                                    <VehicleSelect mode="model"
+                                      value={formData[field.name] || ''}
+                                      models={vehicleModelsFor(activeMake)}
+                                      requireMake strict
+                                      onChange={v => setFormData({ ...formData, [field.name]: v })}
+                                      placeholder={field.placeholder || 'Type model…'} />
+                                  );
+                                })()
+                              ) : field.field_type === 'textarea' ? (
                                 <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   onBlur={fmtBlur} className="input resize-none" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
                               ) : field.field_type === 'select' ? (
