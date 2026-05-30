@@ -9,8 +9,9 @@ import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import { vehicleFieldIssues } from "../utils/vehicleValidation";
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../utils/formAssist";
-import { isCarMake, isCarModel } from "../utils/formFieldNorm";
+import { isCarMake, isCarModel, normalize as normalizeField, maxLengthFor } from "../utils/formFieldNorm";
 import VehicleSelect from "../components/Form/VehicleSelect";
+import CopyableNumber from "../components/UI/CopyableNumber";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -479,19 +480,37 @@ const StaffShell = () => {
     }
   };
 
-  const handleFronterZipChange = (fieldName, val, allFields) => {
+  const handleFronterZipChange = (fieldName, raw, allFields) => {
+    // Strict 5-digit cap — strip every non-digit and clip to 5. Anything past
+    // five was just causing the zip lookup to 404. The cap also enforces what
+    // the form-level normalizer in formFieldNorm does for the same kind.
+    const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
     setFormData(prev => ({ ...prev, [fieldName]: val }));
     clearTimeout(zipFronterTimer.current);
-    if (val.replace(/\D/g, '').length < 5) { setZipFronterInfo(null); return; }
+
+    const cityF  = allFields.find(f => ['City','city','customer_city'].includes(f.name));
+    const stateF = allFields.find(f => ['State','state','customer_state'].includes(f.name));
+
+    if (val.length < 5) {
+      // Backspacing under 5 digits clears both the autofilled city + state so
+      // the user isn't left with stale geo from a previous zip lookup.
+      setZipFronterInfo(null);
+      setFormData(prev => {
+        const next = { ...prev };
+        if (cityF)  next[cityF.name]  = '';
+        if (stateF) next[stateF.name] = '';
+        return next;
+      });
+      return;
+    }
+
     zipFronterTimer.current = setTimeout(async () => {
       setZipFronterLoading(true);
       try {
-        const res = await client.get(`zipcode/${val.trim()}`);
+        const res = await client.get(`zipcode/${val}`);
         setZipFronterInfo(res.data);
         setFormData(prev => {
           const next = { ...prev };
-          const cityF  = allFields.find(f => ['City','city','customer_city'].includes(f.name));
-          const stateF = allFields.find(f => ['State','state','customer_state'].includes(f.name));
           if (cityF)  next[cityF.name]  = res.data.city;
           if (stateF) next[stateF.name] = res.data.state;
           return next;
@@ -659,7 +678,7 @@ const StaffShell = () => {
                           <td className="py-3 px-3 font-semibold text-text">
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs"><CopyableNumber value={t.form_data?.customer_phone || t.form_data?.Phone || ''} /></td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="py-3 px-3">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
@@ -875,7 +894,7 @@ const StaffShell = () => {
                                 : t.form_data?.customer_name || 'Unknown'}
                             </p>
                             <p className="text-xs text-text-secondary mt-0.5">
-                              {t.form_data?.Phone || t.form_data?.customer_phone || ''}
+                              <CopyableNumber value={t.form_data?.Phone || t.form_data?.customer_phone || ''} size={10} />
                             </p>
                           </div>
                           <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
@@ -1193,18 +1212,18 @@ const StaffShell = () => {
                                 </select>
                               ) : field.field_type === 'zip' ? (
                                 <div className="relative">
-                                  <input type="text"
+                                  <input type="text" inputMode="numeric"
                                     value={formData[field.name] || ''}
                                     onChange={e => handleFronterZipChange(field.name, e.target.value, fields)}
                                     className="input pr-8" required={field.is_required}
-                                    placeholder={field.placeholder || 'e.g. 90210'} maxLength={10} />
+                                    placeholder={field.placeholder || 'e.g. 90210'} maxLength={5} />
                                   {zipFronterLoading && (
                                     <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
                                       <div className="animate-spin rounded-full h-4 w-4 border-b-2"
                                         style={{ borderColor: 'var(--color-primary-600)' }} />
                                     </div>
                                   )}
-                                  {!zipFronterLoading && zipFronterInfo && (formData[field.name] || '').replace(/\D/g, '').length >= 5 && (
+                                  {!zipFronterLoading && zipFronterInfo && (formData[field.name] || '').length === 5 && (
                                     <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                                       {zipFronterInfo.city}, {zipFronterInfo.state}
                                     </p>
@@ -1212,9 +1231,14 @@ const StaffShell = () => {
                                 </div>
                               ) : (
                                 <>
+                                  {/* Pipe through formFieldNorm so phone strips brackets/dashes
+                                      and clips at 10 digits, VIN uppercases at 17, name strips
+                                      digits, etc. — even when a fronter pastes "(555) 123-4567". */}
                                   <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type}
-                                    value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                    value={formData[field.name] || ''}
+                                    onChange={e => setFormData({ ...formData, [field.name]: normalizeField(field, e.target.value) })}
                                     onBlur={fmtBlur} list={listId}
+                                    maxLength={maxLengthFor(field)}
                                     className="input" required={field.is_required} placeholder={field.placeholder || ''} />
                                   {listId && <datalist id={listId}>{sug.map(s => <option key={s} value={s} />)}</datalist>}
                                 </>
@@ -1312,7 +1336,7 @@ const StaffShell = () => {
                                 style={{ background: 'var(--gradient-sidebar)', fontSize: 13 }}>{(name[0] || 'L').toUpperCase()}</div>
                               <div className="min-w-0">
                                 <p className="font-semibold text-text truncate">{name}</p>
-                                {phone && <p className="text-xs text-text-secondary truncate">{phone}</p>}
+                                {phone && <p className="text-xs text-text-secondary truncate"><CopyableNumber value={phone} size={10} /></p>}
                               </div>
                             </div>
                             <Badge variant={ds.variant} size="sm">{ds.label}</Badge>

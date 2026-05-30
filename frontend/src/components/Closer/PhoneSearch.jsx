@@ -532,8 +532,14 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
           <Phone size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input
             type="tel"
+            inputMode="numeric"
             value={phone}
-            onChange={e => setPhone(e.target.value)}
+            /* Strip brackets / dashes / spaces on type AND paste so a closer
+               can paste "(555) 123-4567" and the field lands as 5551234567.
+               10-digit cap matches what the backend normalized_phone index
+               stores, so what the user sees == what the search hits. */
+            onChange={e => setPhone(String(e.target.value).replace(/\D/g, '').slice(0, 10))}
+            maxLength={10}
             placeholder="Phone number…"
             className="input pl-8 w-full text-sm h-9"
           />

@@ -13,6 +13,7 @@ import client from '../../api/client';
 import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz, ET_ZONE } from '../../utils/timezone';
+import CopyableNumber from '../UI/CopyableNumber';
 
 const STATUS_CONFIG = {
   pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
@@ -468,7 +469,7 @@ const CallbackDrawer = ({ callback: cb, companyTimezone, onEdit, onDelete, onSta
             {cb.customer_phone && (
               <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text)' }}>
                 <Phone size={13} style={{ color: 'var(--color-text-tertiary)' }} />
-                {cb.customer_phone}
+                <CopyableNumber value={cb.customer_phone} />
               </div>
             )}
             {cb.customer_email && (
@@ -780,7 +781,7 @@ const CallbacksPage = ({ user }) => {
                     <span className="flex items-center gap-1">
                       <Calendar size={10} /> {formatDateTime(cb.callback_at, cb.customer_timezone)}
                     </span>
-                    {cb.customer_phone && <span>📞 {cb.customer_phone}</span>}
+                    {cb.customer_phone && <span className="flex items-center gap-1">📞 <CopyableNumber value={cb.customer_phone} size={10} /></span>}
                   </div>
                   {cb.notes && (
                     <p className="text-[11px] mt-0.5 italic truncate"
