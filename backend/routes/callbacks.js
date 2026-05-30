@@ -9,6 +9,7 @@ const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCase } = require('../utils/titleCase');
+const { expandState } = require('../utils/stateMap');
 
 const router = express.Router();
 
@@ -208,7 +209,7 @@ router.post('/',
         notified:          false,
         user_timezone:     req.body.user_timezone      || null,
         customer_timezone: req.body.customer_timezone  || null,
-        customer_state:    req.body.customer_state     || null,
+        customer_state:    expandState(req.body.customer_state) || null,
         customer_city:     req.body.customer_city      || null,
       })
       .select()

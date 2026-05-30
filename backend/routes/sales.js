@@ -10,6 +10,7 @@ const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
+const { expandStateInFormData } = require('../utils/stateMap');
 
 const router = express.Router();
 
@@ -316,7 +317,7 @@ router.post(
       monthly_payment:  car.monthly_payment  || null,
       payment_due_note: car.payment_due_note || null,
       reference_no:     car.reference_no     || generateReferenceNo(),
-      form_data:        titleCaseFormData(car.form_data || form_data) || null,
+      form_data:        titleCaseFormData(expandStateInFormData(car.form_data || form_data)) || null,
       closer_disposition: car.closer_disposition || null,
     });
 
@@ -545,7 +546,7 @@ router.put(
     if (client_name !== undefined)     updates.client_name      = titleCase(client_name);
     if (fronter_id !== undefined)          updates.fronter_id          = fronter_id;
     if (sale_date !== undefined)           updates.sale_date           = sale_date;
-    if (form_data !== undefined)           updates.form_data           = titleCaseFormData(form_data);
+    if (form_data !== undefined)           updates.form_data           = titleCaseFormData(expandStateInFormData(form_data));
     if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;
 
     const { data: updated, error: updateError } = await supabaseAdmin

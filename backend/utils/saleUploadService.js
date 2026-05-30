@@ -2,6 +2,7 @@ const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
 const { normPhone, normName, getReference: getXferReference, buildIndex: buildXferIndex, resolveRow: resolveXferRow } = require('./uploadService');
 const { titleCase, titleCaseFormData } = require('./titleCase');
+const { expandStateInFormData } = require('./stateMap');
 
 // Retry a Supabase read a few times with backoff. Transient timeouts/5xx on the
 // heavy transfer/sales reads were intermittently failing a whole validation chunk
@@ -516,7 +517,7 @@ function buildSaleRow(row, batchId) {
     reference_no:       (row.reference_no && String(row.reference_no).trim()) || generateReferenceNo(),
     client_name:        titleCase(row.client_name) || null,
     sale_date:          toIsoDate(row.sale_date) || new Date().toISOString().slice(0, 10),
-    form_data:          row.form_data ? titleCaseFormData(row.form_data) : null,
+    form_data:          row.form_data ? titleCaseFormData(expandStateInFormData(row.form_data)) : null,
     closer_disposition: row.closer_disposition || null,
     compliance_note:    row.compliance_note || null,
     submitted_for_review_at: cs.submitted_for_review_at,

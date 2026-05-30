@@ -18,7 +18,7 @@ function titleCase(input) {
 // Identifier-shaped keys whose casing carries meaning. Mirrors the SQL
 // `app_key_titlecasable` denylist in migration 059 so behavior is identical
 // between the bulk-upload write path and the back-fill UPDATE.
-const KEY_SKIP_RE = /(^|_)(vin|email|mail|phone|mobile|tel|cli|zip|postal|url|link|website|password|reference|ref_no|refno|code|id|sku)($|_)/i;
+const KEY_SKIP_RE = /(^|_)(vin|email|mail|phone|mobile|tel|cli|zip|postal|state|url|link|website|password|reference|ref_no|refno|code|id|sku)($|_)/i;
 
 // Same value-shape guards: don't re-case URLs, emails, phone/zip-shaped
 // strings, or VIN-shaped tokens even if the key was generic.
