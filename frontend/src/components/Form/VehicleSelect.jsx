@@ -98,6 +98,11 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
 
   const noMake = mode === 'model' && requireMake && (!models || models.length === 0);
 
+  // Empty registry vs no-typed-match: separate cases so the message is
+  // actually useful. baseOptions is what we'd show if the user cleared the
+  // query — if it's empty, the registry itself is empty.
+  const registryEmpty = (baseOptions || []).length === 0 && !noMake;
+
   return (
     <div className="relative" ref={wrapRef}>
       <input
@@ -107,6 +112,10 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
         disabled={disabled}
         onChange={e => { setQ(e.target.value); setOpen(true); setHi(0); }}
         onFocus={() => setOpen(true)}
+        // Mouse down on an already-focused input doesn't refire onFocus, so
+        // click again wouldn't reopen the dropdown. Force-open on every click
+        // so the field always behaves like a real dropdown trigger.
+        onMouseDown={() => setOpen(true)}
         onBlur={() => {
           // Defer so a click on an option's onMouseDown can commit first.
           // Strict mode runs the typed value through matchInRegistry — bad
@@ -120,15 +129,30 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
         placeholder={placeholder || (mode === 'make' ? 'Type a make…' : noMake ? 'Pick a make first' : 'Type a model…')}
         className="input pr-8"
         autoComplete="off"
+        aria-haspopup="listbox"
+        aria-expanded={open}
       />
-      <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+      {/* Chevron is now a real click-target so users can toggle the dropdown
+          without typing — matches the affordance of a native <select>. */}
+      <button type="button" tabIndex={-1} disabled={disabled}
+        onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); inputRef.current?.focus(); }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-bg-secondary"
+        style={{ color: 'var(--color-text-tertiary)' }}>
+        <ChevronDown size={14} />
+      </button>
 
       {open && !disabled && (
-        <div className="absolute z-30 left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-lg"
+        // z-[60] beats the z-50 modal backdrop so the dropdown isn't clipped
+        // by a sibling field card or another control's stacking context.
+        <div className="absolute z-[60] left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-lg"
           style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: 240, overflowY: 'auto' }}>
           {noMake ? (
             <div className="px-3 py-2 text-xs flex items-center gap-1.5" style={{ color: 'var(--color-warning-700)' }}>
               <AlertCircle size={12} /> Pick a make before choosing a model.
+            </div>
+          ) : registryEmpty ? (
+            <div className="px-3 py-2 text-xs flex items-center gap-1.5" style={{ color: 'var(--color-warning-700)' }}>
+              <AlertCircle size={12} /> No {mode}s configured yet. Ask an admin to add them under Admin → Vehicles.
             </div>
           ) : filtered.length === 0 ? (
             <div className="px-3 py-2 text-xs flex items-center gap-1.5"
