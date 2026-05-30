@@ -7,6 +7,7 @@ const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { titleCase } = require('../utils/titleCase');
+const { stampActor } = require('../utils/auditColumnGuard');
 
 const router = express.Router();
 
@@ -297,9 +298,8 @@ router.post('/',
 
     const { data, error } = await supabaseAdmin
       .from('callback_numbers')
-      .insert({
+      .insert(await stampActor('callback_numbers', {
         company_id:    companyId,
-        last_modified_by: userId,
         phone_number:  req.body.phone_number,
         customer_name: titleCase(req.body.customer_name) || null,
         notes:         req.body.notes         || null,
@@ -310,7 +310,7 @@ router.post('/',
         locked_until:  lockedUntil,
         assigned_at:   now.toISOString(),
         release_at:    releaseAt,
-      })
+      }, userId))
       .select()
       .single();
 
@@ -383,13 +383,12 @@ router.post('/:id/attempt',
 
     // Re-lock: extend locked_until by 7 days from now
     const newLockedUntil = addDays(now, LOCK_DAYS);
-    const numberUpdates = {
+    const numberUpdates = await stampActor('callback_numbers', {
       last_attempt_at: now.toISOString(),
       locked_until:    newLockedUntil,
       status:          'active', // re-activates if it was claimable
       updated_at:      now.toISOString(),
-      last_modified_by: userId,
-    };
+    }, userId);
 
     // If do_not_call, mark released
     if (outcome === 'do_not_call') {
@@ -418,10 +417,9 @@ router.post('/:id/attempt',
     // If outcome = answered_callback and time given → create a regular callback entry
     // so the existing notification scheduler fires at that time
     if (outcome === 'answered_callback' && scheduled_callback_at) {
-      await supabaseAdmin.from('callbacks').insert({
+      await supabaseAdmin.from('callbacks').insert(await stampActor('callbacks', {
         user_id:        userId,
         company_id:     number.company_id,
-        last_modified_by: userId,
         customer_name:  number.customer_name || number.phone_number,
         customer_phone: number.phone_number,
         notes:          remarks || null,
@@ -429,7 +427,7 @@ router.post('/:id/attempt',
         status:         'pending',
         source:         'manual',
         notified:       false,
-      });
+      }, userId));
     }
 
     logger.info('CALLBACK_NUMBERS', `Attempt logged: ${outcome} on ${number.phone_number}`, { userId });
@@ -466,15 +464,14 @@ router.post('/:id/claim', asyncHandler(async (req, res) => {
     .is('owned_until', null);
 
   // Update number ownership
-  await supabaseAdmin.from('callback_numbers').update({
+  await supabaseAdmin.from('callback_numbers').update(await stampActor('callback_numbers', {
     owner_id:    userId,
     status:      'active',
     assigned_at: now.toISOString(),
     locked_until: lockedUntil,
     release_at:  releaseAt,
     updated_at:  now.toISOString(),
-    last_modified_by: userId,
-  }).eq('id', id);
+  }, userId)).eq('id', id);
 
   // Open new claim
   await supabaseAdmin.from('callback_number_claims').insert({
@@ -517,7 +514,7 @@ router.put('/:id',
     if (!isManager && existing.owner_id !== userId) return res.status(403).json({ error: 'Access denied' });
 
     const allowed = ['customer_name', 'notes', 'phone_number'];
-    const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
+    const updates = await stampActor('callback_numbers', { updated_at: new Date().toISOString() }, userId);
     for (const k of allowed) {
       if (req.body[k] !== undefined) {
         updates[k] = k === 'customer_name' ? titleCase(req.body[k]) : req.body[k];
@@ -583,15 +580,14 @@ router.put('/:id/reassign',
     const lockedUntil = addDays(now, LOCK_DAYS);
     const releaseAt   = addDays(now, RELEASE_DAYS);
 
-    await supabaseAdmin.from('callback_numbers').update({
+    await supabaseAdmin.from('callback_numbers').update(await stampActor('callback_numbers', {
       owner_id:     new_owner_id,
       status:       'active',
       assigned_at:  now.toISOString(),
       locked_until: lockedUntil,
       release_at:   releaseAt,
       updated_at:   now.toISOString(),
-      last_modified_by: userId,
-    }).eq('id', id);
+    }, userId)).eq('id', id);
 
     // Open new claim
     await supabaseAdmin.from('callback_number_claims').insert({
@@ -635,12 +631,11 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     .eq('callback_number_id', id)
     .is('owned_until', null);
 
-  await supabaseAdmin.from('callback_numbers').update({
+  await supabaseAdmin.from('callback_numbers').update(await stampActor('callback_numbers', {
     owner_id:   null,
     status:     'released',
     updated_at: now.toISOString(),
-    last_modified_by: userId,
-  }).eq('id', id);
+  }, userId)).eq('id', id);
 
   await logHistory(id, userId, 'status_changed', {
     field: 'status', oldVal: number.status, newVal: 'released',

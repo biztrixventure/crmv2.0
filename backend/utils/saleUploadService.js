@@ -3,6 +3,7 @@ const { etWallClockToUtc } = require('./etUtils');
 const { normPhone, normName, getReference: getXferReference, buildIndex: buildXferIndex, resolveRow: resolveXferRow } = require('./uploadService');
 const { titleCase, titleCaseFormData } = require('./titleCase');
 const { expandStateInFormData } = require('./stateMap');
+const { stampActor } = require('./auditColumnGuard');
 
 // Retry a Supabase read a few times with backoff. Transient timeouts/5xx on the
 // heavy transfer/sales reads were intermittently failing a whole validation chunk
@@ -496,7 +497,6 @@ function buildSaleRow(row, batchId) {
   return {
     transfer_id:        row.transfer_id,
     created_by:         row.closer_user_id,            // manual: created_by = the closer
-    last_modified_by:   row.closer_user_id,            // audit trail attributes the bulk row to the closer
     closer_id:          row.closer_user_id,
     fronter_id:         row.fronter_user_id,
     company_id:         row.company_id,                // inherited fronter company (like manual)
@@ -558,7 +558,10 @@ async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, 
     insertable.push(buildSaleRow({ ...row, company_id: r.company_id, fronter_user_id: r.fronter_user_id, closer_user_id: r.closer_user_id }, batch.id));
   }
   for (let i = 0; i < insertable.length; i += 100) {
-    const slice = insertable.slice(i, i + 100);
+    const raw = insertable.slice(i, i + 100);
+    // Attribute the bulk-upload audit row to the closer (same as created_by)
+    // when migration 063 is applied; no-op pre-migration.
+    const slice = await Promise.all(raw.map(r => stampActor('sales', r, r.created_by)));
     const { data, error } = await supabaseAdmin.from('sales').insert(slice).select('id, transfer_id, company_id, closer_id, closer_disposition');
     if (error) throw new Error(error.message);
     inserted += (data || []).length;

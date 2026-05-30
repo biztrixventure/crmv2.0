@@ -10,6 +10,7 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCase } = require('../utils/titleCase');
 const { expandState } = require('../utils/stateMap');
+const { stampActor } = require('../utils/auditColumnGuard');
 
 const router = express.Router();
 
@@ -194,10 +195,9 @@ router.post('/',
 
     const { data, error } = await supabaseAdmin
       .from('callbacks')
-      .insert({
+      .insert(await stampActor('callbacks', {
         user_id:           ownerId,
         company_id:        companyId,
-        last_modified_by:  userId,
         customer_name:     titleCase(req.body.customer_name),
         customer_phone:    req.body.customer_phone    || null,
         customer_email:    req.body.customer_email    || null,
@@ -212,7 +212,7 @@ router.post('/',
         customer_timezone: req.body.customer_timezone  || null,
         customer_state:    expandState(req.body.customer_state) || null,
         customer_city:     titleCase(req.body.customer_city)    || null,
-      })
+      }, userId))
       .select()
       .single();
 
@@ -250,7 +250,7 @@ router.put('/:id',
     // When rescheduling, reset notified so push fires again
     if (updates.callback_at) updates.notified = false;
     updates.updated_at = new Date().toISOString();
-    updates.last_modified_by = userId;
+    Object.assign(updates, await stampActor('callbacks', {}, userId));
 
     const superadmin = await isSuperAdmin(userId);
     const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);

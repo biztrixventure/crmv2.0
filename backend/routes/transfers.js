@@ -9,6 +9,7 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
+const { stampActor } = require('../utils/auditColumnGuard');
 
 const router = express.Router();
 
@@ -505,16 +506,15 @@ router.post('/', [
   const hasCloser = !!assigned_closer_id;
   const norm = normPhone(phoneFromFD(form_data));
 
-  const newRow = {
+  const newRow = await stampActor('transfers', {
     company_id:         companyId,
     created_by:         userId,
-    last_modified_by:   userId,
     form_data,
     normalized_phone:   norm || null,
     assigned_closer_id: hasCloser ? assigned_closer_id : null,
     assigned_to:        hasCloser ? assigned_closer_id : null,
     status:             hasCloser ? 'assigned' : 'pending',
-  };
+  }, userId);
 
   // Authoritative duplicate resolution (final check at write time — prevents a
   // race between the debounced input check and submit). STRICTLY this fronter's
@@ -541,7 +541,7 @@ router.post('/', [
         const withinWindow = (Date.now() - new Date(tfs[0].created_at).getTime()) / 86400000 <= 30;
         if (withinWindow) {
           // Case A: UPDATE the most recent transfer in place — no new row, no count.
-          const updates = { form_data, normalized_phone: norm, updated_at: new Date().toISOString(), last_modified_by: userId };
+          const updates = await stampActor('transfers', { form_data, normalized_phone: norm, updated_at: new Date().toISOString() }, userId);
           if (hasCloser) {
             updates.assigned_closer_id = assigned_closer_id;
             updates.assigned_to        = assigned_closer_id;
@@ -623,7 +623,7 @@ router.post('/:id/reject', [
       assigned_closer_id: null,
       assigned_to:        null,
       updated_at:        new Date().toISOString(),
-      last_modified_by:  userId,
+      ...(await stampActor('transfers', {}, userId)),
     })
     .eq('id', id)
     .select()
@@ -690,7 +690,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'A reason is required when editing transfer data' });
   }
 
-  const updates = { updated_at: new Date().toISOString(), last_modified_by: userId };
+  const updates = await stampActor('transfers', { updated_at: new Date().toISOString() }, userId);
   if (status) updates.status = status;
 
   // Reassign to a different closer

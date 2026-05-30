@@ -277,9 +277,12 @@ app.use(errorHandler);
 // START SERVER
 // ============================================================================
 
+const { warm: warmAuditCols } = require('./utils/auditColumnGuard');
+
 app.listen(PORT, () => {
   startCallbackScheduler();
   syncSuperadminMetadata(); // Stamp JWT metadata for superadmins — no-op if already done
+  warmAuditCols();          // Probe last_modified_by on tracked tables (mig 063)
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Supabase URL: ${process.env.VITE_SUPABASE_URL}`);

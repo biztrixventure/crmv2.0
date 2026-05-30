@@ -2,6 +2,7 @@ const { supabaseAdmin } = require('../config/database');
 const { etWallClockToUtc } = require('./etUtils');
 const { titleCaseFormData } = require('./titleCase');
 const { expandStateInFormData } = require('./stateMap');
+const { stampActor } = require('./auditColumnGuard');
 
 // transfer_status values guaranteed to exist in the DB enum (migration 000).
 // Anything else from the file falls back to 'pending' (same default the manual
@@ -222,7 +223,8 @@ function buildTransferRow(row, batchId) {
   return {
     company_id:         row.company_id,
     created_by:         row.fronter_user_id,   // the fronter — NOT the uploading superadmin
-    last_modified_by:   row.fronter_user_id,   // audit attributes the bulk row to the fronter, not the uploader
+    // last_modified_by also attributes to the fronter; stamped via stampActor
+    // in the route layer if the column exists (skipped pre-migration 063).
     assigned_to:        null,
     assigned_closer_id: null,
     status:             safeStatus(row.status),
@@ -263,7 +265,10 @@ async function insertApproved(rows, batchMeta, uploaderId) {
   let inserted = 0;
   // Insert in DB-side chunks of 100 to keep statements bounded.
   for (let i = 0; i < finalRows.length; i += 100) {
-    const slice = finalRows.slice(i, i + 100).map(r => buildTransferRow(r, batch.id));
+    const built = finalRows.slice(i, i + 100).map(r => buildTransferRow(r, batch.id));
+    // stampActor adds last_modified_by per row when migration 063 is applied;
+    // attributes the bulk insert to the fronter, mirroring created_by.
+    const slice = await Promise.all(built.map(r => stampActor('transfers', r, r.created_by)));
     const { data, error } = await supabaseAdmin.from('transfers').insert(slice).select('id');
     if (error) throw new Error(error.message);
     inserted += (data || []).length;

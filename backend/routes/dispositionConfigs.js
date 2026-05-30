@@ -5,6 +5,7 @@ const { isSuperAdmin }  = require('../models/helpers');
 const { onDispositionSubmitted } = require('../utils/notificationService');
 const { titleCase } = require('../utils/titleCase');
 const { expandState } = require('../utils/stateMap');
+const { stampActor } = require('../utils/auditColumnGuard');
 
 const ADMIN_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'operations_manager'];
 
@@ -183,7 +184,7 @@ router.post('/submit', async (req, res) => {
     // bulk upload). Only when not already assigned and the submitter is a closer.
     if (!transfer.assigned_closer_id && req.user.role === 'closer') {
       await supabaseAdmin.from('transfers')
-        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString(), last_modified_by: userId })
+        .update(await stampActor('transfers', { assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() }, userId))
         .eq('id', transfer_id);
     }
 
@@ -230,10 +231,9 @@ router.post('/submit-callback', async (req, res) => {
         note:             note?.trim() || null,
         setter_role:      req.user.role || null,
       }).select().single(),
-      supabaseAdmin.from('callbacks').insert({
+      supabaseAdmin.from('callbacks').insert(await stampActor('callbacks', {
         user_id:           userId,
         company_id:        companyId,
-        last_modified_by:  userId,
         customer_name:     titleCase(customerName),
         customer_phone:    customerPhone,
         notes:             note?.trim() || null,
@@ -246,7 +246,7 @@ router.post('/submit-callback', async (req, res) => {
         customer_timezone: customer_timezone || null,
         customer_state:    expandState(customer_state) || null,
         customer_city:     titleCase(customer_city)    || null,
-      }).select().single(),
+      }, userId)).select().single(),
     ]);
 
     if (actErr) throw actErr;
@@ -256,7 +256,7 @@ router.post('/submit-callback', async (req, res) => {
     // sees who scheduled the callback rather than "Unassigned".
     if (!transfer.assigned_closer_id && req.user.role === 'closer') {
       await supabaseAdmin.from('transfers')
-        .update({ assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString(), last_modified_by: userId })
+        .update(await stampActor('transfers', { assigned_closer_id: userId, assigned_to: userId, updated_at: new Date().toISOString() }, userId))
         .eq('id', transfer_id);
     }
 
