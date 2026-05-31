@@ -837,10 +837,15 @@ const StaffShell = () => {
                 total in the corner"). Approved is a one-click filter into the
                 My Sales list scoped to closed_won. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-              {/* My Sales — today big, total in corner. Click → sales sub-section, no filter. */}
+              {/* My Sales — body click filters to today's submitted sales;
+                  the corner "Total N" pill is its own click target that drops
+                  the date filter so the list below shows every sale ever
+                  submitted (without forcing the user to hunt for the date
+                  picker). stopPropagation prevents the card-level handler from
+                  also firing and re-applying today's filter. */}
               <Card
                 className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
-                onClick={() => { setCloserSection('sales'); setSalesStatus(''); }}
+                onClick={() => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('today')); }}
                 title="Show today's submitted sales"
               >
                 <div className="flex items-start justify-between">
@@ -851,10 +856,13 @@ const StaffShell = () => {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all')); }}
+                      title="Show all my sales (no date filter)"
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                       Total {statsLoading ? '—' : (stats.totalSales || 0)}
-                    </span>
+                    </button>
                     <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
                       <DollarSign size={20} className={`text-success-600`} />
                     </div>
@@ -862,11 +870,14 @@ const StaffShell = () => {
                 </div>
               </Card>
 
-              {/* Approved — click filters the sales list below to closed_won. */}
+              {/* Approved — body click filters to today's approved sales; the
+                  corner Total pill drops the date filter and keeps the
+                  closed_won status, so the user sees their full approved
+                  history in one click. */}
               <Card
                 className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
-                onClick={() => { setCloserSection('sales'); setSalesStatus('closed_won'); }}
-                title="Show approved sales"
+                onClick={() => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('today')); }}
+                title="Show today's approved sales"
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -876,10 +887,13 @@ const StaffShell = () => {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('all')); }}
+                      title="Show all approved sales (no date filter)"
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                       Total {statsLoading ? '—' : (stats.closedWon || 0)}
-                    </span>
+                    </button>
                     <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
                       <CheckCircle size={20} className={`text-success-600`} />
                     </div>
@@ -1136,11 +1150,12 @@ const StaffShell = () => {
                 corner pill. Approved + Awaiting Review filter the leads list
                 below on click; Conversion stays display-only. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              {/* Total Leads — today big, total in corner. Click clears any
-                  status filter so all of today's leads surface in the list. */}
+              {/* Total Leads — body click filters to today; corner Total pill
+                  drops the date filter so the user sees their full lead
+                  history without bouncing through the date picker. */}
               <Card
                 className="p-5 cursor-pointer transition-transform hover:scale-[1.02]"
-                onClick={() => { setXferStatus(''); setXferPage(1); }}
+                onClick={() => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('today')); }}
                 title="Show today's leads"
               >
                 <div className="flex items-start justify-between">
@@ -1151,10 +1166,13 @@ const StaffShell = () => {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('all')); }}
+                      title="Show all my leads (no date filter)"
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                       Total {statsLoading ? '—' : (stats.totalTransfers || 0)}
-                    </span>
+                    </button>
                     <div className={`p-2.5 rounded-xl bg-info-100 dark:bg-info-900`}>
                       <Send size={18} className={`text-info-600`} />
                     </div>
@@ -1162,12 +1180,13 @@ const StaffShell = () => {
                 </div>
               </Card>
 
-              {/* Approved Sales — today big, total in corner. Click filters the
-                  leads list to the "completed" status (leads that became sales). */}
+              {/* Approved Sales — body filters to today's converted leads;
+                  corner Total pill keeps the status filter and drops the date
+                  filter so the user sees every lead they've ever converted. */}
               <Card
                 className="p-5 cursor-pointer transition-transform hover:scale-[1.02]"
-                onClick={() => { setXferStatus('completed'); setXferPage(1); }}
-                title="Show leads that converted to approved sales"
+                onClick={() => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('today')); }}
+                title="Show today's converted leads"
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -1177,10 +1196,13 @@ const StaffShell = () => {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('all')); }}
+                      title="Show all my converted leads (no date filter)"
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                       Total {statsLoading ? '—' : (stats.closedWon || 0)}
-                    </span>
+                    </button>
                     <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
                       <CheckCircle size={18} className={`text-success-600`} />
                     </div>
