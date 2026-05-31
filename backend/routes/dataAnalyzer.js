@@ -73,29 +73,20 @@ function applyFilter(query, f, cfg) {
       const arr = rawArr.filter(x => x !== UNSPEC);
 
       if (hasUnspec) {
-        // 51 canonical state names — kept here (not the frontend) so a
-        // browser-side typo can't break the filter. Sales/transfers store
-        // state in form_data, so the column ref is the JSONB key path.
-        const CANONICAL = [
-          'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware',
-          'Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky',
-          'Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi',
-          'Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico',
-          'New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania',
-          'Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
-          'Virginia','Washington','West Virginia','Wisconsin','Wyoming','District of Columbia',
-        ];
+        // After migration 067, every non-canonical / junk state value is
+        // rewritten to JSON null. So the Unspecified bucket reduces to
+        // is.null — no need for a brittle not.in.(51 canonical) clause
+        // inside the OR group (PostgREST's OR parser doesn't like negated
+        // membership filters on quoted JSONB column refs — 500s the query).
+        //
+        // OR branches:
+        //   1. col in.(user's selected canonical states) when any picked
+        //   2. col is.null  (cleaned junk + originally-missing keys)
         const quote = s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
         const colQ  = `"${col}"`;
-        const knownList = `(${CANONICAL.map(quote).join(',')})`;
-        // Three OR branches:
-        //   1. col in.(user's selected canonical states)
-        //   2. col is.null (state key missing — covers post-migration cleanup)
-        //   3. col not.in.(all 51 canonical) — present but non-canonical
         const orParts = [];
         if (arr.length) orParts.push(`${colQ}.in.(${arr.map(quote).join(',')})`);
         orParts.push(`${colQ}.is.null`);
-        orParts.push(`${colQ}.not.in.${knownList}`);
         return query.or(orParts.join(','));
       }
 
