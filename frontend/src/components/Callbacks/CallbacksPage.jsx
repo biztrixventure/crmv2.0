@@ -14,6 +14,7 @@ import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz, ET_ZONE } from '../../utils/timezone';
 import CopyableNumber from '../UI/CopyableNumber';
+import CopyableText from '../UI/CopyableText';
 
 const STATUS_CONFIG = {
   pending:           { label: 'Pending',          color: '#f59e0b', bg: '#fef3c7', icon: Clock       },
@@ -509,8 +510,12 @@ const CallbackDrawer = ({ callback: cb, companyTimezone, onEdit, onDelete, onSta
           {cb.notes && (
             <div className="p-3 rounded-xl text-sm"
               style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>NOTES</p>
-              {cb.notes}
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>NOTES</p>
+              </div>
+              {/* Notes are explicitly opt-in to selection + copy via CopyableText so
+                  the shell-wide .bsx-no-select doesn't block this one block. */}
+              <CopyableText value={cb.notes} />
             </div>
           )}
 
