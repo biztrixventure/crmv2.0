@@ -75,18 +75,22 @@ function applyFilter(query, f, cfg) {
       if (hasUnspec) {
         // After migration 067, every non-canonical / junk state value is
         // rewritten to JSON null. So the Unspecified bucket reduces to
-        // is.null — no need for a brittle not.in.(51 canonical) clause
-        // inside the OR group (PostgREST's OR parser doesn't like negated
-        // membership filters on quoted JSONB column refs — 500s the query).
+        // is.null.
+        //
+        // DO NOT wrap the JSONB col ref in "..." inside an OR group — that
+        // makes PostgREST treat the whole quoted string as one identifier
+        // (e.g. `"form_data->>State"`) and Postgres throws "column does
+        // not exist" because no such literal column is registered. Raw
+        // `form_data->>State.in.(...)` is the supported syntax; PostgREST's
+        // OR parser tokenizes on `.` and recognizes the JSONB operator.
         //
         // OR branches:
         //   1. col in.(user's selected canonical states) when any picked
         //   2. col is.null  (cleaned junk + originally-missing keys)
         const quote = s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-        const colQ  = `"${col}"`;
         const orParts = [];
-        if (arr.length) orParts.push(`${colQ}.in.(${arr.map(quote).join(',')})`);
-        orParts.push(`${colQ}.is.null`);
+        if (arr.length) orParts.push(`${col}.in.(${arr.map(quote).join(',')})`);
+        orParts.push(`${col}.is.null`);
         return query.or(orParts.join(','));
       }
 
@@ -105,12 +109,13 @@ function applyFilter(query, f, cfg) {
         return query.or(parts);
       }
       if (isMakeOrModel) {
-        // JSONB key path. PostgREST's or() parser rejects raw -> operators in
-        // column refs, but accepts them when the whole column ref is quoted
-        // with " ... " — the surrounding quotes turn it into a recognized
-        // identifier. Same value-quoting as the typed branch.
-        const colQ = `"${col}"`;
-        const parts = arr.map(s => `${colQ}.ilike."${s.replace(/"/g, '\\"')}"`).join(',');
+        // JSONB key path. PostgREST's or() parser tokenizes column refs on
+        // `.` and recognizes raw `form_data->>field` as JSONB access — do
+        // NOT wrap the ref in "..." or Postgres reads the whole quoted
+        // string as a literal column identifier and 500s on "does not exist".
+        // Value-only quoting handles spaces / commas in entries like
+        // "Land Rover".
+        const parts = arr.map(s => `${col}.ilike."${s.replace(/"/g, '\\"')}"`).join(',');
         return query.or(parts);
       }
 
