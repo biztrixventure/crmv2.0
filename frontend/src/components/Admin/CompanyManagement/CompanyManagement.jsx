@@ -1,14 +1,19 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus, Search, Building2, MoreVertical,
   Edit2, XCircle, CheckCircle, Trash2,
-  ArrowUpDown, ChevronUp, ChevronDown,
+  ArrowUpDown, ChevronUp, ChevronDown, GripVertical,
 } from 'lucide-react';
 import { Alert } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
+import client from '../../../api/client';
 import CompanyModal from './CompanyModal';
 import CompanyDetail from './CompanyDetail';
+
+// Per-user preference key for the superadmin's custom company ordering.
+// Persisted via /user-preferences and reused across sessions / devices.
+const ORDER_PREF_KEY = 'companies.order';
 
 // ── type style map ─────────────────────────────────────────────────────────────
 const TYPE = {
@@ -17,7 +22,10 @@ const TYPE = {
 };
 
 // ── CompanyCard ────────────────────────────────────────────────────────────────
-const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onActivate, onDelete }) => {
+// `draggable` toggles the grip handle + native HTML5 drag events. The wrapper
+// adds the dnd handlers only when in custom-sort mode so name / date sort
+// stays static and accidental drags don't reorder a list the user can't save.
+const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onActivate, onDelete, draggable, dragHandlers }) => {
   const ts = TYPE[company.company_type] || {};
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos,  setMenuPos]  = useState({ top: 0, left: 0 });
@@ -44,6 +52,11 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
   return (
     <div
       onClick={() => onSelect(company)}
+      draggable={draggable}
+      onDragStart={dragHandlers?.onDragStart}
+      onDragOver={dragHandlers?.onDragOver}
+      onDrop={dragHandlers?.onDrop}
+      onDragEnd={dragHandlers?.onDragEnd}
       className="rounded-xl border cursor-pointer transition-all group"
       style={{
         borderColor: isSelected ? 'var(--color-primary-500)' : 'var(--color-border)',
@@ -52,6 +65,15 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
       }}
     >
       <div className="flex items-start gap-2.5 p-2.5">
+        {draggable && (
+          /* Grip handle — pure visual cue. native drag fires from any child,
+             so a click directly on the icon doesn't accidentally select the card. */
+          <div className="flex items-center justify-center w-4 flex-shrink-0 cursor-grab active:cursor-grabbing"
+            style={{ color: 'var(--color-text-tertiary)' }}
+            onClick={e => e.stopPropagation()}>
+            <GripVertical size={14} />
+          </div>
+        )}
         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{ backgroundColor: ts.bg || 'var(--color-bg-secondary)', border: `1px solid ${ts.border || 'var(--color-border)'}` }}>
           {company.logo_url
@@ -185,15 +207,24 @@ const SummaryPanel = ({ companies }) => {
 };
 
 // ── sort chevron ───────────────────────────────────────────────────────────────
-const SortBtn = ({ col, sort, onClick }) => (
-  <button onClick={() => onClick(col)} className="flex items-center gap-0.5 text-[10px] text-text-secondary font-semibold hover:text-text transition-colors">
-    {col === 'name' ? 'Name' : 'Date'}
-    {sort.col !== col
-      ? <ArrowUpDown size={9} className="opacity-40" />
-      : sort.dir === 'asc' ? <ChevronUp size={9} /> : <ChevronDown size={9} />
-    }
-  </button>
-);
+const SortBtn = ({ col, sort, onClick, label }) => {
+  const active = sort.col === col;
+  const showDir = active && col !== 'custom';   // custom has no asc/desc, just on/off
+  return (
+    <button onClick={() => onClick(col)}
+      className="flex items-center gap-0.5 text-[10px] font-semibold transition-colors"
+      style={{
+        color: active ? 'var(--color-primary-700)' : 'var(--color-text-secondary)',
+      }}>
+      {label || (col === 'name' ? 'Name' : col === 'custom' ? 'Custom' : 'Date')}
+      {col === 'custom'
+        ? <GripVertical size={9} className={active ? '' : 'opacity-40'} />
+        : showDir
+          ? (sort.dir === 'asc' ? <ChevronUp size={9} /> : <ChevronDown size={9} />)
+          : <ArrowUpDown size={9} className="opacity-40" />}
+    </button>
+  );
+};
 
 // ── filter chip ────────────────────────────────────────────────────────────────
 const Chip = ({ active, onClick, children }) => (
@@ -225,7 +256,63 @@ const CompanyManagement = () => {
   const [statusFilt,  setStatusFilt]  = useState('all');
   const [sort,        setSort]        = useState({ col: 'name', dir: 'asc' });
 
+  // Per-user custom ordering — an array of company IDs in display order.
+  // Loaded once on mount from /user-preferences and re-saved after every
+  // drag-drop. Missing IDs (companies added after the pref was saved) fall
+  // through to the end of the list in name order so a fresh company doesn't
+  // get hidden by a stale preference.
+  const [customOrder, setCustomOrder] = useState([]);
+  const dragId = useRef(null);
+
   useEffect(() => { fetchCompanies(); }, []);
+
+  // Hydrate the saved order. Server returns `value: null` when no pref exists
+  // for this user yet, which we treat as an empty array (no custom sort).
+  useEffect(() => {
+    client.get(`user-preferences/${ORDER_PREF_KEY}`)
+      .then(r => { if (Array.isArray(r.data?.value)) setCustomOrder(r.data.value); })
+      .catch(() => {});
+  }, []);
+
+  // Save the order back to the server. Fire-and-forget — local state already
+  // reflects the new order; server-side failure surfaces via the existing
+  // Alert on the next refetch, not via a blocking spinner during drag.
+  const persistOrder = useCallback((next) => {
+    setCustomOrder(next);
+    client.put(`user-preferences/${ORDER_PREF_KEY}`, { value: next }).catch(() => {});
+  }, []);
+
+  // Drag handlers — HTML5 native, no library. The currently-dragged company
+  // ID lives in a ref so we can do a single state update on drop instead of
+  // one per onDragOver tick. Reorder is in-place: drop on a target slides
+  // the dragged card into that slot. Only triggered in custom-sort mode so
+  // the handlers in CompanyCard receive undefined otherwise (no-op).
+  const onDragStart = (id) => (e) => { dragId.current = id; e.dataTransfer.effectAllowed = 'move'; };
+  const onDragOver  = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+  const onDrop      = (targetId) => (e) => {
+    e.preventDefault();
+    const src = dragId.current;
+    dragId.current = null;
+    if (!src || src === targetId) return;
+    // Start from the displayed `filtered` order so dropping is intuitive even
+    // when filters hide some companies. Anything outside `filtered` keeps
+    // its current relative slot in the persisted order.
+    const visibleIds = filteredRef.current.map(c => c.id);
+    const srcIdx = visibleIds.indexOf(src);
+    const tgtIdx = visibleIds.indexOf(targetId);
+    if (srcIdx < 0 || tgtIdx < 0) return;
+    const newVisible = [...visibleIds];
+    newVisible.splice(srcIdx, 1);
+    newVisible.splice(tgtIdx, 0, src);
+
+    // Merge: visible-in-new-order first, then any prior-order IDs that
+    // weren't in the visible set so hidden companies don't get scrambled.
+    const prevOrder = customOrder.length ? customOrder : companies.map(c => c.id);
+    const visibleSet = new Set(newVisible);
+    const merged = [...newVisible, ...prevOrder.filter(id => !visibleSet.has(id))];
+    persistOrder(merged);
+  };
+  const onDragEnd = () => { dragId.current = null; };
 
   // Keep selected in sync after refetch
   useEffect(() => {
@@ -252,12 +339,30 @@ const CompanyManagement = () => {
       if (statusFilt === 'inactive' &&  c.is_active) return false;
       return true;
     });
+
+    if (sort.col === 'custom') {
+      // Index lookup from the saved preference; anything missing (newly
+      // created company never dragged) gets a slot past the known order so
+      // it appears at the end instead of being hidden by the comparator.
+      const idx = new Map(customOrder.map((id, i) => [id, i]));
+      return [...list].sort((a, b) => {
+        const ai = idx.has(a.id) ? idx.get(a.id) : Number.MAX_SAFE_INTEGER;
+        const bi = idx.has(b.id) ? idx.get(b.id) : Number.MAX_SAFE_INTEGER;
+        if (ai !== bi) return ai - bi;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    }
     return [...list].sort((a, b) => {
       const av = sort.col === 'name' ? (a.name || '').toLowerCase() : (a.created_at || '');
       const bv = sort.col === 'name' ? (b.name || '').toLowerCase() : (b.created_at || '');
       return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     });
-  }, [companies, search, typeFilter, statusFilt, sort]);
+  }, [companies, search, typeFilter, statusFilt, sort, customOrder]);
+
+  // Mirror `filtered` to a ref so onDrop can read the displayed order without
+  // closing over a stale snapshot from the time the handler was bound.
+  const filteredRef = useRef(filtered);
+  useEffect(() => { filteredRef.current = filtered; }, [filtered]);
 
   const handleSave = async (formData) => {
     try {
@@ -341,7 +446,15 @@ const CompanyManagement = () => {
               <span className="text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Sort</span>
               <SortBtn col="name"    sort={sort} onClick={toggleSort} />
               <SortBtn col="created" sort={sort} onClick={toggleSort} />
+              {/* Custom: enables drag-and-drop reordering. The order persists
+                  per superadmin via /user-preferences (mig 065). */}
+              <SortBtn col="custom"  sort={sort} onClick={() => setSort({ col: 'custom', dir: 'asc' })} />
             </div>
+            {sort.col === 'custom' && (
+              <p className="text-[10px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                Drag the grip handle to reorder. Saved automatically.
+              </p>
+            )}
           </div>
 
           {/* list body */}
@@ -366,6 +479,13 @@ const CompanyManagement = () => {
                   onDeactivate={handleDeactivate}
                   onActivate={handleActivate}
                   onDelete={handleDelete}
+                  draggable={sort.col === 'custom'}
+                  dragHandlers={sort.col === 'custom' ? {
+                    onDragStart: onDragStart(c.id),
+                    onDragOver,
+                    onDrop: onDrop(c.id),
+                    onDragEnd,
+                  } : undefined}
                 />
               ))}
             </div>

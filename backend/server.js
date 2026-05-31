@@ -28,6 +28,7 @@ const callbackNumbersRoutes   = require('./routes/callbackNumbers');
 const featureFlagsRoutes      = require('./routes/featureFlags');
 const complianceRoutes        = require('./routes/compliance');
 const auditRoutes             = require('./routes/audit');
+const userPreferencesRoutes   = require('./routes/userPreferences');
 const activityLogsRoutes      = require('./routes/activityLogs');
 const leadIntelligenceRoutes    = require('./routes/leadIntelligence');
 const dispositionConfigsRoutes  = require('./routes/dispositionConfigs');
@@ -208,6 +209,7 @@ app.use('/api/callback-numbers',  authMiddleware, readonlyGuard, callbackNumbers
 app.use('/api/feature-flags',     authMiddleware, readonlyGuard, featureFlagsRoutes);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, complianceRoutes);
 app.use('/api/audit',             authMiddleware, readonlyGuard, auditRoutes);
+app.use('/api/user-preferences',  authMiddleware, userPreferencesRoutes);
 app.use('/api/activity-logs',       authMiddleware, readonlyGuard, activityLogsRoutes);
 app.use('/api/lead-intelligence',    authMiddleware, readonlyGuard, leadIntelligenceRoutes);
 app.use('/api/disposition-configs', authMiddleware, readonlyGuard, dispositionConfigsRoutes);
