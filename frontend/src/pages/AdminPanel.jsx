@@ -113,24 +113,37 @@ const AdminPanel = () => {
               <CompanyManagement />
             </div>
           ) : (
-            <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
-              {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
-              {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
-              {activeTab === "sale-search" && <LeadIntelligence />}
-              {activeTab === "numbers"     && <NumbersIntelligence />}
-              {activeTab === "data-analyzer" && <DataAnalyzer />}
-              {activeTab === "vehicles"     && <VehicleManager />}
-              {activeTab === "clients-plans" && <ClientPlanManager />}
-              {activeTab === "faqs"        && <FAQManager />}
-              {activeTab === "scripts"     && <ScriptManager />}
-              {activeTab === "bulk-upload" && <BulkUploadHub />}
-              {activeTab === "announcements" && <AnnouncementsManager />}
-              {activeTab === "marquee"       && <MarqueeManager />}
-              {activeTab === "spiff"         && <SpiffManager />}
-              {activeTab === "chat"          && <ChatAdmin />}
-              {activeTab === "features"    && <FeatureFlagsManager />}
-              <DevCredit />
-            </div>
+            // Data-heavy tabs (analyzer / search / numbers / bulk / chat /
+            // dashboard) drop the max-w cap so the table grids breathe on big
+            // monitors instead of leaving 30% of the screen as empty margins.
+            // Form-style tabs (vehicles, clients-plans, faqs, scripts, etc.)
+            // keep a comfortable reading width — wide forms feel awkward.
+            (() => {
+              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff']);
+              const wrap = WIDE.has(activeTab)
+                ? 'p-4 lg:p-6 w-full'
+                : 'p-4 lg:p-6 max-w-7xl mx-auto w-full';
+              return (
+                <div className={wrap}>
+                  {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
+                  {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
+                  {activeTab === "sale-search" && <LeadIntelligence />}
+                  {activeTab === "numbers"     && <NumbersIntelligence />}
+                  {activeTab === "data-analyzer" && <DataAnalyzer />}
+                  {activeTab === "vehicles"     && <VehicleManager />}
+                  {activeTab === "clients-plans" && <ClientPlanManager />}
+                  {activeTab === "faqs"        && <FAQManager />}
+                  {activeTab === "scripts"     && <ScriptManager />}
+                  {activeTab === "bulk-upload" && <BulkUploadHub />}
+                  {activeTab === "announcements" && <AnnouncementsManager />}
+                  {activeTab === "marquee"       && <MarqueeManager />}
+                  {activeTab === "spiff"         && <SpiffManager />}
+                  {activeTab === "chat"          && <ChatAdmin />}
+                  {activeTab === "features"    && <FeatureFlagsManager />}
+                  <DevCredit />
+                </div>
+              );
+            })()
           )}
         </main>
       </div>
