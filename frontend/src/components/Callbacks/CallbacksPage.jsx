@@ -600,11 +600,21 @@ const CallbacksPage = ({ user }) => {
   const [callbacks,    setCallbacks]    = useState([]);
   const [loading,      setLoading]      = useState(false);
   const [filter,       setFilter]       = useState('pending');
+  const [priority,     setPriority]     = useState('');     // '' | High | Medium | Low
+  const [search,       setSearch]       = useState('');     // customer name / phone substring
+  const [dateFrom,     setDateFrom]     = useState('');     // scheduled callback_at >=
+  const [dateTo,       setDateTo]       = useState('');     // scheduled callback_at <=
+  const [createdFrom,  setCreatedFrom]  = useState('');     // created_at >= (manager parity)
+  const [createdTo,    setCreatedTo]    = useState('');     // created_at <=
+  const [filtersOpen,  setFiltersOpen]  = useState(false);  // advanced filter drawer toggle
   const [modal,        setModal]        = useState(null);
   const [drawerCb,     setDrawerCb]     = useState(null);
   const [deleting,     setDeleting]     = useState(null);
   const [showPushBanner, setShowPushBanner] = useState(false);
   const [outcomeModal, setOutcomeModal] = useState(null);
+
+  // Today (local) ISO yyyy-mm-dd — used by the "Today created" quick toggle.
+  const todayISO = new Date().toISOString().slice(0, 10);
 
   const { permission, subscribed, loading: pushLoading, isSupported, subscribe } =
     usePushNotifications();
@@ -620,12 +630,22 @@ const CallbacksPage = ({ user }) => {
   const fetchCallbacks = useCallback(async () => {
     setLoading(true);
     try {
+      // Mirror ManagerCallbacksTab's parameter shape so a staff member gets the
+      // same server-side filters managers do (status, priority, search,
+      // scheduled date range, creation date range). user_id is scoped server-
+      // side via the JWT, so we don't pass it from the client.
       const params = { company_id: user?.company_id };
       if (filter !== 'all') params.status = filter;
+      if (priority)          params.priority     = priority;
+      if (search.trim())     params.search       = search.trim();
+      if (dateFrom)          params.date_from    = dateFrom;
+      if (dateTo)            params.date_to      = dateTo;
+      if (createdFrom)       params.created_from = createdFrom;
+      if (createdTo)         params.created_to   = createdTo;
       const res = await client.get('callbacks', { params });
       setCallbacks(res.data.callbacks || []);
     } catch {} finally { setLoading(false); }
-  }, [user?.company_id, filter]);
+  }, [user?.company_id, filter, priority, search, dateFrom, dateTo, createdFrom, createdTo]);
 
   useEffect(() => {
     fetchCallbacks();
@@ -716,8 +736,11 @@ const CallbacksPage = ({ user }) => {
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 mb-3 p-1 rounded-xl w-fit"
+      {/* Filter row — status tabs on the left, More-filters toggle on the right.
+          Mirrors the parameters ManagerCallbacksTab exposes so staff get the
+          same drill capability without the cross-team / cross-user picker. */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="flex gap-1 p-1 rounded-xl w-fit"
         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {[
           { key: 'pending',   label: 'Pending'  },
@@ -735,6 +758,104 @@ const CallbacksPage = ({ user }) => {
           </button>
         ))}
       </div>
+
+      {/* Today created quick-toggle — mirrors ManagerCallbacksTab so a
+          staff member can pull up only callbacks they created today with
+          one click. */}
+      {(() => {
+        const isTodayActive = createdFrom === todayISO && createdTo === todayISO;
+        return (
+          <button type="button"
+            onClick={() => {
+              if (isTodayActive) { setCreatedFrom(''); setCreatedTo(''); }
+              else               { setCreatedFrom(todayISO); setCreatedTo(todayISO); }
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+            style={{
+              backgroundColor: isTodayActive ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+              color:           isTodayActive ? '#fff' : 'var(--color-text-secondary)',
+              border:          `1px solid ${isTodayActive ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+            }}>
+            <Calendar size={11} /> Today
+          </button>
+        );
+      })()}
+
+      <button type="button"
+        onClick={() => setFiltersOpen(o => !o)}
+        className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+        style={{
+          backgroundColor: filtersOpen ? 'var(--color-primary-50)' : 'transparent',
+          color: filtersOpen ? 'var(--color-primary-700)' : 'var(--color-text-secondary)',
+          border: '1px solid var(--color-border)',
+        }}>
+        {filtersOpen ? 'Hide' : 'More'} filters
+        {(priority || search || dateFrom || dateTo) && (
+          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+            style={{ backgroundColor: 'var(--color-primary-600)', color: '#fff' }}>
+            {[priority, search, dateFrom, dateTo].filter(Boolean).length}
+          </span>
+        )}
+      </button>
+      </div>
+
+      {/* Advanced filter drawer — same fields ManagerCallbacksTab uses except
+          the cross-user picker (a staff member only sees their own callbacks). */}
+      {filtersOpen && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3 p-3 rounded-xl"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
+            <select value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm py-1.5">
+              <option value="">Any</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Search</label>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Name or phone…" className="input text-sm py-1.5" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Scheduled From</label>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              className="input text-sm py-1.5" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Scheduled To</label>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              className="input text-sm py-1.5" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Created From</label>
+            <input type="date" value={createdFrom} onChange={e => setCreatedFrom(e.target.value)}
+              className="input text-sm py-1.5" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}>Created To</label>
+            <input type="date" value={createdTo} onChange={e => setCreatedTo(e.target.value)}
+              className="input text-sm py-1.5" />
+          </div>
+          {(priority || search || dateFrom || dateTo || createdFrom || createdTo) && (
+            <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
+              <button type="button"
+                onClick={() => { setPriority(''); setSearch(''); setDateFrom(''); setDateTo(''); setCreatedFrom(''); setCreatedTo(''); }}
+                className="text-xs font-bold flex items-center gap-1"
+                style={{ color: 'var(--color-text-tertiary)' }}>
+                <X size={11} /> Clear all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Compact list */}
       {loading ? (

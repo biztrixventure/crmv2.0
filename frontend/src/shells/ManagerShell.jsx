@@ -460,36 +460,46 @@ const ManagerShell = () => {
             <SpiffWidget />
 
             {/* ── Stat cards ── */}
+            {/* Drill-down: each card's onClick now ALSO synchronizes the
+                destination tab's filter so the list count matches the card's
+                number. Total Sales clears any residual status filter; Approved
+                and Awaiting Review pre-apply the matching status. Previously a
+                stale filter from the last visit could hide records the user
+                expected to see. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 {
                   label: 'Total Transfers', value: overviewTotals.transfers, icon: Send, color: 'info',
                   tab: 'transfers',
+                  applyFilter: () => { setXferStatus?.(''); setXferPage?.(1); },
                   sub: overviewTotals.transfers > 0 && overviewTotals.sales > 0
                     ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null,
                 },
                 {
                   label: 'Total Sales', value: overviewTotals.sales, icon: DollarSign, color: 'success',
                   tab: 'team_sales',
+                  applyFilter: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); },
                   sub: overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null,
                 },
                 {
                   label: 'Approved', value: overviewTotals.approved, icon: CheckCircle, color: 'success',
                   tab: 'team_sales',
+                  applyFilter: () => { setSalesStatus('closed_won'); setSalesPage(1); },
                   sub: overviewTotals.sales > 0
                     ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null,
                 },
                 {
                   label: 'Awaiting Review', value: overviewTotals.pendingReview, icon: Clock, color: 'warning',
                   tab: 'team_sales',
+                  applyFilter: () => { setSalesStatus('pending_review'); setSalesPage(1); },
                   sub: overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear',
                 },
-              ].map(({ label, value, icon: Icon, color, tab, sub }) => {
+              ].map(({ label, value, icon: Icon, color, tab, sub, applyFilter }) => {
                 const canNav = tabKeys.has(tab);
                 return (
                   <Card key={label}
                     className={`p-5 group transition-all duration-200 ${canNav ? 'cursor-pointer hover:shadow-md' : ''}`}
-                    onClick={canNav ? () => setActiveTab(tab) : undefined}
+                    onClick={canNav ? () => { applyFilter?.(); setActiveTab(tab); } : undefined}
                     style={{ borderColor: canNav ? undefined : 'var(--color-border)' }}>
                     <div className="flex items-start justify-between mb-3">
                       <div className={`p-2.5 rounded-xl bg-${color}-100 dark:bg-${color}-900 transition-transform duration-200 ${canNav ? 'group-hover:scale-110' : ''}`}>
