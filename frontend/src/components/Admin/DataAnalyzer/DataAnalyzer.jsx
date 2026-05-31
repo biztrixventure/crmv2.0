@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2 } from 'lucide-react';
 import client from '../../../api/client';
-import StateGrid, { ChipGrid } from './StateGrid';
+import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -266,8 +266,13 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     // Child of `make`: options narrow to models belonging to currently-selected
     // makes. With no make picked the grid shows every model across the
     // registry so a "any-make Camry" query stays possible.
+    //
+    // CollapsibleChipGrid keeps the rail short when the registry runs into
+    // hundreds of models — header collapses by default past 24 entries, with
+    // an internal search box for fast narrowing. Same chip click-to-toggle
+    // mechanics as the regular grid, no behavior change beyond visibility.
     const scoped = scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
-    return <ChipGrid value={value || []} onChange={set} options={scoped} cols={5} />;
+    return <CollapsibleChipGrid value={value || []} onChange={set} options={scoped} cols={5} />;
   }
   if (kind === 'sale_plan') {
     // Child of `sale_client`: options narrow to plans for the selected clients,

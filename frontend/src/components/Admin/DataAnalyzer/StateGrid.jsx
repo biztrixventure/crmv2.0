@@ -54,10 +54,82 @@ const ChipGrid = ({ value = [], onChange, options = [], cols = 7 }) => {
   );
 };
 
+// CollapsibleChipGrid — same multi-select chip grid, wrapped in a click-to-
+// expand header with an internal search box. For car_model (and any future
+// large-catalog field): a registry of 500+ models would otherwise take over
+// the whole filter rail; collapsed default + search keeps the rail short
+// while still letting the user grab a specific entry quickly.
+//
+// Default collapsed when options.length > collapseThreshold, expanded
+// otherwise (preserves the inline experience for short lists). Expansion
+// state is local — opening a filter shouldn't survive a page reload, since
+// the user's interest pattern can change.
+import { useState, useMemo } from 'react';
+import { ChevronDown, ChevronUp, Search as SearchIcon } from 'lucide-react';
+
+const CollapsibleChipGrid = ({ value = [], onChange, options = [], cols = 5, collapseThreshold = 24 }) => {
+  const [open, setOpen] = useState(options.length <= collapseThreshold);
+  const [q, setQ]       = useState('');
+
+  // Prefix-first filter so typing "ca" surfaces "Camry" before "Maxima Camry".
+  // Empty query shows everything (capped at 200 visible rows so an enormous
+  // registry doesn't blow up the DOM in one shot).
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return options.slice(0, 200);
+    const prefix = [], rest = [];
+    options.forEach(o => {
+      const lc = String(o).toLowerCase();
+      if (lc.startsWith(needle)) prefix.push(o);
+      else if (lc.includes(needle)) rest.push(o);
+    });
+    return [...prefix, ...rest].slice(0, 200);
+  }, [q, options]);
+
+  const selected = (value || []).length;
+
+  return (
+    <div className="space-y-2">
+      {/* Header: counts + chevron toggle. Click anywhere on the bar opens it. */}
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md"
+        style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold"
+          style={{ color: 'var(--color-text-secondary)' }}>
+          {selected > 0
+            ? <><strong style={{ color: 'var(--color-primary-700)' }}>{selected}</strong> selected · {options.length} total</>
+            : <>{options.length} options</>}
+        </span>
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+
+      {open && (
+        <>
+          {options.length > 8 && (
+            <div className="relative">
+              <SearchIcon size={11} className="absolute left-2 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--color-text-tertiary)' }} />
+              <input value={q} onChange={e => setQ(e.target.value)}
+                placeholder="Search…" className="input text-xs pl-6 py-1 h-7" />
+            </div>
+          )}
+          <ChipGrid value={value} onChange={onChange} options={filtered} cols={cols} />
+          {options.length > filtered.length && (
+            <p className="text-[10px] italic text-center"
+              style={{ color: 'var(--color-text-tertiary)' }}>
+              Showing {filtered.length} of {options.length}. Refine the search to narrow.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 // Backwards-compat alias — kept so external callers (DataAnalyzer) and the
 // re-export don't break. `states` prop maps to `options`, fixed at 7 cols.
 const StateGrid = ({ value, onChange, states }) =>
   <ChipGrid value={value} onChange={onChange} options={states} cols={7} />;
 
 export default StateGrid;
-export { ChipGrid };
+export { ChipGrid, CollapsibleChipGrid };
