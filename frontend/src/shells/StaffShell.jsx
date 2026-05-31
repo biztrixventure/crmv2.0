@@ -831,26 +831,95 @@ const StaffShell = () => {
               <PhoneSearch onCreateSale={openSaleModal} companyTimezone={user?.company_timezone} refreshTrigger={phoneSearchRefresh} />
             </div>
 
-            {/* Stats */}
+            {/* Stats — clickable cards. The first card flips its layout so the
+                primary number is TODAY's count with the running total tucked
+                into a corner pill, matching the spec ("today highlighted,
+                total in the corner"). Approved is a one-click filter into the
+                My Sales list scoped to closed_won. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-              {[
-                { label: 'My Sales',        value: stats.totalSales || 0,          icon: DollarSign, color: 'success' },
-                { label: 'Approved',        value: stats.closedWon || 0,           icon: CheckCircle,color: 'success' },
-                { label: 'Awaiting Review', value: stats.awaitingCompliance || 0,  icon: Clock,      color: 'warning' },
-                { label: 'Conversion',      value: `${stats.conversionRate || 0}%`,icon: Target,     color: 'info'    },
-              ].map(({ label, value, icon: Icon, color }) => (
-                <Card key={label} className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{statsLoading ? '—' : value}</p>
-                    </div>
-                    <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
-                      <Icon size={22} className={`text-${color}-600`} />
+              {/* My Sales — today big, total in corner. Click → sales sub-section, no filter. */}
+              <Card
+                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setCloserSection('sales'); setSalesStatus(''); }}
+                title="Show today's submitted sales"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">My Sales · Today</p>
+                    <p className={`text-3xl font-bold text-success-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.todaySales || 0)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Total {statsLoading ? '—' : (stats.totalSales || 0)}
+                    </span>
+                    <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
+                      <DollarSign size={20} className={`text-success-600`} />
                     </div>
                   </div>
-                </Card>
-              ))}
+                </div>
+              </Card>
+
+              {/* Approved — click filters the sales list below to closed_won. */}
+              <Card
+                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setCloserSection('sales'); setSalesStatus('closed_won'); }}
+                title="Show approved sales"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Approved · Today</p>
+                    <p className={`text-3xl font-bold text-success-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.todayClosedWon || 0)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Total {statsLoading ? '—' : (stats.closedWon || 0)}
+                    </span>
+                    <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
+                      <CheckCircle size={20} className={`text-success-600`} />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Awaiting Review — click filters to pending_review. */}
+              <Card
+                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setCloserSection('sales'); setSalesStatus('pending_review'); }}
+                title="Show sales awaiting compliance review"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Awaiting Review</p>
+                    <p className={`text-3xl font-bold text-warning-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.awaitingCompliance || 0)}
+                    </p>
+                  </div>
+                  <div className={`p-3 rounded-xl bg-warning-100 dark:bg-warning-900`}>
+                    <Clock size={22} className={`text-warning-600`} />
+                  </div>
+                </div>
+              </Card>
+
+              {/* Conversion — display-only. */}
+              <Card className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Conversion</p>
+                    <p className={`text-3xl font-bold text-info-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : `${stats.conversionRate || 0}%`}
+                    </p>
+                  </div>
+                  <div className={`p-3 rounded-xl bg-info-100 dark:bg-info-900`}>
+                    <Target size={22} className={`text-info-600`} />
+                  </div>
+                </div>
+              </Card>
             </div>
 
             {/* Sub-nav: Assigned Transfers | My Sales */}
@@ -1062,26 +1131,96 @@ const StaffShell = () => {
         {/* ── MY TRANSFERS TAB (fronter view) ── */}
         {activeTab === 'transfers' && isFronter && (
           <div>
-            {/* Stats */}
+            {/* Stats — same restructure as the closer dashboard. Total Leads
+                shows TODAY as the primary number with the running total in a
+                corner pill. Approved + Awaiting Review filter the leads list
+                below on click; Conversion stays display-only. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              {[
-                { label: 'Total Leads',       value: stats.totalTransfers || 0,       color: 'info',    icon: Send         },
-                { label: 'Approved Sales',    value: stats.closedWon || 0,            color: 'success', icon: CheckCircle  },
-                { label: 'Awaiting Review',   value: stats.awaitingCompliance || 0,   color: 'warning', icon: Clock        },
-                { label: 'Conversion',        value: `${stats.conversionRate || 0}%`, color: 'primary', icon: Target       },
-              ].map(({ label, value, color, icon: Icon }) => (
-                <Card key={label} className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-text-secondary mb-1">{label}</p>
-                      <p className={`text-3xl font-bold text-${color}-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>{statsLoading ? '—' : value}</p>
-                    </div>
-                    <div className={`p-3 rounded-xl bg-${color}-100 dark:bg-${color}-900`}>
-                      <Icon size={20} className={`text-${color}-600`} />
+              {/* Total Leads — today big, total in corner. Click clears any
+                  status filter so all of today's leads surface in the list. */}
+              <Card
+                className="p-5 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setXferStatus(''); setXferPage(1); }}
+                title="Show today's leads"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Total Leads · Today</p>
+                    <p className={`text-3xl font-bold text-info-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.todayTransfers || 0)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Total {statsLoading ? '—' : (stats.totalTransfers || 0)}
+                    </span>
+                    <div className={`p-2.5 rounded-xl bg-info-100 dark:bg-info-900`}>
+                      <Send size={18} className={`text-info-600`} />
                     </div>
                   </div>
-                </Card>
-              ))}
+                </div>
+              </Card>
+
+              {/* Approved Sales — today big, total in corner. Click filters the
+                  leads list to the "completed" status (leads that became sales). */}
+              <Card
+                className="p-5 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setXferStatus('completed'); setXferPage(1); }}
+                title="Show leads that converted to approved sales"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Approved · Today</p>
+                    <p className={`text-3xl font-bold text-success-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.todayClosedWon || 0)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Total {statsLoading ? '—' : (stats.closedWon || 0)}
+                    </span>
+                    <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
+                      <CheckCircle size={18} className={`text-success-600`} />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Awaiting Review — click filters list to assigned (in-flight). */}
+              <Card
+                className="p-5 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setXferStatus('assigned'); setXferPage(1); }}
+                title="Show leads still in-flight with a closer"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Awaiting Review</p>
+                    <p className={`text-3xl font-bold text-warning-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.awaitingCompliance || 0)}
+                    </p>
+                  </div>
+                  <div className={`p-3 rounded-xl bg-warning-100 dark:bg-warning-900`}>
+                    <Clock size={20} className={`text-warning-600`} />
+                  </div>
+                </div>
+              </Card>
+
+              {/* Conversion — display-only. */}
+              <Card className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Conversion</p>
+                    <p className={`text-3xl font-bold text-primary-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : `${stats.conversionRate || 0}%`}
+                    </p>
+                  </div>
+                  <div className={`p-3 rounded-xl bg-primary-100 dark:bg-primary-900`}>
+                    <Target size={20} className={`text-primary-600`} />
+                  </div>
+                </div>
+              </Card>
             </div>
 
             {/* Create Transfer modal — fronter fields only, sized like the sale modal */}

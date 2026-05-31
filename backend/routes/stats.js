@@ -57,6 +57,17 @@ router.get(
       stats.assignedTransfers  = tAssigned.count || 0;
       stats.completedTransfers = tCompleted.count || 0;
 
+      // ── "Today" window — UTC midnight to next midnight. The Today metric
+      //    on the dashboard cards drives the "Today: N" highlight on the
+      //    transfer + sales cards. Same scoping function so a fronter sees
+      //    their own transfers and a closer sees the assigned-team set.
+      const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+      const todayEnd   = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+      const tToday = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+        .gte('created_at', todayStart.toISOString())
+        .lt('created_at',  todayEnd.toISOString());
+      stats.todayTransfers = tToday.count || 0;
+
       // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
       const scopeSales = (q) => {
         if (['superadmin', 'readonly_admin'].includes(userRole)) return q;              // global
@@ -85,6 +96,21 @@ router.get(
       stats.closedWon          = sWon.count || 0;
       stats.closedLost         = sLost.count || 0;
       stats.awaitingCompliance = sReview.count || 0;
+
+      // Today's sales totals — same UTC-day window used for transfers above.
+      // `todaySales` powers the closer card's "Today: N" heading; `todayClosedWon`
+      // tells the closer how many of today's submissions have already been
+      // compliance-approved, so they can see real progress without leaving
+      // the dashboard.
+      const sToday = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .gte('created_at', todayStart.toISOString())
+        .lt('created_at',  todayEnd.toISOString());
+      stats.todaySales = sToday.count || 0;
+      const sTodayWon = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .eq('status', 'closed_won')
+        .gte('created_at', todayStart.toISOString())
+        .lt('created_at',  todayEnd.toISOString());
+      stats.todayClosedWon = sTodayWon.count || 0;
 
       // Conversion rate: compliance-approved sales / total transfers
       stats.conversionRate = stats.totalTransfers > 0
