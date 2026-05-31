@@ -10,6 +10,8 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
     name: '',
     slug: '',
     logo_url: '',
+    logo_light_url: '',
+    logo_dark_url: '',
     company_type: 'fronter',
   });
   const [errors, setErrors] = useState({});
@@ -18,10 +20,12 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
   useEffect(() => {
     if (company) {
       setFormData({
-        name:         company.name         || '',
-        slug:         company.slug         || '',
-        logo_url:     company.logo_url     || '',
-        company_type: company.company_type || 'fronter',
+        name:           company.name           || '',
+        slug:           company.slug           || '',
+        logo_url:       company.logo_url       || '',
+        logo_light_url: company.logo_light_url || '',
+        logo_dark_url:  company.logo_dark_url  || '',
+        company_type:   company.company_type   || 'fronter',
       });
     }
   }, [company]);
@@ -110,11 +114,11 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
         />
       </FormField>
 
-      {/* Logo URL */}
+      {/* Logo URL — universal fallback */}
       <FormField
-        label="Logo URL"
+        label="Default Logo URL"
         error={errors.logo_url}
-        hint="Enter a URL to a company logo image"
+        hint="Used on both themes if a per-theme variant isn't set. Also drives the loader + 404 brand mark."
       >
         <input
           type="text"
@@ -125,6 +129,49 @@ const CompanyForm = ({ company = null, onSubmit, isLoading = false }) => {
           className="input"
         />
       </FormField>
+
+      {/* Per-theme overrides — dropped into the BrandedLoader + 404 scene
+          when the active theme matches. Optional; both fall back to logo_url. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <FormField
+          label="Light Theme Logo"
+          hint="Shown when the app is in light mode. Optional."
+        >
+          <input
+            type="text"
+            name="logo_light_url"
+            value={formData.logo_light_url}
+            onChange={handleInputChange}
+            placeholder="https://…/logo-dark-on-light.png"
+            className="input"
+          />
+          {formData.logo_light_url && (
+            <div className="mt-2 p-2 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#fff', border: '1px solid var(--color-border)' }}>
+              <img src={formData.logo_light_url} alt="" className="h-10 object-contain"
+                onError={e => { e.target.style.display = 'none'; }} />
+            </div>
+          )}
+        </FormField>
+        <FormField
+          label="Dark Theme Logo"
+          hint="Shown when the app is in dark mode. Optional."
+        >
+          <input
+            type="text"
+            name="logo_dark_url"
+            value={formData.logo_dark_url}
+            onChange={handleInputChange}
+            placeholder="https://…/logo-light-on-dark.png"
+            className="input"
+          />
+          {formData.logo_dark_url && (
+            <div className="mt-2 p-2 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#0b0b0b', border: '1px solid var(--color-border)' }}>
+              <img src={formData.logo_dark_url} alt="" className="h-10 object-contain"
+                onError={e => { e.target.style.display = 'none'; }} />
+            </div>
+          )}
+        </FormField>
+      </div>
 
       {/* Company Type */}
       <FormField label="Company Type" hint="Fronter companies create leads; Closer companies close deals.">

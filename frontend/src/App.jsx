@@ -10,6 +10,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import AcceptInvite from "./pages/AcceptInvite";
 import ImpersonateCallback from "./pages/ImpersonateCallback";
+import BrandedLoader from "./components/UI/BrandedLoader";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
@@ -20,11 +21,11 @@ const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
-const PageSpinner = () => (
-  <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
-    <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: 'var(--color-primary-600)' }} />
-  </div>
-);
+// Branded loader replaces the old spinner everywhere a route is in flight or
+// the /auth/me refresh is mid-air. Keeps the brand visible on cold load + on
+// every shell swap, and reads the per-theme logo so dark/light flips don't
+// strand a white-on-white mark.
+const PageSpinner = () => <BrandedLoader />;
 
 // Protected Route — checks auth + role access
 const ProtectedRoute = ({ children, requiredRole = null }) => {
@@ -40,16 +41,7 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
 const DashboardRedirect = () => {
   const { user, isRefreshing } = useAuth();
 
-  if (isRefreshing) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: 'var(--color-primary-600)' }} />
-          <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Loading your dashboard…</p>
-        </div>
-      </div>
-    );
-  }
+  if (isRefreshing) return <BrandedLoader message="Loading your dashboard" />;
 
   return <Navigate to={getRoleRoute(user?.role)} replace />;
 };

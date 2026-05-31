@@ -21,7 +21,7 @@ router.get(
       if (req.user.role === "superadmin") {
         const { data, error } = await supabaseAdmin
           .from("companies")
-          .select("id, name, slug, logo_url, is_active, company_type, internal_timezone, created_at")
+          .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, created_at")
           .order("name");
 
         if (error) {
@@ -131,7 +131,7 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { name, slug, logo_url, company_type, internal_timezone } = req.body;
+    const { name, slug, logo_url, logo_light_url, logo_dark_url, company_type, internal_timezone } = req.body;
     const userId = req.user.id;
 
     try {
@@ -146,6 +146,8 @@ router.post(
           name,
           slug:              slug              || null,
           logo_url:          logo_url          || null,
+          logo_light_url:    logo_light_url    || null,
+          logo_dark_url:     logo_dark_url     || null,
           created_by:        userId,
           is_active:         true,
           company_type:      company_type      || 'fronter',
@@ -180,7 +182,7 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("companies")
-        .select("id, name, slug, logo_url, is_active, company_type, internal_timezone, created_at")
+        .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, created_at")
         .eq("id", id)
         .single();
 
@@ -234,7 +236,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { name, slug, logo_url, is_active, company_type, internal_timezone } = req.body;
+    const { name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone } = req.body;
     const userId = req.user.id;
 
     try {
@@ -248,6 +250,8 @@ router.put(
       if (name)                          updateData.name              = name;
       if (slug !== undefined)            updateData.slug              = slug || null;
       if (logo_url !== undefined)        updateData.logo_url          = logo_url;
+      if (logo_light_url !== undefined)  updateData.logo_light_url    = logo_light_url || null;
+      if (logo_dark_url !== undefined)   updateData.logo_dark_url     = logo_dark_url  || null;
       if (is_active !== undefined)       updateData.is_active         = is_active;
       if (company_type !== undefined)    updateData.company_type      = company_type;
       if (internal_timezone !== undefined) updateData.internal_timezone = internal_timezone || 'Asia/Karachi';
