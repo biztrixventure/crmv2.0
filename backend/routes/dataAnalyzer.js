@@ -58,8 +58,46 @@ function applyFilter(query, f, cfg) {
     case 'neq':        return v == null || v === '' ? query : query.filter(col, 'neq', v);
     case 'ilike':      return v == null || v === '' ? query : query.filter(col, 'ilike', `%${v}%`);
     case 'in': {
-      const arr = Array.isArray(v) ? v.filter(x => x !== '' && x != null).map(String) : [];
-      if (!arr.length) return query;
+      const rawArr = Array.isArray(v) ? v.filter(x => x !== '' && x != null).map(String) : [];
+      if (!rawArr.length) return query;
+
+      // "Unspecified" sentinel — frontend appends '__UNSPECIFIED__' to the
+      // state filter array when the user wants rows whose state value is
+      // either NULL or not in the canonical 51-state list. Backend pulls the
+      // sentinel out, applies the rest of the in.() normally, then wraps
+      // everything in an OR group so the unspecified bucket surfaces too.
+      // Specific to state fields because car_make/car_model already use
+      // case-insensitive ilike below and "Unspecified" has no meaning there.
+      const UNSPEC = '__UNSPECIFIED__';
+      const hasUnspec = rawArr.includes(UNSPEC) && /\bstate\b/i.test(f.field);
+      const arr = rawArr.filter(x => x !== UNSPEC);
+
+      if (hasUnspec) {
+        // 51 canonical state names — kept here (not the frontend) so a
+        // browser-side typo can't break the filter. Sales/transfers store
+        // state in form_data, so the column ref is the JSONB key path.
+        const CANONICAL = [
+          'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware',
+          'Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky',
+          'Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi',
+          'Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico',
+          'New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania',
+          'Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
+          'Virginia','Washington','West Virginia','Wisconsin','Wyoming','District of Columbia',
+        ];
+        const quote = s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+        const colQ  = `"${col}"`;
+        const knownList = `(${CANONICAL.map(quote).join(',')})`;
+        // Three OR branches:
+        //   1. col in.(user's selected canonical states)
+        //   2. col is.null (state key missing — covers post-migration cleanup)
+        //   3. col not.in.(all 51 canonical) — present but non-canonical
+        const orParts = [];
+        if (arr.length) orParts.push(`${colQ}.in.(${arr.map(quote).join(',')})`);
+        orParts.push(`${colQ}.is.null`);
+        orParts.push(`${colQ}.not.in.${knownList}`);
+        return query.or(orParts.join(','));
+      }
 
       // Car make / model are stored as-typed in the registry now ("BMW",
       // "RAV4") but legacy form_data rows carry title-cased variants ("Bmw",

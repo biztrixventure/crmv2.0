@@ -246,13 +246,38 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
   if (kind === 'state') {
     // Storage: full names (so the IN filter matches form_data values).
     // Display: initials in the chip grid (compact). Translate both ways.
-    const valueAsInitials = (value || []).map(full => STATE_FULL_TO_INITIAL[String(full).toLowerCase()] || full);
+    //
+    // "Unspecified" pseudo-chip surfaces rows whose state value is NULL or
+    // not in the canonical 51-state list (placeholder dashes, numeric junk,
+    // typos that escaped migration 067). Sent as the literal sentinel
+    // '__UNSPECIFIED__' which the backend's `in` op detects and converts to
+    // an OR group (is.null OR not.in.(canonical 51)).
+    const UNSPEC = '__UNSPECIFIED__';
+    const fullValues   = value || [];
+    const hasUnspec    = fullValues.includes(UNSPEC);
+    const stateValues  = fullValues.filter(v => v !== UNSPEC);
+    const valueAsInitials = stateValues.map(full => STATE_FULL_TO_INITIAL[String(full).toLowerCase()] || full);
     return (
-      <StateGrid
-        value={valueAsInitials}
-        onChange={(initials) => set(initials.map(i => STATE_INITIAL_TO_FULL[i] || i))}
-        states={US_STATES}
-      />
+      <div className="space-y-2">
+        <StateGrid
+          value={valueAsInitials}
+          onChange={(initials) => {
+            const fulls = initials.map(i => STATE_INITIAL_TO_FULL[i] || i);
+            set(hasUnspec ? [...fulls, UNSPEC] : fulls);
+          }}
+          states={US_STATES}
+        />
+        <button type="button"
+          onClick={() => set(hasUnspec ? stateValues : [...stateValues, UNSPEC])}
+          className="text-[11px] font-bold py-1.5 px-3 rounded-md transition-all w-full"
+          style={{
+            backgroundColor: hasUnspec ? 'var(--color-warning-600, #d97706)' : 'var(--color-bg-secondary)',
+            color:           hasUnspec ? 'white' : 'var(--color-text-secondary)',
+            border: `1px solid ${hasUnspec ? 'var(--color-warning-600, #d97706)' : 'var(--color-border)'}`,
+          }}>
+          Unspecified / Other (NULL or non-state value)
+        </button>
+      </div>
     );
   }
   if (kind === 'make') {
