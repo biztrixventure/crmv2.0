@@ -214,7 +214,25 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   if (status)    query = query.eq('status', status);
   if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
   if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
-  // JSONB search omitted — filter by company/date/status instead
+
+  // Free-text search across the customer-identifying columns: typed
+  // normalized_phone + the JSONB form_data keys that hold the customer
+  // name / phone (same shape transfers.js POST /search uses, so parity with
+  // the closer-side phone search). Reference_no isn't on transfers — it
+  // lives on linked sales; the linked sale's reference is included via the
+  // enrichment step below, but searching there would require a join, so we
+  // keep the predicate scoped to transfers itself.
+  if (search) {
+    const s = escapeOrValue(search);
+    query = query.or(
+      `normalized_phone.ilike.%${s}%,` +
+      `form_data->>customer_name.ilike.%${s}%,` +
+      `form_data->>customer_phone.ilike.%${s}%,` +
+      `form_data->>Phone.ilike.%${s}%,` +
+      `form_data->>FirstName.ilike.%${s}%,` +
+      `form_data->>LastName.ilike.%${s}%`
+    );
+  }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

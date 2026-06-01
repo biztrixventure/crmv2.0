@@ -28,6 +28,10 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [page, setPage]           = useState(1);
   const [status, setStatus]       = useState('');
   const [company, setCompany]     = useState(initCompany);
+  // Free-text search box (parity with SalesTab + CallbacksTab). Server-side
+  // search hits customer name + phone + reference fields inside form_data,
+  // same shape the closer-side phone search uses.
+  const [search, setSearch]       = useState('');
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
   const [sort, setSort]           = useState({ col: 'created_at', dir: 'desc' });
@@ -53,6 +57,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       const res = await client.get('compliance/transfers', {
         params: {
           status: status || undefined, company_id: company || undefined,
+          search: search.trim() || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
           sort_by: sort.col, sort_dir: sort.dir,
           page, limit: LIMIT,
@@ -61,7 +66,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       setTransfers(res.data.transfers || []);
       setTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [status, company, dateFrom, dateTo, page, sort]);
+  }, [status, company, search, dateFrom, dateTo, page, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -134,6 +139,11 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       </div>
 
       <Filters onSubmit={() => { setPage(1); load(); }}>
+        {/* Free-text search runs against customer name + phone + reference
+            on the backend (compliance/transfers route). Hitting Enter submits
+            via the parent Filters form's onSubmit, same UX as SalesTab. */}
+        <FInput label="Search" placeholder="Name, phone, or reference…"
+          value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
         <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
           <option value="">All companies</option>
           {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
