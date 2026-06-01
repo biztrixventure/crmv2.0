@@ -19,9 +19,13 @@ import {
 
 const TransfersTab = ({ companyList, initCompany = '' }) => {
   const { user } = useAuth();
-  const isSuper = user?.role === 'superadmin';
+  const isSuper      = user?.role === 'superadmin';
+  const isCompliance = user?.role === 'compliance_manager';
+  const canReject    = isSuper || isCompliance;
   const [mgBusy, setMgBusy] = useState(false);
   const [mgStatus, setMgStatus] = useState('');
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(false);
@@ -90,6 +94,21 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
     setMgBusy(true);
     try { await client.put(`transfers/${detail.id}`, { status: mgStatus }); toast.success('Transfer status updated'); setDetail(null); load(); }
     catch (e) { toast.error(e.response?.data?.error || 'Update failed'); }
+    finally { setMgBusy(false); }
+  };
+
+  // Compliance + superadmin can reject a transfer with a written reason.
+  // Backend (transfers.js POST /:id/reject) routes the notification to the
+  // fronter exactly like a closer-side reject, so the user gets the same
+  // alert path no matter who rejected it.
+  const doRejectTransfer = async () => {
+    if (!detail || !rejectReason.trim()) return;
+    setMgBusy(true);
+    try {
+      await client.post(`transfers/${detail.id}/reject`, { reason: rejectReason.trim() });
+      toast.success('Transfer rejected — fronter notified');
+      setRejectOpen(false); setRejectReason(''); setDetail(null); load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Reject failed'); }
     finally { setMgBusy(false); }
   };
 
@@ -291,6 +310,39 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
               )}
             </div>
             <div className="px-6 pb-6 pt-3 flex-shrink-0 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {/* Compliance + superadmin can reject the transfer with a reason.
+                  Backend route routes the notification through the same path
+                  a closer-side reject uses, so the fronter sees one bell. */}
+              {canReject && detail.status !== 'rejected' && detail.status !== 'cancelled' && (
+                <div className="rounded-xl p-3" style={{ backgroundColor: '#fff5f5', border: '1px solid #fecaca' }}>
+                  <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#b91c1c' }}>Compliance — reject transfer</p>
+                  {!rejectOpen ? (
+                    <button onClick={() => setRejectOpen(true)} disabled={mgBusy}
+                      className="px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+                      style={{ color: '#dc2626', backgroundColor: 'rgba(220,38,38,0.08)' }}>
+                      Reject this transfer…
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Reason for rejection (fronter will see this)…"
+                        rows={3} className="input text-sm w-full resize-none" />
+                      <div className="flex items-center gap-2">
+                        <button onClick={doRejectTransfer} disabled={mgBusy || !rejectReason.trim()}
+                          className="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50"
+                          style={{ background: 'linear-gradient(135deg,#dc2626,#991b1b)' }}>
+                          {mgBusy ? 'Rejecting…' : 'Submit rejection'}
+                        </button>
+                        <button onClick={() => { setRejectOpen(false); setRejectReason(''); }}
+                          disabled={mgBusy} className="px-3 py-2 rounded-lg text-sm font-bold border"
+                          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {isSuper && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>

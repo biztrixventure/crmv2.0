@@ -603,12 +603,29 @@ router.post('/:id/reject', [
 
   if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
-  // Only the assigned closer (or a superadmin acting on their behalf) can reject.
-  if (existing.assigned_closer_id !== userId && userRole !== 'superadmin') {
-    return res.status(403).json({ error: 'Only the assigned closer can reject this transfer' });
+  // Allowed actors: the assigned closer (front-line workflow), superadmin
+  // (admin override), and compliance_manager (post-review intervention — they
+  // see records across companies and can reject a transfer that fails review
+  // even after a sale was created on it). Notification still fires, so the
+  // fronter sees the rejection in the same channel as a closer-side reject.
+  const isComplianceReject = userRole === 'compliance_manager';
+  const isSuperAdmin       = userRole === 'superadmin';
+  const isAssignedCloser   = existing.assigned_closer_id === userId;
+  if (!isAssignedCloser && !isSuperAdmin && !isComplianceReject) {
+    return res.status(403).json({ error: 'Only the assigned closer or compliance can reject this transfer' });
   }
 
-  if (!['assigned'].includes(existing.status)) {
+  // Closers / superadmin can only reject an actively-assigned transfer.
+  // Compliance can reject from any non-terminal state — they're acting after
+  // the fact, so `completed` / `pending` / `assigned` all need to be open to
+  // them. Already-rejected / cancelled stays blocked so the same record
+  // can't bounce statuses repeatedly.
+  const closedStates = new Set(['rejected', 'cancelled']);
+  if (isComplianceReject) {
+    if (closedStates.has(existing.status)) {
+      return res.status(400).json({ error: `Cannot reject a transfer with status: ${existing.status}` });
+    }
+  } else if (!['assigned'].includes(existing.status)) {
     return res.status(400).json({ error: `Cannot reject a transfer with status: ${existing.status}` });
   }
 
