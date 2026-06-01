@@ -11,10 +11,28 @@ const TransferFormModal = ({
   closers = [], closersLoading = false,
   saleClients = [], salePlans = [],
   onSubmit, isLoading = false,
+  // Edit mode — when set, the modal prefills from this row and the caller's
+  // onSubmit is expected to dispatch a PUT instead of a POST. The closer
+  // dropdown is hidden in edit mode since reassignment happens through
+  // separate workflow steps (manager reassign / compliance reject).
+  existingTransfer = null,
+  reasonRequired = false,
 }) => {
   const [formData, setFormData]         = useState({});
   const [selectedCloser, setSelectedCloser] = useState('');
+  const [editReason, setEditReason]     = useState('');
   const [error, setError]               = useState('');
+  const isEdit = !!existingTransfer;
+
+  // Hydrate from existing row whenever the modal opens or a different row is
+  // loaded. Resetting on close happens via the modal teardown in handleSubmit.
+  useEffect(() => {
+    if (isOpen && existingTransfer) {
+      setFormData(existingTransfer.form_data || {});
+      if (existingTransfer.assigned_closer_id) setSelectedCloser(existingTransfer.assigned_closer_id);
+      setEditReason('');
+    }
+  }, [isOpen, existingTransfer]);
 
   // Zip → city/state autofill (same UX as SaleForm).
   const [zipLoading, setZipLoading] = useState(false);
@@ -74,11 +92,18 @@ const TransferFormModal = ({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!selectedCloser) { setError('Please select a closer.'); return; }
+    // Closer requirement only applies on create. Edit mode keeps the existing
+    // assignment; reassignment is a separate manager workflow.
+    if (!isEdit && !selectedCloser) { setError('Please select a closer.'); return; }
+    if (reasonRequired && !editReason.trim()) { setError('A reason is required for this edit.'); return; }
     try {
-      await onSubmit({ ...formData, assigned_closer_id: selectedCloser });
+      const payload = isEdit
+        ? { form_data: formData, ...(editReason.trim() ? { reason: editReason.trim() } : {}) }
+        : { ...formData, assigned_closer_id: selectedCloser };
+      await onSubmit(payload);
       setFormData({});
       setSelectedCloser('');
+      setEditReason('');
       onClose();
     } catch (err) {
       setError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to submit');
@@ -230,25 +255,41 @@ const TransferFormModal = ({
                 </div>
               )}
 
-              {/* Closer selection */}
-              <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  Transfer to Closer <span className="text-error-500">*</span>
-                </label>
-                <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required>
-                  <option value="">— Select a closer —</option>
-                  {closers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ''}
-                    </option>
-                  ))}
-                </select>
-                {closers.length === 0 && (
-                  <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
-                    No closers linked to this company yet.
-                  </p>
-                )}
-              </div>
+              {/* Closer selection — hidden in edit mode; reassignment goes
+                  through the separate manager flow. */}
+              {!isEdit && (
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Transfer to Closer <span className="text-error-500">*</span>
+                  </label>
+                  <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required>
+                    <option value="">— Select a closer —</option>
+                    {closers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {closers.length === 0 && (
+                    <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
+                      No closers linked to this company yet.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Edit reason — appears only in edit mode; the backend audit
+                  log records it as the reason on the transfer.edit_history entry. */}
+              {isEdit && (
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Reason for edit {reasonRequired && <span className="text-error-500">*</span>}
+                  </label>
+                  <textarea value={editReason} onChange={e => setEditReason(e.target.value)} rows={2}
+                    placeholder="What did you change and why? (visible in audit log)"
+                    className="input resize-none" />
+                </div>
+              )}
 
               {error && <p className="text-sm text-error-600">{error}</p>}
 

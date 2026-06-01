@@ -10,6 +10,8 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
+import TransferFormModal from '../Transfers/TransferFormModal';
+import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
   fmtDate, fmtDateTime, customerName, downloadCSV,
@@ -26,6 +28,14 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [mgStatus, setMgStatus] = useState('');
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [editOpen,    setEditOpen]    = useState(false);
+
+  // Form-fields catalog for the edit modal. Fetched once when the tab mounts;
+  // the same catalog the fronter uses, since compliance is editing the same
+  // schema. fieldsLoading is forwarded to the modal so its initial paint
+  // shows a spinner instead of an empty form.
+  const { fields, fetchFields, loading: fieldsLoading } = useFormFields();
+  useEffect(() => { fetchFields(); }, [fetchFields]);
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(false);
@@ -101,6 +111,19 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   // Backend (transfers.js POST /:id/reject) routes the notification to the
   // fronter exactly like a closer-side reject, so the user gets the same
   // alert path no matter who rejected it.
+  // Compliance edit — dispatches PUT /transfers/:id with the edited form_data
+  // and a reason. Backend (transfers.js MANAGER_ROLES) now includes
+  // compliance_manager, so this is accepted without elevated guards. Audit
+  // log entry on the transfer carries the reason for compliance review.
+  const doEditTransfer = async (payload) => {
+    if (!detail) return;
+    await client.put(`transfers/${detail.id}`, payload);
+    toast.success('Transfer updated');
+    setEditOpen(false);
+    setDetail(null);
+    load();
+  };
+
   const doRejectTransfer = async () => {
     if (!detail || !rejectReason.trim()) return;
     setMgBusy(true);
@@ -310,6 +333,19 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
               )}
             </div>
             <div className="px-6 pb-6 pt-3 flex-shrink-0 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {/* Compliance + superadmin can edit form_data directly. Backend
+                  records the supplied reason on the transfer's edit_history
+                  audit blob so the review trail stays intact. */}
+              {canReject && (
+                <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+                  <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Compliance — edit transfer</p>
+                  <button onClick={() => setEditOpen(true)} disabled={mgBusy || fieldsLoading}
+                    className="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50"
+                    style={{ background: 'var(--gradient-sidebar)' }}>
+                    Edit lead fields…
+                  </button>
+                </div>
+              )}
               {/* Compliance + superadmin can reject the transfer with a reason.
                   Backend route routes the notification through the same path
                   a closer-side reject uses, so the fronter sees one bell. */}
@@ -374,6 +410,22 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
       {exportOpen && (
         <ExportModal tab="transfers" companyList={companyList}
           onClose={() => setExportOpen(false)} onExport={handleExport} />
+      )}
+
+      {/* Compliance edit modal — reuses TransferFormModal in edit mode.
+          Closer dropdown is hidden, reason textarea is shown, submit
+          dispatches PUT instead of POST. */}
+      {editOpen && detail && (
+        <TransferFormModal
+          isOpen={editOpen}
+          onClose={() => setEditOpen(false)}
+          user={user}
+          fields={fields}
+          fieldsLoading={fieldsLoading}
+          existingTransfer={detail}
+          reasonRequired
+          onSubmit={doEditTransfer}
+        />
       )}
     </div>
   );

@@ -3,8 +3,10 @@ import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } f
 import { Badge } from '../UI';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
+import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
 import { fmtSaleDate } from '../../utils/timezone';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES, COMPLIANCE_EDIT_STATUSES, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -13,7 +15,13 @@ import {
 } from './shared';
 
 const SalesTab = ({ companyList, initCompany = '' }) => {
+  const { user } = useAuth();
   const [sales, setSales]       = useState([]);
+  // Full form-field edit target for compliance — opens SaleModal pre-filled
+  // and dispatches PUT /sales/:id on submit. Separate from the existing
+  // status-only edit modal (editTarget) which only changes status + reason.
+  const [editFieldsTarget, setEditFieldsTarget] = useState(null);
+  const [editFieldsSaving, setEditFieldsSaving] = useState(false);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(false);
   const [page, setPage]         = useState(1);
@@ -94,6 +102,20 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   };
 
   const openEdit = (s) => { setEditTarget(s); setEditStatus(s.status); setEditReason(''); setEditMsg(''); };
+
+  // Direct field-level edit for compliance. SaleForm produces a full payload
+  // matching the closer flow; we forward it to PUT /sales/:id (backend
+  // already lets compliance_manager through, see sales.js line 472).
+  const doEditFields = async (payload) => {
+    if (!editFieldsTarget) return;
+    setEditFieldsSaving(true);
+    try {
+      const res = await client.put(`sales/${editFieldsTarget.id}`, payload);
+      const updated = res?.data?.sale || res?.data?.data || res?.data;
+      if (updated) setSales(list => list.map(x => x.id === editFieldsTarget.id ? { ...x, ...updated } : x));
+      setEditFieldsTarget(null);
+    } finally { setEditFieldsSaving(false); }
+  };
   const doEdit = async () => {
     if (!editReason.trim()) { setEditMsg('Reason required.'); return; }
     setEditSaving(true);
@@ -221,6 +243,13 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                               {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                             </button>
                           )}
+                          {/* Compliance field-level edit — opens SaleModal pre-filled.
+                              Lives next to View so it's discoverable without
+                              cluttering the workflow buttons (Approve/Return/Update). */}
+                          <button onClick={() => setEditFieldsTarget(s)} className="px-2 py-1 rounded-lg text-xs font-bold"
+                            style={{ color: 'var(--color-primary-700)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
+                            Edit
+                          </button>
                           <button onClick={() => setDetailSale(s)} className="p-1 rounded"
                             style={{ color: 'var(--color-primary-600)' }}>
                             <Eye size={14} />
@@ -366,6 +395,16 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         <ExportModal tab="sales" companyList={companyList}
           onClose={() => setExportOpen(false)} onExport={handleExport} />
       )}
+
+      {/* Compliance field-level edit — SaleModal in update mode. */}
+      <SaleModal
+        isOpen={!!editFieldsTarget}
+        onClose={() => setEditFieldsTarget(null)}
+        user={user}
+        existingSale={editFieldsTarget}
+        onSubmit={doEditFields}
+        isLoading={editFieldsSaving}
+      />
     </div>
   );
 };

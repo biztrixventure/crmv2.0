@@ -13,7 +13,10 @@ const { stampActor } = require('../utils/auditColumnGuard');
 
 const router = express.Router();
 
-const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'];
+// compliance_manager joins the manager set so PUT /transfers/:id treats them
+// as an authorized editor. Cross-company scope is bypassed for them below
+// (they review across every company by design — same global view as superadmin).
+const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'];
 
 // ── Fronter-scoped duplicate detection helpers ───────────────────────────────
 const PHONE_KEYS = ['cli_number', 'customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone'];
@@ -681,10 +684,12 @@ router.put('/:id', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Permission denied' });
   }
 
-  // Company scope guard for non-superadmin managers
-  if (isManager && userRole !== 'superadmin') {
+  // Company scope guard for non-superadmin managers. compliance_manager is
+  // explicitly global — they review every company by design (same as
+  // superadmin / readonly_admin), so the scope predicate is skipped for them.
+  if (isManager && userRole !== 'superadmin' && userRole !== 'readonly_admin' && userRole !== 'compliance_manager') {
     const userCompanyId = req.user.company_id;
-    const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole);
+    const isCloserSide = userRole === 'closer_manager';
     if (isCloserSide) {
       // Closer-side managers: verify assigned_closer_id belongs to their company
       if (existing.assigned_closer_id) {
