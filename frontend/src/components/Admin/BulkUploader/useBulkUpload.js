@@ -15,7 +15,7 @@ const apiErr = (e, fallback) =>
 const CHUNK = 100;
 const MAX_ROWS = 2000;
 
-const emptyResults = { clean: [], trueDuplicates: [], conflicts: [], unmatched: [], invalid: [] };
+const emptyResults = { clean: [], updates: [], trueDuplicates: [], conflicts: [], unmatched: [], invalid: [] };
 
 export function useBulkUpload() {
   const [step, setStep]         = useState('guide');   // guide | mapping | review | done
@@ -132,7 +132,7 @@ export function useBulkUpload() {
     }
 
     // DB validation in chunks of 100.
-    const agg = { clean: [], trueDuplicates: [...skipExact], conflicts: [...inFileConflicts], unmatched: [] };
+    const agg = { clean: [], updates: [], trueDuplicates: [...skipExact], conflicts: [...inFileConflicts], unmatched: [] };
     const total = toSend.length;
     let failed = 0;
     setProgress({ phase: 'validate', done: 0, total });
@@ -141,6 +141,7 @@ export function useBulkUpload() {
       try {
         const { data } = await client.post('uploads/validate-chunk', { rows: chunk });
         agg.clean.push(...(data.clean || []));
+        agg.updates.push(...(data.updates || []));
         agg.trueDuplicates.push(...(data.trueDuplicates || []));
         agg.conflicts.push(...(data.conflicts || []));
         agg.unmatched.push(...(data.unmatched || []));
@@ -182,22 +183,37 @@ export function useBulkUpload() {
     setDecisions(() => { const d = {}; results.conflicts.forEach((_, i) => { d[i] = val; }); return d; });
   }, [results.conflicts]);
 
-  // Final insert: clean rows + user-included conflicts.
+  // Final insert: clean rows + user-included conflicts. Updates run alongside.
+  // Updates only contain rows where the diff is non-empty AND the user opted in
+  // (default ON — matches the user's request to update instead of skip).
   const confirmInsert = useCallback(async () => {
     setError('');
     const included = results.conflicts.filter((_, i) => decisions[i]).map(c => c.incoming).filter(r => r.company_id || r.fronter_name);
     const rows = [...results.clean, ...included];
-    if (!rows.length) { setError('No records selected to insert.'); return; }
+    // Only ship updates that actually have changes. Identical-row entries stay
+    // as a quiet "unchanged" count for the success message.
+    const updateRows = results.updates.filter(u => Array.isArray(u.changes) && u.changes.length > 0);
+    const unchangedCount = results.updates.length - updateRows.length;
+    if (!rows.length && !updateRows.length) { setError('No records selected to insert or update.'); return; }
 
     setBusy(true);
-    let inserted = 0, skipped = 0, errMsg = '', stopped = false;
-    const total = rows.length;
+    let inserted = 0, updated = 0, unchanged = unchangedCount, errMsg = '', stopped = false;
+
+    // Inserts batched in CHUNK; updates ship together in one POST so the diff
+    // arrays travel with the row context. Sending the empty rows array w/ updates
+    // is fine — the route handles either side missing.
+    const insertChunks = Math.max(1, Math.ceil(rows.length / CHUNK));
+    const total = rows.length + updateRows.length;
     setProgress({ phase: 'confirm', done: 0, total });
-    for (let i = 0; i < total; i += CHUNK) {
+
+    for (let i = 0; i < Math.max(1, rows.length); i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
+      // Attach the full updates payload only on the LAST call so it's applied once.
+      const isLast = (i + CHUNK) >= rows.length;
       try {
         const { data } = await client.post('uploads/confirm', {
           rows: chunk,
+          updates: isLast ? updateRows : [],
           batch: {
             file_name: fileName,
             total_rows: total,
@@ -205,29 +221,32 @@ export function useBulkUpload() {
             conflict_count: included.length,
           },
         });
-        inserted += data.inserted || 0;
-        skipped  += data.skipped  || 0;
-        setProgress({ phase: 'confirm', done: Math.min(i + CHUNK, total), total });
+        inserted  += data.inserted  || 0;
+        updated   += data.updated   || 0;
+        unchanged += data.unchanged || 0;
+        setProgress({ phase: 'confirm', done: Math.min(i + CHUNK, rows.length) + (isLast ? updateRows.length : 0), total });
       } catch (e) {
-        errMsg = apiErr(e, 'Insert failed.');
+        errMsg = apiErr(e, 'Insert/update failed.');
         stopped = true;
         break;
       }
+      if (rows.length === 0) break; // updates-only path: ran once above
     }
     setProgress(null);
     setBusy(false);
     if (stopped) {
-      // Partial insert: tell the user exactly where it stopped. Re-running is
-      // safe — already-inserted rows are skipped as duplicates.
-      setError(`Inserted ${inserted} of ${total} before stopping: ${errMsg} You can safely re-run — already-inserted records are skipped as duplicates.`);
+      setError(`Inserted ${inserted}, updated ${updated} of ${total} before stopping: ${errMsg} You can safely re-run — already-inserted records will be detected and updated again only if their values still differ.`);
       toast.error('Upload stopped partway — see the message above.');
-      if (inserted) loadBatches();
+      if (inserted || updated) loadBatches();
       return;
     }
-    setSummary({ inserted, skipped });
+    setSummary({ inserted, updated, unchanged });
     setStep('done');
     loadBatches();
-    toast.success(`Upload complete — ${inserted} transfer(s) inserted${skipped ? `, ${skipped} duplicate(s) skipped` : ''}.`);
+    const parts = [`${inserted} inserted`];
+    if (updated)   parts.push(`${updated} updated`);
+    if (unchanged) parts.push(`${unchanged} unchanged`);
+    toast.success(`Upload complete — ${parts.join(', ')}.`);
   }, [results, decisions, fileName, loadBatches]);
 
   const reset = useCallback(() => {

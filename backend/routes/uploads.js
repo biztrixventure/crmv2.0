@@ -54,7 +54,7 @@ router.post('/validate-chunk', asyncHandler(async (req, res) => {
   }
   const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object');
   if (rows.length > 100) return res.status(400).json({ error: 'Too many rows in one chunk (max 100). Reduce the chunk size and retry.' });
-  if (!rows.length) return res.json({ clean: [], trueDuplicates: [], conflicts: [], unmatched: [] });
+  if (!rows.length) return res.json({ clean: [], updates: [], trueDuplicates: [], conflicts: [], unmatched: [] });
 
   const index = buildIndex(await getReference());
 
@@ -66,19 +66,23 @@ router.post('/validate-chunk', asyncHandler(async (req, res) => {
     resolved.push({ ...row, company_id: r.company_id, company_name: r.company_name, fronter_user_id: r.fronter_user_id, fronter_name: r.fronter_name });
   }
 
-  const { clean, trueDuplicates, conflicts } = await classifyChunk(resolved);
-  res.json({ clean, trueDuplicates, conflicts, unmatched });
+  const { clean, updates, conflicts, trueDuplicates } = await classifyChunk(resolved);
+  res.json({ clean, updates, trueDuplicates, conflicts, unmatched });
 }));
 
-// POST /uploads/confirm — insert approved rows (clean + user-included conflicts)
-// Body: { rows: [...resolved rows], batch: { file_name, total_rows, skipped_count, conflict_count } }
+// POST /uploads/confirm — insert clean+conflict rows AND apply dup-update rows.
+// Body: { rows: [...resolved rows], updates: [{ existing_id, changes, … }], batch: {…} }
 router.post('/confirm', asyncHandler(async (req, res) => {
   if (req.body?.rows !== undefined && !Array.isArray(req.body.rows)) {
     return res.status(400).json({ error: '"rows" must be an array of records.' });
   }
-  const rows  = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object');
-  const batch = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
-  if (!rows.length) return res.status(400).json({ error: 'No valid rows to insert.' });
+  if (req.body?.updates !== undefined && !Array.isArray(req.body.updates)) {
+    return res.status(400).json({ error: '"updates" must be an array of records.' });
+  }
+  const rows    = (Array.isArray(req.body?.rows)    ? req.body.rows    : []).filter(r => r && typeof r === 'object');
+  const updates = (Array.isArray(req.body?.updates) ? req.body.updates : []).filter(r => r && typeof r === 'object' && r.existing_id);
+  const batch   = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
+  if (!rows.length && !updates.length) return res.status(400).json({ error: 'No valid rows to insert or update.' });
 
   // Trust-but-verify: every row must still resolve to a real fronter + company.
   const index = buildIndex(await getReference());
@@ -87,9 +91,9 @@ router.post('/confirm', asyncHandler(async (req, res) => {
     const r = resolveRow(row, index);
     if (r.ok) valid.push({ ...row, company_id: r.company_id, fronter_user_id: r.fronter_user_id, fronter_name: r.fronter_name, company_name: r.company_name });
   }
-  if (!valid.length) return res.status(400).json({ error: 'No rows resolved to a valid fronter + company' });
+  if (!valid.length && !updates.length) return res.status(400).json({ error: 'No rows resolved to a valid fronter + company' });
 
-  const result = await insertApproved(valid, batch, req.user.id);
+  const result = await insertApproved(valid, batch, req.user.id, updates);
   res.json(result);
 }));
 

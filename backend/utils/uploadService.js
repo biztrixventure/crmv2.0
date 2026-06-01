@@ -99,13 +99,45 @@ function resolveRow(row, index) {
   return { ok: true, company_id: co.id, company_name: co.name, fronter_user_id: matches[0].user_id, fronter_name: matches[0].name };
 }
 
+// Fields on transfers.form_data that can be safely overwritten by a re-upload.
+// Excludes the dedup key (cli_number) and any derived value the bulk path adds.
+const SKIP_FORM_DATA_KEYS = new Set(['cli_number']);
+
+// Workflow-locked statuses: once a transfer is here, a re-upload of the source
+// row never reverts the status. The closer has already touched it.
+const STATUS_LOCKED = new Set(['assigned', 'completed', 'rejected', 'cancelled']);
+
+// Diff incoming row against existing transfer. Returns [] when nothing actually
+// changes — caller treats that as a no-op skip.
+function diffTransfer(row, existing) {
+  const changes = [];
+  const exFD = existing.form_data || {};
+  const inFD = row.form_data || {};
+  for (const key of Object.keys(inFD)) {
+    if (SKIP_FORM_DATA_KEYS.has(key)) continue;
+    const inVal = inFD[key];
+    if (inVal === null || inVal === undefined || String(inVal).trim() === '') continue; // never wipe with blanks
+    if (String(inVal).trim() !== String(exFD[key] ?? '').trim()) {
+      changes.push({ field: `form_data.${key}`, prev: exFD[key] ?? '', next: inVal });
+    }
+  }
+  // status: only when DB row is still in a "movable" state.
+  const newStatus = safeStatus(row.status);
+  if (!STATUS_LOCKED.has(existing.status) && newStatus !== existing.status) {
+    changes.push({ field: 'status', prev: existing.status, next: newStatus });
+  }
+  return changes;
+}
+
 // ============================================================================
 // DUPLICATE DETECTION (the critical part)
 // ----------------------------------------------------------------------------
 // For a chunk of resolved rows we classify each against EXISTING DB transfers:
 //
-//   TRUE DUPLICATE  — same CLI(phone) + same fronter + same company.
-//                     → auto-skip (caller lists it, never inserts).
+//   UPDATE          — same CLI(phone) + same fronter + same company. Re-upload
+//                     of a lead that already exists. Diff is computed against
+//                     the live row; identical rows surface as no-op skips so
+//                     the user can see "nothing changed for these N records".
 //   CONFLICT        — same CLI(phone) but a DIFFERENT fronter or company.
 //                     → never auto-skip; surface existing vs incoming so the
 //                       superadmin decides include/exclude per row.
@@ -117,9 +149,14 @@ function resolveRow(row, index) {
 //   (b) form_data.customer_phone / Phone — where MANUAL transfers keep the number
 // then normalize whatever we get back in JS before comparing. The conflict scan
 // is GLOBAL (across all companies), per the spec.
+//
+// REVERSIBILITY: every update appends an `edit_history` entry with per-field
+// {from, to} and the batch_id, AND the audit_field_changes() trigger (mig 063)
+// writes a row to `field_audit_log` per change. The bulk batch can be reverted
+// by replaying edit_history.from values for that batch_id.
 // ============================================================================
 async function classifyChunk(resolvedRows) {
-  const clean = [], trueDuplicates = [], conflicts = [];
+  const clean = [], updates = [], conflicts = [];
 
   // Collect the normalized + raw phones present in this chunk.
   const normSet = new Set();
@@ -177,9 +214,22 @@ async function classifyChunk(resolvedRows) {
     const n = normPhone(row.cli_number);
     const matches = (n && existingByPhone.get(n)) || [];
 
-    // TRUE DUPLICATE: an existing record has the SAME phone + fronter + company.
+    // UPDATE: an existing record has the SAME phone + fronter + company.
+    // Compute a diff vs the live row so the review screen shows exactly what
+    // would change. An empty diff = identical row = no-op skip (the caller
+    // tells the user "N records unchanged"), so the same file can be re-run
+    // safely without thrashing edit_history.
     const exactDup = matches.find(m => m.created_by === row.fronter_user_id && m.company_id === row.company_id);
-    if (exactDup) { trueDuplicates.push({ ...row, reason: 'CLI + fronter + company already exist' }); continue; }
+    if (exactDup) {
+      const changes = diffTransfer(row, exactDup);
+      updates.push({
+        ...row,
+        existing_id: exactDup.id,
+        existing_created_at: exactDup.created_at,
+        changes,
+      });
+      continue;
+    }
 
     // CONFLICT: same phone exists but under a different fronter/company.
     if (matches.length > 0) {
@@ -200,7 +250,9 @@ async function classifyChunk(resolvedRows) {
     clean.push(row);
   }
 
-  return { clean, trueDuplicates, conflicts };
+  // trueDuplicates kept as [] for backwards compat w/ any cached frontend
+  // bundle still expecting the old shape — they're rolled into updates now.
+  return { clean, updates, conflicts, trueDuplicates: [] };
 }
 
 // ============================================================================
@@ -240,21 +292,62 @@ function buildTransferRow(row, batchId) {
   };
 }
 
-async function insertApproved(rows, batchMeta, uploaderId) {
-  // Re-check true duplicates at insert time (guards against a race between
-  // validate and confirm). User-approved conflicts arrive pre-resolved in `rows`
-  // and are NOT true dups, so only exact (phone+fronter+company) dups get dropped.
-  const { trueDuplicates } = await classifyChunk(rows);
-  const dupKeys = new Set(trueDuplicates.map(d => `${normPhone(d.cli_number)}|${d.fronter_user_id}|${d.company_id}`));
-  const finalRows = rows.filter(r => !dupKeys.has(`${normPhone(r.cli_number)}|${r.fronter_user_id}|${r.company_id}`));
+// Apply per-row diff updates against existing transfers. Preserves created_at
+// (never patched), appends an edit_history entry tagged with the batch_id, and
+// the audit_field_changes() trigger writes per-field rows to field_audit_log —
+// together those two journals make a bulk batch fully reversible.
+async function applyUpdates(updates, batchId, uploaderId) {
+  let updated = 0, unchanged = 0;
+  for (const u of (updates || [])) {
+    if (!u || !u.existing_id) { unchanged++; continue; }
+    if (!Array.isArray(u.changes) || u.changes.length === 0) { unchanged++; continue; }
 
+    const { data: existing, error: fetchErr } = await supabaseAdmin
+      .from('transfers').select('form_data, status, edit_history').eq('id', u.existing_id).single();
+    if (fetchErr || !existing) { unchanged++; continue; }
+
+    const newFD = { ...(existing.form_data || {}) };
+    let nextStatus = null;
+    for (const c of u.changes) {
+      if (c.field === 'status') nextStatus = c.next;
+      else if (c.field && c.field.startsWith('form_data.')) {
+        const k = c.field.slice('form_data.'.length);
+        newFD[k] = c.next;
+      }
+    }
+
+    const history = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+    const patch = {
+      form_data:    titleCaseFormData(expandStateInFormData(newFD)),
+      updated_at:   new Date().toISOString(),
+      // created_at intentionally absent → preserved as-is.
+      // assigned_closer_id / assigned_to / upload_batch_id intentionally absent.
+      edit_history: [...history, {
+        editor_id:  uploaderId,
+        role:       'bulk_upload',
+        action:     'bulk_update',
+        batch_id:   batchId,
+        changes:    u.changes.map(c => ({ field: c.field, from: c.prev, to: c.next })),
+        edited_at:  new Date().toISOString(),
+      }],
+    };
+    if (nextStatus) patch.status = nextStatus;
+
+    const stamped = await stampActor('transfers', patch, uploaderId);
+    const { error } = await supabaseAdmin.from('transfers').update(stamped).eq('id', u.existing_id);
+    if (!error) updated++;
+  }
+  return { updated, unchanged };
+}
+
+async function insertApproved(rows, batchMeta, uploaderId, updates = []) {
   const { data: batch, error: bErr } = await supabaseAdmin
     .from('upload_batches')
     .insert({
       kind:           'transfer',
       file_name:      batchMeta.file_name || null,
       uploaded_by:    uploaderId,
-      total_rows:     batchMeta.total_rows || finalRows.length,
+      total_rows:     batchMeta.total_rows || (rows.length + (updates?.length || 0)),
       inserted_count: 0,
       skipped_count:  batchMeta.skipped_count || 0,
       conflict_count: batchMeta.conflict_count || 0,
@@ -263,19 +356,20 @@ async function insertApproved(rows, batchMeta, uploaderId) {
   if (bErr) throw new Error(bErr.message);
 
   let inserted = 0;
-  // Insert in DB-side chunks of 100 to keep statements bounded.
-  for (let i = 0; i < finalRows.length; i += 100) {
-    const built = finalRows.slice(i, i + 100).map(r => buildTransferRow(r, batch.id));
-    // stampActor adds last_modified_by per row when migration 063 is applied;
-    // attributes the bulk insert to the fronter, mirroring created_by.
+  for (let i = 0; i < rows.length; i += 100) {
+    const built = rows.slice(i, i + 100).map(r => buildTransferRow(r, batch.id));
     const slice = await Promise.all(built.map(r => stampActor('transfers', r, r.created_by)));
     const { data, error } = await supabaseAdmin.from('transfers').insert(slice).select('id');
     if (error) throw new Error(error.message);
     inserted += (data || []).length;
   }
 
-  await supabaseAdmin.from('upload_batches').update({ inserted_count: inserted }).eq('id', batch.id);
-  return { batch_id: batch.id, inserted, skipped: dupKeys.size };
+  const updateResult = await applyUpdates(updates, batch.id, uploaderId);
+
+  await supabaseAdmin.from('upload_batches')
+    .update({ inserted_count: inserted, conflict_count: (batchMeta.conflict_count || 0) + updateResult.updated })
+    .eq('id', batch.id);
+  return { batch_id: batch.id, inserted, updated: updateResult.updated, unchanged: updateResult.unchanged, skipped: 0 };
 }
 
 // ============================================================================

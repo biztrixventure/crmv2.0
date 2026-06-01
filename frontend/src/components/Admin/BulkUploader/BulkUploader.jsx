@@ -64,7 +64,9 @@ const BulkUploader = () => {
           <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Upload complete</p>
           <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
             {u.summary.inserted} transfer{u.summary.inserted !== 1 ? 's' : ''} inserted
-            {u.summary.skipped > 0 && <> · {u.summary.skipped} skipped as duplicates</>}.
+            {u.summary.updated > 0 && <> · {u.summary.updated} updated</>}
+            {u.summary.unchanged > 0 && <> · {u.summary.unchanged} unchanged</>}
+            {u.summary.skipped > 0 && <> · {u.summary.skipped} skipped</>}.
             They now appear in each fronter’s dashboard.
           </p>
           <Button variant="primary" onClick={u.reset} className="mt-4 inline-flex items-center gap-1.5">
