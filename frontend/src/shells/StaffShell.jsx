@@ -109,7 +109,7 @@ const StaffShell = () => {
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
 
-  const [dateRange, setDateRange] = useState(() => getPresetRange('30d'));
+  const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
   // Cross-role nav
@@ -595,7 +595,7 @@ const StaffShell = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={setDateRange} defaultPreset="30d" />
+          <DateRangePicker onChange={setDateRange} defaultPreset="today" value={dateRange} />
         </div>
 
         {/* ── NON-SALES TABS ── */}

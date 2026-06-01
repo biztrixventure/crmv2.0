@@ -4,6 +4,8 @@ import { todayET } from '../../utils/timezone';
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
+  { key: 'week',  label: 'This week' },
+  { key: 'month', label: 'This month' },
   { key: '7d',    label: 'Last 7 days' },
   { key: '30d',   label: 'Last 30 days' },
   { key: '3m',    label: 'Last 3 months' },
@@ -11,12 +13,24 @@ const PRESETS = [
   { key: 'all',   label: 'All time' },
 ];
 
-export function getPresetRange(key = '30d') {
+export function getPresetRange(key = 'today') {
   const today = todayET();
   // Use noon UTC of today to avoid DST edge cases when subtracting days/months
   const base = new Date(today + 'T12:00:00Z');
   switch (key) {
     case 'today': return { date_from: today, date_to: today };
+    case 'week': {
+      // ISO week (Mon → today). Noon-UTC base keeps the day index stable across DST.
+      const d = new Date(base);
+      const dow = d.getUTCDay();         // 0 = Sun … 6 = Sat
+      const back = dow === 0 ? 6 : dow - 1;
+      d.setUTCDate(d.getUTCDate() - back);
+      return { date_from: d.toISOString().split('T')[0], date_to: today };
+    }
+    case 'month': {
+      // First day of this calendar month → today.
+      return { date_from: `${today.slice(0, 7)}-01`, date_to: today };
+    }
     case '7d': {
       const d = new Date(base); d.setUTCDate(d.getUTCDate() - 7);
       return { date_from: d.toISOString().split('T')[0], date_to: today };
@@ -55,7 +69,7 @@ function matchPreset(range) {
 }
 
 // value prop (optional): { date_from, date_to } — when set externally, syncs the picker label
-const DateRangePicker = ({ onChange, defaultPreset = '30d', value }) => {
+const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
   const [open, setOpen]             = useState(false);
   const [preset, setPreset]         = useState(defaultPreset);
   const [customFrom, setCustomFrom] = useState('');
@@ -99,7 +113,7 @@ const DateRangePicker = ({ onChange, defaultPreset = '30d', value }) => {
     ? (customFrom && customTo
         ? `${fmtDate(customFrom)} – ${fmtDate(customTo)}`
         : customFrom ? fmtDate(customFrom) : 'Custom range')
-    : (PRESETS.find(p => p.key === preset)?.label ?? 'Last 30 days');
+    : (PRESETS.find(p => p.key === preset)?.label ?? 'Today');
 
   return (
     <div className="relative flex-shrink-0" ref={ref}>
