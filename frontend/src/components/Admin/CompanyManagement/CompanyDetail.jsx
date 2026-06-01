@@ -8,6 +8,7 @@ import {
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, LogIn, Copy, ExternalLink,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
+import { fmtSaleDate } from '../../../utils/timezone';
 import Modal from '../../UI/Modal';
 import RoleModal from '../RoleManagement/RoleModal';
 import CreateUserModal from '../UserManagement/CreateUserModal';
@@ -287,7 +288,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                         <ExTd value={r.car_miles ? Number(r.car_miles).toLocaleString() : null} /><ExTd value={r.car_vin} mono />
                         <ExTd value={r.closer_disposition} />
                         {canFin && <><ExTd value={r.down_payment ? `$${r.down_payment}` : null} /><ExTd value={r.payment_due_note} truncate /></>}
-                        <ExTd value={r.sale_date ? new Date(r.sale_date).toLocaleDateString() : null} />
+                        <ExTd value={r.sale_date ? fmtSaleDate(r.sale_date) : null} />
                         <ExTd value={dt(r.submitted_for_review_at)} /><ExTd value={dt(r.compliance_reviewed_at)} /><ExTd value={dt(r.updated_at)} />
                       </>}
                     </tr>

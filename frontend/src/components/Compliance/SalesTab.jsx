@@ -4,6 +4,7 @@ import { Badge } from '../UI';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import ExportModal from './ExportModal';
+import { fmtSaleDate } from '../../utils/timezone';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES, COMPLIANCE_EDIT_STATUSES, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -117,9 +118,9 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     const rows = (res.data.sales || []).map(s => [
       s.customer_name || '', s.customer_phone || '', s.customer_email || '',
       s.reference_no || '', STATUS_LABEL[s.status] || s.status || '',
-      s.fronter_name || '', closerName(s), s.companies?.name || '', fmtDate(s.created_at),
+      s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
     ]);
-    downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Created'],
+    downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Sale Date'],
       `sales_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
@@ -188,7 +189,10 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDate(s.created_at)}</td>
+                      {/* Show the actual sale_date the closer entered (carries through
+                          bulk uploads) instead of the upload moment. Falls back to
+                          created_at on legacy rows where sale_date wasn't captured. */}
+                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at)}</td>
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {s.status === 'pending_review' ? (

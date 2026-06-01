@@ -42,7 +42,7 @@ import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
-import { fmtDateET, todayET } from "../utils/timezone";
+import { fmtDateET, todayET, fmtSaleDate } from "../utils/timezone";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
@@ -953,7 +953,10 @@ const ManagerShell = () => {
                           {/* Show the actual sale_date (carried in the bulk upload) rather
                               than the row's created_at — created_at reflects when the row
                               was inserted/updated, which is misleading for back-filled sales. */}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.sale_date || s.created_at)}</td>
+                          {/* sale_date is a date-only column ("YYYY-MM-DD"). fmtSaleDate
+                              prints it as the calendar day stored, never shifting one
+                              day backward in US timezones the way fmtDateET would. */}
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDateET(s.created_at)}</td>
                           {hasPermission('delete_sale') && (
                             <td className="py-3 px-3">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { Search, X, User, Car, Hash, DollarSign, Calendar, Loader } from 'lucide-react';
 import client from '../../api/client';
+import { fmtSaleDate } from '../../utils/timezone';
 
 const STATUS_COLOR = {
   sold:        { bg: '#dcfce7', color: '#16a34a', label: 'Sold'      },
@@ -152,7 +153,7 @@ const SaleSearch = ({ companyId, user }) => {
                     {s.sale_date && (
                       <span className="flex items-center gap-1">
                         <Calendar size={11} />
-                        {new Date(s.sale_date).toLocaleDateString()}
+                        {fmtSaleDate(s.sale_date)}
                       </span>
                     )}
                   </div>

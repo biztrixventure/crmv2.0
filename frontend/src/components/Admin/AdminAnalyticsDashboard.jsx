@@ -6,7 +6,7 @@ import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
-import { todayET } from '../../utils/timezone';
+import { todayET, fmtSaleDate } from '../../utils/timezone';
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
   ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
@@ -448,7 +448,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           s.companies?.name || '',
           s.plan || '',
           s.monthly_payment ? `$${s.monthly_payment}` : '',
-          s.sale_date ? new Date(s.sale_date).toLocaleDateString() : '',
+          s.sale_date ? fmtSaleDate(s.sale_date) : '',
           new Date(s.created_at).toLocaleDateString(),
         ]);
         downloadCSV(rows,
@@ -856,7 +856,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                         {s.monthly_payment ? `$${Number(s.monthly_payment).toLocaleString()}/mo` : '—'}
                       </td>
                       <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">
-                        {s.sale_date ? new Date(s.sale_date).toLocaleDateString() : '—'}
+                        {fmtSaleDate(s.sale_date)}
                       </td>
                       <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">
                         {new Date(s.created_at).toLocaleDateString()}

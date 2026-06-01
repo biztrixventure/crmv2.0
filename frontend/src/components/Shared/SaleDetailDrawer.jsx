@@ -1,6 +1,7 @@
 import { X, AlertTriangle, DollarSign, CheckCircle, Clock } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
+import { fmtSaleDate } from '../../utils/timezone';
 
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
@@ -145,7 +146,7 @@ export default function SaleDetailDrawer({ sale, onClose }) {
           <Section title="Sale Info">
             {sale.client_name && <Row label="Client"  value={sale.client_name} />}
             {sale.plan        && <Row label="Plan"    value={sale.plan} />}
-            {sale.sale_date   && <Row label="Sale Date" value={new Date(sale.sale_date).toLocaleDateString()} />}
+            {sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
             <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />
             {sale.closer_disposition && (
               <Row label="Closer Disposition" value={sale.closer_disposition}

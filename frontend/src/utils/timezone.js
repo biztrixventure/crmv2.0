@@ -22,6 +22,35 @@ export function fmtDateET(utcIso) {
   } catch { return '—'; }
 }
 
+// Format a date-only value (sale_date column, format "YYYY-MM-DD") as a short
+// date string WITHOUT shifting timezones. `new Date("2026-04-30")` parses as
+// UTC midnight, then any local-time formatter (US East, ET, browser local)
+// rolls it back one calendar day. For sale_date specifically — where the
+// stored value IS the calendar day the sale happened, no time component —
+// we parse the string literally and re-emit it so every viewer sees the
+// same day the bulk uploader entered.
+//
+// Accepts:
+//   "2026-04-30"          → Apr 30, 2026
+//   "2026-04-30T..."      → Apr 30, 2026 (strips the time part)
+//   Date / null / garbage → "—"
+export function fmtSaleDate(val) {
+  if (!val) return '—';
+  const s = String(val);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '—';
+  const [, y, mo, d] = m;
+  // Construct from local-time components so toLocaleDateString doesn't shift.
+  // Year/month/day all come straight from the stored string — no Date math
+  // happens that could roll the calendar day.
+  const date = new Date(Number(y), Number(mo) - 1, Number(d));
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+    }).format(date);
+  } catch { return '—'; }
+}
+
 // Format a UTC ISO string as date + time in Eastern Time ("Jan 15, 2:30 PM")
 export function fmtDateTimeET(utcIso) {
   if (!utcIso) return '—';
