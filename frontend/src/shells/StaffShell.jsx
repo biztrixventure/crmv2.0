@@ -56,7 +56,7 @@ import { useFormFields } from "../hooks/useFormFields";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import PhoneSearch from "../components/Closer/PhoneSearch";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
-import { fmtDateET } from "../utils/timezone";
+import { fmtDateET, fmtSaleDate } from "../utils/timezone";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -797,7 +797,11 @@ const StaffShell = () => {
                           <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(s.created_at)}</td>
+                          {/* Sale date = the day the sale actually happened (carried through
+                              bulk upload). Falls back to created_at on legacy rows where
+                              sale_date wasn't captured. Without this, every bulk-uploaded
+                              row shows the UPLOAD day ("today") instead of the file's date. */}
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDateET(s.created_at)}</td>
                           {hasPermission('delete_sale') && (
                             <td className="py-3 px-3">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
