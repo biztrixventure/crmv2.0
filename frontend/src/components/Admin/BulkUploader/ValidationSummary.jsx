@@ -33,19 +33,31 @@ const rowLine = (r, i) => (
   </div>
 );
 
-// Per-row diff line for the Updates collapsible. Shows the row identity + each
-// changed field as "field: prev → next". Identical-row entries (no changes)
-// render as a muted "no changes" line so the user knows they were detected and
-// silently skipped (no DB write).
-const updateLine = (u, i) => {
+// Per-row diff line for the Updates collapsible. Renders a checkbox so the
+// superadmin can opt OUT of any single update; defaults checked when the row
+// has changes. Identical rows (no changes) skip the checkbox — nothing to opt
+// in on. Shows each change as `field: prev → next` with strike-through prev.
+const updateLine = (updateDecisions, toggleUpdate, allowUpdates) => (u, i) => {
   const changes = Array.isArray(u.changes) ? u.changes : [];
+  const hasChanges = changes.length > 0;
+  const checked = hasChanges ? !!updateDecisions[i] : false;
+  const disabled = !hasChanges || !allowUpdates;
   return (
-    <div key={i} className="text-xs py-1.5 px-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-      <strong style={{ color: 'var(--color-text)' }}>{u.cli_number || '—'}</strong> · {u.fronter_name || '—'} · {u.company_name || '—'}
-      {changes.length === 0
-        ? <span style={{ color: 'var(--color-text-tertiary)' }}> — no changes (skipped)</span>
-        : (
-          <ul className="mt-1 ml-3 list-disc space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+    <label key={i} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded cursor-pointer" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', opacity: !allowUpdates && hasChanges ? 0.5 : 1 }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={() => toggleUpdate(i)}
+        className="mt-0.5"
+      />
+      <div className="flex-1 min-w-0">
+        <div>
+          <strong style={{ color: 'var(--color-text)' }}>{u.cli_number || '—'}</strong> · {u.fronter_name || '—'} · {u.company_name || '—'}
+          {!hasChanges && <span style={{ color: 'var(--color-text-tertiary)' }}> — no changes (skipped)</span>}
+        </div>
+        {hasChanges && (
+          <ul className="mt-1 ml-1 list-disc list-inside space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {changes.map((c, j) => (
               <li key={j} className="break-all">
                 <span style={{ color: 'var(--color-text-tertiary)' }}>{c.field.replace(/^form_data\./, '')}:</span>{' '}
@@ -56,17 +68,28 @@ const updateLine = (u, i) => {
             ))}
           </ul>
         )}
-    </div>
+      </div>
+    </label>
   );
 };
 
-const ValidationSummary = ({ results, decisions, toggleConflict, setAllConflicts, onConfirm, onBack, busy }) => {
+const ValidationSummary = ({
+  results, decisions, toggleConflict, setAllConflicts,
+  updateDecisions = {}, allowUpdates = true, setAllowUpdates = () => {},
+  toggleUpdate = () => {}, setAllUpdates = () => {},
+  onConfirm, onBack, busy,
+}) => {
   const { clean, updates = [], trueDuplicates, conflicts, unmatched, invalid } = results;
   const includedConflicts = conflicts.filter((_, i) => decisions[i]).length;
   const updatesWithChanges = updates.filter(u => Array.isArray(u.changes) && u.changes.length > 0);
   const updatesUnchanged   = updates.length - updatesWithChanges.length;
+  // Count updates that will actually run: master toggle ON, per-row checked, diff non-empty.
+  const includedUpdateCount = !allowUpdates ? 0 : updates.reduce(
+    (acc, u, i) => acc + ((Array.isArray(u.changes) && u.changes.length > 0 && updateDecisions[i]) ? 1 : 0),
+    0
+  );
   const toInsert = clean.length + includedConflicts;
-  const toUpdate = updatesWithChanges.length;
+  const toUpdate = includedUpdateCount;
   const total    = toInsert + toUpdate;
 
   return (
@@ -86,7 +109,35 @@ const ValidationSummary = ({ results, decisions, toggleConflict, setAllConflicts
         </div>
       )}
 
-      <Collapsible icon={RefreshCw} color="var(--color-primary-600)" title="Updates (existing records to be patched)" rows={updates} render={updateLine} />
+      {updates.length > 0 && (
+        <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allowUpdates}
+              onChange={(e) => setAllowUpdates(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="text-sm font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                <RefreshCw size={14} /> Allow updates on duplicate matches
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                When ON, rows that match an existing transfer by phone + fronter + company update that record. Mapped fields with a value get patched. Unmapped or blank fields are preserved as-is — your DB Miles stays if the file has no Miles column. created_at, assigned closer, and workflow status stay locked.
+              </p>
+              {allowUpdates && updatesWithChanges.length > 0 && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <span style={{ color: 'var(--color-text-tertiary)' }}>Per row:</span>
+                  <button type="button" onClick={() => setAllUpdates(true)}  className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-700)' }}>Select all</button>
+                  <button type="button" onClick={() => setAllUpdates(false)} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Clear</button>
+                </div>
+              )}
+            </div>
+          </label>
+        </div>
+      )}
+
+      <Collapsible icon={RefreshCw} color="var(--color-primary-600)" title="Updates (existing records to be patched)" rows={updates} render={updateLine(updateDecisions, toggleUpdate, allowUpdates)} />
       <Collapsible icon={XCircle} color="var(--color-error-600)" title="In-file duplicates (same row twice — skipped)" rows={trueDuplicates} render={rowLine} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Unmatched (fronter/company not found)" rows={unmatched} render={rowLine} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Invalid (missing required fields)" rows={invalid} render={rowLine} />

@@ -28,6 +28,8 @@ export function useBulkUpload() {
   const [progress, setProgress] = useState(null);      // { phase, done, total }
   const [results, setResults]   = useState(emptyResults);
   const [decisions, setDecisions] = useState({});      // conflict index -> include bool
+  const [updateDecisions, setUpdateDecisions] = useState({}); // update index -> include bool (default true)
+  const [allowUpdates, setAllowUpdates] = useState(true);     // master toggle: dup-match → UPDATE vs SKIP
   const [summary, setSummary]   = useState(null);      // { inserted, skipped }
   const [reference, setReference] = useState([]);
   const [batches, setBatches]   = useState([]);
@@ -158,6 +160,11 @@ export function useBulkUpload() {
     setResults(agg);
     // Conflicts default to excluded (safer): user opts in.
     setDecisions({});
+    // Updates default to INCLUDED (user explicitly asked for dup-update). Only
+    // rows with a non-empty diff get a checkbox; unchanged rows aren't actionable.
+    const uDec = {};
+    (agg.updates || []).forEach((u, i) => { if (Array.isArray(u.changes) && u.changes.length) uDec[i] = true; });
+    setUpdateDecisions(uDec);
     setStep('review');
     if (failed) toast.error(`${failed} row(s) couldn't be validated and are listed under unmatched — re-run to re-check them.`);
     else if (invalid.length) toast.warning(`${invalid.length} row(s) are missing required fields — see the review screen.`);
@@ -182,6 +189,14 @@ export function useBulkUpload() {
   const setAllConflicts = useCallback((val) => {
     setDecisions(() => { const d = {}; results.conflicts.forEach((_, i) => { d[i] = val; }); return d; });
   }, [results.conflicts]);
+  const toggleUpdate = useCallback((i) => setUpdateDecisions(d => ({ ...d, [i]: !d[i] })), []);
+  const setAllUpdates = useCallback((val) => {
+    setUpdateDecisions(() => {
+      const d = {};
+      results.updates.forEach((u, i) => { if (Array.isArray(u.changes) && u.changes.length) d[i] = val; });
+      return d;
+    });
+  }, [results.updates]);
 
   // Final insert: clean rows + user-included conflicts. Updates run alongside.
   // Updates only contain rows where the diff is non-empty AND the user opted in
@@ -190,9 +205,14 @@ export function useBulkUpload() {
     setError('');
     const included = results.conflicts.filter((_, i) => decisions[i]).map(c => c.incoming).filter(r => r.company_id || r.fronter_name);
     const rows = [...results.clean, ...included];
-    // Only ship updates that actually have changes. Identical-row entries stay
-    // as a quiet "unchanged" count for the success message.
-    const updateRows = results.updates.filter(u => Array.isArray(u.changes) && u.changes.length > 0);
+    // Updates ship only when (a) master allowUpdates toggle is ON AND (b) the
+    // per-row checkbox is checked AND (c) the row actually has changes. Skipped
+    // rows roll into the "unchanged" count so the user sees they were detected
+    // but intentionally left alone.
+    const updateRows = !allowUpdates ? [] :
+      results.updates.filter((u, i) =>
+        updateDecisions[i] && Array.isArray(u.changes) && u.changes.length > 0
+      );
     const unchangedCount = results.updates.length - updateRows.length;
     if (!rows.length && !updateRows.length) { setError('No records selected to insert or update.'); return; }
 
@@ -247,11 +267,12 @@ export function useBulkUpload() {
     if (updated)   parts.push(`${updated} updated`);
     if (unchanged) parts.push(`${unchanged} unchanged`);
     toast.success(`Upload complete — ${parts.join(', ')}.`);
-  }, [results, decisions, fileName, loadBatches]);
+  }, [results, decisions, updateDecisions, allowUpdates, fileName, loadBatches]);
 
   const reset = useCallback(() => {
     setStep('guide'); setFileName(''); setHeaders([]); setRawRows([]); setMapping({});
-    setError(''); setProgress(null); setResults(emptyResults); setDecisions({}); setSummary(null);
+    setError(''); setProgress(null); setResults(emptyResults); setDecisions({});
+    setUpdateDecisions({}); setAllowUpdates(true); setSummary(null);
   }, []);
 
   const [duplicates, setDuplicates] = useState([]);
@@ -276,6 +297,7 @@ export function useBulkUpload() {
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, batches,
     formFields, fields, phoneKey, duplicates,
+    updateDecisions, allowUpdates, setAllowUpdates, toggleUpdate, setAllUpdates,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleConflict, setAllConflicts,
     confirmInsert, reset, deleteBatch, deleteAllBatches, setStep, loadDuplicates, mergeDuplicates,
   };

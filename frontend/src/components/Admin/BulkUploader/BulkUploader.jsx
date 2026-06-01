@@ -54,6 +54,9 @@ const BulkUploader = () => {
       {u.step === 'review' && (
         <ValidationSummary results={u.results} decisions={u.decisions}
           toggleConflict={u.toggleConflict} setAllConflicts={u.setAllConflicts}
+          updateDecisions={u.updateDecisions} allowUpdates={u.allowUpdates}
+          setAllowUpdates={u.setAllowUpdates}
+          toggleUpdate={u.toggleUpdate} setAllUpdates={u.setAllUpdates}
           onConfirm={u.confirmInsert} onBack={() => u.setStep('mapping')} busy={u.busy} />
       )}
 
