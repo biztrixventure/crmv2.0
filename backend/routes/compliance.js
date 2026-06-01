@@ -163,8 +163,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
     if (ids.length) query = query.in('closer_id', ids);
   }
   if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
-  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
+  // Date filter keys on sale_date (the business day the sale happened) so the
+  // From/To range matches the UI Sale Date column. A bulk-imported April
+  // workbook landed today would otherwise leak into May 1-31 selections
+  // because its created_at is the upload day, not the file's date.
+  if (date_from) query = query.gte('sale_date', date_from);
+  if (date_to)   query = query.lte('sale_date', date_to);
   if (search) { const s = escapeOrValue(search); query = query.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
