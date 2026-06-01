@@ -90,14 +90,16 @@ router.get(
         if (status) q = q.eq('status', status);
         return q;
       };
-      const [sAll, sOpen, sWon, sLost, sReview] = await Promise.all([
+      const [sAll, sOpen, sWon, sLost, sReview, sCancelled] = await Promise.all([
         saleCount(), saleCount('open'), saleCount('closed_won'), saleCount('closed_lost'), saleCount('pending_review'),
+        saleCount('cancelled'),
       ]);
       stats.totalSales         = sAll.count || 0;
       stats.openSales          = sOpen.count || 0;
       stats.closedWon          = sWon.count || 0;
       stats.closedLost         = sLost.count || 0;
       stats.awaitingCompliance = sReview.count || 0;
+      stats.cancelledSales     = sCancelled.count || 0;
 
       // Today's sales totals — keyed on sale_date (the business day the sale
       // actually happened), NOT created_at. Without this, a bulk upload of an
@@ -112,6 +114,10 @@ router.get(
         .eq('status', 'closed_won')
         .eq('sale_date', todayStr);
       stats.todayClosedWon = sTodayWon.count || 0;
+      const sTodayCancelled = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .eq('status', 'cancelled')
+        .eq('sale_date', todayStr);
+      stats.todayCancelled = sTodayCancelled.count || 0;
 
       // Conversion rate: compliance-approved sales / total transfers
       stats.conversionRate = stats.totalTransfers > 0

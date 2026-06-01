@@ -840,7 +840,7 @@ const StaffShell = () => {
                 into a corner pill, matching the spec ("today highlighted,
                 total in the corner"). Approved is a one-click filter into the
                 My Sales list scoped to closed_won. */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
               {/* My Sales — body click filters to today's submitted sales;
                   the corner "Total N" pill is its own click target that drops
                   the date filter so the list below shows every sale ever
@@ -920,6 +920,39 @@ const StaffShell = () => {
                   </div>
                   <div className={`p-3 rounded-xl bg-warning-100 dark:bg-warning-900`}>
                     <Clock size={22} className={`text-warning-600`} />
+                  </div>
+                </div>
+              </Card>
+
+              {/* Cancelled — mirrors the Approved card pattern: body filters to
+                  today's cancelled sales, the corner Total pill drops the date
+                  filter and keeps status=cancelled so the closer can see the
+                  full cancelled history in one click. Status key is 'cancelled'
+                  (not 'closed_lost') — matches the badge label and the value
+                  Compliance writes when they cancel a sale. */}
+              <Card
+                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                onClick={() => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('today')); }}
+                title="Show today's cancelled sales"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-secondary mb-1">Cancelled · Today</p>
+                    <p className={`text-3xl font-bold text-error-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.todayCancelled || 0)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('all')); }}
+                      title="Show all cancelled sales (no date filter)"
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                      Total {statsLoading ? '—' : (stats.cancelledSales || 0)}
+                    </button>
+                    <div className={`p-2.5 rounded-xl bg-error-100 dark:bg-error-900`}>
+                      <XCircle size={20} className={`text-error-600`} />
+                    </div>
                   </div>
                 </div>
               </Card>
