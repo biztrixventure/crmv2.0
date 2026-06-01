@@ -283,7 +283,47 @@ router.get('/closers', asyncHandler(async (req, res) => {
       company_name: companyNameMap[r.company_id]      || '',
     }));
 
-  logger.info('[closers] final closers count=%d', closers.length);
+  // Fairness ranking: rotate closers so the same one isn't always at the top
+  // of the fronter's dropdown. Ranking key = timestamp of each closer's most
+  // recent assignment — least-recently-assigned closer floats to position 1,
+  // closers never assigned land above everyone with prior assignments.
+  // Within a tie (e.g. all-never-assigned), a stable case-insensitive name
+  // sort keeps the dropdown predictable for the same-keyboard typist.
+  if (closers.length > 0) {
+    const closerIds = closers.map(c => c.id);
+    // One round-trip — fetch the most recent assignment per closer. limit
+    // generous enough that even on a high-volume tenant we catch the latest
+    // assignment for every closer; rows ordered DESC so the first occurrence
+    // of each closer_id is their most recent.
+    const fetchCap = Math.max(500, closerIds.length * 5);
+    const { data: recents } = await supabaseAdmin
+      .from('transfers')
+      .select('assigned_closer_id, created_at')
+      .in('assigned_closer_id', closerIds)
+      .order('created_at', { ascending: false })
+      .limit(fetchCap);
+    const lastSeen = {};
+    for (const r of recents || []) {
+      if (r.assigned_closer_id && !lastSeen[r.assigned_closer_id]) {
+        lastSeen[r.assigned_closer_id] = r.created_at;
+      }
+    }
+    closers.sort((a, b) => {
+      const la = lastSeen[a.id];
+      const lb = lastSeen[b.id];
+      if (!la && !lb) {
+        // Both never assigned — alphabetical so the dropdown isn't random.
+        const an = `${a.first_name} ${a.last_name}`.toLowerCase();
+        const bn = `${b.first_name} ${b.last_name}`.toLowerCase();
+        return an.localeCompare(bn);
+      }
+      if (!la) return -1;
+      if (!lb) return 1;
+      return la.localeCompare(lb);     // earlier created_at = less recently assigned = higher up
+    });
+  }
+
+  logger.info('[closers] final closers count=%d (fairness-sorted)', closers.length);
   res.json({ closers });
 }));
 
