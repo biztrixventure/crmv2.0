@@ -658,13 +658,14 @@ router.post('/:id/reject', [
     return res.status(403).json({ error: 'Only the assigned closer or compliance can reject this transfer' });
   }
 
-  // Closers / superadmin can only reject an actively-assigned transfer.
-  // Compliance can reject from any non-terminal state — they're acting after
-  // the fact, so `completed` / `pending` / `assigned` all need to be open to
-  // them. Already-rejected / cancelled stays blocked so the same record
-  // can't bounce statuses repeatedly.
+  // Compliance + superadmin can reject from any non-terminal state — both
+  // act post-hoc on records they didn't necessarily handle in the workflow.
+  // The assigned closer is restricted to 'assigned' transfers so they can't
+  // bounce a sale-completed lead back into the fronter queue. terminal states
+  // (already rejected / cancelled) stay blocked for everyone so a record
+  // can't ping-pong statuses.
   const closedStates = new Set(['rejected', 'cancelled']);
-  if (isComplianceReject) {
+  if (isComplianceReject || isSuperAdmin) {
     if (closedStates.has(existing.status)) {
       return res.status(400).json({ error: `Cannot reject a transfer with status: ${existing.status}` });
     }
