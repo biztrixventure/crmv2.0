@@ -153,8 +153,12 @@ router.get(
     if (safeCloserId && isManagerRole) query = query.eq('closer_id', safeCloserId);
 
     if (status)    query = query.eq('status', status);
-    if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
-    if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
+    // Date filter keys on sale_date (the business day the sale happened) so the
+    // "Today" preset and any custom range match what the UI Date column shows.
+    // Bulk-uploaded April sales no longer count as "Today" just because they
+    // were inserted today. sale_date is a DATE column → string compare works.
+    if (date_from) query = query.gte('sale_date', date_from);
+    if (date_to)   query = query.lte('sale_date', date_to);
     if (search) {
       const s = escapeOrValue(search);
       query = query.or(
@@ -406,8 +410,9 @@ router.get('/compliance', asyncHandler(async (req, res) => {
   // superadmin: no filter
 
   if (status)     query = query.eq('status', status);
-  if (date_from)  query = query.gte('created_at', etDateToUtcStart(date_from));
-  if (date_to)    query = query.lte('created_at', etDateToUtcEnd(date_to));
+  // Same sale_date semantics as GET /sales — see comment there.
+  if (date_from)  query = query.gte('sale_date', date_from);
+  if (date_to)    query = query.lte('sale_date', date_to);
 
   if (search) {
     const s = escapeOrValue(search);

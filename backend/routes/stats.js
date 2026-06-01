@@ -1,6 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -57,15 +58,16 @@ router.get(
       stats.assignedTransfers  = tAssigned.count || 0;
       stats.completedTransfers = tCompleted.count || 0;
 
-      // ── "Today" window — UTC midnight to next midnight. The Today metric
-      //    on the dashboard cards drives the "Today: N" highlight on the
-      //    transfer + sales cards. Same scoping function so a fronter sees
-      //    their own transfers and a closer sees the assigned-team set.
-      const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
-      const todayEnd   = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+      // ── "Today" window — ET calendar day boundaries (the app's display
+      //    timezone). Transfers have no business-date column, so the lead-
+      //    created moment is the only signal — counted in ET so a closer in
+      //    Florida at 9pm sees their day, not tomorrow's UTC bucket.
+      const todayStr   = todayEt();
+      const todayStart = etDateToUtcStart(todayStr);
+      const todayEndIso = etDateToUtcEnd(todayStr);
       const tToday = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
-        .gte('created_at', todayStart.toISOString())
-        .lt('created_at',  todayEnd.toISOString());
+        .gte('created_at', todayStart)
+        .lte('created_at', todayEndIso);
       stats.todayTransfers = tToday.count || 0;
 
       // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
@@ -97,19 +99,18 @@ router.get(
       stats.closedLost         = sLost.count || 0;
       stats.awaitingCompliance = sReview.count || 0;
 
-      // Today's sales totals — same UTC-day window used for transfers above.
-      // `todaySales` powers the closer card's "Today: N" heading; `todayClosedWon`
-      // tells the closer how many of today's submissions have already been
-      // compliance-approved, so they can see real progress without leaving
-      // the dashboard.
+      // Today's sales totals — keyed on sale_date (the business day the sale
+      // actually happened), NOT created_at. Without this, a bulk upload of an
+      // old April workbook today would inflate "Today: N" because every row's
+      // created_at = NOW(). sale_date is a DATE column so plain string equality
+      // matches the ET calendar day. UI Date columns already display sale_date,
+      // so the count and the visible list now agree.
       const sToday = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
-        .gte('created_at', todayStart.toISOString())
-        .lt('created_at',  todayEnd.toISOString());
+        .eq('sale_date', todayStr);
       stats.todaySales = sToday.count || 0;
       const sTodayWon = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
         .eq('status', 'closed_won')
-        .gte('created_at', todayStart.toISOString())
-        .lt('created_at',  todayEnd.toISOString());
+        .eq('sale_date', todayStr);
       stats.todayClosedWon = sTodayWon.count || 0;
 
       // Conversion rate: compliance-approved sales / total transfers
