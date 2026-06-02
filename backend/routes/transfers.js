@@ -550,6 +550,79 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /transfers/manual-entry — closer creates a transfer on behalf of a
+// fronter who forgot to enter the lead on their side. Closer picks the fronter
+// company + fronter user; the transfer is attributed to that fronter (so the
+// fronter dashboard credit is intact) AND tagged with manual_entry_by metadata
+// so analytics and compliance can see who logged it.
+// ============================================================================
+router.post('/manual-entry', [
+  body('fronter_company_id').isUUID().withMessage('fronter_company_id required'),
+  body('fronter_user_id').isUUID().withMessage('fronter_user_id required'),
+  body('form_data').isObject().withMessage('form_data required'),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
+
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { fronter_company_id, fronter_user_id, form_data: rawFD } = req.body;
+
+  // Closer-side roles only — keep this off the fronter side completely.
+  if (!['closer', 'closer_manager', 'company_admin', 'operations_manager', 'compliance_manager', 'superadmin'].includes(userRole)) {
+    return res.status(403).json({ error: 'Only closer-side roles can manually create a transfer.' });
+  }
+
+  // Validate the fronter user is actually a fronter in that company.
+  const { data: roleRow } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('company_id, custom_roles(level)')
+    .eq('user_id', fronter_user_id).eq('company_id', fronter_company_id).eq('is_active', true)
+    .maybeSingle();
+  if (!roleRow || roleRow.custom_roles?.level !== 'fronter') {
+    return res.status(400).json({ error: 'Selected user is not an active fronter in the chosen company.' });
+  }
+
+  // Closer name for the manual_entry_by metadata.
+  const { data: closerProfile } = await supabaseAdmin
+    .from('user_profiles').select('first_name, last_name').eq('user_id', userId).maybeSingle();
+  const closerName = [closerProfile?.first_name, closerProfile?.last_name].filter(Boolean).join(' ') || 'A closer';
+
+  const form_data = titleCaseFormData(expandStateInFormData(rawFD));
+  const norm = normPhone(phoneFromFD(form_data));
+  form_data.manual_entry_by = {
+    closer_id:   userId,
+    closer_name: closerName,
+    entered_at:  new Date().toISOString(),
+  };
+
+  const newRow = await stampActor('transfers', {
+    company_id:         fronter_company_id,
+    created_by:         fronter_user_id,      // fronter attribution preserved
+    form_data,
+    normalized_phone:   norm || null,
+    assigned_closer_id: userId,               // self-assign — closer is working it now
+    assigned_to:        userId,
+    status:             'assigned',
+  }, userId);
+
+  const { data: created, error } = await supabaseAdmin.from('transfers').insert(newRow).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Notify fronter (config-gated). Closer-credit visible in their dashboard.
+  try {
+    notifications.onTransferCreated({
+      transfer: created,
+      fronterName: 'Manual entry · ' + closerName,
+      closerUserId: userId,
+    }).catch(() => {});
+  } catch { /* non-critical */ }
+
+  logger.success('MANUAL_ENTRY', `closer ${userId} → fronter ${fronter_user_id} / company ${fronter_company_id}, transfer ${created.id}`);
+  res.json({ ok: true, transfer: created });
+}));
+
+// ============================================================================
 // POST /transfers — fronter creates + directly assigns to a closer
 // ============================================================================
 router.post('/', [

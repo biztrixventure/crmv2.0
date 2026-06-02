@@ -566,9 +566,9 @@ const ProfileDrawer = ({ group, onClose }) => {
                                 <StatusBadge status={s.status} map={SALE_STATUS} />
                                 {s.is_resell && (
                                   <span title={`Resell · ${s.resell_intent || ''}`}
-                                    className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                                     style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
-                                    RS
+                                    ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                                   </span>
                                 )}
                               </div>

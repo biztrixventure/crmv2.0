@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin, RefreshCw } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin, RefreshCw, UserPlus } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
 import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '../../utils/timezone';
 import ResellModal from './ResellModal';
+import ManualEntryModal from './ManualEntryModal';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -341,9 +342,9 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
             {hasSale && <SaleStatusBadge status={saleStatus} />}
             {hasSale && transfer.sale_is_resell && (
               <span title={`Resell sale on this lead`}
-                className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                 style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
-                RS
+                ↻ resell
               </span>
             )}
             {latestDispo ? (
@@ -503,13 +504,14 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
 };
 
 // ── PhoneSearch ───────────────────────────────────────────────────────────────
-const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
+const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onResellComplete }) => {
   const [phone,              setPhone]              = useState('');
   const [results,            setResults]            = useState(null);
   const [loading,            setLoading]            = useState(false);
   const [error,              setError]              = useState('');
   const [resellTarget,       setResellTarget]       = useState(null);   // existing sale-like object
   const [resellStatuses,     setResellStatuses]     = useState(null);
+  const [manualEntryOpen,    setManualEntryOpen]    = useState(false);
 
   // Pull eligible statuses once so the "New on lead" button only appears for
   // sales the closer can actually resell per business_config.
@@ -622,43 +624,71 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
 
       {/* Results */}
       {results !== null && (
-        results.length === 0 ? (
-          <p className="text-sm text-center mt-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
-            No transfers found for that number.
-          </p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center gap-3 flex-wrap">
-              <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                {results.length} record{results.length !== 1 ? 's' : ''} found
-              </p>
-              {alreadySoldCount > 0 && (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
-                  {alreadySoldCount} already sold
-                </span>
-              )}
-              {availableCount > 0 && (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>
-                  {availableCount} available
-                </span>
-              )}
+        <>
+          {results.length === 0 ? (
+            <p className="text-sm text-center mt-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+              No transfers found for that number.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {results.length} record{results.length !== 1 ? 's' : ''} found
+                </p>
+                {alreadySoldCount > 0 && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
+                    {alreadySoldCount} already sold
+                  </span>
+                )}
+                {availableCount > 0 && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>
+                    {availableCount} available
+                  </span>
+                )}
+              </div>
+              {results.map(t => (
+                <TransferCard
+                  key={t.id}
+                  transfer={t}
+                  onCreateSale={onCreateSale}
+                  onResell={(saleLike) => setResellTarget(saleLike)}
+                  resellEligibleStatuses={eligibleSet}
+                  onDispositionSubmit={handleDispositionSubmit}
+                  dispositionConfigs={dispositionConfigs}
+                  companyTimezone={companyTimezone}
+                />
+              ))}
             </div>
-            {results.map(t => (
-              <TransferCard
-                key={t.id}
-                transfer={t}
-                onCreateSale={onCreateSale}
-                onResell={(saleLike) => setResellTarget(saleLike)}
-                resellEligibleStatuses={eligibleSet}
-                onDispositionSubmit={handleDispositionSubmit}
-                dispositionConfigs={dispositionConfigs}
-                companyTimezone={companyTimezone}
-              />
-            ))}
+          )}
+
+          {/* Manual-entry CTA — always available after a search. Use case:
+              fronter forgot to log the transfer on their side; closer knows
+              who sent the call from the dialer, so they manually create the
+              transfer attributed to that fronter. Tagged "Manual entry by
+              closer · <name>" in audit so analytics keep attribution clean. */}
+          <div className="mt-3 rounded-xl px-3 py-3 flex items-center justify-between gap-3 flex-wrap"
+            style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px dashed var(--color-primary-300, #c7d2fe)' }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                Don't see your lead?
+              </p>
+              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Fronter forgot to log this transfer? Add it manually — credit stays with the fronter, you self-assign.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setManualEntryOpen(true)}
+              className="inline-flex items-center gap-1.5 py-2 px-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.03]"
+              style={{ background: 'var(--gradient-sidebar)', minHeight: 40 }}
+              title="Create a transfer on behalf of a fronter"
+            >
+              <UserPlus size={14} /> Manual entry
+            </button>
           </div>
-        )
+        </>
       )}
 
       {/* Resell modal — opens when closer clicks "New on lead" on a card
@@ -668,7 +698,24 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
         isOpen={!!resellTarget}
         sale={resellTarget}
         onClose={() => setResellTarget(null)}
-        onSuccess={() => { setResellTarget(null); if (phone) runSearch(phone); }}
+        onSuccess={(newSale) => {
+          setResellTarget(null);
+          if (phone) runSearch(phone);
+          // Pipe the new sale up to the parent so it can open the closer's
+          // edit-sale modal pre-loaded — closer fills new car / new policy
+          // fields without hunting for the row in the sales list.
+          if (newSale?.id && onResellComplete) onResellComplete(newSale);
+        }}
+      />
+
+      {/* Manual entry — closer self-creates a transfer for a fronter who
+          forgot to enter the lead. On success the search re-runs so the
+          new transfer (auto-assigned to this closer) appears at the top. */}
+      <ManualEntryModal
+        isOpen={manualEntryOpen}
+        prefillPhone={phone}
+        onClose={() => setManualEntryOpen(false)}
+        onCreated={() => { setManualEntryOpen(false); if (phone) runSearch(phone); }}
       />
     </Card>
   );
