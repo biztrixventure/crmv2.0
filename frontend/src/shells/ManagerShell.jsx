@@ -18,6 +18,7 @@ import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import { useDashboardStats } from "../hooks/useDashboardStats";
+import StatCardTriple from "../components/UI/StatCardTriple";
 import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
@@ -469,69 +470,56 @@ const ManagerShell = () => {
                 and Awaiting Review pre-apply the matching status. Previously a
                 stale filter from the last visit could hide records the user
                 expected to see. */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              {[
-                {
-                  label: 'Total Transfers', value: overviewTotals.transfers, icon: Send, color: 'info',
-                  tab: 'transfers',
-                  applyFilter: () => { setXferStatus?.(''); setXferPage?.(1); },
-                  sub: overviewTotals.transfers > 0 && overviewTotals.sales > 0
-                    ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null,
-                },
-                {
-                  label: 'Total Sales', value: overviewTotals.sales, icon: DollarSign, color: 'success',
-                  tab: 'team_sales',
-                  applyFilter: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); },
-                  sub: overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null,
-                },
-                {
-                  label: 'Approved', value: overviewTotals.approved, icon: CheckCircle, color: 'success',
-                  tab: 'team_sales',
-                  applyFilter: () => { setSalesStatus('closed_won'); setSalesPage(1); },
-                  sub: overviewTotals.sales > 0
-                    ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null,
-                },
-                {
-                  label: 'Awaiting Review', value: overviewTotals.pendingReview, icon: Clock, color: 'warning',
-                  tab: 'team_sales',
-                  applyFilter: () => { setSalesStatus('pending_review'); setSalesPage(1); },
-                  sub: overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear',
-                },
-                {
-                  // Resells card — closer-side visible only (fronter-side managers
-                  // get 0 here automatically because backend scope filters them out
-                  // when hide_from_fronter_manager=true).
-                  label: 'Resells · MTD', value: stats?.resellsThisMonth || 0, icon: RefreshCw, color: 'primary',
-                  tab: 'team_sales',
-                  applyFilter: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); },
-                  sub: (stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet',
-                },
-              ].map(({ label, value, icon: Icon, color, tab, sub, applyFilter }) => {
-                const canNav = tabKeys.has(tab);
-                return (
-                  <Card key={label}
-                    className={`p-5 group transition-all duration-200 ${canNav ? 'cursor-pointer hover:shadow-md' : ''}`}
-                    onClick={canNav ? () => { applyFilter?.(); setActiveTab(tab); } : undefined}
-                    style={{ borderColor: canNav ? undefined : 'var(--color-border)' }}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className={`p-2.5 rounded-xl bg-${color}-100 dark:bg-${color}-900 transition-transform duration-200 ${canNav ? 'group-hover:scale-110' : ''}`}>
-                        <Icon size={18} className={`text-${color}-600`} />
-                      </div>
-                      {canNav && (
-                        <ArrowRight size={13} className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
-                      )}
-                    </div>
-                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1">{label}</p>
-                    {loading
-                      ? <div className="h-8 w-14 rounded-lg animate-pulse mt-1" style={{ backgroundColor: 'var(--color-border)' }} />
-                      : <p className={`text-3xl font-bold text-${color}-600`} style={{ letterSpacing: '-0.03em' }}>{value}</p>
-                    }
-                    {sub && !loading && (
-                      <p className="text-xs text-text-tertiary mt-1.5">{sub}</p>
-                    )}
-                  </Card>
-                );
-              })}
+            {/* Triple-segment cards — Today / MTD / Total each clickable.
+                Today + Month come from useDashboardStats; Total uses the
+                pre-existing overviewTotals so the manager's company-scoped
+                aggregate stays correct even before stats hook loads. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <StatCardTriple
+                label="Total Transfers"  icon={Send}        color="info"
+                loading={loading || !stats}
+                today={{ value: stats?.todayTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('today')); setActiveTab('transfers'); } }}
+                month={{ value: stats?.monthTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('month')); setActiveTab('transfers'); } }}
+                total={{ value: overviewTotals.transfers   , onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('all'));   setActiveTab('transfers'); } }}
+                caption={overviewTotals.transfers > 0 && overviewTotals.sales > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null}
+              />
+              <StatCardTriple
+                label="Total Sales"      icon={DollarSign}  color="success"
+                loading={loading || !stats}
+                today={{ value: stats?.todaySales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
+                month={{ value: stats?.monthSales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
+                total={{ value: overviewTotals.sales      , onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
+                caption={overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null}
+              />
+              <StatCardTriple
+                label="Approved"         icon={CheckCircle} color="success"
+                loading={loading || !stats}
+                today={{ value: stats?.todayClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
+                month={{ value: stats?.monthClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
+                total={{ value: overviewTotals.approved   , onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
+                caption={overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null}
+              />
+              <StatCardTriple
+                label="Awaiting Review"  icon={Clock}       color="warning"
+                loading={loading || !stats}
+                total={{ value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' }}
+                caption={overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear'}
+              />
+              <StatCardTriple
+                label="Cancelled"        icon={XCircle}     color="error"
+                loading={loading || !stats}
+                today={{ value: stats?.todayCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
+                month={{ value: stats?.monthCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
+                total={{ value: stats?.cancelledSales || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
+              />
+              <StatCardTriple
+                label="Resells"          icon={RefreshCw}
+                accent="#8b5cf6" gradientFrom="#ede9fe" color="primary"
+                loading={loading || !stats}
+                month={{ value: stats?.resellsThisMonth || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); }, title: 'Resells this month' }}
+                total={{ value: stats?.resellsTotal     || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); }, title: 'All resells' }}
+                caption={(stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet'}
+              />
             </div>
 
             {/* ── Conversion funnel ── */}

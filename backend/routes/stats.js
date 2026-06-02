@@ -151,6 +151,25 @@ router.get(
         .eq('sale_date', todayStr);
       stats.todayCancelled = sTodayCancelled.count || 0;
 
+      // ── Month-to-date sales metrics — same scope/privacy as today, just a
+      // wider date window. Drives the third clickable segment on stat cards. ──
+      const monthStart = `${todayStr.slice(0, 7)}-01`;
+      const monthSales = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .gte('sale_date', monthStart).lte('sale_date', todayStr);
+      stats.monthSales = monthSales.count || 0;
+      const monthWon = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .eq('status', 'closed_won').gte('sale_date', monthStart).lte('sale_date', todayStr);
+      stats.monthClosedWon = monthWon.count || 0;
+      const monthCanc = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+        .eq('status', 'cancelled').gte('sale_date', monthStart).lte('sale_date', todayStr);
+      stats.monthCancelled = monthCanc.count || 0;
+
+      // Month-to-date transfers — keyed on created_at (no business-date col).
+      const mtStart = etDateToUtcStart(monthStart);
+      const monthXfers = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+        .gte('created_at', mtStart).lte('created_at', todayEndIso);
+      stats.monthTransfers = monthXfers.count || 0;
+
       // Resell counts — month-to-date + all-time. Always-on; fronter scope
       // still applies, so a fronter with hide_from_fronter=true sees 0 here
       // (their pipeline doesn't include resells by definition).
