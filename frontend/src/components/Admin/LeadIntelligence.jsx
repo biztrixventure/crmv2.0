@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Phone, Mail, Building2, X, Clock, CheckCircle,
   AlertTriangle, Info, Activity, FileText, Calendar, User,
-  ChevronRight, ArrowRight, MessageSquare,
+  ChevronRight, ArrowRight, MessageSquare, Trash2,
 } from 'lucide-react';
 import client from '../../api/client';
 import LeadGraph from './LeadGraph';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 const fmtKey = (k) => k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
@@ -138,10 +139,43 @@ const ResultCard = ({ group, onClick }) => {
 
 // ── Profile Drawer ────────────────────────────────────────────────────────────
 const ProfileDrawer = ({ group, onClose }) => {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [tab,     setTab]     = useState('overview');
   const [recTab,  setRecTab]  = useState('transfers');
+  const [deleting, setDeleting] = useState(null);   // `${kind}:${id}` while a delete is in flight
+
+  // Destructive permanent-delete handlers. Each requires a typed confirmation
+  // ("DELETE") so a slipped click can't wipe a record. SuperAdmin only —
+  // backend permission stays authoritative.
+  const requireType = (label) => {
+    const v = window.prompt(`Type DELETE to permanently remove this ${label}. This cannot be undone.`);
+    return v && v.trim().toUpperCase() === 'DELETE';
+  };
+
+  const doDelete = async (kind, id, label) => {
+    if (!requireType(label)) return;
+    setDeleting(`${kind}:${id}`);
+    try {
+      await client.delete(`${kind}/${id}`);
+      // Drop the row from the local profile so the UI updates without a full
+      // reload — full reload happens when user re-runs the search.
+      setProfile(p => {
+        if (!p) return p;
+        const next = { ...p };
+        if (kind === 'transfers')  next.transfers  = (p.transfers  || []).filter(t => t.id !== id);
+        if (kind === 'sales')      next.sales      = (p.sales      || []).filter(s => s.id !== id);
+        if (kind === 'callbacks')  next.callbacks  = (p.callbacks  || []).filter(c => c.id !== id);
+        return next;
+      });
+    } catch (e) {
+      window.alert(e?.response?.data?.error || `Failed to delete this ${label}.`);
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const loadProfile = useCallback(async () => {
     if (!group) return;
@@ -497,7 +531,21 @@ const ProfileDrawer = ({ group, onClose }) => {
                                   </span>
                                 )}
                               </div>
-                              <StatusBadge status={t.status} map={TRANSFER_STATUS} />
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <StatusBadge status={t.status} map={TRANSFER_STATUS} />
+                                {isSuperadmin && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); doDelete('transfers', t.id, 'transfer'); }}
+                                    disabled={deleting === `transfers:${t.id}`}
+                                    title="Permanently delete this transfer"
+                                    aria-label="Permanently delete this transfer"
+                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
+                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
+                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Meta row */}
@@ -571,6 +619,18 @@ const ProfileDrawer = ({ group, onClose }) => {
                                     ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                                   </span>
                                 )}
+                                {isSuperadmin && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); doDelete('sales', s.id, 'sale'); }}
+                                    disabled={deleting === `sales:${s.id}`}
+                                    title="Permanently delete this sale"
+                                    aria-label="Permanently delete this sale"
+                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
+                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
+                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
+                                  </button>
+                                )}
                               </div>
                             </div>
 
@@ -637,7 +697,21 @@ const ProfileDrawer = ({ group, onClose }) => {
                                   <Building2 size={10} />{coName}
                                 </span>
                               </div>
-                              <StatusBadge status={c.status} map={CB_STATUS} />
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <StatusBadge status={c.status} map={CB_STATUS} />
+                                {isSuperadmin && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); doDelete('callbacks', c.id, 'callback'); }}
+                                    disabled={deleting === `callbacks:${c.id}`}
+                                    title="Permanently delete this callback"
+                                    aria-label="Permanently delete this callback"
+                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
+                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
+                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Body — agent, schedule, phone, notes */}

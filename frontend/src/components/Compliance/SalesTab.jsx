@@ -7,8 +7,9 @@ import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
 import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
+import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import {
-  STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES, COMPLIANCE_EDIT_STATUSES, LIMIT,
+  STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
   TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader,
@@ -16,6 +17,12 @@ import {
 
 const SalesTab = ({ companyList, initCompany = '' }) => {
   const { user } = useAuth();
+  // Config-driven status lists — SuperAdmin → Business Rules → Compliance
+  // Workflow drives both the filter dropdown and the edit dialog. Falls back
+  // to the shared.jsx constants when the config endpoint is unavailable.
+  const { allStatuses: cfgAll, editStatuses: cfgEdit } = useComplianceStatuses();
+  const ALL_SALE_STATUSES        = cfgAll?.length  ? cfgAll  : FALLBACK_ALL;
+  const COMPLIANCE_EDIT_STATUSES = cfgEdit?.length ? cfgEdit : FALLBACK_EDIT;
   const [sales, setSales]       = useState([]);
   // Full form-field edit target for compliance — opens SaleModal pre-filled
   // and dispatches PUT /sales/:id on submit. Separate from the existing
