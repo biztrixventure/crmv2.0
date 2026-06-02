@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2 } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
+import DedupRules from './DedupRules';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -10,7 +11,7 @@ import ResellRules from './ResellRules';
 // roadmap without confusion.
 const PAGES = [
   { id: 'resell',       label: 'Resell & Re-engagement', icon: RefreshCw,   Component: ResellRules },
-  { id: 'dedup',        label: 'Dedup & Search',         icon: Search,      disabled: true },
+  { id: 'dedup',        label: 'Dedup & Search',         icon: Search,      Component: DedupRules },
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   disabled: true },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, disabled: true },
   { id: 'notifications',label: 'Notifications',          icon: Bell,        disabled: true },

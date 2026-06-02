@@ -139,6 +139,23 @@ router.get(
         .eq('sale_date', todayStr);
       stats.todayCancelled = sTodayCancelled.count || 0;
 
+      // Resell counts — month-to-date + all-time. Always-on; fronter scope
+      // still applies, so a fronter with hide_from_fronter=true sees 0 here
+      // (their pipeline doesn't include resells by definition).
+      try {
+        const monthStart = `${todayStr.slice(0, 7)}-01`;
+        const sResellMtd = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+          .eq('is_resell', true).gte('sale_date', monthStart).lte('sale_date', todayStr);
+        stats.resellsThisMonth = sResellMtd.count || 0;
+        const sResellTotal = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
+          .eq('is_resell', true);
+        stats.resellsTotal = sResellTotal.count || 0;
+      } catch {
+        // Column missing (pre-mig 069) — leave counts undefined so frontend renders 0.
+        stats.resellsThisMonth = 0;
+        stats.resellsTotal = 0;
+      }
+
       // Conversion rate: compliance-approved sales / total transfers
       stats.conversionRate = stats.totalTransfers > 0
         ? Math.round((stats.closedWon / stats.totalTransfers) * 100)

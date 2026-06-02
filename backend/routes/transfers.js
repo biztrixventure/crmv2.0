@@ -366,13 +366,19 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 
   if (!fronterCompanyIds.length) return res.json({ transfers: [] });
 
+  // Sort key from business_config — defaults to updated_at so leads
+  // refreshed inside the dedup window bubble to the top of closer search.
+  const { getConfig } = require('../utils/businessConfig');
+  const sortBy = await getConfig(companyId, 'search.sort_by', 'updated_at');
+  const sortCol = sortBy === 'created_at' ? 'created_at' : 'updated_at';
+
   // PostgREST JSONB text-extraction: ->>key (no SQL quotes). Covers both naming conventions.
   const { data, error } = await supabaseAdmin
     .from('transfers')
     .select('*')
     .in('company_id', fronterCompanyIds)
     .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
-    .order('created_at', { ascending: false })
+    .order(sortCol, { ascending: false, nullsFirst: false })
     .limit(50);
 
   if (error) return res.status(500).json({ error: error.message });
@@ -580,8 +586,11 @@ router.post('/', [
         if (r.error) return res.status(500).json({ error: r.error.message });
         transfer = r.data; action = 'created_sale_warning'; managerEvent = 'sale_overlap';
       } else {
-        // 30-day window, server time (UTC instants): <= 30 days = Case A.
-        const withinWindow = (Date.now() - new Date(tfs[0].created_at).getTime()) / 86400000 <= 30;
+        // Dedup window from business_config (default 30 days). Superadmin
+        // can tune per company via Business Rules → Dedup & Search.
+        const { getConfig } = require('../utils/businessConfig');
+        const dedupDays = parseInt(await getConfig(companyId, 'dedup.window_days', 30), 10) || 30;
+        const withinWindow = (Date.now() - new Date(tfs[0].created_at).getTime()) / 86400000 <= dedupDays;
         if (withinWindow) {
           // Case A: UPDATE the most recent transfer in place — no new row, no count.
           const updates = await stampActor('transfers', { form_data, normalized_phone: norm, updated_at: new Date().toISOString() }, userId);
