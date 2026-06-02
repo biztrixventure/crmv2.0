@@ -50,7 +50,7 @@ const Section = ({ title, children }) => (
 
 export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const { user, hasPermission } = useAuth();
-  const { sections } = useDrawerLayout('sale');
+  const { sections, isFieldVisible } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
 
@@ -170,32 +170,32 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
               case 'customer':
                 return (
                   <Section key="customer" title={s.label || 'Customer'}>
-                    <Row label="Name"      value={sale.customer_name} />
-                    <Row label="Phone"     value={sale.customer_phone} />
-                    {sale.customer_phone_2 && <Row label="Phone 2" value={sale.customer_phone_2} />}
-                    {sale.customer_email   && <Row label="Email"   value={sale.customer_email} />}
-                    {sale.customer_address && <Row label="Address" value={sale.customer_address} />}
+                    {isFieldVisible('customer', 'name')    && <Row label="Name"  value={sale.customer_name} />}
+                    {isFieldVisible('customer', 'phone')   && <Row label="Phone" value={sale.customer_phone} />}
+                    {isFieldVisible('customer', 'phone_2') && sale.customer_phone_2 && <Row label="Phone 2" value={sale.customer_phone_2} />}
+                    {isFieldVisible('customer', 'email')   && sale.customer_email   && <Row label="Email"   value={sale.customer_email} />}
+                    {isFieldVisible('customer', 'address') && sale.customer_address && <Row label="Address" value={sale.customer_address} />}
                   </Section>
                 );
               case 'vehicle':
                 if (!(sale.car_year || sale.car_make || sale.car_model)) return null;
                 return (
                   <Section key="vehicle" title={s.label || 'Vehicle'}>
-                    {sale.car_year  && <Row label="Year"  value={sale.car_year} />}
-                    {sale.car_make  && <Row label="Make"  value={sale.car_make} />}
-                    {sale.car_model && <Row label="Model" value={sale.car_model} />}
-                    {sale.car_miles && <Row label="Miles" value={Number(sale.car_miles).toLocaleString()} />}
-                    {sale.car_vin   && <Row label="VIN"   value={sale.car_vin} mono />}
+                    {isFieldVisible('vehicle', 'year')  && sale.car_year  && <Row label="Year"  value={sale.car_year} />}
+                    {isFieldVisible('vehicle', 'make')  && sale.car_make  && <Row label="Make"  value={sale.car_make} />}
+                    {isFieldVisible('vehicle', 'model') && sale.car_model && <Row label="Model" value={sale.car_model} />}
+                    {isFieldVisible('vehicle', 'miles') && sale.car_miles && <Row label="Miles" value={Number(sale.car_miles).toLocaleString()} />}
+                    {isFieldVisible('vehicle', 'vin')   && sale.car_vin   && <Row label="VIN"   value={sale.car_vin} mono />}
                   </Section>
                 );
               case 'sale_info':
                 return (
                   <Section key="sale_info" title={s.label || 'Sale Info'}>
-                    {sale.client_name && <Row label="Client"  value={sale.client_name} />}
-                    {sale.plan        && <Row label="Plan"    value={sale.plan} />}
-                    {sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
-                    <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />
-                    {sale.closer_disposition && (
+                    {isFieldVisible('sale_info', 'client')             && sale.client_name && <Row label="Client"  value={sale.client_name} />}
+                    {isFieldVisible('sale_info', 'plan')               && sale.plan        && <Row label="Plan"    value={sale.plan} />}
+                    {isFieldVisible('sale_info', 'sale_date')          && sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
+                    {isFieldVisible('sale_info', 'status')             && <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />}
+                    {isFieldVisible('sale_info', 'closer_disposition') && sale.closer_disposition && (
                       <Row label="Closer Disposition" value={sale.closer_disposition}
                         highlight="var(--color-primary-600)" />
                     )}
@@ -205,14 +205,16 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 if (!hasPermission('view_financial_data')) return null;
                 return (
                   <Section key="financial" title={s.label || 'Financial'}>
-                    {sale.monthly_payment && (
+                    {isFieldVisible('financial', 'monthly_payment') && sale.monthly_payment && (
                       <Row label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`}
                         highlight="#16a34a" />
                     )}
-                    {sale.down_payment && (
+                    {isFieldVisible('financial', 'down_payment') && sale.down_payment && (
                       <Row label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} />
                     )}
-                    {sale.payment_due_note && <Row label="Due Note" value={sale.payment_due_note} />}
+                    {isFieldVisible('financial', 'payment_due_note') && sale.payment_due_note && (
+                      <Row label="Due Note" value={sale.payment_due_note} />
+                    )}
                   </Section>
                 );
               case 'additional':
@@ -227,21 +229,23 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
               case 'people':
                 return (
                   <Section key="people" title={s.label || 'People'}>
-                    {sale.closer_name  && <Row label="Closer"  value={sale.closer_name} />}
-                    {sale.fronter_name && <Row label="Fronter" value={sale.fronter_name} />}
+                    {isFieldVisible('people', 'closer')  && sale.closer_name  && <Row label="Closer"  value={sale.closer_name} />}
+                    {isFieldVisible('people', 'fronter') && sale.fronter_name && <Row label="Fronter" value={sale.fronter_name} />}
                   </Section>
                 );
               case 'timeline':
                 return (
                   <Section key="timeline" title={s.label || 'Timeline'}>
-                    <Row label="Created"  value={new Date(sale.created_at).toLocaleString()} />
-                    {sale.updated_at && sale.updated_at !== sale.created_at && (
+                    {isFieldVisible('timeline', 'created') && (
+                      <Row label="Created" value={new Date(sale.created_at).toLocaleString()} />
+                    )}
+                    {isFieldVisible('timeline', 'updated') && sale.updated_at && sale.updated_at !== sale.created_at && (
                       <Row label="Updated" value={new Date(sale.updated_at).toLocaleString()} />
                     )}
-                    {sale.submitted_for_review_at && (
+                    {isFieldVisible('timeline', 'submitted_for_review') && sale.submitted_for_review_at && (
                       <Row label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} />
                     )}
-                    {sale.compliance_reviewed_at && (
+                    {isFieldVisible('timeline', 'compliance_reviewed') && sale.compliance_reviewed_at && (
                       <Row label="Compliance Reviewed" value={new Date(sale.compliance_reviewed_at).toLocaleString()} />
                     )}
                   </Section>

@@ -88,7 +88,26 @@ export function useDrawerLayout(drawerType) {
     return s ? (s.order ?? 99) : 99;
   };
 
-  return { sections, isVisible, order };
+  // Field-level visibility. When a section has no fields[] array, every field
+  // defaults to visible (back-compat with the section-only configs). When the
+  // SuperAdmin has set fields[], each entry controls one row.
+  const isFieldVisible = (sectionId, fieldId) => {
+    const s = sections.find(x => x.id === sectionId);
+    if (!s) return true;
+    if (!Array.isArray(s.fields) || s.fields.length === 0) return true;
+    const f = s.fields.find(x => x.id === fieldId);
+    return f ? !!f.visible : true;   // new fields default to visible
+  };
+
+  // Get field order within a section (for reordering rendered rows).
+  const fieldOrder = (sectionId, fieldId) => {
+    const s = sections.find(x => x.id === sectionId);
+    if (!s || !Array.isArray(s.fields)) return 99;
+    const f = s.fields.find(x => x.id === fieldId);
+    return f ? (f.order ?? 99) : 99;
+  };
+
+  return { sections, isVisible, order, isFieldVisible, fieldOrder };
 }
 
 // Used by the admin page to bust the cache after a save.

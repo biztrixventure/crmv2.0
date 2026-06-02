@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Phone, Mail, Building2, X, Clock, CheckCircle,
   AlertTriangle, Info, Activity, FileText, Calendar, User,
-  ChevronRight, ArrowRight, MessageSquare, Trash2,
+  ChevronRight, ArrowRight, MessageSquare, Trash2, Pencil,
 } from 'lucide-react';
 import client from '../../api/client';
 import LeadGraph from './LeadGraph';
 import { useAuth } from '../../contexts/AuthContext';
+import LeadEditModal from './LeadEditModal';
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 const fmtKey = (k) => k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
@@ -146,6 +147,7 @@ const ProfileDrawer = ({ group, onClose }) => {
   const [tab,     setTab]     = useState('overview');
   const [recTab,  setRecTab]  = useState('transfers');
   const [deleting, setDeleting] = useState(null);   // `${kind}:${id}` while a delete is in flight
+  const [editing,  setEditing]  = useState(null);   // { kind, record }
 
   // Destructive permanent-delete handlers. Each requires a typed confirmation
   // ("DELETE") so a slipped click can't wipe a record. SuperAdmin only —
@@ -175,6 +177,49 @@ const ProfileDrawer = ({ group, onClose }) => {
     } finally {
       setDeleting(null);
     }
+  };
+
+  // After a successful edit, splice the updated row back into the profile so
+  // the card UI refreshes without re-fetching the entire profile.
+  const handleSaved = (kind, updated) => {
+    setProfile(p => {
+      if (!p) return p;
+      const next = { ...p };
+      const list = kind === 'transfers' ? p.transfers : kind === 'sales' ? p.sales : p.callbacks;
+      const swap = (list || []).map(x => x.id === updated.id ? { ...x, ...updated } : x);
+      if (kind === 'transfers')  next.transfers  = swap;
+      if (kind === 'sales')      next.sales      = swap;
+      if (kind === 'callbacks')  next.callbacks  = swap;
+      return next;
+    });
+  };
+
+  // Small button group (Edit + Delete) used on every record card.
+  const RowActions = ({ kind, id, record, label }) => {
+    if (!isSuperadmin) return null;
+    return (
+      <>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setEditing({ kind, record }); }}
+          title={`Edit this ${label}`}
+          aria-label={`Edit this ${label}`}
+          className="p-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+          style={{ border: '1px solid #bfdbfe', minWidth: 30, minHeight: 30 }}>
+          <Pencil size={12} style={{ color: '#2563eb' }} />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); doDelete(kind, id, label); }}
+          disabled={deleting === `${kind}:${id}`}
+          title={`Permanently delete this ${label}`}
+          aria-label={`Permanently delete this ${label}`}
+          className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
+          style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
+          <Trash2 size={12} style={{ color: '#dc2626' }} />
+        </button>
+      </>
+    );
   };
 
   const loadProfile = useCallback(async () => {
@@ -533,18 +578,7 @@ const ProfileDrawer = ({ group, onClose }) => {
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <StatusBadge status={t.status} map={TRANSFER_STATUS} />
-                                {isSuperadmin && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); doDelete('transfers', t.id, 'transfer'); }}
-                                    disabled={deleting === `transfers:${t.id}`}
-                                    title="Permanently delete this transfer"
-                                    aria-label="Permanently delete this transfer"
-                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
-                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
-                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
-                                  </button>
-                                )}
+                                <RowActions kind="transfers" id={t.id} record={t} label="transfer" />
                               </div>
                             </div>
 
@@ -619,18 +653,7 @@ const ProfileDrawer = ({ group, onClose }) => {
                                     ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                                   </span>
                                 )}
-                                {isSuperadmin && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); doDelete('sales', s.id, 'sale'); }}
-                                    disabled={deleting === `sales:${s.id}`}
-                                    title="Permanently delete this sale"
-                                    aria-label="Permanently delete this sale"
-                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
-                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
-                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
-                                  </button>
-                                )}
+                                <RowActions kind="sales" id={s.id} record={s} label="sale" />
                               </div>
                             </div>
 
@@ -699,18 +722,7 @@ const ProfileDrawer = ({ group, onClose }) => {
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <StatusBadge status={c.status} map={CB_STATUS} />
-                                {isSuperadmin && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); doDelete('callbacks', c.id, 'callback'); }}
-                                    disabled={deleting === `callbacks:${c.id}`}
-                                    title="Permanently delete this callback"
-                                    aria-label="Permanently delete this callback"
-                                    className="p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
-                                    style={{ border: '1px solid #fecaca', minWidth: 30, minHeight: 30 }}>
-                                    <Trash2 size={12} style={{ color: '#dc2626' }} />
-                                  </button>
-                                )}
+                                <RowActions kind="callbacks" id={c.id} record={c} label="callback" />
                               </div>
                             </div>
 
@@ -789,6 +801,18 @@ const ProfileDrawer = ({ group, onClose }) => {
           )}
         </div>
       </div>
+
+      {/* SuperAdmin-only universal record editor — opens for transfer / sale
+          / callback rows from the Edit pencil. handleSaved splices the
+          updated row back into the in-memory profile. */}
+      {editing && (
+        <LeadEditModal
+          kind={editing.kind}
+          record={editing.record}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => handleSaved(editing.kind, updated)}
+        />
+      )}
     </>
   );
 };
