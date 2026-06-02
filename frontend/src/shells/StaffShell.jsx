@@ -595,7 +595,18 @@ const StaffShell = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={setDateRange} defaultPreset="today" value={dateRange} />
+          <DateRangePicker
+            onChange={setDateRange}
+            defaultPreset="today"
+            value={dateRange}
+            onClear={() => {
+              // Master clear: drop status filters on sales + transfers so the
+              // user gets back to a clean view in one click. Date itself is
+              // already being reset to defaultPreset by the picker internally.
+              setSalesStatus(''); setSalesAgent(''); setSalesPage(1);
+              setXferStatus('');  setXferAgent('');  setXferPage(1);
+            }}
+          />
         </div>
 
         {/* ── NON-SALES TABS ── */}

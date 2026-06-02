@@ -1,6 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
-import { Calendar, ChevronDown } from 'lucide-react';
+import { Calendar, ChevronDown, X } from 'lucide-react';
 import { todayET } from '../../utils/timezone';
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Calendar-month range [first day, last day] as YYYY-MM-DD strings. Honors
+// February + leap years via Date(y, m+1, 0).getDate(). Never returns a future
+// "to" beyond todayET so picking the current month doesn't reach into days
+// that haven't happened yet.
+export function monthRange(year, monthIdx /* 0-11 */) {
+  const today = todayET();
+  const last = new Date(year, monthIdx + 1, 0).getDate();
+  const from = `${year}-${String(monthIdx + 1).padStart(2, '0')}-01`;
+  const to   = `${year}-${String(monthIdx + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+  return { date_from: from, date_to: to > today ? today : to };
+}
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
@@ -69,12 +83,16 @@ function matchPreset(range) {
 }
 
 // value prop (optional): { date_from, date_to } — when set externally, syncs the picker label
-const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
+const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) => {
   const [open, setOpen]             = useState(false);
   const [preset, setPreset]         = useState(defaultPreset);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo,   setCustomTo]   = useState('');
   const [isCustom,   setIsCustom]   = useState(false);
+  // Month picker — defaults to current calendar month in ET.
+  const _t = todayET();
+  const [monthYear, setMonthYear] = useState(parseInt(_t.slice(0, 4), 10));
+  const [monthIdx,  setMonthIdx]  = useState(parseInt(_t.slice(5, 7), 10) - 1);
   const ref = useRef(null);
 
   // Sync display when value changes externally (e.g. MiniCalendar click)
@@ -109,6 +127,28 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
     setOpen(false);
   };
 
+  // Month select: range = whole calendar month (clamped to today for the
+  // current month). Custom-from/custom-to inputs pre-fill to the month bounds
+  // so the user can fine-tune within that month without leaving the popover.
+  const selectMonth = (y, m) => {
+    const r = monthRange(y, m);
+    setCustomFrom(r.date_from);
+    setCustomTo(r.date_to);
+    setIsCustom(true);
+    setPreset('');
+    onChange(r);
+    setOpen(false);
+  };
+
+  const handleClear = () => {
+    setIsCustom(false);
+    setCustomFrom(''); setCustomTo('');
+    setPreset(defaultPreset);
+    onChange(getPresetRange(defaultPreset));
+    if (onClear) onClear();
+    setOpen(false);
+  };
+
   const label = isCustom
     ? (customFrom && customTo
         ? `${fmtDate(customFrom)} – ${fmtDate(customTo)}`
@@ -139,7 +179,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-xl p-2 w-52"
+          className="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-xl p-2 w-60"
           style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
         >
           <div className="space-y-0.5 mb-2">
@@ -158,6 +198,41 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
                 {p.label}
               </button>
             ))}
+          </div>
+
+          {/* Month select — applies the full calendar month (clamped to today
+              for the current month). Year selector covers last 4 + this year. */}
+          <div style={{ borderTop: '1px solid var(--color-border)' }} className="pt-2 mb-2">
+            <p className="text-xs font-semibold mb-2 px-1" style={{ color: 'var(--color-text-secondary)' }}>
+              Pick a month
+            </p>
+            <div className="flex gap-1.5 mb-2">
+              <select
+                value={monthIdx}
+                onChange={e => setMonthIdx(parseInt(e.target.value, 10))}
+                className="input text-sm py-1.5 flex-1"
+              >
+                {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+              </select>
+              <select
+                value={monthYear}
+                onChange={e => setMonthYear(parseInt(e.target.value, 10))}
+                className="input text-sm py-1.5 w-20"
+              >
+                {Array.from({ length: 5 }, (_, i) => {
+                  const y = parseInt(_t.slice(0, 4), 10) - i;
+                  return <option key={y} value={y}>{y}</option>;
+                })}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => selectMonth(monthYear, monthIdx)}
+              className="w-full py-1.5 rounded-lg text-sm font-semibold text-white"
+              style={{ background: 'var(--gradient-sidebar)' }}
+            >
+              Apply {MONTHS[monthIdx]} {monthYear}
+            </button>
           </div>
 
           <div style={{ borderTop: '1px solid var(--color-border)' }} className="pt-2">
@@ -190,6 +265,17 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value }) => {
               </button>
             </div>
           </div>
+
+          {/* Clear — resets the picker back to the default preset and lets the
+              parent shell wipe status/agent/etc. via the onClear callback. */}
+          <button
+            type="button"
+            onClick={handleClear}
+            className="w-full mt-2 py-1.5 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors hover:bg-bg-secondary"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          >
+            <X size={12} /> Clear all filters
+          </button>
         </div>
       )}
     </div>
