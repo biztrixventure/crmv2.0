@@ -958,12 +958,7 @@ const StaffShell = () => {
                   className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
                   style={{ backgroundColor: 'var(--color-error-100, #fee2e2)', color: 'var(--color-error-700, #b91c1c)' }}>
                   Total {statsLoading ? '—' : (stats.cancelledSales || 0)}
-                    </button>
-                    <div className={`p-2.5 rounded-xl bg-error-100 dark:bg-error-900`}>
-                      <XCircle size={20} className={`text-error-600`} />
-                    </div>
-                  </div>
-                </div>
+                </button>
               </Card>
 
               {/* Conversion — display-only. Color tinted like the rest so
