@@ -3,6 +3,9 @@ import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2 }
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
+import KpiRules from './KpiRules';
+import ComplianceRules from './ComplianceRules';
+import NotificationsRules from './NotificationsRules';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -12,9 +15,9 @@ import DedupRules from './DedupRules';
 const PAGES = [
   { id: 'resell',       label: 'Resell & Re-engagement', icon: RefreshCw,   Component: ResellRules },
   { id: 'dedup',        label: 'Dedup & Search',         icon: Search,      Component: DedupRules },
-  { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   disabled: true },
-  { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, disabled: true },
-  { id: 'notifications',label: 'Notifications',          icon: Bell,        disabled: true },
+  { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
+  { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
+  { id: 'notifications',label: 'Notifications',          icon: Bell,        Component: NotificationsRules },
 ];
 
 const BusinessRulesHub = () => {

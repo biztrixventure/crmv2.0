@@ -852,7 +852,7 @@ const StaffShell = () => {
                 total in the corner"). All cards share a uniform height +
                 subtle color-tinted gradient bg so the row reads as a
                 cohesive dashboard rather than 5 disconnected tiles. */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
               {/* My Sales — body click filters to today's submitted sales;
                   the corner "Total N" pill is its own click target that drops
                   the date filter so the list below shows every sale ever
@@ -958,6 +958,36 @@ const StaffShell = () => {
                   className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
                   style={{ backgroundColor: 'var(--color-error-100, #fee2e2)', color: 'var(--color-error-700, #b91c1c)' }}>
                   Total {statsLoading ? '—' : (stats.cancelledSales || 0)}
+                </button>
+              </Card>
+
+              {/* Resells — month-to-date + total. Visibility honors privacy
+                  config: fronters with hide_from_fronter=true see 0 here
+                  because the backend scope filter applies. Closer sees full
+                  count; manager sees team total. */}
+              <Card
+                className="p-5 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg min-h-[120px] flex flex-col justify-between"
+                onClick={() => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('month')); }}
+                title="Resells this month — click for month list"
+                style={{ background: 'linear-gradient(135deg, #ede9fe 0%, var(--color-surface) 60%)', borderTop: '3px solid #8b5cf6' }}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">Resells · MTD</p>
+                    <p className="text-4xl font-bold leading-none" style={{ color: '#7c3aed', fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                      {statsLoading ? '—' : (stats.resellsThisMonth || 0)}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: '#ddd6fe' }}>
+                    <RefreshCw size={20} style={{ color: '#7c3aed' }} />
+                  </div>
+                </div>
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all')); }}
+                  title="Show all resells (no date filter)"
+                  className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
+                  style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
+                  Total {statsLoading ? '—' : (stats.resellsTotal || 0)}
                 </button>
               </Card>
 

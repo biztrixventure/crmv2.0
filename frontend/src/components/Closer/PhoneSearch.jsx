@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin, RefreshCw } from 'lucide-react';
 import { Card, Badge } from '../UI';
 import client from '../../api/client';
 import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '../../utils/timezone';
+import ResellModal from './ResellModal';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -36,7 +37,7 @@ const SaleStatusBadge = ({ status }) => {
 };
 
 // ── TransferCard ──────────────────────────────────────────────────────────────
-const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, dispositionConfigs, companyTimezone }) => {
+const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, dispositionConfigs, companyTimezone, resellEligibleStatuses }) => {
   const fd           = transfer.form_data || {};
   const customerName = fd.customer_name
     || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : null)
@@ -417,15 +418,41 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, disposition
         <div className="flex-shrink-0 flex items-center gap-1">
           {hasSale ? (
             <>
-              <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold"
-                style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
-                <DollarSign size={11} /> Already Sold
-              </span>
+              {/* Resell — only when the existing sale's status is eligible per
+                  business_config (resell.enabled_statuses). Replaces the dead
+                  "Already Sold" pill with a productive action. */}
+              {onResell && resellEligibleStatuses?.includes(saleStatus) ? (
+                <button
+                  type="button"
+                  onClick={() => onResell({
+                    id:            transfer.sale_id,
+                    reference_no:  transfer.sale_reference_no,
+                    status:        transfer.sale_status,
+                    customer_name: customerName,
+                    customer_phone: phone,
+                    transfer_id:   transfer.id,
+                    is_resell:     !!transfer.sale_is_resell,
+                  })}
+                  className="flex items-center gap-1.5 py-1.5 px-3 rounded-l-lg font-semibold text-xs text-white hover:scale-[1.03] transition-all"
+                  style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: 'var(--shadow-sm)', whiteSpace: 'nowrap', borderRight: '1px solid rgba(255,255,255,0.2)' }}
+                  title="Resell, add another car, or renewal"
+                  aria-label="Open new sale on this lead"
+                >
+                  <RefreshCw size={12} /> New on lead
+                </button>
+              ) : (
+                <span className="flex items-center gap-1 py-1.5 px-2.5 rounded-l-lg text-xs font-semibold"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)', borderRight: 'none' }}>
+                  <DollarSign size={11} /> Already Sold
+                </span>
+              )}
               {/* Disposition dropdown still accessible after sale */}
               <div className="relative" ref={dropRef}>
                 <button onClick={openDrop}
-                  className="flex items-center py-1.5 px-1.5 rounded-lg font-semibold text-xs hover:scale-[1.03] transition-all"
-                  style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+                  className={`flex items-center py-1.5 px-1.5 ${onResell && resellEligibleStatuses?.includes(saleStatus) ? 'rounded-r-lg text-white' : 'rounded-r-lg'} font-semibold text-xs hover:scale-[1.03] transition-all`}
+                  style={onResell && resellEligibleStatuses?.includes(saleStatus)
+                    ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: 'var(--shadow-sm)' }
+                    : { backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
                   title="Log call outcome">
                   <ChevronDown size={12} />
                 </button>
@@ -467,6 +494,18 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
   const [results,            setResults]            = useState(null);
   const [loading,            setLoading]            = useState(false);
   const [error,              setError]              = useState('');
+  const [resellTarget,       setResellTarget]       = useState(null);   // existing sale-like object
+  const [resellStatuses,     setResellStatuses]     = useState(null);
+
+  // Pull eligible statuses once so the "New on lead" button only appears for
+  // sales the closer can actually resell per business_config.
+  useEffect(() => {
+    client.get('business-config')
+      .then(r => setResellStatuses(r.data?.config?.['resell.enabled_statuses'] || null))
+      .catch(() => setResellStatuses(null));
+  }, []);
+
+  const eligibleSet = resellStatuses ?? ['cancelled','compliance_cancelled','closed_won','sold','closed_lost','expired'];
   const [dispositionConfigs, setDispositionConfigs] = useState([]);
   const lastQuery = useRef('');
 
@@ -597,6 +636,8 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
                 key={t.id}
                 transfer={t}
                 onCreateSale={onCreateSale}
+                onResell={(saleLike) => setResellTarget(saleLike)}
+                resellEligibleStatuses={eligibleSet}
                 onDispositionSubmit={handleDispositionSubmit}
                 dispositionConfigs={dispositionConfigs}
                 companyTimezone={companyTimezone}
@@ -605,6 +646,16 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0 }) => {
           </div>
         )
       )}
+
+      {/* Resell modal — opens when closer clicks "New on lead" on a card
+          whose existing sale is in an eligible status. On success the
+          search re-runs so the closer sees the new sale at the top. */}
+      <ResellModal
+        isOpen={!!resellTarget}
+        sale={resellTarget}
+        onClose={() => setResellTarget(null)}
+        onSuccess={() => { setResellTarget(null); if (phone) runSearch(phone); }}
+      />
     </Card>
   );
 };

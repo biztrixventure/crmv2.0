@@ -413,7 +413,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   if (tIds.length > 0) {
     const [salesRes, dispoRes] = await Promise.all([
       supabaseAdmin.from('sales')
-        .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at, closer_disposition')
+        .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at, closer_disposition, is_resell')
         .in('transfer_id', tIds),
       supabaseAdmin.from('disposition_actions')
         .select('transfer_id, disposition_name, color, note, created_at, user_id')
@@ -461,6 +461,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       sale_reference_no: sale?.reference_no || null,
       sale_closer_name: sale?.closer_name || null,
       sale_closer_disposition: sale?.closer_disposition || null,
+      sale_is_resell: !!sale?.is_resell,
       latest_disposition: latestDispoMapPhone[t.id] || null,
     };
   });

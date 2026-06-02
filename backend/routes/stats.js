@@ -71,8 +71,7 @@ router.get(
         .lte('created_at', todayEndIso);
       stats.todayTransfers = tToday.count || 0;
 
-      // Resell privacy — pre-resolve once per request (config is cached anyway)
-      // so each saleCount() call doesn't await individually.
+      // Resell privacy + KPI counting rules — pre-resolve once per request.
       let hideResells = false;
       if (userRole === 'fronter') {
         hideResells = !!(await getConfig(companyId, 'resell.hide_from_fronter', true));
@@ -81,6 +80,15 @@ router.get(
       } else if (userRole === 'compliance_manager') {
         hideResells = !!(await getConfig(companyId, 'resell.hide_from_compliance', false));
       }
+      // kpi.resell_counts_in toggles whether resells contribute to each stat
+      // family. Privacy filter still wins (a fronter who hides resells never
+      // sees them regardless of this flag), but for closer-side roles it lets
+      // superadmin decide if "Total Sales" should include resells or not.
+      const kpiCounts = (await getConfig(companyId, 'kpi.resell_counts_in', {
+        closer_total: true, conversion: false, fronter_stats: false, resells_card: true,
+      })) || {};
+      const excludeResellsFromTotal = !hideResells && kpiCounts.closer_total === false;
+      const excludeResellsFromConversion = kpiCounts.conversion === false;
 
       // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
       const scopeSales = (q) => {
@@ -105,9 +113,13 @@ router.get(
         }
         return q.eq('id', ZERO_UUID);
       };
-      const saleCount = (status) => {
+      const saleCount = (status, opts = {}) => {
         let q = scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }));
         if (status) q = q.eq('status', status);
+        // closer-side roles may opt to exclude resells from totals via kpi config.
+        if (opts.excludeResells || (excludeResellsFromTotal && !opts.includeResells)) {
+          q = q.eq('is_resell', false);
+        }
         return q;
       };
       const [sAll, sOpen, sWon, sLost, sReview, sCancelled] = await Promise.all([
@@ -156,9 +168,18 @@ router.get(
         stats.resellsTotal = 0;
       }
 
-      // Conversion rate: compliance-approved sales / total transfers
+      // Conversion rate: compliance-approved sales / total transfers.
+      // If config says resells don't count toward conversion, re-count won
+      // sales excluding resells; otherwise reuse stats.closedWon.
+      let conversionNumerator = stats.closedWon;
+      if (excludeResellsFromConversion) {
+        try {
+          const r = await saleCount('closed_won', { excludeResells: true });
+          conversionNumerator = r.count || 0;
+        } catch { /* column missing — fall back to base count */ }
+      }
       stats.conversionRate = stats.totalTransfers > 0
-        ? Math.round((stats.closedWon / stats.totalTransfers) * 100)
+        ? Math.round((conversionNumerator / stats.totalTransfers) * 100)
         : 0;
 
       // Admin-level stats
