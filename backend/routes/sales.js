@@ -12,8 +12,29 @@ const { applySort } = require('../utils/sortHelper');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
+const { getConfig } = require('../utils/businessConfig');
 
 const router = express.Router();
+
+// ============================================================================
+// Resell privacy resolver — returns true when the caller should NOT see
+// is_resell=true sale rows. Looked up per request because the company config
+// can flip on/off independently of the user's role/company.
+// ============================================================================
+async function shouldHideResellsForUser(userRole, companyId, companyType) {
+  if (userRole === 'superadmin' || userRole === 'readonly_admin') return false;
+  if (userRole === 'closer' || userRole === 'closer_manager') return false;
+  if (userRole === 'compliance_manager') {
+    return !!(await getConfig(companyId, 'resell.hide_from_compliance', false));
+  }
+  if (userRole === 'fronter_manager') {
+    return !!(await getConfig(companyId, 'resell.hide_from_fronter_manager', true));
+  }
+  if (userRole === 'fronter' || companyType === 'fronter') {
+    return !!(await getConfig(companyId, 'resell.hide_from_fronter', true));
+  }
+  return false;
+}
 
 // Client sort key -> real column. Name columns sort by underlying user id.
 const SALE_SORT = {
@@ -132,6 +153,13 @@ router.get(
         // Fronter-side: sales whose company_id matches the fronter company
         // (sales created from this company's transfers inherit its company_id)
         query = query.eq('company_id', companyId);
+        // Resell privacy — hide is_resell=true rows from fronter views per
+        // business_config (resell.hide_from_fronter / _manager). Fronters get
+        // credit only for the ORIGINAL sale on a lead; subsequent resells
+        // belong to the closer's company.
+        if (await shouldHideResellsForUser(userRole, companyId, 'fronter')) {
+          query = query.eq('is_resell', false);
+        }
       } else {
         // Closer-side (closer_manager, ops_manager, company_admin, compliance_manager):
         // scope by closer_id across all users in this company
@@ -853,5 +881,178 @@ router.delete(
     res.json({ message: 'Sale deleted successfully' });
   })
 );
+
+// ============================================================================
+// POST /sales/:id/resell — resell an existing sale on the same transfer.
+// Body: { intent: string, reason?: string }
+// Behavior:
+//   resell        → old sale.status = compliance_cancelled, new sale = open
+//   additional_car→ old sale untouched, new sale = open (different car)
+//   renewal       → old sale.status = expired (if not terminal), new sale = open
+//   other / *     → treated as 'resell'
+// Config gates:
+//   resell.enabled_statuses  → old sale's current status must be in this list
+//   resell.warning_statuses  → if old status is in this list, reason is required
+//   resell.cooldown_days     → minimum gap since the last resell on this sale
+//   resell.require_reason_text → reason mandatory regardless of status
+//   resell.auto_block_after_chargebacks → block if this customer has been
+//                              chargebacked at least N times
+// ============================================================================
+router.post('/:id/resell', [
+  body('intent').isString().trim().notEmpty().withMessage('intent is required'),
+  body('reason').optional().isString().trim(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
+
+  const { id } = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const intent   = req.body.intent;
+  const reason   = (req.body.reason || '').trim();
+
+  // ── Permission: closer (on their own sale), closer manager, superadmin ───
+  if (!['closer', 'closer_manager', 'company_admin', 'operations_manager', 'compliance_manager', 'superadmin', 'readonly_admin'].includes(userRole)) {
+    return res.status(403).json({ error: 'Resell is restricted to closer-side roles.' });
+  }
+
+  // ── Load the source sale ─────────────────────────────────────────────────
+  const { data: old, error: fetchErr } = await supabaseAdmin
+    .from('sales').select('*').eq('id', id).single();
+  if (fetchErr || !old) return res.status(404).json({ error: 'Sale not found' });
+
+  if (userRole === 'closer' && old.closer_id !== userId) {
+    return res.status(403).json({ error: 'You can only resell your own sales.' });
+  }
+
+  const companyId = old.company_id;
+
+  // ── Config-driven eligibility checks ─────────────────────────────────────
+  const enabled = (await getConfig(companyId, 'resell.enabled_statuses', [])) || [];
+  const warning = (await getConfig(companyId, 'resell.warning_statuses', [])) || [];
+  const cooldownDays = parseInt(await getConfig(companyId, 'resell.cooldown_days', 7), 10) || 0;
+  const requireReasonGlobal = !!(await getConfig(companyId, 'resell.require_reason_text', false));
+  const autoBlockN  = parseInt(await getConfig(companyId, 'resell.auto_block_after_chargebacks', 2), 10) || 0;
+
+  if (!enabled.includes(old.status)) {
+    return res.status(400).json({ error: `Resell not allowed from status "${old.status}". Adjust Business Rules → Resell to enable.` });
+  }
+  if (requireReasonGlobal && !reason) {
+    return res.status(400).json({ error: 'Reason text is required (configured in Business Rules).' });
+  }
+  if (warning.includes(old.status) && !reason) {
+    return res.status(400).json({ error: `Status "${old.status}" requires a written reason for resell.` });
+  }
+
+  // Cooldown — block if another resell of this sale happened within N days
+  if (cooldownDays > 0) {
+    const cutoff = new Date(Date.now() - cooldownDays * 86400000).toISOString();
+    const { data: recent } = await supabaseAdmin
+      .from('sales').select('id, created_at')
+      .eq('original_sale_id', old.id)
+      .gte('created_at', cutoff)
+      .limit(1);
+    if (recent && recent.length) {
+      return res.status(429).json({ error: `Cooldown active — last resell of this sale was within ${cooldownDays} day(s). Try again later.` });
+    }
+  }
+
+  // Auto-block on repeat chargebacks (same customer phone)
+  if (autoBlockN > 0 && old.customer_phone) {
+    const { count: cbCount } = await supabaseAdmin
+      .from('sales').select('id', { count: 'exact', head: true })
+      .eq('customer_phone', old.customer_phone)
+      .eq('status', 'chargeback');
+    if ((cbCount || 0) >= autoBlockN && userRole !== 'superadmin') {
+      return res.status(403).json({ error: `Customer is auto-blocked after ${cbCount} chargeback(s). Manager override required.` });
+    }
+  }
+
+  // ── Build new sale row ──────────────────────────────────────────────────
+  // Copy customer + (for resell/renewal) vehicle. additional_car clears
+  // vehicle so closer fills fresh. Status starts open so closer can finish
+  // entering policy before submitting to compliance.
+  const isAdditional = intent === 'additional_car';
+  const newRow = {
+    transfer_id:      old.transfer_id,
+    company_id:       old.company_id,
+    fronter_id:       old.fronter_id,         // audit only; attribution gated by config
+    closer_id:        userId,
+    created_by:       userId,
+    customer_name:    old.customer_name,
+    customer_phone:   old.customer_phone,
+    customer_phone_2: old.customer_phone_2,
+    customer_email:   old.customer_email,
+    customer_address: old.customer_address,
+    reference_no:     generateReferenceNo(),
+    sale_date:        new Date().toISOString().slice(0, 10),
+    status:           'open',
+    is_resell:        true,
+    original_sale_id: old.id,
+    resell_intent:    intent,
+    resell_reason:    reason || null,
+    // vehicle: carry over for resell/renewal, blank for additional_car
+    car_year:  isAdditional ? null : old.car_year,
+    car_make:  isAdditional ? null : old.car_make,
+    car_model: isAdditional ? null : old.car_model,
+    car_vin:   isAdditional ? null : old.car_vin,
+    car_miles: isAdditional ? null : old.car_miles,
+    // policy fields stay blank — closer fills before submit
+  };
+
+  const stampedNew = await stampActor('sales', newRow, userId);
+  const { data: created, error: insertErr } = await supabaseAdmin
+    .from('sales').insert(stampedNew).select().single();
+  if (insertErr) {
+    logger.error('RESELL', `insert failed: ${insertErr.message}`);
+    return res.status(500).json({ error: insertErr.message });
+  }
+
+  // ── Flip old sale's status (only when intent semantically replaces) ─────
+  let oldStatusNext = null;
+  if (intent === 'resell' || intent === 'other') oldStatusNext = 'compliance_cancelled';
+  else if (intent === 'renewal' && !['expired', 'compliance_cancelled', 'cancelled'].includes(old.status)) {
+    oldStatusNext = 'expired';
+  }
+
+  if (oldStatusNext) {
+    const history = Array.isArray(old.edit_history) ? old.edit_history : [];
+    const patch = {
+      status:     oldStatusNext,
+      updated_at: new Date().toISOString(),
+      edit_history: [...history, {
+        editor_id: userId,
+        role:      'resell',
+        action:    `status:${old.status}→${oldStatusNext}`,
+        intent,
+        new_sale_id: created.id,
+        reason:    reason || null,
+        edited_at: new Date().toISOString(),
+      }],
+    };
+    const stampedOld = await stampActor('sales', patch, userId);
+    await supabaseAdmin.from('sales').update(stampedOld).eq('id', old.id);
+  }
+
+  // ── Disposition log entry (visible in lead intelligence + audit) ────────
+  try {
+    await supabaseAdmin.from('disposition_actions').insert({
+      transfer_id: old.transfer_id,
+      company_id:  old.company_id,
+      user_id:     userId,
+      disposition_name: `Resell: ${intent}`,
+      color:       '#6366f1',
+      note:        reason ? `Resell intent=${intent}, ref=${created.reference_no}: ${reason}` : `Resell intent=${intent}, new ref=${created.reference_no}`,
+      setter_role: 'closer',
+    });
+  } catch (e) { logger.warn('RESELL', `disposition log failed: ${e.message}`); }
+
+  logger.success('RESELL', `sale ${old.id} → new sale ${created.id} (intent=${intent})`);
+  res.json({
+    ok: true,
+    sale: created,
+    old_sale: { id: old.id, status: oldStatusNext || old.status },
+  });
+}));
 
 module.exports = router;

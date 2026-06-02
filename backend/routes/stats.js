@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
+const { getConfig } = require('../utils/businessConfig');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -70,6 +71,17 @@ router.get(
         .lte('created_at', todayEndIso);
       stats.todayTransfers = tToday.count || 0;
 
+      // Resell privacy — pre-resolve once per request (config is cached anyway)
+      // so each saleCount() call doesn't await individually.
+      let hideResells = false;
+      if (userRole === 'fronter') {
+        hideResells = !!(await getConfig(companyId, 'resell.hide_from_fronter', true));
+      } else if (userRole === 'fronter_manager') {
+        hideResells = !!(await getConfig(companyId, 'resell.hide_from_fronter_manager', true));
+      } else if (userRole === 'compliance_manager') {
+        hideResells = !!(await getConfig(companyId, 'resell.hide_from_compliance', false));
+      }
+
       // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
       const scopeSales = (q) => {
         if (['superadmin', 'readonly_admin'].includes(userRole)) return q;              // global
@@ -78,11 +90,19 @@ router.get(
         // Without this branch the company_id filter below would surface every
         // sale in the fronter's company, which made the dashboard show team-
         // wide totals instead of the fronter's own numbers.
-        if (userRole === 'fronter') return q.eq('fronter_id', userId);
+        if (userRole === 'fronter') {
+          q = q.eq('fronter_id', userId);
+          if (hideResells) q = q.eq('is_resell', false);
+          return q;
+        }
         if (isCloserSide && companyId) return coUserIds.length ? q.in('closer_id', coUserIds) : q.eq('id', ZERO_UUID);
         // Fronter managers and other in-company roles: fronter-pipeline sales
         // carry the fronter company_id.
-        if (companyId) return q.eq('company_id', companyId);
+        if (companyId) {
+          q = q.eq('company_id', companyId);
+          if (hideResells) q = q.eq('is_resell', false);
+          return q;
+        }
         return q.eq('id', ZERO_UUID);
       };
       const saleCount = (status) => {

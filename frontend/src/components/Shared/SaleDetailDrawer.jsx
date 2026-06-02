@@ -1,7 +1,10 @@
-import { X, AlertTriangle, DollarSign, CheckCircle, Clock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
+import client from '../../api/client';
+import ResellModal from '../Closer/ResellModal';
 
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
@@ -44,9 +47,27 @@ const Section = ({ title, children }) => (
   </div>
 );
 
-export default function SaleDetailDrawer({ sale, onClose }) {
-  const { hasPermission } = useAuth();
+export default function SaleDetailDrawer({ sale, onClose, onResold }) {
+  const { user, hasPermission } = useAuth();
+  const [resellOpen, setResellOpen]       = useState(false);
+  const [enabledStatuses, setEnabledStatuses] = useState(null);
+
+  // Pull resell.enabled_statuses once so the button hides for statuses the
+  // superadmin has disabled. Falls back to a safe default when offline.
+  useEffect(() => {
+    if (!sale) return;
+    client.get('business-config')
+      .then(r => setEnabledStatuses(r.data?.config?.['resell.enabled_statuses'] || null))
+      .catch(() => setEnabledStatuses(null));
+  }, [sale?.id]);
+
   if (!sale) return null;
+
+  // Closer-side roles only — fronters never see this button per privacy spec.
+  const closerSide = ['closer', 'closer_manager', 'company_admin', 'operations_manager', 'compliance_manager', 'superadmin', 'readonly_admin'].includes(user?.role);
+  const fallback = ['cancelled', 'compliance_cancelled', 'closed_won', 'sold', 'closed_lost', 'expired'];
+  const eligible = (enabledStatuses ?? fallback).includes(sale.status);
+  const showResell = closerSide && eligible && !sale.is_resell; // can't resell a resell row directly — use the new sale instead
 
   const fd = sale.form_data || {};
   const extraFields = Object.entries(fd).filter(([k]) => !SKIP_KEYS.has(k));
@@ -94,17 +115,35 @@ export default function SaleDetailDrawer({ sale, onClose }) {
         </div>
 
         {/* Status bar */}
-        <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
+        <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0 flex-wrap"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <Badge variant={SALE_BADGE[sale.status] || 'secondary'}>
             {SALE_LABEL[sale.status] || sale.status?.toUpperCase()}
           </Badge>
+          {sale.is_resell && (
+            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+              style={{ backgroundColor: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)' }}>
+              <RefreshCw size={10} /> Resell{sale.resell_intent ? ` · ${sale.resell_intent}` : ''}
+            </span>
+          )}
           {sale.reference_no && (
             <span className="text-xs font-mono text-text-tertiary">#{sale.reference_no}</span>
           )}
           <span className="text-xs text-text-tertiary ml-auto">
             {new Date(sale.created_at).toLocaleString()}
           </span>
+          {showResell && (
+            <button
+              type="button"
+              onClick={() => setResellOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-all hover:scale-105"
+              style={{ background: 'var(--gradient-sidebar)', color: 'white', minHeight: 32 }}
+              title="Resell this policy or add a new sale on this lead"
+              aria-label="Resell or add new sale on this lead"
+            >
+              <RefreshCw size={12} /> New sale on lead
+            </button>
+          )}
         </div>
 
         {/* Compliance note banner */}
@@ -239,6 +278,15 @@ export default function SaleDetailDrawer({ sale, onClose }) {
           )}
         </div>
       </div>
+
+      {/* Resell modal — gated by config + status; parent gets the new sale id
+          via onResold callback so it can navigate or refresh the list. */}
+      <ResellModal
+        isOpen={resellOpen}
+        sale={sale}
+        onClose={() => setResellOpen(false)}
+        onSuccess={(newSale, oldSale) => { setResellOpen(false); onResold?.(newSale, oldSale); }}
+      />
     </>
   );
 }
