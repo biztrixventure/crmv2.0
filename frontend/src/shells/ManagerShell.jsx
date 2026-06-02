@@ -17,6 +17,7 @@ import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
+import { useDashboardStats } from "../hooks/useDashboardStats";
 import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
@@ -101,6 +102,8 @@ const ManagerShell = () => {
   const { isEnabled } = useFeatureFlags();
   const navigate = useNavigate();
   const notifHook = useNotifications();
+  const { stats, fetchStats } = useDashboardStats();
+  useEffect(() => { fetchStats(); }, [fetchStats]);
   const updateAvailable = useVersionCheck();
 
   const { sales, loading: salesLoading, fetchSales, createSale, updateSale, deleteSale } = useSales(user?.company_id);
@@ -466,7 +469,7 @@ const ManagerShell = () => {
                 and Awaiting Review pre-apply the matching status. Previously a
                 stale filter from the last visit could hide records the user
                 expected to see. */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               {[
                 {
                   label: 'Total Transfers', value: overviewTotals.transfers, icon: Send, color: 'info',
@@ -493,6 +496,15 @@ const ManagerShell = () => {
                   tab: 'team_sales',
                   applyFilter: () => { setSalesStatus('pending_review'); setSalesPage(1); },
                   sub: overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear',
+                },
+                {
+                  // Resells card — closer-side visible only (fronter-side managers
+                  // get 0 here automatically because backend scope filters them out
+                  // when hide_from_fronter_manager=true).
+                  label: 'Resells · MTD', value: stats?.resellsThisMonth || 0, icon: RefreshCw, color: 'primary',
+                  tab: 'team_sales',
+                  applyFilter: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); },
+                  sub: (stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet',
                 },
               ].map(({ label, value, icon: Icon, color, tab, sub, applyFilter }) => {
                 const canNav = tabKeys.has(tab);
@@ -946,7 +958,7 @@ const ManagerShell = () => {
                           className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
                           <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
                           <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
-                          <td className="py-3 px-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge></td>
+                          <td className="py-3 px-3"><div className="flex items-center gap-1.5"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge>{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>RS</span>}</div></td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.fronter_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}

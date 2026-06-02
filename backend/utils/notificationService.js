@@ -21,6 +21,16 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
 const { sendPushToUser, sendPushToUsers } = require('./pushService');
+const { getConfig } = require('./businessConfig');
+
+// Config-driven gate. Returns true when the named notification flag is on.
+// Cached via businessConfig's 60s TTL so each event is a cheap lookup.
+async function shouldNotify(companyId, key, fallback = true) {
+  try {
+    const v = await getConfig(companyId, `notifications.${key}`, fallback);
+    return !!v;
+  } catch { return !!fallback; }
+}
 
 // All management roles — notified for company-wide events.
 const MANAGER_LEVELS = [
@@ -135,7 +145,7 @@ async function onTransferCreated({ transfer, fronterName, closerUserId }) {
   const customerName = transfer.form_data?.customer_name || 'New Customer';
   const companyId    = transfer.company_id;
 
-  if (closerUserId) {
+  if (closerUserId && (await shouldNotify(companyId, 'transfer_assigned_notify_closer', true))) {
     await createNotification({
       userId: closerUserId, companyId,
       type:     'transfer_assigned',
@@ -165,8 +175,9 @@ async function onTransferRejected({ transfer, closerName, reason }) {
   const customerName  = transfer.form_data?.customer_name || 'Customer';
   const companyId     = transfer.company_id;
   const fronterUserId = transfer.created_by;
+  const notifyFronter = await shouldNotify(companyId, 'transfer_reject_notify_fronter', true);
 
-  if (fronterUserId) {
+  if (fronterUserId && notifyFronter) {
     await createNotification({
       userId: fronterUserId, companyId,
       type:    'transfer_rejected',
@@ -494,10 +505,65 @@ async function onFronterDuplicateEvent({ kind, companyId, fronterId, phone, prio
   }
 }
 
+// ─── resell event ────────────────────────────────────────────────────────────
+// Fires when a closer creates a resell sale on an existing lead. Honors the
+// notifications.resell_notify_fronter config:
+//   'never'    → no fronter-side ping (default, preserves privacy)
+//   'manager'  → fronter manager only
+//   'everyone' → original fronter + their manager
+// Compliance ping is separately gated by notifications.resell_notify_compliance.
+async function onResellCreated({ newSale, oldSale, closerName, intent }) {
+  const companyId  = newSale.company_id;
+  const customer   = newSale.customer_name || 'Customer';
+  const policy = newSale.reference_no || '';
+
+  const mode = await getConfig(companyId, 'notifications.resell_notify_fronter', 'never');
+
+  if (mode === 'everyone' && oldSale.fronter_id) {
+    await createNotification({
+      userId: oldSale.fronter_id, companyId,
+      type:    'resell_created',
+      title:   'Customer resold',
+      message: `${closerName} resold ${customer} (#${policy}). Intent: ${intent}.`,
+      data:    { sale_id: newSale.id, original_sale_id: oldSale.id, intent },
+    });
+    sendPushToUser(oldSale.fronter_id, {
+      title: 'Customer resold',
+      body:  `${customer} → ${closerName} (${intent})`,
+      tag:   'resell_created',
+      data:  { sale_id: newSale.id },
+    }).catch(() => {});
+  }
+
+  if (mode === 'manager' || mode === 'everyone') {
+    const mgrIds = await getUserIdsByLevel(companyId, ['fronter_manager', 'manager', 'operations_manager']);
+    await notifyUsers(mgrIds, {
+      companyId,
+      type:    'resell_created',
+      title:   'Resell on lead',
+      message: `${closerName} resold ${customer} (intent: ${intent}).`,
+      data:    { sale_id: newSale.id, original_sale_id: oldSale.id, intent },
+    });
+  }
+
+  // Compliance ping — adds the new pending_review sale to their queue.
+  if (await shouldNotify(companyId, 'resell_notify_compliance', true)) {
+    const compIds = await getUserIdsByLevel(companyId, ['compliance_manager']);
+    await notifyUsers(compIds, {
+      companyId,
+      type:    'resell_created',
+      title:   'New resell in review',
+      message: `${closerName} resold ${customer} — new pending review.`,
+      data:    { sale_id: newSale.id, original_sale_id: oldSale.id, intent },
+    });
+  }
+}
+
 module.exports = {
   onTransferCreated,
   onFronterDuplicateEvent,
   onTransferRejected,
+  onResellCreated,
   onTransferEdited,
   onSaleSubmittedForReview,
   onSaleApproved,

@@ -545,6 +545,22 @@ router.put(
       return res.status(403).json({ error: 'This sale has been finalized and cannot be edited' });
     }
 
+    // Compliance lock window — sales older than the configured threshold
+    // become read-only for non-compliance roles. Audit-safe immutability.
+    if (!isCompliance) {
+      const lockDays = parseInt(await getConfig(existing.company_id, 'compliance.lock_window_days', 90), 10) || 0;
+      if (lockDays > 0) {
+        const ageDays = (Date.now() - new Date(existing.created_at).getTime()) / 86400000;
+        if (ageDays > lockDays) {
+          return res.status(403).json({
+            error: `This sale is older than ${lockDays} days and is locked. Contact compliance for changes.`,
+            sale_age_days: Math.floor(ageDays),
+            lock_window_days: lockDays,
+          });
+        }
+      }
+    }
+
     const {
       status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
       car_year, car_make, car_model, car_miles, car_vin,
@@ -1046,6 +1062,14 @@ router.post('/:id/resell', [
       setter_role: 'closer',
     });
   } catch (e) { logger.warn('RESELL', `disposition log failed: ${e.message}`); }
+
+  // Notifications — config-gated fanout (see notificationService.onResellCreated)
+  try {
+    const { data: closerProfile } = await supabaseAdmin
+      .from('user_profiles').select('first_name, last_name').eq('user_id', userId).maybeSingle();
+    const closerName = [closerProfile?.first_name, closerProfile?.last_name].filter(Boolean).join(' ') || 'A closer';
+    notifications.onResellCreated({ newSale: created, oldSale: old, closerName, intent }).catch(() => {});
+  } catch { /* non-critical */ }
 
   logger.success('RESELL', `sale ${old.id} → new sale ${created.id} (intent=${intent})`);
   res.json({

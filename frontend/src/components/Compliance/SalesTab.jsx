@@ -204,9 +204,18 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={STATUS_BADGE[s.status] || 'secondary'} size="sm">
-                          {STATUS_LABEL[s.status] || s.status?.replace(/_/g,' ')}
-                        </Badge>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge variant={STATUS_BADGE[s.status] || 'secondary'} size="sm">
+                            {STATUS_LABEL[s.status] || s.status?.replace(/_/g,' ')}
+                          </Badge>
+                          {s.is_resell && (
+                            <span title={`Resell · ${s.resell_intent || ''}`}
+                              className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
+                              RS
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
