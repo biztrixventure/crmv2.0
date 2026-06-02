@@ -17,10 +17,11 @@ import {
 
 const SalesTab = ({ companyList, initCompany = '' }) => {
   const { user } = useAuth();
-  // Config-driven status lists — SuperAdmin → Business Rules → Compliance
-  // Workflow drives both the filter dropdown and the edit dialog. Falls back
-  // to the shared.jsx constants when the config endpoint is unavailable.
-  const { allStatuses: cfgAll, editStatuses: cfgEdit } = useComplianceStatuses();
+  // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
+  // Workflow drives the dropdowns, labels, and badge colors. labelOf/badgeOf
+  // gracefully fall back to a humanized key / 'secondary' so existing records
+  // with legacy statuses always render correctly.
+  const { allStatuses: cfgAll, editStatuses: cfgEdit, labelOf, badgeOf } = useComplianceStatuses();
   const ALL_SALE_STATUSES        = cfgAll?.length  ? cfgAll  : FALLBACK_ALL;
   const COMPLIANCE_EDIT_STATUSES = cfgEdit?.length ? cfgEdit : FALLBACK_EDIT;
   const [sales, setSales]       = useState([]);
@@ -146,7 +147,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     });
     const rows = (res.data.sales || []).map(s => [
       s.customer_name || '', s.customer_phone || '', s.customer_email || '',
-      s.reference_no || '', STATUS_LABEL[s.status] || s.status || '',
+      s.reference_no || '', labelOf(s.status) || '',
       s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
     ]);
     downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Sale Date'],
@@ -173,7 +174,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         </FSelect>
         <FSelect label="Status" value={status} onChange={e => setStatus(e.target.value)}>
           <option value="">All statuses</option>
-          {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s.replace(/_/g,' ')}</option>)}
+          {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
         </FSelect>
         <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
@@ -212,8 +213,8 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <Badge variant={STATUS_BADGE[s.status] || 'secondary'} size="sm">
-                            {STATUS_LABEL[s.status] || s.status?.replace(/_/g,' ')}
+                          <Badge variant={badgeOf(s.status)} size="sm">
+                            {labelOf(s.status)}
                           </Badge>
                           {s.is_resell && (
                             <span title={`Resell · ${s.resell_intent || ''}`}
@@ -351,7 +352,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>New Status</label>
                 <select value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input text-sm w-full">
-                  {COMPLIANCE_EDIT_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s.replace(/_/g,' ')}</option>)}
+                  {COMPLIANCE_EDIT_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
                 </select>
               </div>
               <div>
