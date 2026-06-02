@@ -35,7 +35,9 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
     setFormData(prefillPhone ? { customer_phone: prefillPhone, Phone: prefillPhone } : {});
     fetchFields();
     setCompanyLoading(true);
-    client.get('uploads/reference')   // reference returns active fronter companies w/ fronters
+    // Closer-side endpoint — returns fronter companies + their active fronter
+    // users without requiring superadmin scope (which uploads/reference does).
+    client.get('transfers/manual-entry-options')
       .then(r => { setCompanies(r.data?.companies || []); })
       .catch(() => setCompanies([]))
       .finally(() => setCompanyLoading(false));

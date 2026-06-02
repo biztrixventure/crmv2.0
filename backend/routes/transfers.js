@@ -550,6 +550,56 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /transfers/manual-entry-options — fronter companies + their active
+// fronter users, for the closer's Manual Entry modal. Closer-side roles only;
+// returns nothing for fronters so they can't accidentally use the closer flow.
+// Light payload: { companies: [{ id, name, fronters: [{ user_id, name }] }] }
+// ============================================================================
+router.get('/manual-entry-options', asyncHandler(async (req, res) => {
+  const userRole = req.user.role;
+  if (!['closer', 'closer_manager', 'company_admin', 'operations_manager', 'compliance_manager', 'superadmin'].includes(userRole)) {
+    return res.status(403).json({ error: 'Manual entry is closer-side only.' });
+  }
+
+  const { data: cos } = await supabaseAdmin
+    .from('companies').select('id, name').eq('company_type', 'fronter').eq('is_active', true).order('name');
+  if (!cos?.length) return res.json({ companies: [] });
+
+  const coIds = cos.map(c => c.id);
+  const { data: roles } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, company_id, custom_roles(level)')
+    .in('company_id', coIds).eq('is_active', true);
+  const fronterRoles = (roles || []).filter(r => r.custom_roles?.level === 'fronter');
+
+  const userIds = [...new Set(fronterRoles.map(r => r.user_id).filter(Boolean))];
+  let names = {};
+  if (userIds.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds);
+    (profiles || []).forEach(p => {
+      names[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed';
+    });
+  }
+
+  const fronterByCo = {};
+  fronterRoles.forEach(r => {
+    if (!names[r.user_id]) return;     // skip users with no profile name
+    (fronterByCo[r.company_id] ||= []).push({ user_id: r.user_id, name: names[r.user_id] });
+  });
+
+  const companies = cos
+    .map(c => ({
+      id: c.id,
+      name: c.name,
+      fronters: (fronterByCo[c.id] || []).sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .filter(c => c.fronters.length > 0);   // hide companies with no usable fronters
+
+  res.json({ companies });
+}));
+
+// ============================================================================
 // POST /transfers/manual-entry — closer creates a transfer on behalf of a
 // fronter who forgot to enter the lead on their side. Closer picks the fronter
 // company + fronter user; the transfer is attributed to that fronter (so the

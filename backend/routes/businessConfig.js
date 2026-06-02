@@ -5,15 +5,19 @@ const { getAllConfig, setConfig, resetConfig } = require('../utils/businessConfi
 
 const router = express.Router();
 
-// Superadmin-only across the whole router.
-router.use(asyncHandler(async (req, res, next) => {
+// Write gate — only superadmin can change config. Reads are open to any
+// authenticated user because the frontend reads runtime flags on every
+// dashboard (resell.enabled_statuses, drawer.layout.*, kpi.* …) and those
+// must be visible to fronters and closers, not just admins.
+const requireSuperAdmin = asyncHandler(async (req, res, next) => {
   if (!(await isSuperAdmin(req.user.id))) {
     return res.status(403).json({ error: 'Superadmin access required' });
   }
   next();
-}));
+});
 
 // GET /business-config?company_id=<uuid>   — resolved values (global + override)
+// Open to any authenticated user so the UI can render config-driven sections.
 router.get('/', asyncHandler(async (req, res) => {
   const config = await getAllConfig(req.query.company_id || null);
   res.json({ config });
@@ -21,7 +25,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // PUT /business-config — upsert a single key
 // Body: { scope: 'global'|'company:<uuid>', key, value }
-router.put('/', asyncHandler(async (req, res) => {
+router.put('/', requireSuperAdmin, asyncHandler(async (req, res) => {
   const { scope, key, value } = req.body || {};
   if (!scope || !key)   return res.status(400).json({ error: 'scope and key are required.' });
   if (value === undefined) return res.status(400).json({ error: 'value is required (null/false/0 are allowed but must be sent).' });
@@ -33,7 +37,7 @@ router.put('/', asyncHandler(async (req, res) => {
 }));
 
 // DELETE /business-config/:scope/:key  — clear a company override (falls back to global)
-router.delete('/:scope/:key', asyncHandler(async (req, res) => {
+router.delete('/:scope/:key', requireSuperAdmin, asyncHandler(async (req, res) => {
   await resetConfig(req.params.scope, req.params.key);
   res.json({ ok: true });
 }));
@@ -42,7 +46,7 @@ router.delete('/:scope/:key', asyncHandler(async (req, res) => {
 // into a per-company override block. Lets superadmin set a one-off starting
 // point for a new client and then tweak from there. Existing overrides are
 // preserved unless overwrite=true.
-router.post('/clone-global/:companyId', asyncHandler(async (req, res) => {
+router.post('/clone-global/:companyId', requireSuperAdmin, asyncHandler(async (req, res) => {
   const { supabaseAdmin } = require('../config/database');
   const { setConfig } = require('../utils/businessConfig');
   const companyId = req.params.companyId;

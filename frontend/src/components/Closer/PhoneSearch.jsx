@@ -625,6 +625,33 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
       {/* Results */}
       {results !== null && (
         <>
+          {/* Manual-entry CTA — always visible at the top of the result block
+              (above the records) so the closer doesn't scroll past every
+              transfer to find it. Use case: fronter forgot to log the lead;
+              closer knows from the dialer who sent it and creates the
+              transfer attributed to that fronter, then jumps to the sale
+              form. Tagged "Manual entry by closer · <name>" in audit. */}
+          <div className="mt-3 mb-3 rounded-xl px-3 py-3 flex items-center justify-between gap-3 flex-wrap"
+            style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px dashed var(--color-primary-300, #c7d2fe)' }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                Don't see your lead?
+              </p>
+              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Fronter forgot to log this transfer? Add it manually — credit stays with the fronter, you self-assign + jump straight to the sale form.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setManualEntryOpen(true)}
+              className="inline-flex items-center gap-1.5 py-2 px-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.03]"
+              style={{ background: 'var(--gradient-sidebar)', minHeight: 40 }}
+              title="Create a transfer on behalf of a fronter"
+            >
+              <UserPlus size={14} /> Manual entry
+            </button>
+          </div>
+
           {results.length === 0 ? (
             <p className="text-sm text-center mt-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
               No transfers found for that number.
@@ -663,31 +690,6 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
             </div>
           )}
 
-          {/* Manual-entry CTA — always available after a search. Use case:
-              fronter forgot to log the transfer on their side; closer knows
-              who sent the call from the dialer, so they manually create the
-              transfer attributed to that fronter. Tagged "Manual entry by
-              closer · <name>" in audit so analytics keep attribution clean. */}
-          <div className="mt-3 rounded-xl px-3 py-3 flex items-center justify-between gap-3 flex-wrap"
-            style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px dashed var(--color-primary-300, #c7d2fe)' }}>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
-                Don't see your lead?
-              </p>
-              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Fronter forgot to log this transfer? Add it manually — credit stays with the fronter, you self-assign.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setManualEntryOpen(true)}
-              className="inline-flex items-center gap-1.5 py-2 px-3 rounded-lg text-sm font-bold text-white transition-all hover:scale-[1.03]"
-              style={{ background: 'var(--gradient-sidebar)', minHeight: 40 }}
-              title="Create a transfer on behalf of a fronter"
-            >
-              <UserPlus size={14} /> Manual entry
-            </button>
-          </div>
         </>
       )}
 
@@ -709,13 +711,21 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
       />
 
       {/* Manual entry — closer self-creates a transfer for a fronter who
-          forgot to enter the lead. On success the search re-runs so the
-          new transfer (auto-assigned to this closer) appears at the top. */}
+          forgot to enter the lead. On success: close modal, refresh search,
+          and immediately open the closer's "create sale" flow for the new
+          transfer so they can finish the workflow without a second click. */}
       <ManualEntryModal
         isOpen={manualEntryOpen}
         prefillPhone={phone}
         onClose={() => setManualEntryOpen(false)}
-        onCreated={() => { setManualEntryOpen(false); if (phone) runSearch(phone); }}
+        onCreated={(transfer) => {
+          setManualEntryOpen(false);
+          if (phone) runSearch(phone);
+          // Pipe the brand-new transfer into the same onCreateSale path used
+          // by every "Sale" button in TransferCard. Parent decides whether to
+          // open the SaleModal in transfer mode (StaffShell does).
+          if (transfer && onCreateSale) onCreateSale(transfer);
+        }}
       />
     </Card>
   );
