@@ -328,10 +328,24 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
               style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)', border: '1px solid var(--color-primary-200)' }}>
               {transfer.company_slug}
             </span>
+            {transfer.cross_company && (
+              <span title={`Same phone exists in ${transfer.cross_company_count} fronter companies`}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)', border: '1px solid var(--color-warning-300, #fcd34d)' }}>
+                <Globe size={9} /> {transfer.cross_company_count} cos
+              </span>
+            )}
             <Badge variant={TRANSFER_BADGE[transfer.status] || 'secondary'} size="sm">
               {transfer.status}
             </Badge>
             {hasSale && <SaleStatusBadge status={saleStatus} />}
+            {hasSale && transfer.sale_is_resell && (
+              <span title={`Resell sale on this lead`}
+                className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
+                RS
+              </span>
+            )}
             {latestDispo ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{ backgroundColor: (latestDispo.color || '#6b7280') + '22', color: latestDispo.color || '#6b7280', border: `1px solid ${latestDispo.color || '#6b7280'}44` }}

@@ -562,7 +562,16 @@ const ProfileDrawer = ({ group, onClose }) => {
                                   <Building2 size={10} />{coName}
                                 </span>
                               </div>
-                              <StatusBadge status={s.status} map={SALE_STATUS} />
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <StatusBadge status={s.status} map={SALE_STATUS} />
+                                {s.is_resell && (
+                                  <span title={`Resell · ${s.resell_intent || ''}`}
+                                    className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                                    style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
+                                    RS
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Body */}

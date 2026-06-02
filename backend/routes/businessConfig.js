@@ -38,4 +38,35 @@ router.delete('/:scope/:key', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// POST /business-config/clone-global/:companyId  — copy every global default
+// into a per-company override block. Lets superadmin set a one-off starting
+// point for a new client and then tweak from there. Existing overrides are
+// preserved unless overwrite=true.
+router.post('/clone-global/:companyId', asyncHandler(async (req, res) => {
+  const { supabaseAdmin } = require('../config/database');
+  const { setConfig } = require('../utils/businessConfig');
+  const companyId = req.params.companyId;
+  if (!/^[0-9a-f-]{36}$/i.test(companyId)) {
+    return res.status(400).json({ error: 'Invalid companyId.' });
+  }
+  const overwrite = req.body?.overwrite === true;
+
+  const { data: globals, error: gErr } = await supabaseAdmin
+    .from('business_config').select('key, value').eq('scope', 'global');
+  if (gErr) return res.status(500).json({ error: gErr.message });
+
+  const scope = `company:${companyId}`;
+  let { data: existing } = await supabaseAdmin
+    .from('business_config').select('key').eq('scope', scope);
+  const existingKeys = new Set((existing || []).map(r => r.key));
+
+  let copied = 0, skipped = 0;
+  for (const row of (globals || [])) {
+    if (!overwrite && existingKeys.has(row.key)) { skipped++; continue; }
+    await setConfig(scope, row.key, row.value, req.user.id);
+    copied++;
+  }
+  res.json({ ok: true, copied, skipped, scope });
+}));
+
 module.exports = router;

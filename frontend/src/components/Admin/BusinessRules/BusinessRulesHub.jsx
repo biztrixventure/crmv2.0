@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2 } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -73,6 +73,26 @@ const BusinessRulesHub = () => {
     } catch (e) { console.error(e); }
   };
 
+  // Bulk-clone all global defaults into the active company scope. Skips keys
+  // already overridden by default so an accidental click doesn't wipe edits.
+  const handleCloneGlobals = async (overwrite = false) => {
+    if (!companyId) return;
+    const msg = overwrite
+      ? 'Overwrite EVERY company setting with the current global defaults? Existing overrides will be lost.'
+      : 'Copy every global default into this company as overrides? Keys you have already customized stay untouched.';
+    if (!window.confirm(msg)) return;
+    setSavingMsg('Cloning…');
+    try {
+      const { data } = await client.post(`business-config/clone-global/${companyId}`, { overwrite });
+      setSavingMsg(`Cloned ${data.copied}${data.skipped ? `, ${data.skipped} kept` : ''} ✓`);
+      reload();
+      setTimeout(() => setSavingMsg(''), 2500);
+    } catch (e) {
+      setSavingMsg(e.response?.data?.error || 'Clone failed');
+      setTimeout(() => setSavingMsg(''), 3000);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -113,14 +133,30 @@ const BusinessRulesHub = () => {
               ))}
             </optgroup>
           </select>
+          {scope !== 'global' && (
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => handleCloneGlobals(false)}
+                title="Copy every global default into this company (skips existing overrides)"
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                style={{ background: 'var(--gradient-sidebar)', color: 'white', minHeight: 36 }}>
+                <Copy size={12} /> Clone globals
+              </button>
+              <button type="button" onClick={() => handleCloneGlobals(true)}
+                title="Overwrite every company setting with global defaults (destructive)"
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all border"
+                style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)', minHeight: 36 }}>
+                Reset all
+              </button>
+            </div>
+          )}
           {savingMsg && (
             <span aria-live="polite" className="text-xs font-semibold px-2 py-1 rounded"
               style={{
-                backgroundColor: savingMsg === 'Saving…' ? 'var(--color-bg-secondary)'
+                backgroundColor: savingMsg === 'Saving…' || savingMsg === 'Cloning…' ? 'var(--color-bg-secondary)'
                   : savingMsg.includes('✓') ? 'var(--color-success-100, #d1fae5)'
                   : 'var(--color-error-100, #fee2e2)',
                 color: savingMsg.includes('✓') ? 'var(--color-success-700, #047857)'
-                  : savingMsg.includes('failed') || savingMsg.includes('Save failed') ? 'var(--color-error-700, #b91c1c)'
+                  : savingMsg.includes('failed') ? 'var(--color-error-700, #b91c1c)'
                   : 'var(--color-text-secondary)',
               }}>
               {savingMsg}

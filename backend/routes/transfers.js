@@ -445,10 +445,22 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     }
   }
 
+  // Cross-company detection — same normalized phone hitting multiple fronter
+  // companies in the result set. Used by the UI to flag risky leads when
+  // dedup.cross_company config is set to warn or block.
+  const companiesPerPhone = {};
+  data.forEach(t => {
+    const ph = t.normalized_phone;
+    if (!ph) return;
+    if (!companiesPerPhone[ph]) companiesPerPhone[ph] = new Set();
+    companiesPerPhone[ph].add(t.company_id);
+  });
+
   const transfers = data.map(t => {
     const co      = companyMap[t.company_id] || {};
     const profile = profileMap[t.created_by] || {};
     const sale    = saleByTransferId[t.id] || null;
+    const coCount = t.normalized_phone ? (companiesPerPhone[t.normalized_phone]?.size || 1) : 1;
     return {
       ...t,
       company_name: co.name || 'Unknown',
@@ -462,6 +474,8 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       sale_closer_name: sale?.closer_name || null,
       sale_closer_disposition: sale?.closer_disposition || null,
       sale_is_resell: !!sale?.is_resell,
+      cross_company_count: coCount,
+      cross_company: coCount > 1,
       latest_disposition: latestDispoMapPhone[t.id] || null,
     };
   });
