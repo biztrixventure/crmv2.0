@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity } from 'lucide-react';
+import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
@@ -46,7 +46,24 @@ const Section = ({ title, children }) => (
 const SKIP_KEYS = new Set([
   'customer_name', 'customer_phone', 'customer_email', 'customer_address',
   'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
+  // Internal/derived keys we never want to show as free-form rows.
+  'manual_entry_by',   // rendered as a dedicated banner instead
+  'cli_number',        // dedup key (same as Phone)
+  'transfer_date',     // shown in header timestamp
+  'last_redial_at',    // metadata
+  'state_abbr',        // duplicate of State
 ]);
+
+// ── safely stringify a form_data value for display ─────────────────────────
+const renderVal = (v) => {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    // Show JSON instead of [object Object] for any structured value that
+    // leaks through SKIP_KEYS — surface the data without breaking the UI.
+    try { return JSON.stringify(v); } catch { return ''; }
+  }
+  return String(v);
+};
 
 const ROLE_LABELS = {
   superadmin: 'Super Admin', readonly_admin: 'Admin', compliance_manager: 'Compliance',
@@ -80,10 +97,18 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
   const address = [fd.Address, fd.City, fd.State, fd.Zip].filter(Boolean).join(', ')
     || fd.customer_address || '';
 
-  // Extra form_data fields (beyond the standard ones)
+  // Extra form_data fields (beyond the standard ones). Filter out objects +
+  // empty/null values so a future internal key never leaks as "[object Object]".
   const extraFields = Object.entries(fd).filter(
-    ([k]) => !SKIP_KEYS.has(k) && !k.startsWith('Sale') && !k.startsWith('sale_')
+    ([k, v]) => !SKIP_KEYS.has(k)
+      && !k.startsWith('Sale') && !k.startsWith('sale_')
+      && v !== null && v !== undefined && String(v).trim() !== ''
+      && typeof v !== 'object'
   );
+
+  // Manual-entry metadata (closer who logged it on behalf of a fronter).
+  const manualEntry = fd.manual_entry_by && typeof fd.manual_entry_by === 'object'
+    ? fd.manual_entry_by : null;
 
   const hist = Array.isArray(transfer.edit_history) ? transfer.edit_history : [];
 
@@ -133,6 +158,23 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           );
         })()}
 
+        {/* Manual entry banner — flags that the closer typed this transfer
+            on behalf of the fronter via the search "Manual entry" CTA. */}
+        {manualEntry?.closer_name && (
+          <div className="mx-5 mt-4 p-3 rounded-xl flex items-start gap-2 flex-shrink-0"
+            style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+            <UserPlus size={14} style={{ color: 'var(--color-primary-700, #4338ca)', marginTop: 1 }} className="flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                Manual entry by closer · {manualEntry.closer_name}
+              </p>
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                Logged on {manualEntry.entered_at ? new Date(manualEntry.entered_at).toLocaleString() : 'unknown date'} — attributed to this fronter.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Rejection banner */}
         {transfer.status === 'rejected' && transfer.rejection_reason && (
           <div className="mx-5 mt-4 p-3 rounded-xl flex items-start gap-2 flex-shrink-0"
@@ -173,11 +215,12 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
             </Section>
           )}
 
-          {/* Extra form fields */}
+          {/* Extra form fields — only primitive values land here, objects
+              are excluded by the filter above so no [object Object]. */}
           {extraFields.length > 0 && (
             <Section title="Additional Info">
               {extraFields.map(([k, v]) => (
-                <Row key={k} label={k.replace(/_/g, ' ')} value={String(v)} />
+                <Row key={k} label={k.replace(/_/g, ' ')} value={renderVal(v)} />
               ))}
             </Section>
           )}

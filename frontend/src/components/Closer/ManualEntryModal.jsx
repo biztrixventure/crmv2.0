@@ -56,8 +56,14 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
 
   if (!isOpen) return null;
 
+  // form_fields stores the form_data key under `name` (not `key`). Mirror the
+  // fronter's own form by ordering + filtering to fronter-visible fields, and
+  // skip the phone-style fields because we already render a dedicated phone
+  // input above.
+  const PHONE_KEYS = new Set(['customer_phone', 'Phone', 'phone', 'PhoneNumber', 'phone_number']);
   const formFieldsSorted = (fields || [])
-    .filter(f => f.show_to_fronter !== false)   // mirror the fronter's own form
+    .filter(f => f.show_to_fronter !== false)
+    .filter(f => !PHONE_KEYS.has(f.name))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   const setField = (key, value) => setFormData(prev => ({ ...prev, [key]: value }));
@@ -178,22 +184,27 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                 style={{ minHeight: 40 }}
               />
 
-              {/* Dynamic fields from form_fields config — same as the fronter's form */}
+              {/* Dynamic fields from form_fields config — same shape the
+                  fronter's own form posts. Each input is keyed AND bound to
+                  the row's `name` column (the form_data property name) so
+                  every field has its own state slot. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {formFieldsSorted
-                  .filter(f => !['customer_phone', 'Phone', 'phone'].includes(f.key))
-                  .map(f => (
-                    <div key={f.id || f.key}>
-                      <input
-                        type="text"
-                        placeholder={f.label || f.key}
-                        value={formData[f.key] || ''}
-                        onChange={(e) => setField(f.key, e.target.value)}
-                        className="input text-xs py-1.5 w-full"
-                        aria-label={f.label || f.key}
-                      />
-                    </div>
-                  ))}
+                {formFieldsSorted.map(f => (
+                  <div key={f.id || f.name}>
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary block mb-0.5">
+                      {f.label || f.name}
+                      {f.is_required && <span className="text-error-600 ml-0.5">*</span>}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={f.placeholder || f.label || f.name}
+                      value={formData[f.name] ?? ''}
+                      onChange={(e) => setField(f.name, e.target.value)}
+                      className="input text-xs py-1.5 w-full"
+                      aria-label={f.label || f.name}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 

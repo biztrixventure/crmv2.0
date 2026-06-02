@@ -23,7 +23,19 @@ const SKIP_KEYS = new Set([
   'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
   'CarYear', 'CarMake', 'CarModel', 'CarMiles', 'CarVin',
   'SaleDisposition',
+  // Internal/derived keys we never want to render as free-form rows.
+  'manual_entry_by', 'cli_number', 'transfer_date', 'last_redial_at', 'state_abbr',
 ]);
+
+// Safely stringify a form_data value — objects become JSON strings so we
+// never render "[object Object]" by accident.
+const renderVal = (v) => {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    try { return JSON.stringify(v); } catch { return ''; }
+  }
+  return String(v);
+};
 
 const Row = ({ label, value, mono = false, highlight }) => {
   if (!value && value !== 0) return null;
@@ -72,7 +84,12 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const showResell = closerSide && eligible && !sale.is_resell; // can't resell a resell row directly — use the new sale instead
 
   const fd = sale.form_data || {};
-  const extraFields = Object.entries(fd).filter(([k]) => !SKIP_KEYS.has(k));
+  // Same safe filter the transfer drawer uses — object values never leak.
+  const extraFields = Object.entries(fd).filter(
+    ([k, v]) => !SKIP_KEYS.has(k)
+      && v !== null && v !== undefined && String(v).trim() !== ''
+      && typeof v !== 'object'
+  );
 
   const hist = Array.isArray(sale.edit_history) ? sale.edit_history : [];
 
@@ -222,7 +239,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 return (
                   <Section key="additional" title={s.label || 'Additional Info'}>
                     {extraFields.map(([k, v]) => (
-                      <Row key={k} label={k.replace(/_/g, ' ')} value={String(v)} />
+                      <Row key={k} label={k.replace(/_/g, ' ')} value={renderVal(v)} />
                     ))}
                   </Section>
                 );
