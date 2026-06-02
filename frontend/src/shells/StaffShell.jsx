@@ -275,7 +275,7 @@ const StaffShell = () => {
   // Debounce the fronter lead filter into a server-side search; reset to page 1.
   useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
   useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ]);
-  useEffect(() => { if (isCloser) fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE }); }, [fetchSales, date_from, date_to, isCloser, closerSalesPage]);
+  useEffect(() => { if (isCloser) fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) }); }, [fetchSales, date_from, date_to, isCloser, closerSalesPage, salesStatus]);
   // Keep page within range when the date filter narrows the dataset.
   useEffect(() => { setTransfersPage(1); setCloserSalesPage(1); }, [date_from, date_to]);
 
@@ -338,7 +338,7 @@ const StaffShell = () => {
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
@@ -354,7 +354,7 @@ const StaffShell = () => {
       await client.put(`sales/${editSale.id}`, formData);
       setEditSale(null);
       setSaleSuccess('Sale updated!');
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setEditSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to update sale');
@@ -368,7 +368,7 @@ const StaffShell = () => {
     setSubmitMsg('');
     try {
       await client.post(`sales/${saleId}/submit-review`);
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE });
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
       setSubmitMsg('');
     } catch (err) {
       setSubmitMsg(err.response?.data?.error || 'Failed to submit');
@@ -849,117 +849,115 @@ const StaffShell = () => {
             {/* Stats — clickable cards. The first card flips its layout so the
                 primary number is TODAY's count with the running total tucked
                 into a corner pill, matching the spec ("today highlighted,
-                total in the corner"). Approved is a one-click filter into the
-                My Sales list scoped to closed_won. */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+                total in the corner"). All cards share a uniform height +
+                subtle color-tinted gradient bg so the row reads as a
+                cohesive dashboard rather than 5 disconnected tiles. */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
               {/* My Sales — body click filters to today's submitted sales;
                   the corner "Total N" pill is its own click target that drops
                   the date filter so the list below shows every sale ever
-                  submitted (without forcing the user to hunt for the date
-                  picker). stopPropagation prevents the card-level handler from
-                  also firing and re-applying today's filter. */}
+                  submitted. stopPropagation prevents the card-level handler
+                  from also firing and re-applying today's filter. */}
               <Card
-                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                className="p-5 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg min-h-[120px] flex flex-col justify-between"
                 onClick={() => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('today')); }}
                 title="Show today's submitted sales"
+                style={{ background: 'linear-gradient(135deg, var(--color-success-50, #ecfdf5) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-success-500, #10b981)' }}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm text-text-secondary mb-1">My Sales · Today</p>
-                    <p className={`text-3xl font-bold text-success-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">My Sales · Today</p>
+                    <p className="text-4xl font-bold text-success-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
                       {statsLoading ? '—' : (stats.todaySales || 0)}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
-                    <button type="button"
-                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all')); }}
-                      title="Show all my sales (no date filter)"
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
-                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
-                      Total {statsLoading ? '—' : (stats.totalSales || 0)}
-                    </button>
-                    <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
-                      <DollarSign size={20} className={`text-success-600`} />
-                    </div>
+                  <div className="p-2.5 rounded-xl bg-success-100 dark:bg-success-900/40 shrink-0">
+                    <DollarSign size={20} className="text-success-600" />
                   </div>
                 </div>
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all')); }}
+                  title="Show all my sales (no date filter)"
+                  className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
+                  style={{ backgroundColor: 'var(--color-success-100, #d1fae5)', color: 'var(--color-success-700, #047857)' }}>
+                  Total {statsLoading ? '—' : (stats.totalSales || 0)}
+                </button>
               </Card>
 
-              {/* Approved — body click filters to today's approved sales; the
-                  corner Total pill drops the date filter and keeps the
-                  closed_won status, so the user sees their full approved
-                  history in one click. */}
+              {/* Approved — today's approved + total approved pill. */}
               <Card
-                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                className="p-5 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg min-h-[120px] flex flex-col justify-between"
                 onClick={() => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('today')); }}
                 title="Show today's approved sales"
+                style={{ background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-primary-500, #6366f1)' }}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm text-text-secondary mb-1">Approved · Today</p>
-                    <p className={`text-3xl font-bold text-success-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">Approved · Today</p>
+                    <p className="text-4xl font-bold text-primary-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
                       {statsLoading ? '—' : (stats.todayClosedWon || 0)}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
-                    <button type="button"
-                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('all')); }}
-                      title="Show all approved sales (no date filter)"
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
-                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
-                      Total {statsLoading ? '—' : (stats.closedWon || 0)}
-                    </button>
-                    <div className={`p-2.5 rounded-xl bg-success-100 dark:bg-success-900`}>
-                      <CheckCircle size={20} className={`text-success-600`} />
-                    </div>
+                  <div className="p-2.5 rounded-xl bg-primary-100 dark:bg-primary-900/40 shrink-0">
+                    <CheckCircle size={20} className="text-primary-600" />
                   </div>
                 </div>
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('all')); }}
+                  title="Show all approved sales (no date filter)"
+                  className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
+                  style={{ backgroundColor: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)' }}>
+                  Total {statsLoading ? '—' : (stats.closedWon || 0)}
+                </button>
               </Card>
 
-              {/* Awaiting Review — click filters to pending_review. */}
+              {/* Awaiting Review — click filters to pending_review. No today
+                  vs total split because there's no business day signal here. */}
               <Card
-                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
-                onClick={() => { setCloserSection('sales'); setSalesStatus('pending_review'); }}
-                title="Show sales awaiting compliance review"
+                className="p-5 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg min-h-[120px] flex flex-col justify-between"
+                onClick={() => { setCloserSection('sales'); setSalesStatus('pending_review'); setDateRange(getPresetRange('all')); }}
+                title="Show all sales awaiting compliance review"
+                style={{ background: 'linear-gradient(135deg, var(--color-warning-50, #fffbeb) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-warning-500, #f59e0b)' }}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm text-text-secondary mb-1">Awaiting Review</p>
-                    <p className={`text-3xl font-bold text-warning-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">Awaiting Review</p>
+                    <p className="text-4xl font-bold text-warning-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
                       {statsLoading ? '—' : (stats.awaitingCompliance || 0)}
                     </p>
                   </div>
-                  <div className={`p-3 rounded-xl bg-warning-100 dark:bg-warning-900`}>
-                    <Clock size={22} className={`text-warning-600`} />
+                  <div className="p-2.5 rounded-xl bg-warning-100 dark:bg-warning-900/40 shrink-0">
+                    <Clock size={20} className="text-warning-600" />
                   </div>
                 </div>
+                <p className="text-[10px] text-text-tertiary mt-2">Pending compliance check</p>
               </Card>
 
-              {/* Cancelled — mirrors the Approved card pattern: body filters to
-                  today's cancelled sales, the corner Total pill drops the date
-                  filter and keeps status=cancelled so the closer can see the
-                  full cancelled history in one click. Status key is 'cancelled'
-                  (not 'closed_lost') — matches the badge label and the value
-                  Compliance writes when they cancel a sale. */}
+              {/* Cancelled — today + total cancelled. Status key is 'cancelled'
+                  (matches the badge label and the value Compliance writes). */}
               <Card
-                className="p-6 cursor-pointer transition-transform hover:scale-[1.02]"
+                className="p-5 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg min-h-[120px] flex flex-col justify-between"
                 onClick={() => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('today')); }}
                 title="Show today's cancelled sales"
+                style={{ background: 'linear-gradient(135deg, var(--color-error-50, #fef2f2) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-error-500, #ef4444)' }}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm text-text-secondary mb-1">Cancelled · Today</p>
-                    <p className={`text-3xl font-bold text-error-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">Cancelled · Today</p>
+                    <p className="text-4xl font-bold text-error-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
                       {statsLoading ? '—' : (stats.todayCancelled || 0)}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
-                    <button type="button"
-                      onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('all')); }}
-                      title="Show all cancelled sales (no date filter)"
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full hover:scale-105 transition-transform"
-                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
-                      Total {statsLoading ? '—' : (stats.cancelledSales || 0)}
+                  <div className="p-2.5 rounded-xl bg-error-100 dark:bg-error-900/40 shrink-0">
+                    <XCircle size={20} className="text-error-600" />
+                  </div>
+                </div>
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('all')); }}
+                  title="Show all cancelled sales (no date filter)"
+                  className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full hover:scale-105 transition-transform mt-2"
+                  style={{ backgroundColor: 'var(--color-error-100, #fee2e2)', color: 'var(--color-error-700, #b91c1c)' }}>
+                  Total {statsLoading ? '—' : (stats.cancelledSales || 0)}
                     </button>
                     <div className={`p-2.5 rounded-xl bg-error-100 dark:bg-error-900`}>
                       <XCircle size={20} className={`text-error-600`} />
@@ -968,19 +966,24 @@ const StaffShell = () => {
                 </div>
               </Card>
 
-              {/* Conversion — display-only. */}
-              <Card className="p-6">
+              {/* Conversion — display-only. Color tinted like the rest so
+                  the row reads as a single dashboard, not an island. */}
+              <Card
+                className="p-5 min-h-[120px] flex flex-col justify-between"
+                style={{ background: 'linear-gradient(135deg, var(--color-info-50, #ecfeff) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-info-500, #06b6d4)' }}
+              >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm text-text-secondary mb-1">Conversion</p>
-                    <p className={`text-3xl font-bold text-info-600`} style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1">Conversion</p>
+                    <p className="text-4xl font-bold text-info-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em' }}>
                       {statsLoading ? '—' : `${stats.conversionRate || 0}%`}
                     </p>
                   </div>
-                  <div className={`p-3 rounded-xl bg-info-100 dark:bg-info-900`}>
-                    <Target size={22} className={`text-info-600`} />
+                  <div className="p-2.5 rounded-xl bg-info-100 dark:bg-info-900/40 shrink-0">
+                    <Target size={20} className="text-info-600" />
                   </div>
                 </div>
+                <p className="text-[10px] text-text-tertiary mt-2">Sold ÷ total transfers</p>
               </Card>
             </div>
 
@@ -1173,7 +1176,7 @@ const StaffShell = () => {
                         )}
                         {hasPermission('delete_sale') && (
                           <button
-                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE })); } }}
+                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) })); } }}
                             className="w-full mt-1 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-error-50"
                             style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
                             <Trash2 size={11} /> Delete Sale
