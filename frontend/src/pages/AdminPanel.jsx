@@ -24,6 +24,7 @@ import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
+import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 
@@ -82,6 +83,7 @@ const AdminPanel = () => {
     // 403 any ban/unban POST without us hiding the screen.
     ...(user?.role === 'superadmin' || isReadOnly      ? [{ id: "chat",          label: "Chat Control"  }] : []),
     ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
+    ...(user?.role === 'superadmin'                   ? [{ id: "business-rules", label: "Business Rules"  }] : []),
   ];
 
   return (
@@ -119,7 +121,7 @@ const AdminPanel = () => {
             // Form-style tabs (vehicles, clients-plans, faqs, scripts, etc.)
             // keep a comfortable reading width — wide forms feel awkward.
             (() => {
-              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff']);
+              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff', 'business-rules']);
               const wrap = WIDE.has(activeTab)
                 ? 'p-4 lg:p-6 w-full'
                 : 'p-4 lg:p-6 max-w-7xl mx-auto w-full';
@@ -140,6 +142,7 @@ const AdminPanel = () => {
                   {activeTab === "spiff"         && <SpiffManager />}
                   {activeTab === "chat"          && <ChatAdmin />}
                   {activeTab === "features"    && <FeatureFlagsManager />}
+                  {activeTab === "business-rules" && <BusinessRulesHub />}
                   <DevCredit />
                 </div>
               );
