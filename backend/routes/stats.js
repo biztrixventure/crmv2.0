@@ -170,6 +170,17 @@ router.get(
         .gte('created_at', mtStart).lte('created_at', todayEndIso);
       stats.monthTransfers = monthXfers.count || 0;
 
+      // Today/MTD completed transfers — the fronter's "approved" KPI on their
+      // dashboard. Counting completed transfers (not closed_won sales) keeps
+      // the card number aligned with the records shown when the user clicks
+      // through, so Total on Approved actually surfaces those rows.
+      const todayCompletedX = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+        .eq('status', 'completed').gte('created_at', todayStart).lte('created_at', todayEndIso);
+      stats.todayCompletedTransfers = todayCompletedX.count || 0;
+      const monthCompletedX = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+        .eq('status', 'completed').gte('created_at', mtStart).lte('created_at', todayEndIso);
+      stats.monthCompletedTransfers = monthCompletedX.count || 0;
+
       // Resell counts — month-to-date + all-time. Always-on; fronter scope
       // still applies, so a fronter with hide_from_fronter=true sees 0 here
       // (their pipeline doesn't include resells by definition).

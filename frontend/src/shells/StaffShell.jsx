@@ -1128,12 +1128,19 @@ const StaffShell = () => {
                 month={{ value: stats.monthTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.totalTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('all'));   } }}
               />
+              {/* Approved — counts COMPLETED transfers (fronter's actual KPI:
+                  leads the closer finished). Earlier this card showed sales
+                  counts (closed_won) but the click filtered the transfers list
+                  by completed, so Total reported 248 yet the list came back
+                  empty when the two queries didn't line up. Now count + click
+                  agree on completed transfers, so the records always render
+                  on click. */}
               <StatCardTriple
                 label="Approved"     icon={CheckCircle}  color="success"
                 loading={statsLoading}
-                today={{ value: stats.todayClosedWon || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('today')); } }}
-                month={{ value: stats.monthClosedWon || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('month')); } }}
-                total={{ value: stats.closedWon      || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('all'));   } }}
+                today={{ value: stats.todayCompletedTransfers || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('today')); } }}
+                month={{ value: stats.monthCompletedTransfers || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('month')); } }}
+                total={{ value: stats.completedTransfers      || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('all'));   } }}
               />
               <StatCardTriple
                 label="Awaiting Review" icon={Clock}     color="warning"
