@@ -59,11 +59,11 @@ router.get(
       stats.assignedTransfers  = tAssigned.count || 0;
       stats.completedTransfers = tCompleted.count || 0;
 
-      // ── "Today" window — ET calendar day boundaries (the app's display
-      //    timezone). Transfers have no business-date column, so the lead-
-      //    created moment is the only signal — counted in ET so a closer in
-      //    Florida at 9pm sees their day, not tomorrow's UTC bucket.
-      const todayStr   = todayEt();
+      // ── "Today" window — config-driven timezone via kpi.today_timezone.
+      // Defaults to America/New_York. Closer in any timezone sees the same
+      // company-defined business day boundary.
+      const tzName     = await getConfig(companyId, 'kpi.today_timezone', 'America/New_York');
+      const todayStr   = todayEt(tzName);
       const todayStart = etDateToUtcStart(todayStr);
       const todayEndIso = etDateToUtcEnd(todayStr);
       const tToday = await scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
@@ -168,18 +168,49 @@ router.get(
         stats.resellsTotal = 0;
       }
 
-      // Conversion rate: compliance-approved sales / total transfers.
-      // If config says resells don't count toward conversion, re-count won
-      // sales excluding resells; otherwise reuse stats.closedWon.
+      // Conversion rate — config-driven numerator + denominator.
+      //   numerator:    closed_won (default) | closed_won_plus_sold | all_non_cancelled
+      //   denominator:  all_transfers (default) | transfers_minus_rejected | assigned_transfers_only
+      const numMode = await getConfig(companyId, 'kpi.conversion_numerator',   'closed_won');
+      const denMode = await getConfig(companyId, 'kpi.conversion_denominator', 'all_transfers');
       let conversionNumerator = stats.closedWon;
-      if (excludeResellsFromConversion) {
-        try {
+      try {
+        if (numMode === 'closed_won_plus_sold') {
+          const a = await saleCount('closed_won', { excludeResells: excludeResellsFromConversion });
+          const b = await saleCount('sold',       { excludeResells: excludeResellsFromConversion });
+          conversionNumerator = (a.count || 0) + (b.count || 0);
+        } else if (numMode === 'all_non_cancelled') {
+          let q = scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }));
+          q = q.not('status', 'in', '(cancelled,compliance_cancelled,closed_lost)');
+          if (excludeResellsFromConversion) q = q.eq('is_resell', false);
+          const r = await q;
+          conversionNumerator = r.count || 0;
+        } else if (excludeResellsFromConversion) {
           const r = await saleCount('closed_won', { excludeResells: true });
           conversionNumerator = r.count || 0;
-        } catch { /* column missing — fall back to base count */ }
+        }
+      } catch { /* fall back to base closedWon */ }
+
+      let conversionDenominator = stats.totalTransfers;
+      if (denMode === 'transfers_minus_rejected') {
+        conversionDenominator = stats.totalTransfers - (tPending.count || 0) - 0;
+        // approximate — actual rejected count would need another query
+        try {
+          let q = scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+            .eq('status', 'rejected');
+          const r = await q;
+          conversionDenominator = stats.totalTransfers - (r.count || 0);
+        } catch { /* ignore */ }
+      } else if (denMode === 'assigned_transfers_only') {
+        try {
+          let q = scopeTransfers(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }))
+            .in('status', ['assigned', 'completed']);
+          const r = await q;
+          conversionDenominator = r.count || 0;
+        } catch { /* fall back to totalTransfers */ }
       }
-      stats.conversionRate = stats.totalTransfers > 0
-        ? Math.round((conversionNumerator / stats.totalTransfers) * 100)
+      stats.conversionRate = conversionDenominator > 0
+        ? Math.round((conversionNumerator / conversionDenominator) * 100)
         : 0;
 
       // Admin-level stats

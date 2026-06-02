@@ -320,13 +320,17 @@ router.post(
 
     const saleDate = sale_date || new Date().toISOString().split('T')[0];
 
+    // Default status — config-driven via compliance.default_new_sale_status.
+    // 'open' lets closer iterate; 'pending_review' auto-submits.
+    const defaultStatus = await getConfig(companyId, 'compliance.default_new_sale_status', 'open');
+
     // Shared customer/identity columns — identical across every car for this sale.
     const sharedCols = await stampActor('sales', {
       transfer_id: transfer_id || null,
       created_by:  userId,
       closer_id:   userId,
       company_id:  companyId,
-      status:      status || 'open',
+      status:      status || defaultStatus,
       customer_name:    titleCase(customer_name),
       customer_phone,
       customer_phone_2: customer_phone_2 || null,
@@ -568,7 +572,10 @@ router.put(
       reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition,
     } = req.body;
 
-    const validStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
+    // Allowed statuses sourced from business_config — superadmin can enable
+    // 'resold', 'expired', 'refunded', or restrict the legacy set per company.
+    const fallbackStatuses = ['open', 'sold', 'cancelled', 'follow_up', 'closed_won', 'closed_lost'];
+    const validStatuses = (await getConfig(existing.company_id, 'compliance.allowed_statuses', fallbackStatuses)) || fallbackStatuses;
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status', allowed: validStatuses });
     }
@@ -989,6 +996,10 @@ router.post('/:id/resell', [
   // vehicle so closer fills fresh. Status starts open so closer can finish
   // entering policy before submitting to compliance.
   const isAdditional = intent === 'additional_car';
+  // Initial status — config-driven via compliance.resell_initial_status.
+  // Default 'pending_review' shoves the new sale straight to compliance; 'open'
+  // lets the closer keep editing before submitting.
+  const initialStatus = await getConfig(companyId, 'compliance.resell_initial_status', 'pending_review');
   const newRow = {
     transfer_id:      old.transfer_id,
     company_id:       old.company_id,
@@ -1002,7 +1013,7 @@ router.post('/:id/resell', [
     customer_address: old.customer_address,
     reference_no:     generateReferenceNo(),
     sale_date:        new Date().toISOString().slice(0, 10),
-    status:           'open',
+    status:           initialStatus,
     is_resell:        true,
     original_sale_id: old.id,
     resell_intent:    intent,

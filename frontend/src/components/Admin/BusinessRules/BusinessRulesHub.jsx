@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
 import KpiRules from './KpiRules';
 import ComplianceRules from './ComplianceRules';
 import NotificationsRules from './NotificationsRules';
+import DrawerLayoutRules from './DrawerLayoutRules';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -18,6 +19,7 @@ const PAGES = [
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
   { id: 'notifications',label: 'Notifications',          icon: Bell,        Component: NotificationsRules },
+  { id: 'drawer',       label: 'Drawer Layout',          icon: LayoutTemplate, Component: DrawerLayoutRules },
 ];
 
 const BusinessRulesHub = () => {

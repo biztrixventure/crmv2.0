@@ -90,13 +90,19 @@ function etWallClockToUtc(input) {
   return new Date(base + getEtOffsetMs(dateStr)).toISOString();
 }
 
-// Current ET calendar day as 'YYYY-MM-DD'. Used for "Today" semantics on
-// date-only columns (e.g. sales.sale_date) so a closer in Florida at 9pm ET
-// (already past UTC midnight) still sees their day, not tomorrow.
-function todayEt() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+// Current ET calendar day as 'YYYY-MM-DD'. Default zone is America/New_York
+// (the app's display zone). Pass an explicit zone to honor business_config's
+// kpi.today_timezone setting per company.
+function todayEt(zone = ET_ZONE) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone || ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  }
 }
 
 module.exports = { etDateToUtcStart, etDateToUtcEnd, etWallClockToUtc, todayEt };

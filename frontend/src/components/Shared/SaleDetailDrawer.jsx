@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
 import client from '../../api/client';
 import ResellModal from '../Closer/ResellModal';
+import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
@@ -49,6 +50,7 @@ const Section = ({ title, children }) => (
 
 export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const { user, hasPermission } = useAuth();
+  const { sections } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
 
@@ -158,86 +160,109 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
           </div>
         )}
 
-        {/* Scrollable body */}
+        {/* Scrollable body — section order + visibility from useDrawerLayout
+            (SuperAdmin configures per role in Business Rules → Drawer Layout).
+            Unknown sections (e.g. 'compliance_actions' for compliance role) are
+            tolerated; renderer map below decides what to render. */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          {sections.filter(s => s.visible).map(s => {
+            switch (s.id) {
+              case 'customer':
+                return (
+                  <Section key="customer" title={s.label || 'Customer'}>
+                    <Row label="Name"      value={sale.customer_name} />
+                    <Row label="Phone"     value={sale.customer_phone} />
+                    {sale.customer_phone_2 && <Row label="Phone 2" value={sale.customer_phone_2} />}
+                    {sale.customer_email   && <Row label="Email"   value={sale.customer_email} />}
+                    {sale.customer_address && <Row label="Address" value={sale.customer_address} />}
+                  </Section>
+                );
+              case 'vehicle':
+                if (!(sale.car_year || sale.car_make || sale.car_model)) return null;
+                return (
+                  <Section key="vehicle" title={s.label || 'Vehicle'}>
+                    {sale.car_year  && <Row label="Year"  value={sale.car_year} />}
+                    {sale.car_make  && <Row label="Make"  value={sale.car_make} />}
+                    {sale.car_model && <Row label="Model" value={sale.car_model} />}
+                    {sale.car_miles && <Row label="Miles" value={Number(sale.car_miles).toLocaleString()} />}
+                    {sale.car_vin   && <Row label="VIN"   value={sale.car_vin} mono />}
+                  </Section>
+                );
+              case 'sale_info':
+                return (
+                  <Section key="sale_info" title={s.label || 'Sale Info'}>
+                    {sale.client_name && <Row label="Client"  value={sale.client_name} />}
+                    {sale.plan        && <Row label="Plan"    value={sale.plan} />}
+                    {sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
+                    <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />
+                    {sale.closer_disposition && (
+                      <Row label="Closer Disposition" value={sale.closer_disposition}
+                        highlight="var(--color-primary-600)" />
+                    )}
+                  </Section>
+                );
+              case 'financial':
+                if (!hasPermission('view_financial_data')) return null;
+                return (
+                  <Section key="financial" title={s.label || 'Financial'}>
+                    {sale.monthly_payment && (
+                      <Row label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`}
+                        highlight="#16a34a" />
+                    )}
+                    {sale.down_payment && (
+                      <Row label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} />
+                    )}
+                    {sale.payment_due_note && <Row label="Due Note" value={sale.payment_due_note} />}
+                  </Section>
+                );
+              case 'additional':
+                if (extraFields.length === 0) return null;
+                return (
+                  <Section key="additional" title={s.label || 'Additional Info'}>
+                    {extraFields.map(([k, v]) => (
+                      <Row key={k} label={k.replace(/_/g, ' ')} value={String(v)} />
+                    ))}
+                  </Section>
+                );
+              case 'people':
+                return (
+                  <Section key="people" title={s.label || 'People'}>
+                    {sale.closer_name  && <Row label="Closer"  value={sale.closer_name} />}
+                    {sale.fronter_name && <Row label="Fronter" value={sale.fronter_name} />}
+                  </Section>
+                );
+              case 'timeline':
+                return (
+                  <Section key="timeline" title={s.label || 'Timeline'}>
+                    <Row label="Created"  value={new Date(sale.created_at).toLocaleString()} />
+                    {sale.updated_at && sale.updated_at !== sale.created_at && (
+                      <Row label="Updated" value={new Date(sale.updated_at).toLocaleString()} />
+                    )}
+                    {sale.submitted_for_review_at && (
+                      <Row label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} />
+                    )}
+                    {sale.compliance_reviewed_at && (
+                      <Row label="Compliance Reviewed" value={new Date(sale.compliance_reviewed_at).toLocaleString()} />
+                    )}
+                  </Section>
+                );
+              case 'compliance_actions':
+                // Reserved for an action toolbar inside the drawer — wired in a
+                // future commit where the compliance approve/return UI moves
+                // here. Render nothing for now so the section can be toggled
+                // without breaking the layout.
+                return null;
+              case 'audit':
+                // Audit trail is rendered after the switch (it has its own
+                // custom layout) — see below.
+                return null;
+              default:
+                return null;
+            }
+          })}
 
-          {/* Customer */}
-          <Section title="Customer">
-            <Row label="Name"      value={sale.customer_name} />
-            <Row label="Phone"     value={sale.customer_phone} />
-            {sale.customer_phone_2 && <Row label="Phone 2" value={sale.customer_phone_2} />}
-            {sale.customer_email   && <Row label="Email"   value={sale.customer_email} />}
-            {sale.customer_address && <Row label="Address" value={sale.customer_address} />}
-          </Section>
-
-          {/* Vehicle */}
-          {(sale.car_year || sale.car_make || sale.car_model) && (
-            <Section title="Vehicle">
-              {sale.car_year  && <Row label="Year"  value={sale.car_year} />}
-              {sale.car_make  && <Row label="Make"  value={sale.car_make} />}
-              {sale.car_model && <Row label="Model" value={sale.car_model} />}
-              {sale.car_miles && <Row label="Miles" value={Number(sale.car_miles).toLocaleString()} />}
-              {sale.car_vin   && <Row label="VIN"   value={sale.car_vin} mono />}
-            </Section>
-          )}
-
-          {/* Sale Info */}
-          <Section title="Sale Info">
-            {sale.client_name && <Row label="Client"  value={sale.client_name} />}
-            {sale.plan        && <Row label="Plan"    value={sale.plan} />}
-            {sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
-            <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />
-            {sale.closer_disposition && (
-              <Row label="Closer Disposition" value={sale.closer_disposition}
-                highlight="var(--color-primary-600)" />
-            )}
-          </Section>
-
-          {/* Financial — gated */}
-          {hasPermission('view_financial_data') && (
-            <Section title="Financial">
-              {sale.monthly_payment && (
-                <Row label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`}
-                  highlight="#16a34a" />
-              )}
-              {sale.down_payment && (
-                <Row label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} />
-              )}
-              {sale.payment_due_note && <Row label="Due Note" value={sale.payment_due_note} />}
-            </Section>
-          )}
-
-          {/* Extra form fields */}
-          {extraFields.length > 0 && (
-            <Section title="Additional Info">
-              {extraFields.map(([k, v]) => (
-                <Row key={k} label={k.replace(/_/g, ' ')} value={String(v)} />
-              ))}
-            </Section>
-          )}
-
-          {/* People */}
-          <Section title="People">
-            {sale.closer_name  && <Row label="Closer"  value={sale.closer_name} />}
-            {sale.fronter_name && <Row label="Fronter" value={sale.fronter_name} />}
-          </Section>
-
-          {/* Timeline */}
-          <Section title="Timeline">
-            <Row label="Created"  value={new Date(sale.created_at).toLocaleString()} />
-            {sale.updated_at && sale.updated_at !== sale.created_at && (
-              <Row label="Updated" value={new Date(sale.updated_at).toLocaleString()} />
-            )}
-            {sale.submitted_for_review_at && (
-              <Row label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} />
-            )}
-            {sale.compliance_reviewed_at && (
-              <Row label="Compliance Reviewed" value={new Date(sale.compliance_reviewed_at).toLocaleString()} />
-            )}
-          </Section>
-
-          {/* Audit trail */}
-          {hist.length > 0 && (
+          {/* Audit trail — gated by layout config */}
+          {sections.find(s => s.id === 'audit')?.visible && hist.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-bold uppercase tracking-widest mb-2"
                 style={{ color: 'var(--color-primary-600)' }}>Audit Trail</p>
