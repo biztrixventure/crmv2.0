@@ -663,6 +663,151 @@ const AddCustomModal = ({ onAdd, onClose }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OptionsEditor — chip-based add/rename/remove with confirm-on-delete +
+// duplicate-check. Lives inside the FieldCard footer and persists every change
+// to the server immediately via onSave. Never deletes silently; pending-remove
+// state mirrors the "click twice" pattern the field-remove control uses, so
+// SuperAdmin can't lose data with one click.
+//
+// Data-safety: historical form_data values keep the raw option string; this
+// editor only changes what shows in NEW dropdowns. Caption explains that.
+// ─────────────────────────────────────────────────────────────────────────────
+const OptionsEditor = ({ field, onSave, onClose }) => {
+  const initial = Array.isArray(field.options) ? field.options : [];
+  const [opts, setOpts]               = useState(initial);
+  const [newOpt, setNewOpt]           = useState('');
+  const [editingIdx, setEditingIdx]   = useState(null);
+  const [draft, setDraft]             = useState('');
+  const [pendingRemove, setPendingRemove] = useState(null);
+  const removeTimer = useRef(null);
+  const editRef = useRef(null);
+
+  useEffect(() => { if (editingIdx !== null) editRef.current?.focus(); }, [editingIdx]);
+  useEffect(() => () => clearTimeout(removeTimer.current), []);
+
+  const commit = (next) => {
+    setOpts(next);
+    onSave(next);
+  };
+
+  const addOption = () => {
+    const v = newOpt.trim();
+    if (!v) return;
+    if (opts.some(o => o.toLowerCase() === v.toLowerCase())) {
+      // Duplicate — flash by clearing the input but keep the existing entry.
+      setNewOpt('');
+      return;
+    }
+    commit([...opts, v]);
+    setNewOpt('');
+  };
+
+  const startRename = (i) => {
+    setEditingIdx(i);
+    setDraft(opts[i]);
+  };
+  const commitRename = () => {
+    const v = draft.trim();
+    if (v && v !== opts[editingIdx]
+        && !opts.some((o, i) => i !== editingIdx && o.toLowerCase() === v.toLowerCase())) {
+      const next = opts.map((o, i) => i === editingIdx ? v : o);
+      commit(next);
+    }
+    setEditingIdx(null);
+  };
+
+  const requestRemove = (i) => {
+    if (pendingRemove === i) {
+      clearTimeout(removeTimer.current);
+      setPendingRemove(null);
+      commit(opts.filter((_, j) => j !== i));
+    } else {
+      setPendingRemove(i);
+      removeTimer.current = setTimeout(() => setPendingRemove(null), 3000);
+    }
+  };
+
+  return (
+    <div className="px-3 pb-3 pt-2"
+      style={{ borderTop: '1px dashed var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary inline-flex items-center gap-1.5">
+          <List size={11} /> Options · {opts.length}
+        </p>
+        <button onClick={onClose} title="Close editor"
+          className="p-1 rounded hover:bg-bg text-text-tertiary"
+          style={{ minWidth: 26, minHeight: 26 }}>
+          <X size={11} />
+        </button>
+      </div>
+
+      <p className="text-[10px] leading-relaxed mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+        Click a chip to rename. ✕ asks once before removing. Historical records keep the old text, so removing or renaming an option here never rewrites past sales.
+      </p>
+
+      {/* Chip list */}
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {opts.length === 0 && (
+          <span className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+            No options yet — add the first one below.
+          </span>
+        )}
+        {opts.map((o, i) => editingIdx === i ? (
+          <input
+            key={`edit-${i}`}
+            ref={editRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') setEditingIdx(null);
+            }}
+            className="text-xs px-2 py-1 rounded-full bg-white border outline-none"
+            style={{ borderColor: 'var(--color-primary-400)', minWidth: 100 }} />
+        ) : (
+          <span key={`${o}-${i}`}
+            className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-full text-xs font-semibold transition-all"
+            style={{
+              backgroundColor: pendingRemove === i ? 'var(--color-error-100, #fee2e2)' : 'var(--color-surface)',
+              border: `1px solid ${pendingRemove === i ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)'}`,
+              color:  pendingRemove === i ? 'var(--color-error-700, #b91c1c)' : 'var(--color-text)',
+            }}>
+            <button onClick={() => startRename(i)} className="cursor-text"
+              title="Click to rename">
+              {o}
+            </button>
+            <button onClick={() => requestRemove(i)}
+              className="ml-0.5 rounded-full p-0.5 hover:bg-error-50"
+              title={pendingRemove === i ? 'Click again to confirm' : 'Remove'}
+              aria-label={pendingRemove === i ? `Confirm remove ${o}` : `Remove ${o}`}>
+              {pendingRemove === i
+                ? <span className="text-[10px] font-bold px-1">Remove?</span>
+                : <X size={10} style={{ color: 'var(--color-error-500)' }} />}
+            </button>
+          </span>
+        ))}
+      </div>
+
+      {/* Add new */}
+      <div className="flex items-center gap-1.5">
+        <input value={newOpt}
+          onChange={(e) => setNewOpt(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') addOption(); }}
+          placeholder="Add an option…"
+          className="input text-xs py-1 h-auto flex-1" />
+        <button onClick={addOption}
+          disabled={!newOpt.trim() || opts.some(o => o.toLowerCase() === newOpt.trim().toLowerCase())}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: 'var(--color-success-600, #16a34a)' }}>
+          <Plus size={11} /> Add
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Field card on the canvas
 // ─────────────────────────────────────────────────────────────────────────────
 const FieldCard = ({
@@ -836,8 +981,12 @@ const FieldCard = ({
           </button>
         )}
 
-        {/* Edit options button for sale_disposition / sale_status */}
-        {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && !editingOptions && (
+        {/* Edit options button — now also covers plain 'select' fields so
+            the SuperAdmin can extend a dropdown like Condition or any
+            custom select without touching the JSON config. Existing
+            historical values stay valid even if an option is removed
+            (records store the string snapshot, not an FK). */}
+        {(field.field_type === 'select' || field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && !editingOptions && (
           <button onClick={() => { setOptionsVal((field.options || []).join(', ')); setEditingOptions(true); }}
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0 hover:opacity-80"
             style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
@@ -866,22 +1015,24 @@ const FieldCard = ({
         </span>
       </div>
 
-      {/* Inline options editor for sale_disposition / sale_status */}
-      {(field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && editingOptions && (
-        <div className="px-3 pb-2.5 flex items-center gap-1.5">
-          <input value={optionsVal} onChange={e => setOptionsVal(e.target.value)}
-            placeholder="Sale, No Sale, Callback, …"
-            className="input text-xs py-1 h-auto flex-1" />
-          <button onClick={() => {
-            const opts = optionsVal.split(',').map(s => s.trim()).filter(Boolean);
-            onSaveOptions(index, opts);
-            setEditingOptions(false);
-          }} className="px-2 py-1 rounded text-xs font-bold text-white flex-shrink-0"
-            style={{ background: 'var(--gradient-sidebar)' }}>Save</button>
-          <button onClick={() => setEditingOptions(false)}
-            className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0"
-            style={{ color: 'var(--color-text-secondary)' }}>✕</button>
-        </div>
+      {/* Chip-based options editor — opens for any field that owns an
+          options list. Each option is a chip. Click a chip to rename it
+          inline. Click ✕ on a chip to remove it (with a confirmation step
+          inline). "+ Add option" input commits on Enter or the green Add
+          button. Saves are debounced — every chip op writes the next
+          options array to the server immediately, so a refresh never
+          loses what the user typed.
+
+          Data-safety note shown above the editor: form_data entries from
+          past sales/transfers store the raw string, NOT a reference, so
+          removing an option here doesn't break or rewrite any historical
+          records. They keep the old value as-is. */}
+      {editingOptions && (
+        <OptionsEditor
+          field={field}
+          onSave={(opts) => onSaveOptions(index, opts)}
+          onClose={() => setEditingOptions(false)}
+        />
       )}
     </div>
   );
