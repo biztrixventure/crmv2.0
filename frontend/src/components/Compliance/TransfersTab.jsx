@@ -198,6 +198,9 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
         <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
       </Filters>
 
+      {/* Stats strip — total matches + per-status breakdown of the page. */}
+      <TabStatsStrip total={total} records={transfers} />
+
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         {loading ? <Spinner /> : transfers.length === 0 ? (

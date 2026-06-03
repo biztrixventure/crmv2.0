@@ -5,6 +5,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
+import TabStatsStrip from './TabStatsStrip';
 import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
@@ -179,6 +180,26 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
       </Filters>
+
+      {/* Stats strip — total matches + per-status breakdown of the page.
+          Catalog-driven labels + badges via the compliance hook. */}
+      <TabStatsStrip
+        total={total}
+        records={sales}
+        labelOf={labelOf}
+        badgeOf={(key) => {
+          // Map the catalog badge variant to bg/color the strip expects.
+          const variant = badgeOf(key);
+          const VAR = {
+            success:   { bg: '#d1fae5', color: '#047857' },
+            error:     { bg: '#fee2e2', color: '#b91c1c' },
+            warning:   { bg: '#fef3c7', color: '#b45309' },
+            info:      { bg: '#dbeafe', color: '#1d4ed8' },
+            secondary: { bg: '#f3f4f6', color: '#6b7280' },
+          };
+          return { ...(VAR[variant] || VAR.secondary), label: labelOf(key) };
+        }}
+      />
 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

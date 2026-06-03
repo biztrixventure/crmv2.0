@@ -7,6 +7,7 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
+import TabStatsStrip from './TabStatsStrip';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
   fmtDate, fmtDateTime, downloadCSV,
@@ -469,7 +470,21 @@ const CallbacksTab = ({ companyList }) => {
     catch (e) { toast.error(e.response?.data?.error || 'Update failed'); } finally { setMgBusy(false); }
   };
 
-  const sortedCompanies = [...companyList].sort((a, b) => a.name.localeCompare(b.name));
+  // Filter the company dropdown to the side the user picked on the horizontal
+  // toggle. Fronter view → only fronter companies, closer view → only closer
+  // companies. Companies with no recorded type fall through to both lists.
+  const sortedCompanies = [...companyList]
+    .filter(c => !c.company_type || c.company_type === cbType)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Reset the selected company whenever the side switches so a leftover
+  // fronter-co id doesn't sit in the dropdown while closer companies render.
+  useEffect(() => { setCompany(''); setSelectedUser(''); }, [cbType]);
+
+  // Overdue counter for the extra tile on the stats strip.
+  const overdueOnPage = callbacks.reduce((n, c) =>
+    n + ((c.status === 'pending' && c.callback_at && new Date(c.callback_at) < new Date()) ? 1 : 0)
+  , 0);
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
     const res = await client.get('compliance/callbacks', {
@@ -588,6 +603,17 @@ const CallbacksTab = ({ companyList }) => {
           <FInput label="Crt. From" type="date" value={createdFrom} onChange={e => setCreatedFrom(e.target.value)} />
           <FInput label="Crt. To"   type="date" value={createdTo}   onChange={e => setCreatedTo(e.target.value)} />
         </Filters>
+
+        {/* Stats strip — total matches + per-status breakdown of the page +
+            an Overdue tile derived from the loaded records. */}
+        <TabStatsStrip
+          total={total}
+          records={callbacks}
+          extraTiles={overdueOnPage > 0 ? [{
+            key: 'overdue', label: 'Overdue', value: overdueOnPage,
+            bg: '#fef2f2', color: '#dc2626', icon: AlertCircle,
+          }] : []}
+        />
 
         {/* Priority stats bar */}
         {callbacks.length > 0 && <PriorityStatsBar callbacks={callbacks} />}
