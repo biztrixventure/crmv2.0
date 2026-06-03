@@ -527,6 +527,11 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
     setFilters({ companyId: '', closerId: '', status: statusFilter, search: '', priority: '' });
     setPage(1);
     setSort({ col: 'created_at', dir: 'desc' });
+    // When jumping from a stat card / pipeline segment, drop the date range
+    // too — the KPI counts are global (all-time, scope-wide) so the list
+    // below must be too, otherwise clicking a status with a row outside the
+    // current 30-day window shows "nothing" even though the count says 1.
+    if (statusFilter) setDateRange({ date_from: null, date_to: null });
     setTimeout(() => dataTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
   const navToCompanies = () => document.dispatchEvent(new CustomEvent('admin-nav', { detail: 'companies' }));
