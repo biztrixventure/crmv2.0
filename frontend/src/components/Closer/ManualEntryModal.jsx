@@ -8,27 +8,49 @@ import { isCarMake, isCarModel } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
 
 // ── Field renderer — mirrors the fronter form's field-type switch so a
-// dropdown stays a dropdown, vehicle fields get typeahead, etc. Kept inline
-// here (rather than a shared component) because the fronter form needs full
-// VehicleSelect chaining state and zip lookups that don't apply here.
-function renderManualField(field, value, setValue) {
+// dropdown stays a dropdown, vehicle fields get typeahead, etc.
+// ctx provides:
+//   vehicleMakes, vehicleModelsFor — populated from /api/vehicles
+//   formData, setField              — for cross-field chaining (make→model wipe)
+//   onZipFill                       — called when a ZIP resolves so City/State auto-fill
+function renderManualField(field, value, setValue, ctx = {}) {
   const v = value ?? '';
   const required = !!field.is_required;
   const ph = field.placeholder || field.label || field.name;
 
-  // CarMake / CarModel — VehicleSelect typeahead. Make picker lists every
-  // make; model picker stays unscoped (no chaining) because the modal does
-  // not preload the full vehicle registry. Closer can still type any model.
+  // CarMake — typeahead from the live vehicle registry. Picking a make
+  // wipes the sibling Model so a Honda Camry can't slip through.
   if (isCarMake(field)) {
-    return <VehicleSelect mode="make" value={v} strict={false}
-      onChange={setValue} placeholder={ph} />;
+    return (
+      <VehicleSelect mode="make"
+        value={v} makes={ctx.vehicleMakes || []} strict
+        onChange={(next) => {
+          setValue(next);
+          // Wipe the model when the make changes (parent owns the formData).
+          if (ctx.setField && ctx.formData) {
+            const modelField = (ctx.fields || []).find(f => isCarModel(f));
+            if (modelField && next !== v) ctx.setField(modelField.name, '');
+          }
+        }}
+        placeholder={ph} />
+    );
   }
   if (isCarModel(field)) {
-    return <VehicleSelect mode="model" value={v} strict={false}
-      onChange={setValue} placeholder={ph} />;
+    // Model dropdown scoped to whatever make is currently picked.
+    const activeMake = (() => {
+      const mk = (ctx.fields || []).find(f => isCarMake(f));
+      return mk ? (ctx.formData?.[mk.name] || '') : '';
+    })();
+    return (
+      <VehicleSelect mode="model"
+        value={v}
+        models={ctx.vehicleModelsFor ? ctx.vehicleModelsFor(activeMake) : []}
+        requireMake strict
+        onChange={setValue} placeholder={ph} />
+    );
   }
 
-  // Plain select — uses field.options.
+  // Plain select.
   if (field.field_type === 'select') {
     return (
       <select value={v} onChange={(e) => setValue(e.target.value)}
@@ -47,18 +69,33 @@ function renderManualField(field, value, setValue) {
     );
   }
 
-  if (['number','tel','email','phone','zip','date'].includes(field.field_type)) {
-    const t = field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type;
+  // ZIP — fires onZipFill when value becomes 5 digits so the parent can
+  // auto-populate City/State fields from /api/zipcode.
+  if (field.field_type === 'zip') {
     return (
-      <input type={t} value={v} onChange={(e) => setValue(e.target.value)}
+      <input type="text" inputMode="numeric"
+        value={v}
+        onChange={(e) => {
+          const next = e.target.value.replace(/[^0-9]/g, '').slice(0, 5);
+          setValue(next);
+          if (ctx.onZipFill && /^\d{5}$/.test(next)) ctx.onZipFill(next);
+        }}
         required={required} placeholder={ph}
-        inputMode={field.field_type === 'zip' || field.field_type === 'number' ? 'numeric' : undefined}
         className="input text-xs py-1.5 w-full" />
     );
   }
 
-  // Default text input — also catches sale_* types which closer fills on the
-  // sale form, not the transfer form.
+  if (['number','tel','email','phone','date'].includes(field.field_type)) {
+    const t = field.field_type === 'phone' ? 'tel' : field.field_type;
+    return (
+      <input type={t} value={v} onChange={(e) => setValue(e.target.value)}
+        required={required} placeholder={ph}
+        inputMode={field.field_type === 'number' ? 'numeric' : undefined}
+        className="input text-xs py-1.5 w-full" />
+    );
+  }
+
+  // Default text input.
   return (
     <input type="text" value={v} onChange={(e) => setValue(e.target.value)}
       required={required} placeholder={ph}
@@ -88,21 +125,57 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
   const [err,            setErr]            = useState('');
   const [companyLoading, setCompanyLoading] = useState(false);
   const [fronterLoading, setFronterLoading] = useState(false);
+  const [vehicleTree,    setVehicleTree]    = useState([]);
+  const [zipInfo,        setZipInfo]        = useState(null);   // last resolved {city,state}
+  const [zipLoading,     setZipLoading]     = useState(false);
 
-  // Load fronter companies + form-field config once when opened.
+  // Load fronter companies + form-field config + vehicle registry on open.
   useEffect(() => {
     if (!isOpen) return;
     setErr(''); setBusy(false); setCompanyId(''); setFronterId('');
     setFormData(prefillPhone ? { customer_phone: prefillPhone, Phone: prefillPhone } : {});
+    setZipInfo(null);
     fetchFields();
     setCompanyLoading(true);
-    // Closer-side endpoint — returns fronter companies + their active fronter
-    // users without requiring superadmin scope (which uploads/reference does).
-    client.get('transfers/manual-entry-options')
-      .then(r => { setCompanies(r.data?.companies || []); })
-      .catch(() => setCompanies([]))
-      .finally(() => setCompanyLoading(false));
+    Promise.allSettled([
+      client.get('transfers/manual-entry-options'),
+      client.get('vehicles'),
+    ]).then(([coRes, vehRes]) => {
+      if (coRes.status === 'fulfilled') setCompanies(coRes.value.data?.companies || []);
+      else setCompanies([]);
+      if (vehRes.status === 'fulfilled') setVehicleTree(vehRes.value.data?.makes || []);
+      else setVehicleTree([]);
+    }).finally(() => setCompanyLoading(false));
   }, [isOpen, prefillPhone, fetchFields]);
+
+  // Vehicle helpers built from the registry tree.
+  const vehicleMakes      = vehicleTree.map(m => m.name);
+  const vehicleModelsFor  = (makeName) => {
+    const mk = vehicleTree.find(m => m.name.toLowerCase() === String(makeName || '').toLowerCase());
+    return (mk?.models || []).map(m => m.name);
+  };
+
+  // ZIP → city/state autofill via the shared zipcode service. Populates every
+  // matching field name (City/State/customer_city/customer_state) in formData
+  // so whichever variant the SuperAdmin configured gets filled.
+  const onZipFill = (zip) => {
+    setZipLoading(true);
+    client.get(`zipcode/${zip}`)
+      .then(r => {
+        const info = r.data || null;
+        setZipInfo(info);
+        if (info) {
+          const set = (k, v) => { if (!v) return; setFormData(p => ({ ...p, [k]: v })); };
+          set('City', info.city);              set('city', info.city);
+          set('customer_city', info.city);
+          set('State', info.state_abbr || info.state);
+          set('state', info.state_abbr || info.state);
+          set('customer_state', info.state_abbr || info.state);
+        }
+      })
+      .catch(() => setZipInfo(null))
+      .finally(() => setZipLoading(false));
+  };
 
   // When company changes, narrow the fronter list. Reference payload already
   // contains the active fronters per company so this is a local filter.
@@ -256,7 +329,23 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                       {f.label || f.name}
                       {f.is_required && <span className="text-error-600 ml-0.5">*</span>}
                     </label>
-                    {renderManualField(f, formData[f.name], (v) => setField(f.name, v))}
+                    {renderManualField(f, formData[f.name], (v) => setField(f.name, v), {
+                      vehicleMakes, vehicleModelsFor,
+                      formData, setField,
+                      fields: formFieldsSorted,
+                      onZipFill,
+                    })}
+                    {/* ZIP resolution hint — small note under any field
+                        whose type is 'zip' once City/State have come back. */}
+                    {f.field_type === 'zip' && zipLoading && (
+                      <p className="text-[10px] text-text-tertiary mt-1">Looking up ZIP…</p>
+                    )}
+                    {f.field_type === 'zip' && !zipLoading && zipInfo
+                       && (formData[f.name] || '').length === 5 && (
+                      <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {zipInfo.city}, {zipInfo.state}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
