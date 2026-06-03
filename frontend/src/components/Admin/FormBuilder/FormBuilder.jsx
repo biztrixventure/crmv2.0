@@ -16,7 +16,7 @@ import {
   Type, Hash, Mail, Phone, Calendar, AlignLeft, List, DollarSign,
   X, Zap, Users, UserX, Tag, Briefcase, Link2, Car,
   ChevronRight, Layers, ListChecks, LayoutGrid, ArrowRight, MessageSquare,
-  Bookmark, BookOpen, Trash2, Pencil, Check,
+  Bookmark, BookOpen, Trash2, Pencil, Check, Info,
 } from 'lucide-react';
 import DispositionManager from './DispositionManager';
 import VehicleManager from '../Vehicles/VehicleManager';
@@ -808,17 +808,150 @@ const OptionsEditor = ({ field, onSave, onClose }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FullEditPanel — one-stop edit surface that opens when the Pencil icon is
+// clicked on a field card. Surfaces every editable property in a tight grid
+// so the SuperAdmin doesn't have to hunt through footer toggles. Locked rows:
+//   * `name` (form_data property name): renaming would orphan all historical
+//     form_data rows that key on it. Shown read-only with a tooltip.
+//   * `field_type` for sale_* fields: changing the type breaks the sale
+//     pipeline (sale_plan → live mapping, sale_status → enum etc.). Locked.
+// Every change writes via onPatch immediately; canvas changes are batched
+// and persist on the next Save click — same as every other field edit.
+// ─────────────────────────────────────────────────────────────────────────────
+const TYPE_OPTIONS_FOR_EDIT = [
+  { v: 'text',     label: 'Text'      },
+  { v: 'textarea', label: 'Long text' },
+  { v: 'number',   label: 'Number'    },
+  { v: 'email',    label: 'Email'     },
+  { v: 'tel',      label: 'Phone'     },
+  { v: 'zip',      label: 'ZIP code'  },
+  { v: 'date',     label: 'Date'      },
+  { v: 'select',   label: 'Dropdown'  },
+];
+
+const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onClose }) => {
+  const [label,       setLabel]       = useState(field.label || '');
+  const [placeholder, setPlaceholder] = useState(field.placeholder || '');
+  const typeLocked = isSale || isCloserDeal;
+
+  const commit = (key, value) => onPatch({ [key]: value });
+
+  return (
+    <div className="px-3 pb-3 pt-2"
+      style={{ borderTop: '1px solid var(--color-primary-200, #c7d2fe)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5"
+          style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+          <Pencil size={11} /> Edit field
+        </p>
+        <button onClick={onClose} title="Close edit panel"
+          className="p-1 rounded hover:bg-white"
+          style={{ minWidth: 26, minHeight: 26, color: 'var(--color-primary-700)' }}>
+          <X size={11} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {/* Display label */}
+        <div className="sm:col-span-2">
+          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
+            Display label
+          </label>
+          <input value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => label.trim() && label !== field.label && commit('label', label.trim())}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            placeholder="What the closer/fronter sees"
+            className="input text-xs py-1.5 w-full" />
+          <p className="text-[10px] text-text-tertiary mt-0.5">Safe to rename anytime. Past records keep the old label as a snapshot.</p>
+        </div>
+
+        {/* Field name (read-only) */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
+            Form-data key <span className="text-[9px] font-normal italic">(locked)</span>
+          </label>
+          <input value={field.name || ''} readOnly
+            className="input text-xs py-1.5 w-full font-mono"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
+            title="Renaming would orphan every existing form_data row that keys on this name." />
+        </div>
+
+        {/* Type */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
+            Type {typeLocked && <span className="text-[9px] font-normal italic">(locked)</span>}
+          </label>
+          {typeLocked ? (
+            <input value={field.field_type} readOnly
+              className="input text-xs py-1.5 w-full font-mono"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
+              title="Sale + closer-deal field types are locked because changing them breaks downstream sale logic." />
+          ) : (
+            <select value={field.field_type}
+              onChange={(e) => commit('field_type', e.target.value)}
+              className="input text-xs py-1.5 w-full">
+              {TYPE_OPTIONS_FOR_EDIT.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+            </select>
+          )}
+        </div>
+
+        {/* Placeholder */}
+        <div className="sm:col-span-2">
+          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
+            Placeholder
+          </label>
+          <input value={placeholder}
+            onChange={(e) => setPlaceholder(e.target.value)}
+            onBlur={() => placeholder !== (field.placeholder || '') && commit('placeholder', placeholder)}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            placeholder="Hint text inside the input"
+            className="input text-xs py-1.5 w-full" />
+        </div>
+
+        {/* Toggles row */}
+        <div className="sm:col-span-2 flex flex-wrap gap-2 mt-1">
+          <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+            <input type="checkbox" checked={!!field.is_required}
+              onChange={(e) => commit('is_required', e.target.checked)} />
+            Required
+          </label>
+          {!isCloserDeal && (
+            <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+              <input type="checkbox" checked={field.show_to_fronter !== false}
+                onChange={(e) => commit('show_to_fronter', e.target.checked)} />
+              Visible to fronter
+            </label>
+          )}
+          <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+            <input type="checkbox" checked={!!field.repeats_per_car}
+              onChange={(e) => commit('repeats_per_car', e.target.checked)} />
+            Repeats per car
+          </label>
+        </div>
+      </div>
+
+      <p className="text-[10px] text-text-tertiary mt-3 leading-relaxed flex items-start gap-1.5">
+        <Info size={11} className="flex-shrink-0 mt-0.5" />
+        Edits stay on the canvas until you click <strong>Save</strong> at the top. Renaming labels, changing the type, or editing options never deletes any past record — historical form_data values keep the original string.
+      </p>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Field card on the canvas
 // ─────────────────────────────────────────────────────────────────────────────
 const FieldCard = ({
   field, index, isDragging, isDragOver,
   onDragStart, onDragOver, onDrop, onDragEnd,
   onRemove, onToggleRequired, onToggleFronter, onChangeSpan, onEditLabel, onConfigureMapping, onSaveOptions,
-  onToggleRepeatsPerCar,
+  onToggleRepeatsPerCar, onPatch,
 }) => {
   const [editingLabel,   setEditingLabel]   = useState(false);
   const [labelVal,       setLabelVal]       = useState(field.label);
   const [editingOptions, setEditingOptions] = useState(false);
+  const [editingFull,    setEditingFull]    = useState(false);
   const [optionsVal,     setOptionsVal]     = useState((field.options || []).join(', '));
   const [pendingRemove,  setPendingRemove]  = useState(false);
   const removeTimer = useRef(null);
@@ -883,6 +1016,22 @@ const FieldCard = ({
             {field.label}
           </span>
         )}
+        {/* Edit pencil — opens the full edit panel below. Lets the SuperAdmin
+            tweak any property of the field in one place without hunting through
+            footer toggles. Disabled while the inline label is being typed so
+            the two editors don't fight. */}
+        <button
+          onClick={(e) => { e.stopPropagation(); setEditingFull(v => !v); setEditingOptions(false); }}
+          className="p-0.5 rounded flex-shrink-0 transition-colors"
+          style={{
+            backgroundColor: editingFull ? 'var(--color-primary-100)' : 'transparent',
+            color: editingFull ? 'var(--color-primary-700)' : 'var(--color-primary-600)',
+          }}
+          title={editingFull ? 'Close edit panel' : 'Edit this field'}
+          aria-label={editingFull ? 'Close edit panel' : 'Edit field'}
+          aria-expanded={editingFull}>
+          <Pencil size={13} />
+        </button>
         {pendingRemove ? (
           <button
             onClick={handleRemoveClick}
@@ -1034,6 +1183,19 @@ const FieldCard = ({
           onClose={() => setEditingOptions(false)}
         />
       )}
+
+      {/* Full edit panel — every property in one place. Locked rows: row id,
+          internal `name` (form_data key). Locked types: sale_* fields keep
+          their field_type to avoid breaking downstream sale logic. */}
+      {editingFull && onPatch && (
+        <FullEditPanel
+          field={field}
+          isSale={isSale}
+          isCloserDeal={isCloserDeal}
+          onPatch={onPatch}
+          onClose={() => setEditingFull(false)}
+        />
+      )}
     </div>
   );
 };
@@ -1151,6 +1313,9 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
   const editLabel      = (i, label) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, label } : f));
   const saveMapping    = (i, mapping) => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, options: mapping } : f));
   const saveOptions    = (i, opts)    => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, options: opts } : f));
+  // Generic patch — used by the Edit panel to update any subset of editable
+  // properties at once. Never touches `name` (form_data key) or row id.
+  const patchField     = (i, patch)   => setCanvasFields(prev => prev.map((f, idx) => idx === i ? { ...f, ...patch } : f));
 
   const onDragStart = (e, i) => { dragIndex.current = i; e.dataTransfer.effectAllowed = 'move'; };
   const onDragOver  = (e, i) => { e.preventDefault(); setDragOverIdx(i); };
@@ -1541,6 +1706,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   onEditLabel={(label) => editLabel(idx, label)}
                   onConfigureMapping={(i) => setMappingField(i)}
                   onSaveOptions={(i, opts) => saveOptions(i, opts)}
+                  onPatch={(patch) => patchField(idx, patch)}
                   onToggleRepeatsPerCar={toggleRepeatsPerCar}
                 />
               ))}
