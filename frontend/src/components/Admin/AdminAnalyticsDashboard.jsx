@@ -7,6 +7,17 @@ import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { todayET, fmtSaleDate } from '../../utils/timezone';
+import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
+
+// Map our 5 semantic badge tokens to a hex so the pipeline bar gets a
+// solid background even when Tailwind tree-shakes unused classes.
+const BADGE_COLOR_DOT = {
+  success:   '#16a34a',
+  error:     '#dc2626',
+  warning:   '#d97706',
+  info:      '#2563eb',
+  secondary: '#6b7280',
+};
 import {
   Users, Building2, Activity, DollarSign, CheckCircle, Target, Shield, Layers,
   ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight,
@@ -295,6 +306,10 @@ const TODAY = todayET();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
+  // Compliance status catalog — drives the dynamic pipeline bar at the top
+  // of the dashboard. SuperAdmin enables/disables/renames/recolors statuses
+  // in Business Rules → Compliance Workflow, then the pipeline matches.
+  const { catalog } = useComplianceStatuses();
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
 
   // Date range — shared source of truth for both DateRangePicker and MiniCalendar
@@ -613,42 +628,66 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         />
       </div>
 
-      {/* ── Pipeline bar ────────────────────────────────────────────────── */}
-      {!statsLoading && ((stats.closedWon || 0) + (stats.closedLost || 0)) > 0 && (
-        <div className="rounded-xl p-3 flex items-center gap-4"
-          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <div className="flex-shrink-0">
-            <p className="text-xs font-bold text-text">Pipeline</p>
-            <p className="text-[10px] text-text-tertiary">Won · Open · Lost</p>
+      {/* ── Pipeline bar — fully dynamic from the compliance status catalog.
+          Adding a new status in Business Rules → Compliance Workflow → Sale
+          status catalog (and enabling it) makes it appear here automatically
+          with its configured badge color, label, and count. */}
+      {!statsLoading && (() => {
+        const cat = (catalog || []).filter(c => c.enabled !== false);
+        const byStatus = stats.salesByStatus || {};
+        // Build list of {status, label, color, value} from catalog. Skip
+        // statuses with zero count to keep the bar uncluttered, but always
+        // keep at least 3 buckets so the bar doesn't collapse to nothing.
+        const segments = cat
+          .map(c => ({
+            key: c.key,
+            label: c.label || c.key.replace(/_/g, ' '),
+            value: byStatus[c.key] || 0,
+            color: BADGE_COLOR_DOT[c.badge] || BADGE_COLOR_DOT.secondary,
+          }))
+          .filter(s => s.value > 0);
+        const total = segments.reduce((sum, s) => sum + s.value, 0);
+        if (total === 0) return null;
+        return (
+          <div className="rounded-xl p-3 flex items-center gap-4 flex-wrap"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="flex-shrink-0">
+              <p className="text-xs font-bold text-text">Pipeline</p>
+              <p className="text-[10px] text-text-tertiary truncate" style={{ maxWidth: 220 }}>
+                {segments.map(s => s.label).join(' · ')}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] flex-shrink-0 flex-wrap">
+              {segments.map(s => (
+                <button key={s.key} onClick={() => jumpToData('sales', s.key)}
+                  className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer"
+                  title={`Show ${s.label} sales`}
+                  aria-label={`${s.label} ${s.value}, click to filter sales`}>
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+                  <span className="text-text-secondary">
+                    {s.label} <strong style={{ color: s.color }}>{s.value}</strong>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 h-2 rounded-full overflow-hidden flex gap-px min-w-[180px]"
+              style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+              {segments.map((s, i) => (
+                <div key={s.key}
+                  className="h-full"
+                  style={{
+                    width: `${(s.value / total) * 100}%`,
+                    backgroundColor: s.color,
+                    borderTopLeftRadius:  i === 0                  ? 999 : 0,
+                    borderBottomLeftRadius: i === 0                ? 999 : 0,
+                    borderTopRightRadius:  i === segments.length-1 ? 999 : 0,
+                    borderBottomRightRadius: i === segments.length-1 ? 999 : 0,
+                  }} />
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-[11px] flex-shrink-0">
-            {[
-              { l:'Won',  v: stats.closedWon  ||0, cls:'bg-success-500', c:'var(--color-success-600)', status:'closed_won'  },
-              { l:'Open', v: stats.openSales  ||0, cls:'bg-info-500',    c:'var(--color-info-600)',    status:'open'        },
-              { l:'Lost', v: stats.closedLost ||0, cls:'bg-error-500',   c:'var(--color-error-600)',   status:'closed_lost' },
-            ].map(s => (
-              <button key={s.l} onClick={() => jumpToData('sales', s.status)}
-                className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer">
-                <div className={`w-2 h-2 rounded-full ${s.cls}`} />
-                <span className="text-text-secondary">{s.l} <strong style={{ color: s.c }}>{s.v}</strong></span>
-              </button>
-            ))}
-          </div>
-          <div className="flex-1 h-2 rounded-full overflow-hidden flex gap-px"
-            style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-            {(() => {
-              const t = (stats.closedWon||0)+(stats.closedLost||0)+(stats.openSales||0);
-              return t > 0 ? (
-                <>
-                  <div className="h-full rounded-l-full bg-success-500" style={{ width:`${((stats.closedWon||0)/t)*100}%` }} />
-                  <div className="h-full bg-info-500"                   style={{ width:`${((stats.openSales||0)/t)*100}%` }} />
-                  <div className="h-full rounded-r-full bg-error-500"   style={{ width:`${((stats.closedLost||0)/t)*100}%` }} />
-                </>
-              ) : <div className="h-full w-full rounded-full" style={{ backgroundColor: 'var(--color-border)' }} />;
-            })()}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
       <div className="rounded-xl px-3 py-2.5"

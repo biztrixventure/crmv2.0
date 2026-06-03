@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { toast } from "sonner";
 import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
@@ -100,8 +101,12 @@ const StaffShell = () => {
   const isCloser   = user?.role === 'closer'  || hasPermission('create_sale');
 
   const defaultTab = isCloser ? 'sales' : isFronter ? 'transfers' : 'callbacks';
-  const [activeTab, setActiveTab] = useState(defaultTab);
-  const [activeNav, setActiveNav] = useState('dashboard');
+  // Per-role storage keys so closer/fronter state doesn't bleed across accounts.
+  const tabKey = `biztrix.staffTab.${user?.role || 'default'}`;
+  const navKey = `biztrix.staffNav.${user?.role || 'default'}`;
+  const secKey = `biztrix.closerSection.${user?.role || 'default'}`;
+  const [activeTab, setActiveTab] = usePersistedState(tabKey, defaultTab);
+  const [activeNav, setActiveNav] = usePersistedState(navKey, 'dashboard');
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
@@ -199,7 +204,7 @@ const StaffShell = () => {
 
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [closerSection, setCloserSection]   = useState('assigned'); // 'assigned' | 'sales'
+  const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
 
   // Vehicle registry — populates the CarMake / CarModel typeahead inside the
   // fronter's New Transfer modal. Fetched once on mount; cheap enough that we

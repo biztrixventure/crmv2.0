@@ -133,6 +133,44 @@ router.get(
       stats.awaitingCompliance = sReview.count || 0;
       stats.cancelledSales     = sCancelled.count || 0;
 
+      // Per-status sale counts — drives the dynamic pipeline bar on the
+      // SuperAdmin dashboard so adding a custom status in Business Rules →
+      // Compliance Workflow → Sale status catalog instantly shows up in the
+      // pipeline. Reads enabled keys from compliance.status_catalog or
+      // falls back to allowed_statuses; final fallback is the hardcoded
+      // legacy list so old deployments still render something useful.
+      const catalog = await getConfig(companyId, 'compliance.status_catalog', null);
+      let enabledStatusKeys;
+      if (Array.isArray(catalog) && catalog.length) {
+        enabledStatusKeys = catalog.filter(s => s.enabled !== false).map(s => s.key);
+      } else {
+        enabledStatusKeys = (await getConfig(companyId, 'compliance.allowed_statuses', [
+          'open','sold','cancelled','follow_up','closed_won','closed_lost',
+          'pending_review','needs_revision','compliance_cancelled','chargeback','dispute',
+        ])) || [];
+      }
+      const byStatus = {};
+      // Reuse existing aggregate counts where we already have them to skip
+      // duplicate round-trips.
+      const known = {
+        open: stats.openSales,
+        closed_won: stats.closedWon,
+        closed_lost: stats.closedLost,
+        pending_review: stats.awaitingCompliance,
+        cancelled: stats.cancelledSales,
+      };
+      for (const key of enabledStatusKeys) {
+        if (Object.prototype.hasOwnProperty.call(known, key)) {
+          byStatus[key] = known[key] || 0;
+        } else {
+          try {
+            const r = await saleCount(key);
+            byStatus[key] = r.count || 0;
+          } catch { byStatus[key] = 0; }
+        }
+      }
+      stats.salesByStatus = byStatus;
+
       // Today's sales totals — keyed on sale_date (the business day the sale
       // actually happened), NOT created_at. Without this, a bulk upload of an
       // old April workbook today would inflate "Today: N" because every row's

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -163,8 +164,12 @@ const ManagerShell = () => {
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
-  const [activeTab, setActiveTab] = useState('overview');
-  const [activeNav, setActiveNav] = useState('dashboard');
+  // Persisted across reloads — per-role storage key so manager state stays
+  // distinct from any other role using the same machine.
+  const mgrTabKey = `biztrix.managerTab.${user?.role || 'default'}`;
+  const mgrNavKey = `biztrix.managerNav.${user?.role || 'default'}`;
+  const [activeTab, setActiveTab] = usePersistedState(mgrTabKey, 'overview');
+  const [activeNav, setActiveNav] = usePersistedState(mgrNavKey, 'dashboard');
   const [exportOpen, setExportOpen] = useState(false);
 
   // Report the active section to the assistant for section-specific guidance.

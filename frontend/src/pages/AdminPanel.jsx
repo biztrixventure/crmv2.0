@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -36,7 +37,7 @@ const AdminPanel = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
-  const [activeTab, setActiveTab]     = useState("dashboard");
+  const [activeTab, setActiveTab]     = usePersistedState("biztrix.adminTab", "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const notifHook = useNotifications();
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
