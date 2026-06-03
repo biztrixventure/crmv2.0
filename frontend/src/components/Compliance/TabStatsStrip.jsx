@@ -90,38 +90,65 @@ export default function TabStatsStrip({
     });
   }
 
+  // Uniform tile dimensions — every tile gets the same width + height so the
+  // strip reads as a tight grid instead of a ragged row.
+  const TILE_W  = 124;
+  const TILE_H  = 48;
+  const tileBase = {
+    minWidth:  TILE_W,
+    maxWidth:  TILE_W,
+    minHeight: TILE_H,
+    height:    TILE_H,
+  };
+
   return (
-    <div className="flex items-stretch gap-2 flex-wrap mb-3">
-      {/* Total tile — always first, full-width on small screens */}
-      <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, var(--color-surface) 70%)',
-                 border: '1px solid var(--color-primary-200, #c7d2fe)', minWidth: 180 }}>
-        <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-primary-100, #e0e7ff)' }}>
-          <Layers size={16} style={{ color: 'var(--color-primary-700, #4338ca)' }} />
+    <div className="grid gap-2 mb-3"
+      style={{
+        gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_W}px, 1fr))`,
+      }}>
+      {/* Total tile — primary accent, always first. */}
+      <div
+        className="flex items-center gap-2 px-2.5 rounded-lg"
+        style={{
+          ...tileBase,
+          background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, var(--color-surface) 70%)',
+          border: '1px solid var(--color-primary-200, #c7d2fe)',
+        }}
+        title={loaded < total ? `${total.toLocaleString()} total · ${loaded} on this page` : `${total.toLocaleString()} total`}>
+        <div className="rounded-md flex-shrink-0 flex items-center justify-center"
+          style={{ width: 26, height: 26, backgroundColor: 'var(--color-primary-100, #e0e7ff)' }}>
+          <Layers size={13} style={{ color: 'var(--color-primary-700, #4338ca)' }} />
         </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary-700, #4338ca)' }}>Matches</p>
-          <p className="text-xl font-bold leading-none mt-0.5" style={{ color: 'var(--color-primary-700, #4338ca)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>
+        <div className="min-w-0 flex-1">
+          <p className="text-[9px] font-bold uppercase tracking-wider truncate"
+            style={{ color: 'var(--color-primary-700, #4338ca)' }}>Matches</p>
+          <p className="text-base font-bold leading-none mt-0.5 truncate"
+            style={{ color: 'var(--color-primary-700, #4338ca)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
             {total.toLocaleString()}
           </p>
-          {loaded > 0 && loaded < total && (
-            <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>showing {loaded} on this page</p>
-          )}
         </div>
       </div>
 
-      {/* Per-status tiles for the current page */}
+      {/* Per-status tiles */}
       {tiles.map(t => {
         const Icon = t.icon;
         return (
           <div key={t.key + ':' + t.label}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl flex-shrink-0"
-            style={{ backgroundColor: t.bg, border: `1px solid ${t.color}30`, minWidth: 110 }}
+            className="flex items-center gap-2 px-2.5 rounded-lg"
+            style={{
+              ...tileBase,
+              backgroundColor: t.bg,
+              border: `1px solid ${t.color}30`,
+            }}
             title={`${t.label}: ${t.value} on this page`}>
-            <Icon size={13} style={{ color: t.color }} />
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: t.color }}>{t.label}</p>
-              <p className="text-sm font-bold leading-none mt-0.5" style={{ color: t.color, fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>
+            <div className="rounded-md flex-shrink-0 flex items-center justify-center"
+              style={{ width: 26, height: 26, backgroundColor: `${t.color}1a` }}>
+              <Icon size={13} style={{ color: t.color }} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[9px] font-bold uppercase tracking-wider truncate" style={{ color: t.color }}>{t.label}</p>
+              <p className="text-base font-bold leading-none mt-0.5 truncate"
+                style={{ color: t.color, fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
                 {Number(t.value || 0).toLocaleString()}
               </p>
             </div>

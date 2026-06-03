@@ -10,6 +10,7 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
+import TabStatsStrip from './TabStatsStrip';
 import TransferFormModal from '../Transfers/TransferFormModal';
 import { useFormFields } from '../../hooks/useFormFields';
 import {
