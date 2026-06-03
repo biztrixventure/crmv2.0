@@ -836,105 +836,194 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onClose }) => {
 
   const commit = (key, value) => onPatch({ [key]: value });
 
+  // Esc closes the modal. body scroll-lock while open keeps the canvas in
+  // place behind the backdrop so the SuperAdmin doesn't lose context.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
   return (
-    <div className="px-3 pb-3 pt-2"
-      style={{ borderTop: '1px solid var(--color-primary-200, #c7d2fe)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5"
-          style={{ color: 'var(--color-primary-700, #4338ca)' }}>
-          <Pencil size={11} /> Edit field
-        </p>
-        <button onClick={onClose} title="Close edit panel"
-          className="p-1 rounded hover:bg-white"
-          style={{ minWidth: 26, minHeight: 26, color: 'var(--color-primary-700)' }}>
-          <X size={11} />
-        </button>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="field-edit-title"
+      className="fixed inset-0 z-50 overflow-y-auto"
+      style={{ backgroundColor: 'rgba(15,23,42,0.6)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="w-full max-w-xl rounded-2xl shadow-2xl flex flex-col"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
+            maxHeight: 'calc(100vh - 32px)',
+          }}
+          onClick={(e) => e.stopPropagation()}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+            style={{
+              background: 'var(--gradient-sidebar)',
+              borderTopLeftRadius: '1rem', borderTopRightRadius: '1rem',
+            }}>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2 rounded-xl bg-white/20 flex-shrink-0">
+                <Pencil size={16} className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <h2 id="field-edit-title" className="text-base font-bold text-white truncate">
+                  Edit field
+                </h2>
+                <p className="text-xs text-white/75 truncate font-mono">{field.name}</p>
+              </div>
+            </div>
+            <button onClick={onClose} aria-label="Close"
+              className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors flex-shrink-0"
+              style={{ minWidth: 36, minHeight: 36 }}>
+              <X size={16} className="text-white" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Display label */}
+              <div className="sm:col-span-2">
+                <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
+                  Display label
+                </label>
+                <input value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  onBlur={() => label.trim() && label !== field.label && commit('label', label.trim())}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  placeholder="What the closer/fronter sees"
+                  autoFocus
+                  className="input text-sm py-2 w-full" />
+                <p className="text-[11px] text-text-tertiary mt-1">Safe to rename anytime. Past records keep the old label as a snapshot.</p>
+              </div>
+
+              {/* Form-data key (locked) */}
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
+                  Form-data key <span className="text-[10px] font-normal italic">(locked)</span>
+                </label>
+                <input value={field.name || ''} readOnly
+                  className="input text-sm py-2 w-full font-mono"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
+                  title="Renaming would orphan every existing form_data row that keys on this name." />
+              </div>
+
+              {/* Type */}
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
+                  Type {typeLocked && <span className="text-[10px] font-normal italic">(locked)</span>}
+                </label>
+                {typeLocked ? (
+                  <input value={field.field_type} readOnly
+                    className="input text-sm py-2 w-full font-mono"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
+                    title="Sale + closer-deal field types are locked because changing them breaks downstream sale logic." />
+                ) : (
+                  <select value={field.field_type}
+                    onChange={(e) => commit('field_type', e.target.value)}
+                    className="input text-sm py-2 w-full">
+                    {TYPE_OPTIONS_FOR_EDIT.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+                  </select>
+                )}
+              </div>
+
+              {/* Placeholder */}
+              <div className="sm:col-span-2">
+                <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
+                  Placeholder
+                </label>
+                <input value={placeholder}
+                  onChange={(e) => setPlaceholder(e.target.value)}
+                  onBlur={() => placeholder !== (field.placeholder || '') && commit('placeholder', placeholder)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  placeholder="Hint text inside the input"
+                  className="input text-sm py-2 w-full" />
+              </div>
+
+              {/* Behavior toggles */}
+              <div className="sm:col-span-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-2">
+                  Behavior
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors"
+                    style={{
+                      border: '1px solid', minHeight: 40,
+                      borderColor: field.is_required ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
+                      backgroundColor: field.is_required ? 'var(--color-error-50, #fef2f2)' : 'transparent',
+                    }}>
+                    <input type="checkbox" checked={!!field.is_required}
+                      onChange={(e) => commit('is_required', e.target.checked)} />
+                    <span className="text-sm font-semibold"
+                      style={{ color: field.is_required ? 'var(--color-error-700)' : 'var(--color-text)' }}>
+                      Required
+                    </span>
+                  </label>
+
+                  {!isCloserDeal && (
+                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors"
+                      style={{
+                        border: '1px solid', minHeight: 40,
+                        borderColor: field.show_to_fronter !== false ? 'var(--color-info-300)' : 'var(--color-border)',
+                        backgroundColor: field.show_to_fronter !== false ? 'var(--color-info-50)' : 'transparent',
+                      }}>
+                      <input type="checkbox" checked={field.show_to_fronter !== false}
+                        onChange={(e) => commit('show_to_fronter', e.target.checked)} />
+                      <span className="text-sm font-semibold"
+                        style={{ color: field.show_to_fronter !== false ? 'var(--color-info-700)' : 'var(--color-text)' }}>
+                        Visible to fronter
+                      </span>
+                    </label>
+                  )}
+
+                  <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors"
+                    style={{
+                      border: '1px solid', minHeight: 40,
+                      borderColor: field.repeats_per_car ? 'rgba(16,185,129,0.4)' : 'var(--color-border)',
+                      backgroundColor: field.repeats_per_car ? 'rgba(16,185,129,0.08)' : 'transparent',
+                    }}>
+                    <input type="checkbox" checked={!!field.repeats_per_car}
+                      onChange={(e) => commit('repeats_per_car', e.target.checked)} />
+                    <span className="text-sm font-semibold"
+                      style={{ color: field.repeats_per_car ? '#047857' : 'var(--color-text)' }}>
+                      Repeats per car
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl p-3 mt-5 flex items-start gap-2"
+              style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+              <Info size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-primary-700, #4338ca)' }} />
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                Edits land on the canvas immediately. They commit to the database when you click <strong>Save</strong> at the top of the page. Renaming labels, changing the type, or editing options never deletes any past record — historical form_data values keep their original string.
+              </p>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center gap-2 px-5 py-3 flex-shrink-0"
+            style={{ borderTop: '1px solid var(--color-border)' }}>
+            <p className="text-[11px] text-text-tertiary flex-1">Press Esc or click outside to close.</p>
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-bold text-white"
+              style={{ background: 'var(--gradient-sidebar)', minHeight: 36 }}>
+              Done
+            </button>
+          </div>
+        </div>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        {/* Display label */}
-        <div className="sm:col-span-2">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
-            Display label
-          </label>
-          <input value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            onBlur={() => label.trim() && label !== field.label && commit('label', label.trim())}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-            placeholder="What the closer/fronter sees"
-            className="input text-xs py-1.5 w-full" />
-          <p className="text-[10px] text-text-tertiary mt-0.5">Safe to rename anytime. Past records keep the old label as a snapshot.</p>
-        </div>
-
-        {/* Field name (read-only) */}
-        <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
-            Form-data key <span className="text-[9px] font-normal italic">(locked)</span>
-          </label>
-          <input value={field.name || ''} readOnly
-            className="input text-xs py-1.5 w-full font-mono"
-            style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
-            title="Renaming would orphan every existing form_data row that keys on this name." />
-        </div>
-
-        {/* Type */}
-        <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
-            Type {typeLocked && <span className="text-[9px] font-normal italic">(locked)</span>}
-          </label>
-          {typeLocked ? (
-            <input value={field.field_type} readOnly
-              className="input text-xs py-1.5 w-full font-mono"
-              style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
-              title="Sale + closer-deal field types are locked because changing them breaks downstream sale logic." />
-          ) : (
-            <select value={field.field_type}
-              onChange={(e) => commit('field_type', e.target.value)}
-              className="input text-xs py-1.5 w-full">
-              {TYPE_OPTIONS_FOR_EDIT.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-            </select>
-          )}
-        </div>
-
-        {/* Placeholder */}
-        <div className="sm:col-span-2">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary mb-0.5 block">
-            Placeholder
-          </label>
-          <input value={placeholder}
-            onChange={(e) => setPlaceholder(e.target.value)}
-            onBlur={() => placeholder !== (field.placeholder || '') && commit('placeholder', placeholder)}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-            placeholder="Hint text inside the input"
-            className="input text-xs py-1.5 w-full" />
-        </div>
-
-        {/* Toggles row */}
-        <div className="sm:col-span-2 flex flex-wrap gap-2 mt-1">
-          <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-            <input type="checkbox" checked={!!field.is_required}
-              onChange={(e) => commit('is_required', e.target.checked)} />
-            Required
-          </label>
-          {!isCloserDeal && (
-            <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-              <input type="checkbox" checked={field.show_to_fronter !== false}
-                onChange={(e) => commit('show_to_fronter', e.target.checked)} />
-              Visible to fronter
-            </label>
-          )}
-          <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-            <input type="checkbox" checked={!!field.repeats_per_car}
-              onChange={(e) => commit('repeats_per_car', e.target.checked)} />
-            Repeats per car
-          </label>
-        </div>
-      </div>
-
-      <p className="text-[10px] text-text-tertiary mt-3 leading-relaxed flex items-start gap-1.5">
-        <Info size={11} className="flex-shrink-0 mt-0.5" />
-        Edits stay on the canvas until you click <strong>Save</strong> at the top. Renaming labels, changing the type, or editing options never deletes any past record — historical form_data values keep the original string.
-      </p>
     </div>
   );
 };
