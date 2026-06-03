@@ -829,7 +829,36 @@ const TYPE_OPTIONS_FOR_EDIT = [
   { v: 'select',   label: 'Dropdown'  },
 ];
 
-const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onClose }) => {
+// Per-type config notes shown inside the modal so the SuperAdmin knows what
+// each special field type does + what's editable. Helps onboard non-engineers
+// who land on a field they didn't create.
+const FIELD_TYPE_INFO = {
+  text:       'Plain free-form text. Normalizes capitals on blur.',
+  textarea:   'Multi-line text. Best for notes or addresses.',
+  number:     'Numeric only. Mobile shows the number keypad.',
+  email:      'Email format. Blank values default to no@email.com on save.',
+  tel:        'Phone number. Strips parens/dashes and clips to 10 digits.',
+  phone:      'Phone number. Strips parens/dashes and clips to 10 digits.',
+  zip:        'US ZIP. Auto-fills the matching City + State fields via the ZIP API on 5-digit input.',
+  date:       'Date picker.',
+  select:     'Dropdown. Edit options below — closer/fronter pick from this list.',
+  sale_plan:        'Live from Sale Config. Use "Map Plans" to link client → plan.',
+  sale_client:      'Live from Sale Config (client list). Edit clients in Sale Config, not here.',
+  sale_fronter:     'Closer-only. Auto-populated from the assigned transfer.',
+  sale_date:        'Closer-only. Defaults to today.',
+  sale_status:      'Closer-only outcome selector (Sold / No Sale / Callback). Edit the options below.',
+  sale_disposition: 'Closer-only disposition selector. Edit the options below.',
+  sale_call_review: 'Closer-only call review label. Edit the options below.',
+  sale_down_payment: 'Closer-only money field. Currency formatted.',
+  sale_monthly_payment: 'Closer-only money field. Currency formatted.',
+  sale_payment_due_note: 'Closer-only note about the next due date.',
+  sale_reference_no:  'Closer-only. Auto-generated unique reference.',
+};
+
+// Which types own a free-form options[] list editable on the form_fields row.
+const HAS_OPTIONS_LIST = new Set(['select', 'sale_disposition', 'sale_status', 'sale_call_review']);
+
+const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMapping, onClose }) => {
   const [label,       setLabel]       = useState(field.label || '');
   const [placeholder, setPlaceholder] = useState(field.placeholder || '');
   const typeLocked = isSale || isCloserDeal;
@@ -1003,6 +1032,74 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onClose }) => {
               </div>
             </div>
 
+            {/* Type-specific help line — explains what this field type does
+                so the SuperAdmin knows what to expect for each. */}
+            {FIELD_TYPE_INFO[field.field_type] && (
+              <p className="text-[11px] mt-3 italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                {FIELD_TYPE_INFO[field.field_type]}
+              </p>
+            )}
+
+            {/* Type-specific config sections — surface inside the modal so the
+                SuperAdmin doesn't have to close it to find another button. */}
+
+            {/* Options list — chip editor for any select-style field. Lives
+                inside the modal so add/rename/remove happens in context. */}
+            {HAS_OPTIONS_LIST.has(field.field_type) && (
+              <div className="mt-5 rounded-xl"
+                style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                <OptionsEditor
+                  field={field}
+                  onSave={(opts) => onPatch({ options: opts })}
+                  onClose={() => {}}
+                />
+              </div>
+            )}
+
+            {/* Sale Plan → mapping flow (live data from Sale Config). */}
+            {field.field_type === 'sale_plan' && (
+              <div className="mt-5 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap"
+                style={{ backgroundColor: 'var(--color-primary-50, #faf5ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+                <div className="text-xs leading-relaxed" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+                  <p className="font-bold mb-0.5 inline-flex items-center gap-1.5"><Link2 size={11} /> Client → Plan mapping</p>
+                  <p>Plans cascade off the selected Client. Configure which plans appear for each client.</p>
+                </div>
+                <button type="button" onClick={() => { onConfigureMapping?.(); onClose(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+                  style={{ background: 'var(--gradient-sidebar)', minHeight: 36 }}>
+                  <Link2 size={12} /> Open mapping
+                </button>
+              </div>
+            )}
+
+            {/* Sale Client / sale_fronter / sale_reference — read-only data
+                sources. Let the SuperAdmin know what controls each. */}
+            {(field.field_type === 'sale_client' || field.field_type === 'sale_fronter' || field.field_type === 'sale_reference_no' || field.field_type === 'sale_date') && (
+              <div className="mt-5 rounded-xl p-3 flex items-start gap-2"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                <Info size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }} />
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {field.field_type === 'sale_client'   && <>Sourced from <strong>Sale Config → Clients</strong>. Add or edit the list there to change what closers see.</>}
+                  {field.field_type === 'sale_fronter'  && <>Closer-only. Auto-populated from the transfer's <code>created_by</code> when the closer opens the sale modal.</>}
+                  {field.field_type === 'sale_reference_no' && <>Auto-generated on sale submit. Format is configurable in Sale Config.</>}
+                  {field.field_type === 'sale_date'     && <>Defaults to today on the sale modal. Closer can override per sale.</>}
+                </p>
+              </div>
+            )}
+
+            {/* Money formatting hint for currency fields. */}
+            {(field.field_type === 'sale_down_payment' || field.field_type === 'sale_monthly_payment') && (
+              <div className="mt-5 rounded-xl p-3 flex items-start gap-2"
+                style={{ backgroundColor: 'var(--color-success-50, #f0fdf4)', border: '1px solid var(--color-success-200, #bbf7d0)' }}>
+                <DollarSign size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-success-700)' }} />
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-success-700)' }}>
+                  Currency-formatted at display + stored as a number. No extra options needed.
+                </p>
+              </div>
+            )}
+
+            {/* Generic safety note — repeated every time so the data-loss
+                contract is crystal clear regardless of which type is open. */}
             <div className="rounded-xl p-3 mt-5 flex items-start gap-2"
               style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
               <Info size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-primary-700, #4338ca)' }} />
@@ -1282,6 +1379,7 @@ const FieldCard = ({
           isSale={isSale}
           isCloserDeal={isCloserDeal}
           onPatch={onPatch}
+          onConfigureMapping={() => onConfigureMapping(index)}
           onClose={() => setEditingFull(false)}
         />
       )}

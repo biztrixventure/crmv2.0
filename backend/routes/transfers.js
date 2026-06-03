@@ -22,6 +22,32 @@ const MANAGER_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'manager
 const PHONE_KEYS = ['cli_number', 'customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone'];
 const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 const phoneFromFD = (fd) => { if (!fd) return ''; for (const k of PHONE_KEYS) if (fd[k]) return fd[k]; return ''; };
+
+// ── Email defaulting ─────────────────────────────────────────────────────────
+// A transfer / sale / manual entry submitted with no email lands in compliance
+// + analytics with empty cells that downstream consumers (CSV exports, search,
+// matching) handle awkwardly. Coerce every empty email-shaped field to a
+// shared sentinel ("no@email.com") so the row stays valid and the audit log
+// has SOMETHING to display. Existing values are never touched.
+const EMAIL_KEYS = ['customer_email', 'Email', 'email', 'CustomerEmail', 'EmailAddress'];
+const DEFAULT_EMAIL = 'no@email.com';
+function defaultEmptyEmails(fd) {
+  if (!fd || typeof fd !== 'object') return fd;
+  const next = { ...fd };
+  let touched = false;
+  for (const k of EMAIL_KEYS) {
+    if (k in next && (next[k] === null || next[k] === undefined || String(next[k]).trim() === '')) {
+      next[k] = DEFAULT_EMAIL;
+      touched = true;
+    }
+  }
+  // If no email key is present at all but the data carries customer info,
+  // add a generic customer_email so downstream code never sees `undefined`.
+  if (!touched && !EMAIL_KEYS.some(k => k in next) && (next.customer_phone || next.Phone || next.phone)) {
+    next.customer_email = DEFAULT_EMAIL;
+  }
+  return next;
+}
 // A "completed" sale (the deal closed) — used to decide insert-vs-update.
 const COMPLETED_SALE = ['closed_won', 'sold'];
 
@@ -638,7 +664,7 @@ router.post('/manual-entry', [
     .from('user_profiles').select('first_name, last_name').eq('user_id', userId).maybeSingle();
   const closerName = [closerProfile?.first_name, closerProfile?.last_name].filter(Boolean).join(' ') || 'A closer';
 
-  const form_data = titleCaseFormData(expandStateInFormData(rawFD));
+  const form_data = defaultEmptyEmails(titleCaseFormData(expandStateInFormData(rawFD)));
   const norm = normPhone(phoneFromFD(form_data));
   form_data.manual_entry_by = {
     closer_id:   userId,
@@ -686,7 +712,7 @@ router.post('/', [
   const userId    = req.user.id;
   const companyId = req.user.company_id;
   const { assigned_closer_id } = req.body;
-  const form_data = titleCaseFormData(expandStateInFormData(req.body.form_data));
+  const form_data = defaultEmptyEmails(titleCaseFormData(expandStateInFormData(req.body.form_data)));
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 

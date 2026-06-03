@@ -334,7 +334,9 @@ router.post(
       customer_name:    titleCase(customer_name),
       customer_phone,
       customer_phone_2: customer_phone_2 || null,
-      customer_email:   customer_email   || null,
+      // Empty email coerced to the shared sentinel so downstream consumers
+      // never see NULL/'' for a column they treat as searchable.
+      customer_email:   (customer_email && String(customer_email).trim()) ? customer_email : 'no@email.com',
       customer_address: customer_address || null,
       client_name: titleCase(client_name) || null,
       fronter_id:  fronter_id  || null,
