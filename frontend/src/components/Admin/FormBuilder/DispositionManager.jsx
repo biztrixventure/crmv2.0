@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast, toastError } from '../../../utils/toast';
-import { Plus, X, Save, Edit3, Bell, BellOff, MessageSquare, GripVertical, Globe, Building2 } from 'lucide-react';
+import { Plus, X, Save, Edit3, Bell, BellOff, MessageSquare, GripVertical, Globe, Building2, RotateCcw, Trash2, EyeOff, Info } from 'lucide-react';
 import client from '../../../api/client';
 
 const NOTIFIABLE_ROLES = [
@@ -205,23 +205,42 @@ const DispositionForm = ({ initial, onSave, onCancel, saving }) => {
 };
 
 // ── Disposition card ──────────────────────────────────────────────────────────
-const DispoCard = ({ config, onEdit, onDelete, deleting }) => {
+const DispoCard = ({ config, onEdit, onDeactivate, onActivate, onHardDelete, busyId }) => {
   const notifSummary = [
     ...(config.notify_roles || []).map(r => NOTIFIABLE_ROLES.find(x => x.value === r)?.label || r),
     config.notify_fronter         ? 'Fronter'         : null,
     config.notify_fronter_manager ? 'Fronter Mgr'     : null,
   ].filter(Boolean);
+  const inactive = config.is_active === false;
+  const busy = busyId === config.id;
 
   return (
     <div className="flex items-start gap-3 px-4 py-3.5 group transition-colors hover:bg-bg-secondary"
-      style={{ borderBottom: '1px solid var(--color-border)' }}>
-      {/* Color strip */}
-      <div className="flex-shrink-0 w-1 h-14 rounded-full self-stretch" style={{ backgroundColor: config.color }} />
+      style={{
+        borderBottom: '1px solid var(--color-border)',
+        opacity: inactive ? 0.55 : 1,
+        backgroundColor: inactive ? 'var(--color-bg-secondary)' : undefined,
+      }}>
+      {/* Color strip — desaturated when inactive */}
+      <div className="flex-shrink-0 w-1 h-14 rounded-full self-stretch"
+        style={{ backgroundColor: inactive ? 'var(--color-border)' : config.color }} />
 
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{config.name}</span>
+          <span className="font-bold text-sm"
+            style={{
+              color: inactive ? 'var(--color-text-tertiary)' : 'var(--color-text)',
+              textDecoration: inactive ? 'line-through' : 'none',
+            }}>
+            {config.name}
+          </span>
+          {inactive && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+              style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
+              <EyeOff size={9} /> Disabled
+            </span>
+          )}
           {config.requires_note && (
             <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-semibold"
               style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#b45309' }}>
@@ -254,20 +273,39 @@ const DispoCard = ({ config, onEdit, onDelete, deleting }) => {
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-        <button onClick={() => onEdit(config)}
-          className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-primary-100"
-          title="Edit">
-          <Edit3 size={13} style={{ color: 'var(--color-primary-600)' }} />
-        </button>
-        <button onClick={() => onDelete(config.id)} disabled={deleting === config.id}
-          className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-error-100"
-          title="Delete">
-          {deleting === config.id
-            ? <div className="animate-spin w-3 h-3 border-b-2 border-error-500 rounded-full" />
-            : <X size={13} style={{ color: '#ef4444' }} />}
-        </button>
+      {/* Actions — active row: edit + deactivate. inactive row: activate + permanent delete. */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {inactive ? (
+          <>
+            <button onClick={() => onActivate(config)} disabled={busy}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold disabled:opacity-40"
+              style={{ backgroundColor: 'var(--color-success-50, #f0fdf4)', color: 'var(--color-success-700, #15803d)', border: '1px solid var(--color-success-300, #86efac)', minHeight: 28 }}
+              title="Bring this disposition back so closers can use it again">
+              <RotateCcw size={11} /> Activate
+            </button>
+            <button onClick={() => onHardDelete(config)} disabled={busy}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold disabled:opacity-40"
+              style={{ backgroundColor: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', minHeight: 28 }}
+              title="Permanently remove this row (history is kept — closers stored the name as a snapshot)">
+              <Trash2 size={11} /> Delete permanently
+            </button>
+          </>
+        ) : (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => onEdit(config)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-primary-100"
+              title="Edit">
+              <Edit3 size={13} style={{ color: 'var(--color-primary-600)' }} />
+            </button>
+            <button onClick={() => onDeactivate(config)} disabled={busy}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-error-100 disabled:opacity-40"
+              title="Disable — closer dropdowns drop it. Reversible.">
+              {busy
+                ? <div className="animate-spin w-3 h-3 border-b-2 border-error-500 rounded-full" />
+                : <EyeOff size={13} style={{ color: '#ef4444' }} />}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -315,15 +353,38 @@ const DispositionManager = () => {
     } finally { setSaving(false); }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Deactivate this disposition option? Existing records will not be affected.')) return;
-    setDeleting(id);
+  const handleDeactivate = async (cfg) => {
+    if (!window.confirm(`Disable "${cfg.name}"?\n\nClosers will no longer see it in their dispositions dropdown. Existing records keep the label in their audit log. You can re-enable any time.`)) return;
+    setDeleting(cfg.id);
     try {
-      await client.delete(`disposition-configs/${id}`);
+      await client.delete(`disposition-configs/${cfg.id}`);
       await load();
-      toast.success('Disposition deactivated');
+      toast.success(`"${cfg.name}" disabled`);
     } catch (err) {
-      toastError(err, 'Failed to deactivate disposition');
+      toastError(err, 'Failed to disable disposition');
+    } finally { setDeleting(null); }
+  };
+
+  const handleActivate = async (cfg) => {
+    setDeleting(cfg.id);
+    try {
+      await client.put(`disposition-configs/${cfg.id}`, { is_active: true });
+      await load();
+      toast.success(`"${cfg.name}" re-enabled`);
+    } catch (err) {
+      toastError(err, 'Failed to re-enable disposition');
+    } finally { setDeleting(null); }
+  };
+
+  const handleHardDelete = async (cfg) => {
+    if (!window.confirm(`Permanently delete "${cfg.name}"?\n\nThe config row is removed. Existing call records keep their text snapshot — the audit log is not affected. This action cannot be undone.`)) return;
+    setDeleting(cfg.id);
+    try {
+      await client.delete(`disposition-configs/${cfg.id}?hard=true`);
+      await load();
+      toast.success(`"${cfg.name}" permanently deleted`);
+    } catch (err) {
+      toastError(err, 'Failed to delete disposition');
     } finally { setDeleting(null); }
   };
 
@@ -415,16 +476,28 @@ const DispositionManager = () => {
               key={cfg.id}
               config={cfg}
               onEdit={setEditing}
-              onDelete={handleDelete}
-              deleting={deleting}
+              onDeactivate={handleDeactivate}
+              onActivate={handleActivate}
+              onHardDelete={handleHardDelete}
+              busyId={deleting}
             />
           )
         ))}
       </div>
 
-      <p className="text-xs text-center mt-4" style={{ color: 'var(--color-text-tertiary)' }}>
-        Global options (marked "global") are available to all companies. Company options override for this company.
-      </p>
+      <div className="mt-4 rounded-xl p-3 flex items-start gap-2"
+        style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+        <Info size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-primary-700, #4338ca)' }} />
+        <div className="text-xs leading-relaxed" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
+          <p className="font-bold mb-1">How edits + deletes work</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            <li><strong>Renaming</strong> a disposition: closers see the new label immediately. Past call records keep the OLD name in their audit log (the name is stored as a text snapshot, not a reference).</li>
+            <li><strong>Disable</strong> (eye-off icon): hidden from the closer dropdown. Reversible — hit Activate to bring it back.</li>
+            <li><strong>Delete permanently</strong>: only available on already-disabled rows. Removes the config row; old call records still show the original text label.</li>
+            <li>Global rows (Globe icon) apply to all companies; company rows override for the selected company.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 };

@@ -117,27 +117,47 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/disposition-configs/:id — admin: soft delete
+// DELETE /api/disposition-configs/:id
+// Default: soft-delete (set is_active=false) so historical disposition_actions
+// keep their snapshot label and the SuperAdmin can re-activate later.
+// ?hard=true: permanent row delete. Only allowed on rows already soft-deleted
+// AND with no FK references — existing disposition_actions store a text
+// snapshot of the name, so deleting the config row never breaks history.
 router.delete('/:id', async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.user.company_id;
   const role      = req.user.role;
+  const hard      = req.query.hard === 'true' || req.query.hard === '1';
   try {
     const sa = await isSuperAdmin(userId);
     if (!sa && !ADMIN_ROLES.includes(role)) {
       return res.status(403).json({ error: 'Admin access required' });
     }
     const { data: existing } = await supabaseAdmin
-      .from('disposition_configs').select('id, company_id').eq('id', req.params.id).single();
+      .from('disposition_configs').select('id, company_id, is_active, name').eq('id', req.params.id).single();
     if (!existing) return res.status(404).json({ error: 'Not found' });
     if (!sa && existing.company_id !== null && existing.company_id !== companyId) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    if (hard) {
+      if (existing.is_active) {
+        return res.status(400).json({ error: 'Deactivate the disposition first, then delete it permanently.' });
+      }
+      // disposition_actions stores name as a text snapshot, so deleting the
+      // config row leaves history intact. Setting disposition_config_id null
+      // is defensive in case a future FK turns ON DELETE CASCADE.
+      await supabaseAdmin.from('disposition_actions')
+        .update({ disposition_config_id: null })
+        .eq('disposition_config_id', req.params.id);
+      const { error } = await supabaseAdmin.from('disposition_configs').delete().eq('id', req.params.id);
+      if (error) throw error;
+      return res.json({ success: true, action: 'deleted' });
     }
     await supabaseAdmin
       .from('disposition_configs')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
-    res.json({ success: true });
+    res.json({ success: true, action: 'deactivated' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
