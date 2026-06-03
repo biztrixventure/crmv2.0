@@ -484,15 +484,19 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     );
   };
 
-  // City/State are auto-filled by ZIP lookup — hide from display, keep in formData for submission
+  // City/State are auto-filled by ZIP lookup, but the SuperAdmin can mark
+  // them required on the form config — in that case render them so the closer
+  // can edit/confirm. They still receive ZIP autofill, just visibly.
   const ZIP_AUTO_FILL = ['City','city','customer_city','State','state','customer_state'];
+  const showAutofillField = (f) => !ZIP_AUTO_FILL.includes(f.name) || f.is_required || f.show_to_closer === true;
+
   const sortedFields = [...fields]
-    .filter(f => !ZIP_AUTO_FILL.includes(f.name))
+    .filter(showAutofillField)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   // Vehicle/deal fields that duplicate on each additional car
   const carFieldsSorted = carFields
-    .filter(f => !ZIP_AUTO_FILL.includes(f.name))
+    .filter(showAutofillField)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   const SPAN_CLASS = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4', 5: 'col-span-5' };

@@ -4,6 +4,67 @@ import { Button } from '../UI';
 import client from '../../api/client';
 import { useFormFields } from '../../hooks/useFormFields';
 import { useAuth } from '../../contexts/AuthContext';
+import { isCarMake, isCarModel } from '../../utils/formFieldNorm';
+import VehicleSelect from '../Form/VehicleSelect';
+
+// ── Field renderer — mirrors the fronter form's field-type switch so a
+// dropdown stays a dropdown, vehicle fields get typeahead, etc. Kept inline
+// here (rather than a shared component) because the fronter form needs full
+// VehicleSelect chaining state and zip lookups that don't apply here.
+function renderManualField(field, value, setValue) {
+  const v = value ?? '';
+  const required = !!field.is_required;
+  const ph = field.placeholder || field.label || field.name;
+
+  // CarMake / CarModel — VehicleSelect typeahead. Make picker lists every
+  // make; model picker stays unscoped (no chaining) because the modal does
+  // not preload the full vehicle registry. Closer can still type any model.
+  if (isCarMake(field)) {
+    return <VehicleSelect mode="make" value={v} strict={false}
+      onChange={setValue} placeholder={ph} />;
+  }
+  if (isCarModel(field)) {
+    return <VehicleSelect mode="model" value={v} strict={false}
+      onChange={setValue} placeholder={ph} />;
+  }
+
+  // Plain select — uses field.options.
+  if (field.field_type === 'select') {
+    return (
+      <select value={v} onChange={(e) => setValue(e.target.value)}
+        required={required} className="input text-xs py-1.5 w-full">
+        <option value="">Select {field.label || field.name}…</option>
+        {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+    );
+  }
+
+  if (field.field_type === 'textarea') {
+    return (
+      <textarea value={v} onChange={(e) => setValue(e.target.value)}
+        rows={2} required={required} placeholder={ph}
+        className="input text-xs py-1.5 w-full resize-none" />
+    );
+  }
+
+  if (['number','tel','email','phone','zip','date'].includes(field.field_type)) {
+    const t = field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' ? 'text' : field.field_type;
+    return (
+      <input type={t} value={v} onChange={(e) => setValue(e.target.value)}
+        required={required} placeholder={ph}
+        inputMode={field.field_type === 'zip' || field.field_type === 'number' ? 'numeric' : undefined}
+        className="input text-xs py-1.5 w-full" />
+    );
+  }
+
+  // Default text input — also catches sale_* types which closer fills on the
+  // sale form, not the transfer form.
+  return (
+    <input type="text" value={v} onChange={(e) => setValue(e.target.value)}
+      required={required} placeholder={ph}
+      className="input text-xs py-1.5 w-full" />
+  );
+}
 
 /* ManualEntryModal — closer creates a transfer on behalf of a fronter who
    forgot to log it. Form flow:
@@ -184,10 +245,10 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                 style={{ minHeight: 40 }}
               />
 
-              {/* Dynamic fields from form_fields config — same shape the
-                  fronter's own form posts. Each input is keyed AND bound to
-                  the row's `name` column (the form_data property name) so
-                  every field has its own state slot. */}
+              {/* Dynamic fields from form_fields config — same shape + types
+                  the fronter's own form posts. Honors field_type so a State
+                  dropdown stays a dropdown, vehicle fields use VehicleSelect,
+                  etc. Per-field state slot keyed on f.name. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {formFieldsSorted.map(f => (
                   <div key={f.id || f.name}>
@@ -195,14 +256,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                       {f.label || f.name}
                       {f.is_required && <span className="text-error-600 ml-0.5">*</span>}
                     </label>
-                    <input
-                      type="text"
-                      placeholder={f.placeholder || f.label || f.name}
-                      value={formData[f.name] ?? ''}
-                      onChange={(e) => setField(f.name, e.target.value)}
-                      className="input text-xs py-1.5 w-full"
-                      aria-label={f.label || f.name}
-                    />
+                    {renderManualField(f, formData[f.name], (v) => setField(f.name, v))}
                   </div>
                 ))}
               </div>
