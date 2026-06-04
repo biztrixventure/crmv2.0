@@ -69,8 +69,8 @@ const FORMAT_SPEC = {
   sale_reference_no: { icon: FileText, note: 'Free text. External reference / order number.' },
 };
 
-const FieldRule = ({ icon: Icon, name, label, type, required, helper, children }) => {
-  const [open, setOpen] = useState(false);
+const FieldRule = ({ icon: Icon, name, label, type, required, helper, children, defaultOpen = false }) => {
+  const [open, setOpen] = useState(defaultOpen);
   const hasBody = !!children;
   return (
     <div
@@ -171,15 +171,77 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
     [catalog],
   );
 
+  // Aggregate reference lists for the special sale_* dropdown field types.
+  // Plans + clients come from the bulk-upload reference endpoint (which
+  // pulls sale_configs across every company). Fronters come from
+  // reference.companies[].fronters. Grouped by company so the operator
+  // can see who's allowed where.
+  const plansByCompany = useMemo(() => {
+    const map = new Map();
+    (reference.plans || []).forEach(p => {
+      const key = p.company || 'Global';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p.value);
+    });
+    return map;
+  }, [reference.plans]);
+  const clientsByCompany = useMemo(() => {
+    const map = new Map();
+    (reference.clients || []).forEach(c => {
+      const key = c.company || 'Global';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(c.value);
+    });
+    return map;
+  }, [reference.clients]);
+  const frontersByCompany = useMemo(() => {
+    const map = new Map();
+    (reference.companies || []).forEach(co => {
+      if (Array.isArray(co.fronters) && co.fronters.length) {
+        map.set(co.name, co.fronters.map(f => f.name));
+      }
+    });
+    return map;
+  }, [reference.companies]);
+  const closerNames = useMemo(
+    () => (reference.closers || []).map(c => c.name).filter(Boolean),
+    [reference.closers],
+  );
+  const companyNames = useMemo(
+    () => (reference.companies || []).map(co => co.name).filter(Boolean),
+    [reference.companies],
+  );
+
+  // Robust options parser — form_fields.options may be a JSON array, a
+  // JSON string of one, or a comma-separated string depending on the
+  // Form Builder editor used. Normalize to a flat array of strings.
+  const parseOptions = (raw) => {
+    if (Array.isArray(raw)) return raw;
+    if (raw == null) return [];
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { /* fall through to CSV split */ }
+      }
+      return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
   // Per-field rule cards — one per dynamic form field + the upload-only
-  // control fields. We expand only fields that have a meaningful options
-  // list or a known format spec.
+  // control fields. Every field with a known catalog (status, plan,
+  // client, fronter, select-with-options) renders its full value list
+  // so the operator can see exactly what to type.
   const dynamicRules = useMemo(() => {
     return (formFields || []).map(f => {
       const type = String(f.field_type || 'text');
       const spec = FORMAT_SPEC[type] || FORMAT_SPEC.text;
       const isSelect = type === 'select';
-      const options = Array.isArray(f.options) ? f.options : [];
+      const options = parseOptions(f.options);
       return {
         key:       f.name,
         label:     f.label || f.name,
@@ -277,18 +339,25 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
         </div>
 
         <div className="p-3 space-y-2">
-          {/* Control fields first (fronter/company/closer/status/compliance_note) */}
+          {/* ── Control fields ── fronter/company/closer/status/compliance_note.
+              Each renders its full valid-value list inline so the operator
+              never has to bounce out of this page to know what to type. */}
           {CONTROL_FIELDS.map((cf) => {
-            const isStatus = cf.key === 'status';
+            const isStatus    = cf.key === 'status';
+            const isCompany   = cf.key === 'company_name';
+            const isFronter   = cf.key === 'fronter_name';
+            const isCloser    = cf.key === 'closer_name';
+            const isNote      = cf.key === 'compliance_note';
             return (
               <FieldRule
                 key={cf.key}
-                icon={isStatus ? ListChecks : FileText}
+                icon={isStatus ? ListChecks : isNote ? FileText : Building2}
                 name={cf.key}
                 label={cf.label}
                 type="control"
                 required={cf.required}
                 helper={cf.desc}
+                defaultOpen={isStatus || isCompany || isFronter || isCloser}
               >
                 {isStatus && (
                   <>
@@ -310,52 +379,209 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                     </div>
                   </>
                 )}
+                {isCompany && (
+                  <>
+                    <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Must match an existing company name (case-insensitive, spaces and punctuation ignored).
+                    </p>
+                    <div className="rounded-lg p-2.5 flex flex-wrap gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {companyNames.length === 0
+                        ? <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No active companies.</p>
+                        : companyNames.map(n => (
+                          <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{n}</span>
+                        ))}
+                    </div>
+                  </>
+                )}
+                {isFronter && (
+                  <>
+                    <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Must match a fronter active in the row's company. Listed per company below.
+                    </p>
+                    <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {frontersByCompany.size === 0
+                        ? <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No fronters configured.</p>
+                        : [...frontersByCompany.entries()].map(([co, names]) => (
+                          <div key={co}>
+                            <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {names.map(n => (
+                                <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                  style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{n}</span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </>
+                )}
+                {isCloser && (
+                  <>
+                    <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Optional. Must match a closer when set. Leave blank if unknown — the row still inserts.
+                    </p>
+                    <div className="rounded-lg p-2.5 flex flex-wrap gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {closerNames.length === 0
+                        ? <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No closers configured.</p>
+                        : closerNames.map(n => (
+                          <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{n}</span>
+                        ))}
+                    </div>
+                  </>
+                )}
+                {isNote && (
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Free text. Optional reviewer note attached to the sale. Shown verbatim on the sale drawer.
+                  </p>
+                )}
               </FieldRule>
             );
           })}
 
-          {/* Dynamic form fields — one row per field. Select fields expand
-              to show every option pulled from form_fields.options. */}
+          {/* ── Dynamic form fields ── one row per field. Every field expands
+              to show its accepted values: sale_status pulls the compliance
+              catalog, sale_plan/sale_client/sale_fronter pull from the
+              upload reference endpoint, plain select fields pull from
+              form_fields.options. Free-text / format-only fields show the
+              FORMAT_SPEC line. ── */}
           {dynamicRules.length === 0 && (
             <p className="text-xs italic px-2 py-3" style={{ color: 'var(--color-text-tertiary)' }}>
               No form fields configured yet. Configure them in Admin → Form Builder.
             </p>
           )}
-          {dynamicRules.map((f) => (
-            <FieldRule
-              key={f.key}
-              icon={f.icon}
-              name={f.key}
-              label={f.label}
-              type={f.type}
-              required={f.required}
-              helper={f.helper}
-            >
-              {f.isSelect && f.options.length > 0 && (
-                <>
+          {dynamicRules.map((f) => {
+            // Auto-open any field that resolves to a concrete value list.
+            const isSaleStatus  = f.type === 'sale_status';
+            const isSalePlan    = f.type === 'sale_plan';
+            const isSaleClient  = f.type === 'sale_client';
+            const isSaleFronter = f.type === 'sale_fronter';
+            const hasValueList  = isSaleStatus || isSalePlan || isSaleClient || isSaleFronter
+                                  || (f.isSelect && f.options.length > 0);
+            return (
+              <FieldRule
+                key={f.key}
+                icon={f.icon}
+                name={f.key}
+                label={f.label}
+                type={f.type}
+                required={f.required}
+                helper={f.helper}
+                defaultOpen={hasValueList}
+              >
+                {/* Format spec line — shown on every field so even a plain
+                    text/number/date column has guidance in the body. */}
+                {f.helper && (
                   <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    Allowed values for this dropdown (from Form Builder). Any other value is rejected at validation.
+                    <strong>Format:</strong> {f.helper}
                   </p>
+                )}
+
+                {isSaleStatus && (
                   <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                    {f.options.map((opt) => {
-                      const isObj = opt && typeof opt === 'object';
-                      const value = isObj ? (opt.value ?? opt.client ?? '') : String(opt);
-                      const label = isObj ? (opt.label || opt.plan || opt.client || value) : value;
-                      const effect = isObj && opt.plan
-                        ? `Maps to plan "${opt.plan}" for client "${opt.client || ''}".`
-                        : null;
-                      return <OptionRow key={value} value={value} label={label} effect={effect} />;
-                    })}
+                    <p className="text-[11px] mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      Same catalog as the upload <code>status</code> column above.
+                    </p>
+                    {statusOptions.length === 0
+                      ? <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No statuses enabled.</p>
+                      : statusOptions.map((o) => (
+                        <OptionRow key={o.value} value={o.value} label={o.label} dotColor={o.dot} effect={o.effect} />
+                      ))}
                   </div>
-                </>
-              )}
-              {f.isSelect && f.options.length === 0 && (
-                <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
-                  No options configured for this dropdown yet. Add options in Form Builder.
-                </p>
-              )}
-            </FieldRule>
-          ))}
+                )}
+
+                {isSalePlan && (
+                  <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    {plansByCompany.size === 0 ? (
+                      <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                        No plans configured. Configure in Admin → Sale Configs → Plans.
+                      </p>
+                    ) : (
+                      [...plansByCompany.entries()].map(([co, vals]) => (
+                        <div key={co}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {vals.map(v => (
+                              <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {isSaleClient && (
+                  <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    {clientsByCompany.size === 0 ? (
+                      <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                        No clients configured. Configure in Admin → Sale Configs → Clients.
+                      </p>
+                    ) : (
+                      [...clientsByCompany.entries()].map(([co, vals]) => (
+                        <div key={co}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {vals.map(v => (
+                              <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {isSaleFronter && (
+                  <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    {frontersByCompany.size === 0 ? (
+                      <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                        No fronters configured.
+                      </p>
+                    ) : (
+                      [...frontersByCompany.entries()].map(([co, names]) => (
+                        <div key={co}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {names.map(n => (
+                              <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{n}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {f.isSelect && (
+                  f.options.length > 0 ? (
+                    <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      <p className="text-[11px] mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                        Allowed values from Form Builder. Any other value is rejected at validation.
+                      </p>
+                      {f.options.map((opt, i) => {
+                        const isObj = opt && typeof opt === 'object';
+                        const value = isObj ? (opt.value ?? opt.client ?? opt.plan ?? '') : String(opt);
+                        const label = isObj ? (opt.label || opt.plan || opt.client || value) : value;
+                        const effect = isObj && opt.plan
+                          ? `Maps to plan "${opt.plan}" for client "${opt.client || ''}".`
+                          : null;
+                        return <OptionRow key={`${value}-${i}`} value={value} label={label} effect={effect} />;
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                      No options configured for this dropdown. Add options in Form Builder → Edit → Options.
+                    </p>
+                  )
+                )}
+              </FieldRule>
+            );
+          })}
         </div>
       </div>
 

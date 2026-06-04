@@ -203,12 +203,39 @@ async function getReference({ fresh = false } = {}) {
   fronterRoles.forEach(r => { (frByCompany[r.company_id] ||= []).push({ user_id: r.user_id, name: names[r.user_id] || '' }); });
   closerRoles.forEach(r => closers.push({ user_id: r.user_id, name: names[r.user_id] || '', company_id: r.company_id }));
 
+  // Sale configs — plans + clients per company (and global rows where
+  // company_id IS NULL). Powers the bulk-upload field-rule cheatsheet so
+  // the operator can see exactly which plan/client names are accepted
+  // without bouncing to another page. Failure is non-fatal: the upload
+  // still works without this data; the guide just shows a hint instead
+  // of the list.
+  let plans = [], clientsCfg = [];
+  try {
+    const { data: cfgs } = await supabaseAdmin
+      .from('sale_configs')
+      .select('company_id, type, value, sort_order')
+      .in('type', ['plan', 'client'])
+      .order('sort_order', { ascending: true })
+      .order('value',      { ascending: true });
+    const coNameById = new Map((companies || []).map(c => [c.id, c.name]));
+    (cfgs || []).forEach(r => {
+      const bucket = r.type === 'plan' ? plans : clientsCfg;
+      bucket.push({
+        value:      r.value,
+        company_id: r.company_id,
+        company:    r.company_id ? (coNameById.get(r.company_id) || '—') : 'Global',
+      });
+    });
+  } catch { /* leave plans/clients empty */ }
+
   const data = {
     companies: (companies || []).map(c => ({
       id: c.id, name: c.name, company_type: c.company_type,
       fronters: (frByCompany[c.id] || []).filter(f => f.name),
     })),
     closers: closers.filter(c => c.name),
+    plans,
+    clients: clientsCfg,
   };
   _ref = { data, at: Date.now() };
   return data;
