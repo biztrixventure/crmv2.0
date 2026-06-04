@@ -491,49 +491,131 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                   </div>
                 )}
 
-                {isSalePlan && (
-                  <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                    {plansByCompany.size === 0 ? (
-                      <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
-                        No plans configured. Configure in Admin → Sale Configs → Plans.
-                      </p>
-                    ) : (
-                      [...plansByCompany.entries()].map(([co, vals]) => (
-                        <div key={co}>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {vals.map(v => (
-                              <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
-                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
-                            ))}
-                          </div>
+                {isSalePlan && (() => {
+                  // sale_plan reads its allowed values from TWO places: the
+                  // Form Builder field's options JSON (client→plans mapping,
+                  // wins when present — matches SaleForm.jsx behavior) and
+                  // the global sale_configs.plans fallback.
+                  const opts = f.options || [];
+                  const mappings = opts.filter(o => o && typeof o === 'object' && o.client);
+                  const flatPlans = opts.filter(o => typeof o === 'string' || (o && typeof o === 'object' && (o.value || o.plan) && !o.client));
+                  const hasFieldOpts = mappings.length > 0 || flatPlans.length > 0;
+                  return (
+                    <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {hasFieldOpts && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            From Form Builder · this field's options
+                          </p>
+                          {mappings.length > 0 ? mappings.map((m, i) => {
+                            const plans = Array.isArray(m.plans) ? m.plans : (m.plan ? [m.plan] : []);
+                            return (
+                              <div key={`${m.client}-${i}`} className="mb-1.5">
+                                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  Client <code className="px-1 py-0.5 rounded font-mono" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text)' }}>{m.client}</code> →
+                                </p>
+                                <div className="flex flex-wrap gap-1.5 mt-1 ml-2">
+                                  {plans.length === 0
+                                    ? <span className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>no plans set</span>
+                                    : plans.map(p => (
+                                      <span key={p} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{p}</span>
+                                    ))}
+                                </div>
+                              </div>
+                            );
+                          }) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {flatPlans.map((p, i) => {
+                                const v = typeof p === 'string' ? p : (p.value || p.plan);
+                                return (
+                                  <span key={`${v}-${i}`} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      ))
-                    )}
-                  </div>
-                )}
+                      )}
+                      {plansByCompany.size > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            From Sale Configs · fallback when this field has no options
+                          </p>
+                          {[...plansByCompany.entries()].map(([co, vals]) => (
+                            <div key={co} className="mb-1.5">
+                              <p className="text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {vals.map(v => (
+                                  <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {!hasFieldOpts && plansByCompany.size === 0 && (
+                        <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                          No plans configured. Add them either inside the <strong>Form Builder</strong> on this field
+                          (Edit → Options → client/plan mapping) or in <strong>Admin → Sale Configs → Plans</strong>.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
-                {isSaleClient && (
-                  <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                    {clientsByCompany.size === 0 ? (
-                      <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
-                        No clients configured. Configure in Admin → Sale Configs → Clients.
-                      </p>
-                    ) : (
-                      [...clientsByCompany.entries()].map(([co, vals]) => (
-                        <div key={co}>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                {isSaleClient && (() => {
+                  // sale_client uses sale_configs first (closer's SaleForm
+                  // renders from useSaleConfigs.clients), but the Form
+                  // Builder field options may also carry clients as plain
+                  // strings or { value, label } pairs.
+                  const opts = f.options || [];
+                  const optClients = opts
+                    .map(o => typeof o === 'string' ? o : (o && (o.value || o.client || o.label)))
+                    .filter(Boolean);
+                  return (
+                    <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {optClients.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            From Form Builder · this field's options
+                          </p>
                           <div className="flex flex-wrap gap-1.5">
-                            {vals.map(v => (
-                              <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
-                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                            {optClients.map((c, i) => (
+                              <span key={`${c}-${i}`} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{c}</span>
                             ))}
                           </div>
                         </div>
-                      ))
-                    )}
-                  </div>
-                )}
+                      )}
+                      {clientsByCompany.size > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            From Sale Configs
+                          </p>
+                          {[...clientsByCompany.entries()].map(([co, vals]) => (
+                            <div key={co} className="mb-1.5">
+                              <p className="text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {vals.map(v => (
+                                  <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
+                                    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{v}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {optClients.length === 0 && clientsByCompany.size === 0 && (
+                        <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                          No clients configured. Add them either inside the <strong>Form Builder</strong> on this field
+                          (Edit → Options) or in <strong>Admin → Sale Configs → Clients</strong>.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {isSaleFronter && (
                   <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
