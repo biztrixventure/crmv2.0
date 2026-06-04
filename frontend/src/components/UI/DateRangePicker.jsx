@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, ChevronDown, X } from 'lucide-react';
 import { todayET } from '../../utils/timezone';
 
@@ -93,7 +94,50 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   const _t = todayET();
   const [monthYear, setMonthYear] = useState(parseInt(_t.slice(0, 4), 10));
   const [monthIdx,  setMonthIdx]  = useState(parseInt(_t.slice(5, 7), 10) - 1);
-  const ref = useRef(null);
+  const ref      = useRef(null);
+  const btnRef   = useRef(null);
+  const popRef   = useRef(null);
+  // Portal popover position — recomputed on open + resize + scroll so the
+  // panel never gets clipped by an ancestor with overflow:hidden (shells
+  // wrap header rows in Cards / overflow-x-auto strips). Flips above the
+  // button when there's not enough room below the viewport.
+  const [popPos, setPopPos] = useState({ top: 0, left: 0, maxH: 0, ready: false });
+
+  const recalcPosition = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin   = 8;
+    const popW     = 240;   // matches w-60
+    const desiredH = popRef.current?.scrollHeight || 480;
+
+    const spaceBelow = vh - r.bottom - margin;
+    const spaceAbove = r.top - margin;
+    const placeAbove = spaceBelow < Math.min(desiredH, 320) && spaceAbove > spaceBelow;
+    const maxH       = Math.max(160, (placeAbove ? spaceAbove : spaceBelow));
+
+    // Right-align to button right edge; clamp to viewport horizontally.
+    let left = r.right - popW;
+    if (left < margin) left = margin;
+    if (left + popW > vw - margin) left = vw - popW - margin;
+
+    const top = placeAbove ? Math.max(margin, r.top - margin - Math.min(desiredH, maxH)) : r.bottom + 4;
+    setPopPos({ top, left, maxH, ready: true });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) { setPopPos(p => ({ ...p, ready: false })); return; }
+    recalcPosition();
+    const onResize = () => recalcPosition();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onResize, true);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onResize, true);
+    };
+  }, [open]);
 
   // Sync display when value changes externally (e.g. MiniCalendar click)
   useEffect(() => {
@@ -109,7 +153,11 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   }, [value?.date_from, value?.date_to]); // eslint-disable-line
 
   useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const handler = e => {
+      const inAnchor = ref.current && ref.current.contains(e.target);
+      const inPopover = popRef.current && popRef.current.contains(e.target);
+      if (!inAnchor && !inPopover) setOpen(false);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
@@ -158,6 +206,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   return (
     <div className="relative flex-shrink-0" ref={ref}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(o => !o)}
         className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors"
@@ -177,10 +226,19 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
         }} />
       </button>
 
-      {open && (
+      {open && createPortal((
         <div
-          className="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-xl p-2 w-60"
-          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          ref={popRef}
+          className="fixed z-[9999] rounded-xl shadow-xl p-2 overflow-y-auto"
+          style={{
+            top:             popPos.top,
+            left:            popPos.left,
+            width:           240,
+            maxHeight:       popPos.maxH ? `${popPos.maxH}px` : '60vh',
+            visibility:      popPos.ready ? 'visible' : 'hidden',
+            backgroundColor: 'var(--color-surface)',
+            border:          '1px solid var(--color-border)',
+          }}
         >
           <div className="space-y-0.5 mb-2">
             {PRESETS.map(p => (
@@ -277,7 +335,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
             <X size={12} /> Clear all filters
           </button>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 };
