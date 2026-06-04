@@ -1,11 +1,197 @@
-import { useState } from 'react';
-import { Download, FileSpreadsheet, CheckCircle2, Info, Building2, ChevronDown, ShieldCheck } from 'lucide-react';
-import { sampleTemplateCsv } from './saleColumnMapping';
+import { useState, useMemo } from 'react';
+import {
+  Download, FileSpreadsheet, CheckCircle2, Info, Building2, ChevronDown,
+  ShieldCheck, ListChecks, Hash, Phone, Mail, Calendar, MapPin, FileText, ChevronRight,
+} from 'lucide-react';
+import { sampleTemplateCsv, CONTROL_FIELDS } from './saleColumnMapping';
+import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
+
+/*
+ * SaleFileRequirementsGuide
+ *
+ * Dynamic upload-prep cheatsheet. Tells the operator exactly what each
+ * column accepts and — critically — what *happens* when a particular
+ * value is in the file. Status dropdown options are pulled from the
+ * admin-configured compliance.status_catalog so adding "Coverage gap" in
+ * Business Rules → Compliance Workflow immediately appears here with a
+ * sensible "what happens" line driven by the status category. Every
+ * select-type form field listed here pulls its allowed values from
+ * form_fields.options the same way.
+ */
+
+// Status-category fallbacks. Used when a catalog status has no key-
+// specific override below — so a freshly-added status still gets a useful
+// "what happens" line driven by its category bucket.
+const CATEGORY_EFFECT = {
+  pending: 'Sale lands in the compliance review queue. Compliance staff approves, returns for revision, or cancels.',
+  won:     'Counts as revenue and closed-won. Locks the sale after the compliance lock window.',
+  lost:    'Closed without revenue. Excluded from win-rate calculations.',
+  neutral: 'Renders with its label in lists; no special effect on revenue or queue.',
+};
+
+// Key-specific overrides — applied on top of the category fallback for the
+// well-known lifecycle keys. New admin-defined keys fall through to the
+// category fallback above.
+const KEY_EFFECT = {
+  open:                 'Closer draft. Sale has not been submitted for compliance review yet.',
+  sold:                 'Marked sold by the closer but not yet compliance-approved. Lands in the review queue.',
+  pending_review:       'Default if the status column is blank. Sale enters the compliance review queue immediately.',
+  needs_revision:       'Returned to the closer with the reviewer note. Closer must edit and resubmit.',
+  closed_won:           'Approved sale. Counts toward revenue, win-rate, and SPIFF metrics.',
+  closed_lost:          'Lost lead. Excluded from revenue and win-rate.',
+  cancelled:            'Closer-side cancellation. Excluded from revenue. No compliance lock.',
+  compliance_cancelled: 'Compliance rejected the sale. Locked from further closer/manager edits.',
+  chargeback:           'Refunded after approval. Excluded from net revenue. Lands in compliance follow-up.',
+  dispute:              'Customer-disputed sale. Compliance investigates before final disposition.',
+  follow_up:            'Marked for follow-up. Stays in the closer\'s active pipeline.',
+};
+
+// Field-type → human-friendly format spec. Used for non-select column
+// types so the operator sees "what to type" at a glance.
+const FORMAT_SPEC = {
+  phone: { icon: Phone,    note: '10 digits, no separators (e.g. 5551234567). Auto-strips spaces, dashes, parens.' },
+  tel:   { icon: Phone,    note: '10 digits, no separators.' },
+  email: { icon: Mail,     note: 'Standard email. Blank → server defaults to "no@email.com" so the row never breaks.' },
+  date:  { icon: Calendar, note: 'YYYY-MM-DD (or Excel date). Sales without a date land on today.' },
+  number:{ icon: Hash,     note: 'Integer or decimal. No currency symbols.' },
+  zip:   { icon: MapPin,   note: '5-digit US ZIP. Server auto-fills City/State if a single ZIP is sent.' },
+  state: { icon: MapPin,   note: '2-letter abbreviation (e.g. CA) or full name. Matched case-insensitively.' },
+  textarea:    { icon: FileText, note: 'Free text. Multi-line OK if quoted in CSV.' },
+  text:        { icon: FileText, note: 'Free text.' },
+  sale_plan:        { icon: ListChecks, note: 'Must match a plan defined for the closer\'s company in Sale Configs.' },
+  sale_client:      { icon: ListChecks, note: 'Must match a client defined for the company in Sale Configs.' },
+  sale_fronter:     { icon: ListChecks, note: 'Fronter full name. Must match an active fronter in the row\'s company.' },
+  sale_date:        { icon: Calendar,   note: 'YYYY-MM-DD. Drives the "Today / MTD" buckets on every shell.' },
+  sale_status:      { icon: ListChecks, note: 'Same catalog as the Status column. See Status section above for behavior.' },
+  sale_down_payment:   { icon: Hash, note: 'Numeric. Used for revenue + commission calc.' },
+  sale_monthly_payment:{ icon: Hash, note: 'Numeric. Drives recurring-revenue projections.' },
+  sale_payment_due_note:{ icon: FileText, note: 'Free text. Shown verbatim on the sale drawer.' },
+  sale_reference_no: { icon: FileText, note: 'Free text. External reference / order number.' },
+};
+
+const FieldRule = ({ icon: Icon, name, label, type, required, helper, children }) => {
+  const [open, setOpen] = useState(false);
+  const hasBody = !!children;
+  return (
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+    >
+      <button
+        type="button"
+        onClick={() => hasBody && setOpen(o => !o)}
+        className="w-full px-3 py-2.5 flex items-center gap-2.5 text-left hover:bg-bg-secondary transition-colors"
+        style={{ cursor: hasBody ? 'pointer' : 'default' }}
+      >
+        {Icon && <Icon size={14} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{name}</code>
+            {label && label !== name && (
+              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>“{label}”</span>
+            )}
+            {required && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold"
+                style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)' }}>
+                REQUIRED
+              </span>
+            )}
+            {type && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                {type}
+              </span>
+            )}
+          </div>
+          {helper && (
+            <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--color-text-secondary)' }}>{helper}</p>
+          )}
+        </div>
+        {hasBody && (
+          <ChevronRight
+            size={14}
+            className="flex-shrink-0"
+            style={{ color: 'var(--color-text-tertiary)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}
+          />
+        )}
+      </button>
+      {hasBody && open && (
+        <div className="px-3 pb-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const BADGE_DOT = {
+  success: '#16a34a', error: '#dc2626', warning: '#d97706',
+  info: '#2563eb', primary: '#6366f1', secondary: '#6b7280',
+};
+
+const OptionRow = ({ value, label, dotColor, effect }) => (
+  <div className="flex items-start gap-2.5 py-1.5">
+    {dotColor && (
+      <span className="inline-block rounded-full flex-shrink-0 mt-1.5"
+        style={{ width: 8, height: 8, backgroundColor: dotColor }} />
+    )}
+    <div className="flex-1 min-w-0">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{value}</code>
+        {label && label !== value && (
+          <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>“{label}”</span>
+        )}
+      </div>
+      {effect && (
+        <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--color-text-secondary)' }}>{effect}</p>
+      )}
+    </div>
+  </div>
+);
 
 const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] }, fields = [], formFields = [], phoneKey = null }) => {
-  const [show, setShow] = useState(false);
+  const [showNames, setShowNames] = useState(false);
+  const { catalog } = useComplianceStatuses();
+
   const required = fields.filter(f => f.required);
   const optional = fields.filter(f => !f.required);
+
+  // Status options — driven entirely by the live catalog so new statuses
+  // appear here the moment they're enabled in Business Rules.
+  const statusOptions = useMemo(
+    () =>
+      (catalog || [])
+        .filter(s => s && s.key && s.enabled !== false)
+        .map(s => ({
+          value:  s.key,
+          label:  s.label,
+          dot:    BADGE_DOT[s.badge] || '#6b7280',
+          effect: KEY_EFFECT[s.key] || CATEGORY_EFFECT[s.category] || CATEGORY_EFFECT.neutral,
+        })),
+    [catalog],
+  );
+
+  // Per-field rule cards — one per dynamic form field + the upload-only
+  // control fields. We expand only fields that have a meaningful options
+  // list or a known format spec.
+  const dynamicRules = useMemo(() => {
+    return (formFields || []).map(f => {
+      const type = String(f.field_type || 'text');
+      const spec = FORMAT_SPEC[type] || FORMAT_SPEC.text;
+      const isSelect = type === 'select';
+      const options = Array.isArray(f.options) ? f.options : [];
+      return {
+        key:       f.name,
+        label:     f.label || f.name,
+        type,
+        required:  !!f.is_required,
+        icon:      spec?.icon || FileText,
+        helper:    spec?.note,
+        isSelect,
+        options,
+      };
+    });
+  }, [formFields]);
 
   const download = () => {
     const blob = new Blob(['﻿' + sampleTemplateCsv(formFields, phoneKey)], { type: 'text/csv;charset=utf-8;' });
@@ -15,6 +201,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
 
   return (
     <div className="space-y-4">
+      {/* ── Header card with quick required/optional list + template download ── */}
       <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-3">
@@ -73,14 +260,114 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
         </div>
       </div>
 
+      {/* ── Field-by-field rules: what each column accepts + what happens for
+            every possible value. Status options are pulled live from the
+            compliance.status_catalog; select-field options come from the
+            form_fields.options array. Nothing here is hardcoded by status
+            key — adding a new admin status surfaces here automatically. ── */}
       <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <button onClick={() => setShow(s => !s)} className="w-full flex items-center justify-between p-4">
+        <div className="p-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <p className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+            <ListChecks size={15} style={{ color: 'var(--color-primary-600)' }} /> Field-by-field rules
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            Every column listed below with its accepted values and what happens when that value lands in the file.
+            New statuses or form fields added by an admin show up here automatically — no code change.
+          </p>
+        </div>
+
+        <div className="p-3 space-y-2">
+          {/* Control fields first (fronter/company/closer/status/compliance_note) */}
+          {CONTROL_FIELDS.map((cf) => {
+            const isStatus = cf.key === 'status';
+            return (
+              <FieldRule
+                key={cf.key}
+                icon={isStatus ? ListChecks : FileText}
+                name={cf.key}
+                label={cf.label}
+                type="control"
+                required={cf.required}
+                helper={cf.desc}
+              >
+                {isStatus && (
+                  <>
+                    <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Allowed values come from <strong>Business Rules → Compliance Workflow → Sale status catalog</strong>.
+                      Listed live below. Any value not in this list is rejected at validation; blank defaults to
+                      <code className="ml-1 px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>pending_review</code>.
+                    </p>
+                    <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {statusOptions.length === 0 ? (
+                        <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                          No statuses enabled in the catalog yet.
+                        </p>
+                      ) : (
+                        statusOptions.map((o) => (
+                          <OptionRow key={o.value} value={o.value} label={o.label} dotColor={o.dot} effect={o.effect} />
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </FieldRule>
+            );
+          })}
+
+          {/* Dynamic form fields — one row per field. Select fields expand
+              to show every option pulled from form_fields.options. */}
+          {dynamicRules.length === 0 && (
+            <p className="text-xs italic px-2 py-3" style={{ color: 'var(--color-text-tertiary)' }}>
+              No form fields configured yet. Configure them in Admin → Form Builder.
+            </p>
+          )}
+          {dynamicRules.map((f) => (
+            <FieldRule
+              key={f.key}
+              icon={f.icon}
+              name={f.key}
+              label={f.label}
+              type={f.type}
+              required={f.required}
+              helper={f.helper}
+            >
+              {f.isSelect && f.options.length > 0 && (
+                <>
+                  <p className="text-[11px] mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    Allowed values for this dropdown (from Form Builder). Any other value is rejected at validation.
+                  </p>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    {f.options.map((opt) => {
+                      const isObj = opt && typeof opt === 'object';
+                      const value = isObj ? (opt.value ?? opt.client ?? '') : String(opt);
+                      const label = isObj ? (opt.label || opt.plan || opt.client || value) : value;
+                      const effect = isObj && opt.plan
+                        ? `Maps to plan "${opt.plan}" for client "${opt.client || ''}".`
+                        : null;
+                      return <OptionRow key={value} value={value} label={label} effect={effect} />;
+                    })}
+                  </div>
+                </>
+              )}
+              {f.isSelect && f.options.length === 0 && (
+                <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+                  No options configured for this dropdown yet. Add options in Form Builder.
+                </p>
+              )}
+            </FieldRule>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Valid names reference (companies + closers) ── */}
+      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <button onClick={() => setShowNames(s => !s)} className="w-full flex items-center justify-between p-4">
           <span className="flex items-center gap-2 font-semibold" style={{ color: 'var(--color-text)' }}>
             <Building2 size={16} style={{ color: 'var(--color-primary-600)' }} /> Valid names ({reference.companies.length} companies · {reference.closers.length} closers)
           </span>
-          <ChevronDown size={18} className="transition-transform" style={{ color: 'var(--color-text-tertiary)', transform: show ? 'rotate(180deg)' : 'none' }} />
+          <ChevronDown size={18} className="transition-transform" style={{ color: 'var(--color-text-tertiary)', transform: showNames ? 'rotate(180deg)' : 'none' }} />
         </button>
-        {show && (
+        {showNames && (
           <div className="px-4 pb-4 space-y-3 max-h-80 overflow-y-auto">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {reference.companies.map(co => (
