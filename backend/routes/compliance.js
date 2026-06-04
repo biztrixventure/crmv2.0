@@ -632,50 +632,68 @@ const CANCEL_LIKE_STATUSES = new Set([
   'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute',
 ]);
 
+// Strip characters that PostgREST .in() and .or() treat as syntax. We never
+// permit them inside ref/policy strings (they're not valid identifiers in
+// practice) so dropping them is safer than escaping and avoids 400s caused
+// by user input like "P-001, P-002" being pasted into a single cell.
+const sanitizeRef = (s) => String(s ?? '').replace(/[,()'"\\]/g, '').trim();
+
+// Chunk so a single PostgREST URL never exceeds the safe length (the
+// .in() filter and .or() filter both get embedded in the query string).
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 router.post('/sales/bulk-search', asyncHandler(async (req, res) => {
   const rawRefs = Array.isArray(req.body?.refs) ? req.body.refs : [];
-  const refs = [...new Set(rawRefs.map(r => String(r ?? '').trim()).filter(Boolean))];
-  if (!refs.length)  return res.status(400).json({ error: 'No reference numbers provided.' });
-  if (refs.length > 500) return res.status(400).json({ error: 'Too many references in one batch (max 500). Split the list.' });
+  // Sanitize first so duplicate-detection runs on the cleaned-up form.
+  const cleaned = rawRefs.map(sanitizeRef).filter(Boolean);
+  if (!cleaned.length) return res.status(400).json({ error: 'No reference numbers provided.' });
+  if (cleaned.length > 500) return res.status(400).json({ error: 'Too many references in one batch (max 500). Split the list.' });
 
-  // Track duplicates the caller sent so they see them flagged in the UI.
+  const refs = [];
   const duplicates = [];
   const seen = new Set();
-  rawRefs.forEach(r => {
-    const k = String(r ?? '').trim();
-    if (!k) return;
-    if (seen.has(k.toLowerCase())) duplicates.push(k); else seen.add(k.toLowerCase());
-  });
-
-  // Build a single query that matches reference_no OR any of the JSON keys.
-  // Using `.or()` keeps the query a single round-trip even with N refs +
-  // M alternate keys.
-  const refLowers = refs.map(r => r.toLowerCase());
-  const refUppers = refs.map(r => r.toUpperCase());
-  const allVariants = [...new Set([...refs, ...refLowers, ...refUppers])];
-
-  // Direct column match (cheap — uses idx_sales_reference_no).
-  const { data: byCol, error: e1 } = await supabaseAdmin
-    .from('sales')
-    .select('id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id')
-    .in('reference_no', allVariants);
-  if (e1) return res.status(500).json({ error: e1.message });
-
-  // JSON-key match for form_data variants. Supabase PostgREST can `.in()` on
-  // a JSONB path with the ->> arrow.
-  const jsonRows = [];
-  for (const k of [...REF_KEYS, ...POLICY_KEYS]) {
-    const { data, error } = await supabaseAdmin
-      .from('sales')
-      .select('id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id')
-      .in(`form_data->>${k}`, allVariants);
-    if (error) continue;
-    if (data?.length) jsonRows.push(...data);
+  for (const r of cleaned) {
+    const k = r.toLowerCase();
+    if (seen.has(k)) duplicates.push(r);
+    else { seen.add(k); refs.push(r); }
   }
 
-  // De-duplicate sales (a row may have hit both reference_no and form_data).
+  const SELECT_COLS = 'id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id, cancellation_date';
+  const chunks = chunk(refs, 50);
   const saleById = new Map();
-  [...(byCol || []), ...jsonRows].forEach(r => saleById.set(r.id, r));
+
+  // For each chunk, run TWO targeted reads:
+  //  1. reference_no exact match (case-insensitive via .or ilike).
+  //  2. form_data JSON-key match across REF_KEYS + POLICY_KEYS.
+  // Each chunk wrapped in try/catch so one bad batch doesn't kill the rest.
+  for (const batch of chunks) {
+    try {
+      // Direct column — single .or() with ilike per ref keeps it case-insensitive
+      // and uses the trgm index when present.
+      const refOr = batch.map(r => `reference_no.ilike.${r}`).join(',');
+      if (refOr) {
+        const { data, error } = await supabaseAdmin.from('sales').select(SELECT_COLS).or(refOr);
+        if (error) logger.warn('BULK_SEARCH_REF', error.message);
+        (data || []).forEach(r => saleById.set(r.id, r));
+      }
+
+      // JSON-key matches — one .or() per JSON key so the query stays in a
+      // single URL even at 50 refs × 7 keys.
+      for (const key of [...REF_KEYS, ...POLICY_KEYS]) {
+        const jsonOr = batch.map(r => `form_data->>${key}.ilike.${r}`).join(',');
+        if (!jsonOr) continue;
+        const { data, error } = await supabaseAdmin.from('sales').select(SELECT_COLS).or(jsonOr);
+        if (error) { logger.warn(`BULK_SEARCH_${key}`, error.message); continue; }
+        (data || []).forEach(r => saleById.set(r.id, r));
+      }
+    } catch (e) {
+      logger.error('BULK_SEARCH_CHUNK', `Chunk failed`, e);
+    }
+  }
   const sales = [...saleById.values()];
 
   // Hydrate human-readable company / closer / fronter names in one round-trip.
@@ -727,22 +745,62 @@ router.post('/sales/bulk-search', asyncHandler(async (req, res) => {
   res.json({ matched: summaries, unmatched, duplicates });
 }));
 
+// Normalize a date input to YYYY-MM-DD. Accepts ISO timestamp, YYYY-MM-DD,
+// MM/DD/YYYY, Excel-serial numbers, or empty string. Returns null when the
+// input is empty or unparseable so a bad date never silently overwrites.
+function normalizeDate(input) {
+  if (input == null) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  // ISO 8601 first (covers YYYY-MM-DD and full timestamp).
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return isoMatch.slice(1).join('-');
+  // M/D/YYYY or MM/DD/YYYY.
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  // Excel serial — number of days since 1899-12-30.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const ms = (parseFloat(s) - 25569) * 86400 * 1000;
+    if (Number.isFinite(ms)) return new Date(ms).toISOString().slice(0, 10);
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
+
 router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const role   = req.user.role;
-  const ids        = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
-  const new_status = String(req.body?.new_status || '').trim();
-  const reason     = String(req.body?.reason || '').trim();
+  const body   = req.body || {};
 
-  if (!ids.length)       return res.status(400).json({ error: 'No sale ids provided.' });
-  if (ids.length > 500)  return res.status(400).json({ error: 'Too many ids in one batch (max 500).' });
-  if (!new_status)       return res.status(400).json({ error: 'new_status is required.' });
-  if (CANCEL_LIKE_STATUSES.has(new_status) && !reason) {
-    return res.status(400).json({ error: 'A reason is required when applying a cancellation status.' });
+  // The endpoint accepts either:
+  //   - { ids: ["uuid", "uuid"], new_status, reason, cancellation_date }
+  //   - { updates: [{ id, cancellation_date?, reason? }], new_status, reason, cancellation_date }
+  // Per-row fields override the top-level ones. The bulk fields stay as the
+  // fallback so the operator can apply the same date/reason to every row
+  // without typing it 50 times.
+  const new_status        = String(body.new_status || '').trim();
+  const bulkReason        = String(body.reason || '').trim();
+  const bulkCancelDate    = normalizeDate(body.cancellation_date);
+  let updates             = Array.isArray(body.updates) ? body.updates : null;
+  if (!updates) {
+    const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean) : [];
+    updates = ids.map(id => ({ id }));
+  }
+  updates = updates.filter(u => u && u.id);
+
+  if (!updates.length)       return res.status(400).json({ error: 'No sale ids provided.' });
+  if (updates.length > 500)  return res.status(400).json({ error: 'Too many ids in one batch (max 500).' });
+  if (!new_status)           return res.status(400).json({ error: 'new_status is required.' });
+
+  const isCancelLike = CANCEL_LIKE_STATUSES.has(new_status);
+  if (isCancelLike && !bulkReason && !updates.every(u => String(u.reason || '').trim())) {
+    return res.status(400).json({ error: 'A reason is required when applying a cancellation status (either bulk-level or on every row).' });
+  }
+  if (bulkCancelDate === null && body.cancellation_date) {
+    return res.status(400).json({ error: 'The bulk cancellation_date could not be parsed. Use YYYY-MM-DD or MM/DD/YYYY.' });
   }
 
-  // Validate the status against the live catalog (falls back to legacy
-  // allowed_statuses, then the hardcoded lifecycle set used in sales.js).
   const { getConfig } = require('../utils/businessConfig');
   const catalog = await getConfig(null, 'compliance.status_catalog', null);
   const allowed = Array.isArray(catalog) && catalog.length
@@ -752,21 +810,46 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `"${new_status}" is not an allowed status.` });
   }
 
+  const ids = updates.map(u => u.id);
   const now = new Date().toISOString();
   const { data: rows, error: fetchErr } = await supabaseAdmin
-    .from('sales').select('id, status, edit_history, compliance_note').in('id', ids);
+    .from('sales').select('id, status, edit_history, compliance_note, cancellation_date').in('id', ids);
   if (fetchErr) return res.status(500).json({ error: fetchErr.message });
 
+  const byId = new Map((rows || []).map(r => [r.id, r]));
   const results = [];
   const skipped = [];
-  for (const sale of rows || []) {
-    if (sale.status === new_status) {
-      skipped.push({ id: sale.id, reason: `Already ${new_status}` });
+
+  for (const upd of updates) {
+    const sale = byId.get(upd.id);
+    if (!sale) { skipped.push({ id: upd.id, reason: 'Not found' }); continue; }
+
+    // Per-row overrides win; bulk values are the fallback.
+    const rowReason = String(upd.reason || '').trim() || bulkReason;
+    const rowDateRaw = upd.cancellation_date !== undefined && upd.cancellation_date !== null && upd.cancellation_date !== ''
+      ? upd.cancellation_date
+      : (bulkCancelDate || null);
+    const rowDate = rowDateRaw ? normalizeDate(rowDateRaw) : null;
+    if (upd.cancellation_date && rowDate === null) {
+      skipped.push({ id: upd.id, reason: `Bad cancellation_date "${upd.cancellation_date}"` });
       continue;
     }
+    if (isCancelLike && !rowReason) {
+      skipped.push({ id: upd.id, reason: 'Reason required for cancellation status' });
+      continue;
+    }
+
+    if (sale.status === new_status && (!rowDate || sale.cancellation_date === rowDate)) {
+      skipped.push({ id: sale.id, reason: `Already ${new_status}${rowDate ? ` on ${rowDate}` : ''}` });
+      continue;
+    }
+
     const history = Array.isArray(sale.edit_history) ? sale.edit_history : [];
-    const newNote = reason
-      ? (sale.compliance_note ? `${sale.compliance_note}\n${now.slice(0,10)} · ${new_status}: ${reason}` : `${now.slice(0,10)} · ${new_status}: ${reason}`)
+    const noteLine = rowReason
+      ? `${now.slice(0,10)} · ${new_status}${rowDate ? ` (eff ${rowDate})` : ''}: ${rowReason}`
+      : null;
+    const newNote = noteLine
+      ? (sale.compliance_note ? `${sale.compliance_note}\n${noteLine}` : noteLine)
       : sale.compliance_note;
 
     const patch = {
@@ -779,23 +862,22 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
         action: 'bulk_status_update',
         previous_status: sale.status,
         new_status,
-        reason: reason || null,
+        reason: rowReason || null,
+        cancellation_date: rowDate,
         edited_at: now,
       }],
     };
-    if (['closed_won', 'closed_lost', 'cancelled', 'compliance_cancelled', 'needs_revision'].includes(new_status)) {
+    // cancellation_date semantics: write it when the status is cancel-like
+    // OR when the caller explicitly sent one (so admins can backfill).
+    if (isCancelLike || rowDate) patch.cancellation_date = rowDate;
+    if (['closed_won', 'closed_lost', 'cancelled', 'compliance_cancelled', 'needs_revision', 'chargeback', 'dispute'].includes(new_status)) {
       patch.compliance_reviewed_by = userId;
       patch.compliance_reviewed_at = now;
     }
     const { error: updateErr } = await supabaseAdmin.from('sales').update(patch).eq('id', sale.id);
     if (updateErr) { skipped.push({ id: sale.id, reason: updateErr.message }); continue; }
-    results.push({ id: sale.id, previous_status: sale.status, new_status });
+    results.push({ id: sale.id, previous_status: sale.status, new_status, cancellation_date: rowDate });
   }
-
-  // Report sales that were in the request but didn't come back from the DB
-  // (deleted or not visible to the caller). Helps the operator reconcile.
-  const foundIds = new Set((rows || []).map(r => r.id));
-  ids.filter(i => !foundIds.has(i)).forEach(i => skipped.push({ id: i, reason: 'Not found' }));
 
   logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s)`);
   res.json({ updated: results.length, results, skipped });

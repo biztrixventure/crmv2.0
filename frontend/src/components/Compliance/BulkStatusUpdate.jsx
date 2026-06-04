@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Upload, Search, ListChecks, X, AlertTriangle, CheckCircle2, FileText,
-  Hash, Loader2, Trash2,
+  Upload, Search, ListChecks, X, AlertTriangle, CheckCircle2, Loader2, Trash2, Calendar,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
@@ -9,19 +8,21 @@ import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 /*
  * BulkStatusUpdate
  *
- * Compliance-shell page for updating many sales at once by reference /
- * policy number. Workflow:
- *   1. Paste a list (commas, spaces, newlines all OK) OR upload a CSV
- *      whose first column is the reference / policy number.
+ * Updates many sales at once by reference / policy number. Workflow:
+ *   1. Paste a list — each line can be just a ref OR
+ *      "ref, date" OR "ref, date, note". Commas / semicolons / pipes / tabs
+ *      all work as the column separator. Header rows are auto-skipped.
+ *      Alternatively upload a CSV with the same columns.
  *   2. Search → backend matches each ref against sales.reference_no,
- *      form_data.SaleReferenceNo, and form_data.PolicyNumber. Unmatched
- *      and duplicate inputs are surfaced separately.
- *   3. Select rows (all or one-by-one).
+ *      form_data.SaleReferenceNo, and form_data.PolicyNumber (+ snake_case
+ *      and lowercase variants admins commonly use).
+ *   3. Each matched row is shown with the parsed date / note pre-filled
+ *      and editable. Per-row date / note overrides the bulk-level values.
  *   4. Pick a target status from the live compliance.status_catalog.
- *   5. When the status is a cancellation/loss type, a reason field is
- *      required and the reason is appended to compliance_note +
- *      edit_history on every updated row.
- *   6. Apply → backend bulk-updates + writes audit history.
+ *      Cancellation-like statuses gate the Apply button on a reason being
+ *      set (per-row OR bulk-level) and a date.
+ *   5. Apply → backend bulk-updates + writes audit history + stamps
+ *      sales.cancellation_date when relevant.
  */
 
 const BADGE_DOT = {
@@ -30,39 +31,49 @@ const BADGE_DOT = {
 };
 const CANCEL_LIKE = new Set(['cancelled','compliance_cancelled','closed_lost','chargeback','dispute']);
 
-// Parse the paste box: split on commas / semicolons / newlines / tabs /
-// pipes / multiple spaces. Trim, drop blanks, dedupe-preserving-order.
-function parseRefs(text) {
-  if (!text) return [];
-  const parts = String(text).split(/[\n\r,;\t|]|  +/g).map(s => s.trim()).filter(Boolean);
-  const seen = new Set();
-  const out = [];
-  for (const p of parts) {
-    const k = p.toLowerCase();
-    if (!seen.has(k)) { seen.add(k); out.push(p); }
-  }
-  return out;
+// Robust date parser — accepts YYYY-MM-DD, MM/DD/YYYY, M/D/YYYY, ISO
+// timestamps. Returns YYYY-MM-DD or null when unparseable. Mirrors the
+// server-side normalizeDate so the user sees what the backend will store.
+function normalizeDate(input) {
+  if (input == null) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso.slice(1).join('-');
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
 }
 
-// Read the first column of a CSV/TSV file. Skips the header row when it's
-// obviously a label (contains the words "ref" / "policy"). Reads up to 5000
-// lines so a wildly oversized file doesn't lock the tab.
-async function readCsvFirstColumn(file) {
-  const text = await file.text();
-  const lines = text.split(/\r?\n/).slice(0, 5000);
-  const refs = [];
-  let started = false;
+// Parse the paste box. Each non-empty line is split on the first separator
+// found (\t, comma, semicolon, pipe). The first token is the ref; the
+// second (if present and date-like) is the cancellation date; the third
+// is the per-row note. Returns { refs: [{ref, date, note}], dupes, header }.
+function parseLines(text) {
+  if (!text) return { entries: [], dupes: [] };
+  const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const entries = [];
+  const dupes = [];
+  const seen = new Set();
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
-    if (!raw) continue;
-    const sep = raw.includes('\t') ? '\t' : ',';
-    const first = raw.split(sep)[0]?.replace(/^"|"$/g, '').trim();
-    if (!first) continue;
-    if (!started && i === 0 && /^(ref|policy|sale\s*ref|reference)/i.test(first)) continue;
-    started = true;
-    refs.push(first);
+    // Skip a row whose first column is obviously a header label.
+    if (i === 0 && /^(ref|policy|reference|sale\s*ref)/i.test(raw)) continue;
+    const sep = raw.includes('\t') ? '\t' : raw.includes('|') ? '|' : raw.includes(';') ? ';' : ',';
+    const parts = raw.split(sep).map(p => p.replace(/^"|"$/g, '').trim());
+    const ref = parts[0];
+    if (!ref) continue;
+    const k = ref.toLowerCase();
+    if (seen.has(k)) { dupes.push(ref); continue; }
+    seen.add(k);
+    const dateRaw = parts[1] || '';
+    const note    = parts.slice(2).join(', ').trim();
+    const date = dateRaw ? normalizeDate(dateRaw) : null;
+    entries.push({ ref, date, note, dateRaw });
   }
-  return refs;
+  return { entries, dupes };
 }
 
 export default function BulkStatusUpdate() {
@@ -76,22 +87,46 @@ export default function BulkStatusUpdate() {
   const [searching, setSearching]   = useState(false);
   const [searchErr, setSearchErr]   = useState('');
   const [results, setResults]       = useState(null);   // { matched, unmatched, duplicates }
-  const [selected, setSelected]     = useState(new Set());
+  const [rowState, setRowState]     = useState({});     // id → { selected, date, note }
   const [newStatus, setNewStatus]   = useState('');
-  const [reason, setReason]         = useState('');
+  const [bulkReason, setBulkReason] = useState('');
+  const [bulkDate,   setBulkDate]   = useState('');
   const [applying, setApplying]     = useState(false);
   const [applyMsg, setApplyMsg]     = useState('');
 
-  const parsedFromBox = useMemo(() => parseRefs(pasteText), [pasteText]);
+  const parsed = useMemo(() => parseLines(pasteText), [pasteText]);
   const isCancelStatus = newStatus && CANCEL_LIKE.has(newStatus);
+  // Map ref → parsed line so we can prefill the matched-row editor.
+  const parsedByRef = useMemo(() => {
+    const m = new Map();
+    parsed.entries.forEach(e => m.set(e.ref.toLowerCase(), e));
+    return m;
+  }, [parsed]);
 
-  const doSearch = async (refs) => {
-    setSearching(true); setSearchErr(''); setResults(null); setSelected(new Set());
+  const selectedRows = useMemo(
+    () => Object.entries(rowState).filter(([, v]) => v?.selected).map(([id]) => id),
+    [rowState],
+  );
+
+  const doSearch = async (entries) => {
+    setSearching(true); setSearchErr(''); setResults(null); setRowState({});
     try {
+      const refs = entries.map(e => e.ref);
       const { data } = await client.post('compliance/sales/bulk-search', { refs });
       setResults(data);
-      // Auto-select all matched on first load so the common case is one click.
-      setSelected(new Set((data?.matched || []).map(r => r.id)));
+      // Auto-select all matched and prefill per-row date / note from the
+      // user's pasted columns.
+      const next = {};
+      (data?.matched || []).forEach(r => {
+        const matchedKey = (r.matched_via || r.reference_no || '').toLowerCase();
+        const parsedHit = parsedByRef.get(matchedKey);
+        next[r.id] = {
+          selected: true,
+          date: parsedHit?.date || (r.cancellation_date || ''),
+          note: parsedHit?.note || '',
+        };
+      });
+      setRowState(next);
     } catch (e) {
       setSearchErr(e.response?.data?.error || 'Search failed.');
     } finally {
@@ -100,48 +135,70 @@ export default function BulkStatusUpdate() {
   };
 
   const onSearchClick = () => {
-    const refs = parsedFromBox;
-    if (!refs.length) { setSearchErr('Paste at least one reference or policy number.'); return; }
-    doSearch(refs);
+    if (!parsed.entries.length) { setSearchErr('Paste at least one reference or policy number.'); return; }
+    doSearch(parsed.entries);
   };
 
   const onFile = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // reset so the same file can be re-picked
+    e.target.value = '';
     if (!file) return;
     try {
-      const refs = await readCsvFirstColumn(file);
-      if (!refs.length) { setSearchErr('No reference numbers found in the file.'); return; }
-      setPasteText(refs.join('\n'));
-      doSearch(refs);
+      const text = await file.text();
+      setPasteText(text);
+      const p = parseLines(text);
+      if (!p.entries.length) { setSearchErr('No reference numbers found in the file.'); return; }
+      // Need to wait for parsedByRef to update; call doSearch with the
+      // freshly-parsed entries directly.
+      setSearchErr('');
+      setTimeout(() => doSearch(p.entries), 0);
     } catch {
       setSearchErr('Could not read the file. Use a .csv or plain-text file.');
     }
   };
 
-  const toggle = (id) => setSelected(s => {
-    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
-  });
+  const setRow = (id, patch) => setRowState(s => ({ ...s, [id]: { ...(s[id] || {}), ...patch } }));
+  const toggle = (id) => setRow(id, { selected: !rowState[id]?.selected });
   const toggleAll = () => {
     if (!results?.matched) return;
-    if (selected.size === results.matched.length) setSelected(new Set());
-    else setSelected(new Set(results.matched.map(r => r.id)));
+    const allOn = results.matched.every(r => rowState[r.id]?.selected);
+    const next = { ...rowState };
+    results.matched.forEach(r => { next[r.id] = { ...(next[r.id] || {}), selected: !allOn }; });
+    setRowState(next);
   };
 
-  const applyDisabled = applying || !newStatus || selected.size === 0 || (isCancelStatus && !reason.trim());
+  // Apply gating — every selected row must have a reason (per-row OR
+  // bulk-level) when status is cancel-like.
+  const missingReason = isCancelStatus && selectedRows.some(id => {
+    const rr = rowState[id]?.note?.trim() || bulkReason.trim();
+    return !rr;
+  });
+  const applyDisabled = applying || !newStatus || selectedRows.length === 0 || missingReason;
 
   const doApply = async () => {
     if (applyDisabled) return;
     setApplying(true); setApplyMsg('');
     try {
-      const ids = [...selected];
-      const { data } = await client.post('compliance/sales/bulk-status', {
-        ids, new_status: newStatus, reason: reason.trim() || undefined,
+      const updates = selectedRows.map(id => {
+        const v = rowState[id] || {};
+        return {
+          id,
+          cancellation_date: v.date || undefined,
+          reason: (v.note || '').trim() || undefined,
+        };
       });
-      setApplyMsg(`Updated ${data.updated}/${ids.length}.${data.skipped?.length ? ` Skipped ${data.skipped.length}.` : ''}`);
-      // Refresh the visible rows so the new status renders inline.
-      await doSearch(parsedFromBox);
-      setReason('');
+      const { data } = await client.post('compliance/sales/bulk-status', {
+        updates,
+        new_status: newStatus,
+        reason: bulkReason.trim() || undefined,
+        cancellation_date: bulkDate || undefined,
+      });
+      const skippedLine = data.skipped?.length
+        ? ` Skipped ${data.skipped.length}: ${data.skipped.slice(0, 3).map(s => s.reason).join('; ')}${data.skipped.length > 3 ? '…' : ''}`
+        : '';
+      setApplyMsg(`Updated ${data.updated}/${updates.length}.${skippedLine}`);
+      await doSearch(parsed.entries);
+      setBulkReason(''); setBulkDate('');
     } catch (e) {
       setApplyMsg(e.response?.data?.error || 'Update failed.');
     } finally {
@@ -150,8 +207,8 @@ export default function BulkStatusUpdate() {
   };
 
   const reset = () => {
-    setPasteText(''); setResults(null); setSelected(new Set());
-    setNewStatus(''); setReason(''); setApplyMsg(''); setSearchErr('');
+    setPasteText(''); setResults(null); setRowState({});
+    setNewStatus(''); setBulkReason(''); setBulkDate(''); setApplyMsg(''); setSearchErr('');
   };
 
   return (
@@ -163,7 +220,7 @@ export default function BulkStatusUpdate() {
           <div>
             <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Bulk Status Update</h2>
             <p className="text-sm text-white/80">
-              Paste or upload reference / policy numbers, pick the rows, set the target status — applied in one go with audit trail.
+              Paste or upload references — optionally with cancellation date + note per line — then apply a status to every row.
             </p>
           </div>
         </div>
@@ -173,29 +230,28 @@ export default function BulkStatusUpdate() {
       {/* ── Step 1: Input ─────────────────────────────────────────────── */}
       <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-          1. Paste references or upload CSV
+          1. Paste references (and optionally date + note)
         </p>
         <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-          Accepts commas, spaces, newlines, tabs, pipes — any common separator. CSV uses the first column. Matches against
-          <code className="mx-1 px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>reference_no</code> and any
-          <code className="mx-1 px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>SaleReferenceNo</code> /
-          <code className="mx-1 px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>PolicyNumber</code> form-data keys.
+          One row per line. Columns can be separated by comma, semicolon, pipe, or tab. Example:
+          <code className="ml-1 px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>P-1001, 2026-05-15, customer requested refund</code>.
+          Date is optional; if you skip it, the bulk-level date below is used. Header rows auto-skip.
         </p>
         <textarea
           value={pasteText}
           onChange={e => setPasteText(e.target.value)}
-          rows={5}
-          placeholder="P-1001, P-1002, P-1003&#10;P-1004&#10;P-1005"
+          rows={6}
+          placeholder={'P-1001\nP-1002, 2026-05-12\nP-1003, 2026-05-14, customer cancellation\nP-1004 | 2026-05-15 | chargeback'}
           className="input w-full font-mono text-sm"
-          style={{ minHeight: 110 }}
+          style={{ minHeight: 130 }}
         />
         <div className="flex flex-wrap items-center gap-2 mt-3">
-          <button onClick={onSearchClick} disabled={searching || parsedFromBox.length === 0}
+          <button onClick={onSearchClick} disabled={searching || parsed.entries.length === 0}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white transition-all disabled:opacity-40"
             style={{ background: 'var(--gradient-sidebar)', minHeight: 36 }}>
             {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-            Search {parsedFromBox.length > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: 'rgba(255,255,255,0.22)' }}>{parsedFromBox.length}</span>}
+            Search {parsed.entries.length > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: 'rgba(255,255,255,0.22)' }}>{parsed.entries.length}</span>}
           </button>
           <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border cursor-pointer transition-colors hover:bg-bg-secondary"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', minHeight: 36 }}>
@@ -209,6 +265,11 @@ export default function BulkStatusUpdate() {
               <Trash2 size={14} /> Clear
             </button>
           )}
+          {parsed.entries.some(e => e.dateRaw && !e.date) && (
+            <span className="text-[11px] inline-flex items-center gap-1" style={{ color: 'var(--color-warning-700)' }}>
+              <AlertTriangle size={11} /> Some lines had a date column that couldn't be parsed — they'll fall back to the bulk-level date.
+            </span>
+          )}
           {searchErr && <span className="text-xs font-semibold" style={{ color: 'var(--color-error-600, #dc2626)' }}>{searchErr}</span>}
         </div>
       </div>
@@ -218,7 +279,7 @@ export default function BulkStatusUpdate() {
         <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap" style={{ borderColor: 'var(--color-border)' }}>
             <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>
-              2. Pick rows to update
+              2. Review matched rows · edit per-row date + note if needed
             </p>
             <div className="flex items-center gap-3 text-xs font-semibold flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
               <span className="inline-flex items-center gap-1"><CheckCircle2 size={12} style={{ color: 'var(--color-success-600)' }} /> {results.matched.length} matched</span>
@@ -238,15 +299,15 @@ export default function BulkStatusUpdate() {
                   <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
                     <th className="px-3 py-2 text-left">
                       <input type="checkbox"
-                        checked={selected.size === results.matched.length}
+                        checked={results.matched.every(r => rowState[r.id]?.selected)}
                         onChange={toggleAll} />
                     </th>
                     <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Ref / Policy</th>
                     <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Customer</th>
-                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Current Status</th>
-                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Company</th>
-                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Closer / Fronter</th>
-                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Sale Date</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Current</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Cancel Date</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Note / Reason</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Company · Closer</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -254,34 +315,54 @@ export default function BulkStatusUpdate() {
                     const hit = enabledStatuses.find(x => x.key === s.status);
                     const dot = hit ? (BADGE_DOT[hit.badge] || '#6b7280') : '#6b7280';
                     const lbl = hit?.label || (s.status || '—').replace(/_/g, ' ');
+                    const rs  = rowState[s.id] || {};
                     return (
-                      <tr key={s.id} className="border-b hover:bg-bg-secondary"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: selected.has(s.id) ? 'var(--color-primary-50, #eef2ff)' : 'transparent' }}>
-                        <td className="px-3 py-2">
-                          <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+                      <tr key={s.id} className="border-b"
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: rs.selected ? 'var(--color-primary-50, #eef2ff)' : 'transparent' }}>
+                        <td className="px-3 py-2 align-top">
+                          <input type="checkbox" checked={!!rs.selected} onChange={() => toggle(s.id)} />
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs">
+                        <td className="px-3 py-2 font-mono text-xs align-top">
                           <div>{s.matched_via || s.reference_no || '—'}</div>
                           {s.policy_number && s.policy_number !== s.matched_via && (
                             <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.policy_number}</div>
                           )}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 align-top">
                           <div className="font-semibold text-sm">{s.customer_name || '—'}</div>
                           <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.customer_phone || ''}</div>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 align-top">
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
                             <span className="inline-block rounded-full" style={{ width: 7, height: 7, backgroundColor: dot }} />
                             {lbl}
                           </span>
+                          {s.cancellation_date && (
+                            <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                              cancelled {s.cancellation_date}
+                            </div>
+                          )}
                         </td>
-                        <td className="px-3 py-2 text-xs">{s.company_name || '—'}</td>
-                        <td className="px-3 py-2 text-xs">
-                          <div>{s.closer_name || '—'}</div>
-                          <div style={{ color: 'var(--color-text-tertiary)' }}>{s.fronter_name || '—'}</div>
+                        <td className="px-3 py-2 align-top">
+                          <input type="date"
+                            value={rs.date || ''}
+                            onChange={e => setRow(s.id, { date: e.target.value })}
+                            className="input text-xs py-1"
+                            style={{ minWidth: 130 }} />
                         </td>
-                        <td className="px-3 py-2 text-xs">{s.sale_date || '—'}</td>
+                        <td className="px-3 py-2 align-top">
+                          <textarea
+                            value={rs.note || ''}
+                            onChange={e => setRow(s.id, { note: e.target.value })}
+                            placeholder={bulkReason ? `(bulk: ${bulkReason.slice(0,40)})` : 'optional per-row note'}
+                            rows={1}
+                            className="input text-xs py-1 w-full"
+                            style={{ minWidth: 180, resize: 'vertical' }} />
+                        </td>
+                        <td className="px-3 py-2 text-xs align-top">
+                          <div>{s.company_name || '—'}</div>
+                          <div style={{ color: 'var(--color-text-tertiary)' }}>{s.closer_name || '—'}</div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -327,14 +408,14 @@ export default function BulkStatusUpdate() {
         </div>
       )}
 
-      {/* ── Step 3: Apply status ─────────────────────────────────────── */}
+      {/* ── Step 3: Apply ────────────────────────────────────────────── */}
       {results && results.matched.length > 0 && (
         <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-            3. Apply a new status to {selected.size} selected row{selected.size === 1 ? '' : 's'}
+            3. Apply a new status to {selectedRows.length} selected row{selectedRows.length === 1 ? '' : 's'}
           </p>
 
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="flex flex-wrap gap-2 mb-4">
             {enabledStatuses.map(s => {
               const active = newStatus === s.key;
               const dot = BADGE_DOT[s.badge] || '#6b7280';
@@ -354,26 +435,38 @@ export default function BulkStatusUpdate() {
             })}
           </div>
 
-          {/* Reason — required + visible when status is cancel-like. We
-              still show the box for non-cancel statuses but as optional,
-              since compliance often wants a note even on approvals. */}
-          {(newStatus && (isCancelStatus || newStatus === 'needs_revision' || newStatus === 'closed_won')) && (
-            <div className="mb-3">
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isCancelStatus ? 'var(--color-error-700, #b91c1c)' : 'var(--color-text-secondary)' }}>
-                {isCancelStatus ? 'Reason (required)' : 'Note (optional)'}
-              </label>
-              <textarea
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                rows={3}
-                placeholder={isCancelStatus
-                  ? 'Why are these being cancelled? Applied to every selected row.'
-                  : 'Optional context appended to each sale\'s compliance note.'}
-                className="input w-full text-sm"
-                style={{
-                  borderColor: isCancelStatus && !reason.trim() ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
-                }}
-              />
+          {/* Bulk-level fallback fields — only shown once a status is picked
+              so the form isn't noisy on first load. */}
+          {newStatus && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              {(isCancelStatus || ['closed_won', 'needs_revision'].includes(newStatus)) && (
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Calendar size={11} className="inline mr-1" />
+                    Bulk cancellation date {isCancelStatus ? '(fallback for rows with no per-row date)' : '(optional)'}
+                  </label>
+                  <input type="date" value={bulkDate}
+                    onChange={e => setBulkDate(e.target.value)}
+                    className="input text-sm" />
+                </div>
+              )}
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isCancelStatus ? 'var(--color-error-700, #b91c1c)' : 'var(--color-text-secondary)' }}>
+                  {isCancelStatus ? 'Bulk reason (used when a row has no per-row note)' : 'Bulk note (optional)'}
+                </label>
+                <textarea
+                  value={bulkReason}
+                  onChange={e => setBulkReason(e.target.value)}
+                  rows={2}
+                  placeholder={isCancelStatus
+                    ? 'Why are these being cancelled? Applied to every row without a per-row note.'
+                    : 'Optional context appended to each sale\'s compliance note.'}
+                  className="input w-full text-sm"
+                  style={{
+                    borderColor: isCancelStatus && !bulkReason.trim() && selectedRows.some(id => !rowState[id]?.note?.trim()) ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
+                  }}
+                />
+              </div>
             </div>
           )}
 
@@ -382,7 +475,7 @@ export default function BulkStatusUpdate() {
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ background: 'var(--gradient-sidebar)', minHeight: 38 }}>
               {applying ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              Apply to {selected.size} sale{selected.size === 1 ? '' : 's'}
+              Apply to {selectedRows.length} sale{selectedRows.length === 1 ? '' : 's'}
             </button>
             {applyMsg && (
               <span className="text-xs font-semibold px-2 py-1 rounded"
@@ -390,9 +483,9 @@ export default function BulkStatusUpdate() {
                 {applyMsg}
               </span>
             )}
-            {isCancelStatus && !reason.trim() && (
+            {missingReason && (
               <span className="text-[11px]" style={{ color: 'var(--color-error-600, #dc2626)' }}>
-                Reason required for {newStatus.replace(/_/g, ' ')}.
+                Reason required (per-row or bulk) for {newStatus.replace(/_/g, ' ')}.
               </span>
             )}
           </div>

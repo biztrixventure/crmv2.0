@@ -572,6 +572,7 @@ router.put(
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition,
+      cancellation_date,
     } = req.body;
 
     // Allowed statuses sourced from business_config — superadmin can enable
@@ -607,6 +608,20 @@ router.put(
     if (sale_date !== undefined)           updates.sale_date           = sale_date;
     if (form_data !== undefined)           updates.form_data           = titleCaseFormData(expandStateInFormData(form_data));
     if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;
+    // Cancellation date — only compliance/superadmin can set it directly,
+    // and only meaningful when the row transitions into a cancellation-like
+    // status. Stored as YYYY-MM-DD (or null to clear).
+    if (cancellation_date !== undefined && isCompliance) {
+      if (cancellation_date === null || cancellation_date === '') {
+        updates.cancellation_date = null;
+      } else {
+        const m = String(cancellation_date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+        const us = String(cancellation_date).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) updates.cancellation_date = m.slice(1).join('-');
+        else if (us) updates.cancellation_date = `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+        else return res.status(400).json({ error: 'cancellation_date must be YYYY-MM-DD or MM/DD/YYYY' });
+      }
+    }
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('sales').update(updates).eq('id', id).select().single();
