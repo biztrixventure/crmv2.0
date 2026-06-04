@@ -5,9 +5,36 @@
 // before persisting. Matches the SQL `app_title_case` helper in migration 059.
 // ============================================================================
 
+// HTML entity decoder — bulk-upload + manual ingestion both sometimes
+// receive form_data values where the spreadsheet (or upstream HTML form)
+// left raw entities in the string ("Town &amp Countr Limited", "Smith
+// &amp; Sons", "Tom &#39;Doc&#39; Jones"). Without this, the dirty
+// strings get title-cased into the DB and stay forever. Decode only the
+// most common entities — keep the regex tight so we never accidentally
+// rewrite something that was meant as a literal "&amp" string.
+const HTML_ENTITIES = {
+  '&amp;': '&', '&AMP;': '&',
+  '&quot;': '"', '&QUOT;': '"',
+  '&apos;': "'", '&#39;':  "'",
+  '&lt;':   '<', '&gt;':   '>',
+  '&nbsp;': ' ',
+  // Trailing-semicolon-missing variants — sheet exports drop them.
+  '&amp':   '&',
+  '&quot':  '"',
+  '&apos':  "'",
+};
+function decodeEntities(s) {
+  if (!s || typeof s !== 'string') return s;
+  // Numeric refs (&#39; / &#x27;) handled inline.
+  return s
+    .replace(/&#x([0-9a-fA-F]+);?/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&[a-zA-Z]+;?/g, (m) => HTML_ENTITIES[m] ?? m);
+}
+
 function titleCase(input) {
   if (input == null) return input;
-  const s = String(input).replace(/\s+/g, ' ').trim();
+  const s = decodeEntities(String(input)).replace(/\s+/g, ' ').trim();
   if (!s) return s;
   return s
     .split(' ')
@@ -40,8 +67,14 @@ function titleCaseFormData(obj) {
   if (!obj || typeof obj !== 'object') return obj;
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (typeof v === 'string' && !KEY_SKIP_RE.test(k) && !valueLooksIdentifierish(v)) {
-      out[k] = titleCase(v);
+    if (typeof v === 'string') {
+      // HTML-entity decode unconditionally — entity-encoded text in any
+      // string field (identifier or not) is always wrong. Title-casing
+      // is still gated by the key/value identifier checks.
+      const decoded = decodeEntities(v);
+      out[k] = (!KEY_SKIP_RE.test(k) && !valueLooksIdentifierish(decoded))
+        ? titleCase(decoded)
+        : decoded;
     } else {
       out[k] = v;
     }
@@ -49,4 +82,4 @@ function titleCaseFormData(obj) {
   return out;
 }
 
-module.exports = { titleCase, titleCaseFormData };
+module.exports = { titleCase, titleCaseFormData, decodeEntities };
