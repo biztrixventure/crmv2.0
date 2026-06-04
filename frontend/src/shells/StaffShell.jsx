@@ -49,6 +49,7 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
 import { Card, Badge, Alert } from "../components/UI";
 import StatCardTriple from "../components/UI/StatCardTriple";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
+import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -633,29 +634,13 @@ const StaffShell = () => {
               <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
             </div>
 
-            {/* Filter bar */}
+            {/* Filter bar — transfer pills come from the admin-configured
+                transfer.status_catalog (Business Rules → Transfer Lifecycle). */}
             <div className="flex flex-wrap gap-2 mb-4">
-              <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
-                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                {[
-                  { k: '',          l: 'All'       },
-                  { k: 'pending',   l: 'Pending'   },
-                  { k: 'assigned',  l: 'Assigned'  },
-                  { k: 'completed', l: 'Completed' },
-                  { k: 'rejected',  l: 'Rejected'  },
-                  { k: 'cancelled', l: 'Cancelled' },
-                ].map(({ k, l }) => (
-                  <button key={k} onClick={() => { setXferStatus(k); setXferPage(1); }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
-                    style={{
-                      background: xferStatus === k ? 'var(--gradient-sidebar)' : 'transparent',
-                      color:      xferStatus === k ? 'white' : 'var(--color-text-secondary)',
-                      boxShadow:  xferStatus === k ? 'var(--shadow-sm)' : 'none',
-                    }}>
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <TransferStatusFilterPills
+                value={xferStatus}
+                onChange={(k) => { setXferStatus(k); setXferPage(1); }}
+              />
               {companyAgents.length > 0 && (
                 <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>

@@ -21,6 +21,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import StatCardTriple from "../components/UI/StatCardTriple";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
+import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
 import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import NumberUploadManager from "../components/Numbers/NumberUploadManager";
@@ -767,29 +768,14 @@ const ManagerShell = () => {
               </button>
             </div>
 
-            {/* Filter bar */}
+            {/* Filter bar — transfer status pills come from the admin-
+                configured transfer.status_catalog so SuperAdmin can rename
+                labels, hide unused states, or reorder them per company. */}
             <div className="flex flex-wrap gap-2 mb-4">
-              <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
-                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                {[
-                  { k: '',           l: 'All'       },
-                  { k: 'pending',    l: 'Pending'   },
-                  { k: 'assigned',   l: 'Assigned'  },
-                  { k: 'completed',  l: 'Completed' },
-                  { k: 'rejected',   l: 'Rejected'  },
-                  { k: 'cancelled',  l: 'Cancelled' },
-                ].map(({ k, l }) => (
-                  <button key={k} onClick={() => { setXferStatus(k); setXferPage(1); }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
-                    style={{
-                      background:  xferStatus === k ? 'var(--gradient-sidebar)' : 'transparent',
-                      color:       xferStatus === k ? 'white' : 'var(--color-text-secondary)',
-                      boxShadow:   xferStatus === k ? 'var(--shadow-sm)' : 'none',
-                    }}>
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <TransferStatusFilterPills
+                value={xferStatus}
+                onChange={(k) => { setXferStatus(k); setXferPage(1); }}
+              />
               {companyAgents.length > 0 && (
                 <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
