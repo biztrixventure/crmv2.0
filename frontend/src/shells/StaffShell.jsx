@@ -48,6 +48,7 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
 };
 import { Card, Badge, Alert } from "../components/UI";
 import StatCardTriple from "../components/UI/StatCardTriple";
+import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -747,31 +748,14 @@ const StaffShell = () => {
               <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
             </div>
 
-            {/* Filter bar */}
+            {/* Filter bar — pills come from the admin-configured
+                compliance.status_catalog so any status change in Business
+                Rules → Compliance Workflow shows up here automatically. */}
             <div className="flex flex-wrap gap-2 mb-4">
-              <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
-                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                {[
-                  { k: '',               l: 'All'       },
-                  { k: 'open',           l: 'Pending'   },
-                  { k: 'sold',           l: 'Sold'      },
-                  { k: 'pending_review', l: 'In Review' },
-                  { k: 'needs_revision', l: 'Needs Fix' },
-                  { k: 'closed_won',     l: 'Approved'  },
-                  { k: 'cancelled',      l: 'Cancelled' },
-                  { k: 'closed_lost',    l: 'Lost'      },
-                ].map(({ k, l }) => (
-                  <button key={k} onClick={() => { setSalesStatus(k); setSalesPage(1); }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
-                    style={{
-                      background: salesStatus === k ? 'var(--gradient-sidebar)' : 'transparent',
-                      color:      salesStatus === k ? 'white' : 'var(--color-text-secondary)',
-                      boxShadow:  salesStatus === k ? 'var(--shadow-sm)' : 'none',
-                    }}>
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <SaleStatusFilterPills
+                value={salesStatus}
+                onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
+              />
               {companyAgents.length > 0 && (
                 <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
