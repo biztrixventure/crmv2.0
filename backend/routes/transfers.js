@@ -792,6 +792,16 @@ router.post('/', [
   // Manager-dashboard alert (async, non-blocking) for duplicate-handling events.
   if (managerEvent) {
     notifications.onFronterDuplicateEvent({ kind: managerEvent, companyId, fronterId: userId, phone: norm, priorTransferId: priorId }).catch(() => {});
+
+    // Append-only log row for ManagerShell "Dup Attempts" stat. Fire-and-forget.
+    supabaseAdmin.from('transfer_dedup_events').insert({
+      company_id:        companyId,
+      fronter_id:        userId,
+      transfer_id:       transfer?.id || null,
+      prior_transfer_id: managerEvent === 'refresh' ? (transfer?.id || null) : priorId,
+      event_type:        managerEvent,
+      normalized_phone:  norm || null,
+    }).then(() => {}).catch(() => {});
   }
 
   res.status(201).json({ transfer, action });

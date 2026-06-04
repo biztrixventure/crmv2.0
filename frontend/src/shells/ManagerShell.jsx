@@ -10,7 +10,7 @@ import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -524,6 +524,18 @@ const ManagerShell = () => {
                 month={{ value: stats?.resellsThisMonth || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); }, title: 'Resells this month' }}
                 total={{ value: stats?.resellsTotal     || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); }, title: 'All resells' }}
                 caption={(stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet'}
+              />
+              {/* Dup Attempts — fronter re-submitted an existing phone. These
+                  events are intentionally NOT counted in "Total Transfers" so
+                  fronter KPI hygiene stays intact, but the manager needs the
+                  raw activity signal for reporting. */}
+              <StatCardTriple
+                label="Dup Attempts"     icon={Copy}        color="warning"
+                loading={loading || !stats}
+                today={{ value: stats?.dupToday || 0, title: 'Duplicate attempts today (refresh + reengage + sale_overlap)' }}
+                month={{ value: stats?.dupMonth || 0, title: 'Duplicate attempts this month' }}
+                total={{ value: stats?.dupTotal || 0, title: 'All-time duplicate attempts' }}
+                caption="refresh · reengage · overlap"
               />
             </div>
 

@@ -219,6 +219,30 @@ router.get(
         .eq('status', 'completed').gte('created_at', mtStart).lte('created_at', todayEndIso);
       stats.monthCompletedTransfers = monthCompletedX.count || 0;
 
+      // Duplicate-attempt counts — fronter-side company scope only. Surfaces
+      // refresh / reengage / sale_overlap events the dedup flow logged but
+      // didn't count as new transfers. Closer-side and superadmin (no
+      // companyId) get 0 by omission.
+      stats.dupToday = 0; stats.dupMonth = 0; stats.dupTotal = 0;
+      if (companyId && !isCloserSide) {
+        try {
+          const dupBase = () => supabaseAdmin
+            .from('transfer_dedup_events').select('id', { count: 'exact', head: true })
+            .eq('company_id', companyId);
+          const scopeDup = (q) => userRole === 'fronter' ? q.eq('fronter_id', userId) : q;
+          const [dToday, dMonth, dTotal] = await Promise.all([
+            scopeDup(dupBase()).gte('created_at', todayStart).lte('created_at', todayEndIso),
+            scopeDup(dupBase()).gte('created_at', mtStart).lte('created_at', todayEndIso),
+            scopeDup(dupBase()),
+          ]);
+          stats.dupToday = dToday.count || 0;
+          stats.dupMonth = dMonth.count || 0;
+          stats.dupTotal = dTotal.count || 0;
+        } catch {
+          // Table missing (pre-mig 072) — leave zeros so UI renders cleanly.
+        }
+      }
+
       // Resell counts — month-to-date + all-time. Always-on; fronter scope
       // still applies, so a fronter with hide_from_fronter=true sees 0 here
       // (their pipeline doesn't include resells by definition).
