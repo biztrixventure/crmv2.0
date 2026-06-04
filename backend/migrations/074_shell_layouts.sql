@@ -73,11 +73,12 @@ INSERT INTO business_config (scope, key, value) VALUES
         {"key":"companies", "enabled":true, "label":"Companies",    "order":0},
         {"key":"calendar",  "enabled":true, "label":"Calendar",     "order":1},
         {"key":"queue",     "enabled":true, "label":"Review Queue", "order":2},
-        {"key":"sales",     "enabled":true, "label":"All Sales",    "order":3},
-        {"key":"transfers", "enabled":true, "label":"Transfers",    "order":4},
-        {"key":"callbacks", "enabled":true, "label":"Callbacks",    "order":5},
-        {"key":"reviews",   "enabled":true, "label":"Call Reviews", "order":6},
-        {"key":"numbers",   "enabled":true, "label":"Call Numbers", "order":7}
+        {"key":"sales",       "enabled":true, "label":"All Sales",          "order":3},
+        {"key":"bulk_status", "enabled":true, "label":"Bulk Status Update", "order":4},
+        {"key":"transfers",   "enabled":true, "label":"Transfers",          "order":5},
+        {"key":"callbacks",   "enabled":true, "label":"Callbacks",          "order":6},
+        {"key":"reviews",     "enabled":true, "label":"Call Reviews",       "order":7},
+        {"key":"numbers",     "enabled":true, "label":"Call Numbers",       "order":8}
       ]
     }'::jsonb)
 ON CONFLICT (scope, key) DO NOTHING;

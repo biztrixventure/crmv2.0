@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -20,18 +20,20 @@ import TransfersTab        from '../components/Compliance/TransfersTab';
 import CallbacksTab        from '../components/Compliance/CallbacksTab';
 import ReviewsTab          from '../components/Compliance/ReviewsTab';
 import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
+import BulkStatusUpdate    from '../components/Compliance/BulkStatusUpdate';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
 
 const CODE_TABS = [
-  { key: 'companies', label: 'Companies',    icon: Building2 },
-  { key: 'calendar',  label: 'Calendar',     icon: CalendarDays },
-  { key: 'queue',     label: 'Review Queue', icon: Clock },
-  { key: 'sales',     label: 'All Sales',    icon: FileText },
-  { key: 'transfers', label: 'Transfers',    icon: ArrowRight },
-  { key: 'callbacks', label: 'Callbacks',    icon: PhoneCall },
-  { key: 'reviews',   label: 'Call Reviews', icon: Star },
-  { key: 'numbers',   label: 'Call Numbers', icon: Hash },
+  { key: 'companies',   label: 'Companies',          icon: Building2 },
+  { key: 'calendar',    label: 'Calendar',           icon: CalendarDays },
+  { key: 'queue',       label: 'Review Queue',       icon: Clock },
+  { key: 'sales',       label: 'All Sales',          icon: FileText },
+  { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
+  { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
+  { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
+  { key: 'reviews',     label: 'Call Reviews',       icon: Star },
+  { key: 'numbers',     label: 'Call Numbers',       icon: Hash },
 ];
 
 const ComplianceShell = () => {
@@ -166,6 +168,7 @@ const ComplianceShell = () => {
             initCompany={tabInit.company || ''}
           />
         )}
+        {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab
             key={tabInit.company || 'all'}

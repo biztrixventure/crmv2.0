@@ -599,4 +599,206 @@ router.get('/callback-audit-log', asyncHandler(async (req, res) => {
   res.json({ entries, total: count || 0, page: parseInt(page), limit: lim });
 }));
 
+// ============================================================================
+// Bulk status update — search by reference / policy numbers, preview, apply
+//
+//   POST /compliance/sales/bulk-search
+//     body: { refs: string[] }   (max 500 entries, whitespace-trimmed)
+//     resp: { matched: SaleSummary[], unmatched: string[], duplicates: string[] }
+//
+//   POST /compliance/sales/bulk-status
+//     body: { ids: string[], new_status: string, reason?: string }
+//     resp: { updated: number, skipped: [{id, reason}], results: [{id, status}] }
+//
+// Reference matching is exact (case-insensitive). The lookup tries each ref
+// against three columns in order: sales.reference_no, sales.form_data->>'SaleReferenceNo',
+// and sales.form_data->>'PolicyNumber' (plus snake_case + lowercase variants
+// admins commonly use in Form Builder). First hit wins.
+//
+// The "reason" body field is required when the new_status belongs to a
+// cancellation/loss category (cancelled, compliance_cancelled, closed_lost,
+// chargeback, dispute) so the compliance team always records *why* a
+// cancellation happened. The reason is appended to compliance_note + the
+// edit_history audit entry.
+// ============================================================================
+
+const POLICY_KEYS = ['PolicyNumber', 'policy_number', 'policy_no', 'PolicyNo'];
+const REF_KEYS    = ['SaleReferenceNo', 'sale_reference_no', 'reference_no', 'ReferenceNo'];
+
+// Status keys that require a reason. Catalog-driven would be cleaner but we
+// keep it static here so the rule survives even if business_config is
+// unreachable; the legacy lifecycle keys cover the cancellation cases.
+const CANCEL_LIKE_STATUSES = new Set([
+  'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute',
+]);
+
+router.post('/sales/bulk-search', asyncHandler(async (req, res) => {
+  const rawRefs = Array.isArray(req.body?.refs) ? req.body.refs : [];
+  const refs = [...new Set(rawRefs.map(r => String(r ?? '').trim()).filter(Boolean))];
+  if (!refs.length)  return res.status(400).json({ error: 'No reference numbers provided.' });
+  if (refs.length > 500) return res.status(400).json({ error: 'Too many references in one batch (max 500). Split the list.' });
+
+  // Track duplicates the caller sent so they see them flagged in the UI.
+  const duplicates = [];
+  const seen = new Set();
+  rawRefs.forEach(r => {
+    const k = String(r ?? '').trim();
+    if (!k) return;
+    if (seen.has(k.toLowerCase())) duplicates.push(k); else seen.add(k.toLowerCase());
+  });
+
+  // Build a single query that matches reference_no OR any of the JSON keys.
+  // Using `.or()` keeps the query a single round-trip even with N refs +
+  // M alternate keys.
+  const refLowers = refs.map(r => r.toLowerCase());
+  const refUppers = refs.map(r => r.toUpperCase());
+  const allVariants = [...new Set([...refs, ...refLowers, ...refUppers])];
+
+  // Direct column match (cheap — uses idx_sales_reference_no).
+  const { data: byCol, error: e1 } = await supabaseAdmin
+    .from('sales')
+    .select('id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id')
+    .in('reference_no', allVariants);
+  if (e1) return res.status(500).json({ error: e1.message });
+
+  // JSON-key match for form_data variants. Supabase PostgREST can `.in()` on
+  // a JSONB path with the ->> arrow.
+  const jsonRows = [];
+  for (const k of [...REF_KEYS, ...POLICY_KEYS]) {
+    const { data, error } = await supabaseAdmin
+      .from('sales')
+      .select('id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id')
+      .in(`form_data->>${k}`, allVariants);
+    if (error) continue;
+    if (data?.length) jsonRows.push(...data);
+  }
+
+  // De-duplicate sales (a row may have hit both reference_no and form_data).
+  const saleById = new Map();
+  [...(byCol || []), ...jsonRows].forEach(r => saleById.set(r.id, r));
+  const sales = [...saleById.values()];
+
+  // Hydrate human-readable company / closer / fronter names in one round-trip.
+  const companyIds = [...new Set(sales.map(s => s.company_id).filter(Boolean))];
+  const userIds    = [...new Set(sales.flatMap(s => [s.fronter_id, s.closer_id]).filter(Boolean))];
+  const [{ data: cos }, { data: profiles }] = await Promise.all([
+    companyIds.length
+      ? supabaseAdmin.from('companies').select('id, name').in('id', companyIds)
+      : Promise.resolve({ data: [] }),
+    userIds.length
+      ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const coName  = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+  const usrName = Object.fromEntries((profiles || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
+
+  // Resolve which input ref produced each sale (so the UI can show
+  // "P-100 → matched", "P-999 → not found"). A sale may match more than one
+  // ref (rare); we attribute it to the first match.
+  const matchedRefSet = new Set();
+  const summaries = sales.map(s => {
+    const fdRefs = []
+      .concat(...REF_KEYS.map(k => [s.form_data?.[k]]))
+      .concat(...POLICY_KEYS.map(k => [s.form_data?.[k]]))
+      .map(v => (v == null ? '' : String(v).toLowerCase()));
+    const all = new Set([String(s.reference_no || '').toLowerCase(), ...fdRefs].filter(Boolean));
+    const matchedRef = refs.find(r => all.has(r.toLowerCase())) || s.reference_no || null;
+    if (matchedRef) matchedRefSet.add(matchedRef.toLowerCase());
+    return {
+      id:              s.id,
+      reference_no:    s.reference_no,
+      policy_number:   POLICY_KEYS.map(k => s.form_data?.[k]).find(Boolean) || null,
+      matched_via:     matchedRef,
+      status:          s.status,
+      customer_name:   s.customer_name,
+      customer_phone:  s.customer_phone,
+      sale_date:       s.sale_date,
+      monthly_payment: s.monthly_payment,
+      plan:            s.plan,
+      company_id:      s.company_id,
+      company_name:    coName[s.company_id] || null,
+      fronter_name:    usrName[s.fronter_id] || null,
+      closer_name:     usrName[s.closer_id]  || null,
+      compliance_note: s.compliance_note || null,
+    };
+  });
+
+  const unmatched = refs.filter(r => !matchedRefSet.has(r.toLowerCase()));
+  res.json({ matched: summaries, unmatched, duplicates });
+}));
+
+router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const role   = req.user.role;
+  const ids        = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+  const new_status = String(req.body?.new_status || '').trim();
+  const reason     = String(req.body?.reason || '').trim();
+
+  if (!ids.length)       return res.status(400).json({ error: 'No sale ids provided.' });
+  if (ids.length > 500)  return res.status(400).json({ error: 'Too many ids in one batch (max 500).' });
+  if (!new_status)       return res.status(400).json({ error: 'new_status is required.' });
+  if (CANCEL_LIKE_STATUSES.has(new_status) && !reason) {
+    return res.status(400).json({ error: 'A reason is required when applying a cancellation status.' });
+  }
+
+  // Validate the status against the live catalog (falls back to legacy
+  // allowed_statuses, then the hardcoded lifecycle set used in sales.js).
+  const { getConfig } = require('../utils/businessConfig');
+  const catalog = await getConfig(null, 'compliance.status_catalog', null);
+  const allowed = Array.isArray(catalog) && catalog.length
+    ? new Set(catalog.filter(s => s.enabled !== false).map(s => s.key))
+    : new Set(['open','sold','cancelled','follow_up','closed_won','closed_lost','pending_review','needs_revision','compliance_cancelled','chargeback','dispute']);
+  if (!allowed.has(new_status)) {
+    return res.status(400).json({ error: `"${new_status}" is not an allowed status.` });
+  }
+
+  const now = new Date().toISOString();
+  const { data: rows, error: fetchErr } = await supabaseAdmin
+    .from('sales').select('id, status, edit_history, compliance_note').in('id', ids);
+  if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+
+  const results = [];
+  const skipped = [];
+  for (const sale of rows || []) {
+    if (sale.status === new_status) {
+      skipped.push({ id: sale.id, reason: `Already ${new_status}` });
+      continue;
+    }
+    const history = Array.isArray(sale.edit_history) ? sale.edit_history : [];
+    const newNote = reason
+      ? (sale.compliance_note ? `${sale.compliance_note}\n${now.slice(0,10)} · ${new_status}: ${reason}` : `${now.slice(0,10)} · ${new_status}: ${reason}`)
+      : sale.compliance_note;
+
+    const patch = {
+      status: new_status,
+      updated_at: now,
+      compliance_note: newNote,
+      edit_history: [...history, {
+        editor_id: userId,
+        role,
+        action: 'bulk_status_update',
+        previous_status: sale.status,
+        new_status,
+        reason: reason || null,
+        edited_at: now,
+      }],
+    };
+    if (['closed_won', 'closed_lost', 'cancelled', 'compliance_cancelled', 'needs_revision'].includes(new_status)) {
+      patch.compliance_reviewed_by = userId;
+      patch.compliance_reviewed_at = now;
+    }
+    const { error: updateErr } = await supabaseAdmin.from('sales').update(patch).eq('id', sale.id);
+    if (updateErr) { skipped.push({ id: sale.id, reason: updateErr.message }); continue; }
+    results.push({ id: sale.id, previous_status: sale.status, new_status });
+  }
+
+  // Report sales that were in the request but didn't come back from the DB
+  // (deleted or not visible to the caller). Helps the operator reconcile.
+  const foundIds = new Set((rows || []).map(r => r.id));
+  ids.filter(i => !foundIds.has(i)).forEach(i => skipped.push({ id: i, reason: 'Not found' }));
+
+  logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s)`);
+  res.json({ updated: results.length, results, skipped });
+}));
+
 module.exports = router;
