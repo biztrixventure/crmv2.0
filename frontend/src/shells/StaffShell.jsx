@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toast } from "sonner";
 import { toastError } from "../utils/toast";
@@ -53,6 +53,7 @@ import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPill
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
+import { useShellLayout } from "../hooks/useShellLayout";
 import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
@@ -528,7 +529,7 @@ const StaffShell = () => {
     }, 500);
   };
 
-  const TABS = [
+  const CODE_TABS = [
     ...((isCloser || hasPermission('view_own_sales')) && isEnabled('sales')
       ? [{ key: 'sales',          label: 'My Sales',        icon: DollarSign }] : []),
     ...((isFronter || hasPermission('view_own_transfers')) && isEnabled('transfers')
@@ -550,6 +551,21 @@ const StaffShell = () => {
     { key: 'faqs',              label: 'FAQs',            icon: HelpCircle },
     { key: 'scripts',           label: 'Scripts',         icon: FileText   },
   ];
+  const {
+    applyTabs: applyStaffLayout,
+    defaultTab: staffDefaultTab,
+    isCardVisible: isStaffCardVisible,
+    isFilterVisible: isStaffFilterVisible,
+  } = useShellLayout('staff');
+  const TABS = useMemo(() => applyStaffLayout(CODE_TABS), [applyStaffLayout, CODE_TABS]);
+
+  // Reconcile activeTab when admin layout hides the persisted tab key.
+  useEffect(() => {
+    if (TABS.length && !TABS.some(t => t.key === activeTab)) {
+      const fallback = staffDefaultTab(TABS) || TABS[0]?.key;
+      if (fallback) setActiveTab(fallback);
+    }
+  }, [TABS, activeTab, staffDefaultTab, setActiveTab]);
 
   return (
     <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
@@ -826,6 +842,7 @@ const StaffShell = () => {
                 with its own filter scope. Closer sees: My Sales, Approved,
                 Awaiting Review, Cancelled, Resells, Conversion. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+              {isStaffCardVisible('my_sales') && (
               <StatCardTriple
                 label="My Sales"        icon={DollarSign}  color="success"
                 loading={statsLoading}
@@ -833,6 +850,8 @@ const StaffShell = () => {
                 month={{ value: stats.monthSales   || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.totalSales   || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all'));   } }}
               />
+              )}
+              {isStaffCardVisible('approved') && (
               <StatCardTriple
                 label="Approved"        icon={CheckCircle} color="primary"
                 loading={statsLoading}
@@ -840,6 +859,8 @@ const StaffShell = () => {
                 month={{ value: stats.monthClosedWon || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.closedWon      || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('all'));   } }}
               />
+              )}
+              {isStaffCardVisible('cancelled') && (
               <StatCardTriple
                 label="Cancelled"       icon={XCircle}     color="error"
                 loading={statsLoading}
@@ -847,12 +868,16 @@ const StaffShell = () => {
                 month={{ value: stats.monthCancelled || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.cancelledSales || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('all'));   } }}
               />
+              )}
+              {isStaffCardVisible('awaiting_review') && (
               <StatCardTriple
                 label="Awaiting Review" icon={Clock}       color="warning"
                 loading={statsLoading}
                 total={{ value: stats.awaitingCompliance || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('pending_review'); setDateRange(getPresetRange('all')); }, title: 'Show all sales awaiting compliance review' }}
                 caption="Pending compliance check"
               />
+              )}
+              {isStaffCardVisible('resells') && (
               <StatCardTriple
                 label="Resells"
                 icon={RefreshCw} color="primary"
@@ -861,6 +886,7 @@ const StaffShell = () => {
                 month={{ value: stats.resellsThisMonth || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('month')); }, title: 'Resells this month' }}
                 total={{ value: stats.resellsTotal     || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('all'));   }, title: 'All resells' }}
               />
+              )}
 
               {/* Conversion — display-only, kept in the same row. */}
               <Card
@@ -1095,6 +1121,7 @@ const StaffShell = () => {
             {/* Stats — triple-segment cards for the fronter view. Same
                 Today / MTD / Total clickable pattern as the closer side. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              {isStaffCardVisible('total_leads') && (
               <StatCardTriple
                 label="Total Leads"  icon={Send}         color="info"
                 loading={statsLoading}
@@ -1102,6 +1129,7 @@ const StaffShell = () => {
                 month={{ value: stats.monthTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.totalTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('all'));   } }}
               />
+              )}
               {/* Approved — counts COMPLETED transfers (fronter's actual KPI:
                   leads the closer finished). Earlier this card showed sales
                   counts (closed_won) but the click filtered the transfers list
@@ -1109,6 +1137,7 @@ const StaffShell = () => {
                   empty when the two queries didn't line up. Now count + click
                   agree on completed transfers, so the records always render
                   on click. */}
+              {isStaffCardVisible('fronter_approved') && (
               <StatCardTriple
                 label="Approved"     icon={CheckCircle}  color="success"
                 loading={statsLoading}
@@ -1116,12 +1145,15 @@ const StaffShell = () => {
                 month={{ value: stats.monthCompletedTransfers || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('month')); } }}
                 total={{ value: stats.completedTransfers      || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('all'));   } }}
               />
+              )}
+              {isStaffCardVisible('fronter_awaiting_review') && (
               <StatCardTriple
                 label="Awaiting Review" icon={Clock}     color="warning"
                 loading={statsLoading}
                 total={{ value: stats.awaitingCompliance || 0, onClick: () => { setXferStatus('assigned'); setXferPage(1); }, title: 'Show leads in-flight with a closer' }}
                 caption="In-flight with closer"
               />
+              )}
 
               {/* Conversion — display-only, same color theme as the closer side. */}
               <Card

@@ -19,6 +19,7 @@ import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import { useDashboardStats } from "../hooks/useDashboardStats";
+import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
@@ -141,7 +142,11 @@ const ManagerShell = () => {
   // numbers/spiffs/activity_log/faqs/scripts). Cross-role admin surfaces
   // (Calendar/Team/Roles/Forms/Reviews/Reports) have moved to crossNavItems
   // above so the dashboard tab bar doesn't carry duplicate destinations.
-  const TABS = [
+  // CODE_TABS = the catalog gated by permissions + feature flags. The admin
+  // layout override (shell.layout.manager) can only narrow this — hide,
+  // rename, reorder — never widen. Permission-gated tabs stay hidden
+  // regardless of admin config.
+  const CODE_TABS = [
     { key: 'overview',     label: 'Overview',        icon: TrendingUp,   always: true },
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',  label: 'Team Transfers', icon: Send       }] : []),
@@ -163,6 +168,14 @@ const ManagerShell = () => {
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
   ];
+  const {
+    applyTabs: applyManagerLayout,
+    defaultTab: managerDefaultTab,
+    isCardVisible: isMgrCardVisible,
+    isFilterVisible: isMgrFilterVisible,
+    isActionVisible: isMgrActionVisible,
+  } = useShellLayout('manager');
+  const TABS = useMemo(() => applyManagerLayout(CODE_TABS), [applyManagerLayout, CODE_TABS]);
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
@@ -173,6 +186,16 @@ const ManagerShell = () => {
   const [activeTab, setActiveTab] = usePersistedState(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = usePersistedState(mgrNavKey, 'dashboard');
   const [exportOpen, setExportOpen] = useState(false);
+
+  // Reconcile activeTab when admin layout hides the persisted tab key.
+  // Without this, landing on a tab the admin just disabled would show
+  // an empty body until the user manually picks another tab.
+  useEffect(() => {
+    if (TABS.length && !TABS.some(t => t.key === activeTab)) {
+      const fallback = managerDefaultTab(TABS) || TABS[0]?.key;
+      if (fallback) setActiveTab(fallback);
+    }
+  }, [TABS, activeTab, managerDefaultTab, setActiveTab]);
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeNav !== 'dashboard' ? activeNav : activeTab); }, [activeTab, activeNav]);
@@ -432,10 +455,12 @@ const ManagerShell = () => {
             <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              <FileSpreadsheet size={16} /> Export
-            </button>
+            {isMgrActionVisible('export') && (
+              <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                <FileSpreadsheet size={16} /> Export
+              </button>
+            )}
             <button onClick={loadOverview} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold transition-all hover:bg-bg-secondary"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <RefreshCw size={16} /> Refresh
@@ -461,7 +486,9 @@ const ManagerShell = () => {
               </button>
             ))}
           </div>
-          <DateRangePicker onChange={handleDateChange} defaultPreset="today" />
+          {isMgrFilterVisible('date_range') && (
+            <DateRangePicker onChange={handleDateChange} defaultPreset="today" />
+          )}
         </div>
 
         {/* ── OVERVIEW TAB ── */}
@@ -482,6 +509,7 @@ const ManagerShell = () => {
                 pre-existing overviewTotals so the manager's company-scoped
                 aggregate stays correct even before stats hook loads. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {isMgrCardVisible('transfers') && (
               <StatCardTriple
                 label="Total Transfers"  icon={Send}        color="info"
                 loading={loading || !stats}
@@ -490,6 +518,8 @@ const ManagerShell = () => {
                 total={{ value: overviewTotals.transfers   , onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('all'));   setActiveTab('transfers'); } }}
                 caption={overviewTotals.transfers > 0 && overviewTotals.sales > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null}
               />
+              )}
+              {isMgrCardVisible('sales') && (
               <StatCardTriple
                 label="Total Sales"      icon={DollarSign}  color="success"
                 loading={loading || !stats}
@@ -498,6 +528,8 @@ const ManagerShell = () => {
                 total={{ value: overviewTotals.sales      , onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
                 caption={overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null}
               />
+              )}
+              {isMgrCardVisible('approved') && (
               <StatCardTriple
                 label="Approved"         icon={CheckCircle} color="success"
                 loading={loading || !stats}
@@ -506,12 +538,16 @@ const ManagerShell = () => {
                 total={{ value: overviewTotals.approved   , onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
                 caption={overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null}
               />
+              )}
+              {isMgrCardVisible('awaiting_review') && (
               <StatCardTriple
                 label="Awaiting Review"  icon={Clock}       color="warning"
                 loading={loading || !stats}
                 total={{ value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' }}
                 caption={overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear'}
               />
+              )}
+              {isMgrCardVisible('cancelled') && (
               <StatCardTriple
                 label="Cancelled"        icon={XCircle}     color="error"
                 loading={loading || !stats}
@@ -519,6 +555,8 @@ const ManagerShell = () => {
                 month={{ value: stats?.monthCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
                 total={{ value: stats?.cancelledSales || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
               />
+              )}
+              {isMgrCardVisible('resells') && (
               <StatCardTriple
                 label="Resells"          icon={RefreshCw}
                 accent="#8b5cf6" gradientFrom="#ede9fe" color="primary"
@@ -527,10 +565,9 @@ const ManagerShell = () => {
                 total={{ value: stats?.resellsTotal     || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); }, title: 'All resells' }}
                 caption={(stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet'}
               />
-              {/* Dup Attempts — fronter re-submitted an existing phone. These
-                  events are intentionally NOT counted in "Total Transfers" so
-                  fronter KPI hygiene stays intact, but the manager needs the
-                  raw activity signal for reporting. */}
+              )}
+              {/* Dup Attempts — fronter re-submitted an existing phone. */}
+              {isMgrCardVisible('dup_attempts') && (
               <StatCardTriple
                 label="Dup Attempts"     icon={Copy}        color="warning"
                 loading={loading || !stats}
@@ -539,6 +576,7 @@ const ManagerShell = () => {
                 total={{ value: stats?.dupTotal || 0, title: 'All-time duplicate attempts' }}
                 caption="refresh · reengage · overlap"
               />
+              )}
             </div>
 
             {/* ── Conversion funnel ── */}
@@ -776,7 +814,7 @@ const ManagerShell = () => {
                 value={xferStatus}
                 onChange={(k) => { setXferStatus(k); setXferPage(1); }}
               />
-              {companyAgents.length > 0 && (
+              {isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
                 <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
@@ -895,7 +933,7 @@ const ManagerShell = () => {
                 value={salesStatus}
                 onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
               />
-              {companyAgents.length > 0 && (
+              {isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
                 <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>

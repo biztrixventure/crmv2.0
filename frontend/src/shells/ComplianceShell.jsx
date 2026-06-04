@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
+import { useShellLayout } from '../hooks/useShellLayout';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
@@ -22,7 +23,7 @@ import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
 
-const TABS = [
+const CODE_TABS = [
   { key: 'companies', label: 'Companies',    icon: Building2 },
   { key: 'calendar',  label: 'Calendar',     icon: CalendarDays },
   { key: 'queue',     label: 'Review Queue', icon: Clock },
@@ -40,12 +41,27 @@ const ComplianceShell = () => {
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
 
+  // Layer admin override onto the code-defined catalog.
+  const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
+  const TABS = useMemo(() => applyComplianceLayout(CODE_TABS), [applyComplianceLayout]);
+
   // Honor an initial-tab hint passed via router state (the AdminPanel sidebar
   // links straight into specific tabs, e.g. "All Sales", so superadmin lands on
   // the right view instead of always on Companies).
   const location = useLocation();
-  const initialTab = TABS.find(t => t.key === location.state?.tab)?.key || 'companies';
+  const initialTab = TABS.find(t => t.key === location.state?.tab)?.key
+    || complianceDefaultTab(TABS)
+    || TABS[0]?.key
+    || 'companies';
   const [activeTab, setActiveTab]   = useState(initialTab);
+
+  // Reconcile activeTab when admin layout hides the persisted tab key.
+  useEffect(() => {
+    if (TABS.length && !TABS.some(t => t.key === activeTab)) {
+      const fallback = complianceDefaultTab(TABS) || TABS[0]?.key;
+      if (fallback) setActiveTab(fallback);
+    }
+  }, [TABS, activeTab, complianceDefaultTab]);
   const [tabInit, setTabInit]       = useState({});
   const [infoOpen, setInfoOpen]     = useState(false);
 
