@@ -443,29 +443,35 @@ export default function BulkStatusUpdate() {
                 <div>
                   <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>
                     <Calendar size={11} className="inline mr-1" />
-                    Bulk cancellation date {isCancelStatus ? '(fallback for rows with no per-row date)' : '(optional)'}
+                    Cancellation date for all rows {!isCancelStatus && '(optional)'}
                   </label>
                   <input type="date" value={bulkDate}
                     onChange={e => setBulkDate(e.target.value)}
                     className="input text-sm" />
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Pick one date here to apply to every row. Rows that already have their own date in the table above keep their own.
+                  </p>
                 </div>
               )}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isCancelStatus ? 'var(--color-error-700, #b91c1c)' : 'var(--color-text-secondary)' }}>
-                  {isCancelStatus ? 'Bulk reason (used when a row has no per-row note)' : 'Bulk note (optional)'}
+                  {isCancelStatus ? 'Reason for all rows' : 'Note for all rows (optional)'}
                 </label>
                 <textarea
                   value={bulkReason}
                   onChange={e => setBulkReason(e.target.value)}
                   rows={2}
                   placeholder={isCancelStatus
-                    ? 'Why are these being cancelled? Applied to every row without a per-row note.'
+                    ? 'Why are these being cancelled? Used for every row that doesn\'t have its own note.'
                     : 'Optional context appended to each sale\'s compliance note.'}
                   className="input w-full text-sm"
                   style={{
                     borderColor: isCancelStatus && !bulkReason.trim() && selectedRows.some(id => !rowState[id]?.note?.trim()) ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
                   }}
                 />
+                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Type one reason here to apply to every row. Rows with their own note in the table above keep their own.
+                </p>
               </div>
             </div>
           )}
