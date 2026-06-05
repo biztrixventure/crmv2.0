@@ -184,8 +184,16 @@ router.post('/', asyncHandler(async (req, res) => {
 
   let userId;
   if (sendInvite) {
+    // Resolve the frontend base URL the same way the existing /users
+    // invite-email path does. Without redirectTo, Supabase falls back to
+    // the project's Site URL, which on a fresh project is empty / wrong
+    // and the link 404s after Supabase verifies the OTP. With it set,
+    // Supabase appends the access_token to this URL's hash fragment and
+    // the AcceptInvite page picks it up.
+    const appBase = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').replace(/\/$/, '');
     const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: { first_name, last_name, role: 'readonly_admin' },
+      redirectTo: `${appBase}/accept-invite`,
     });
     if (inviteErr) return res.status(400).json({ error: inviteErr.message });
     userId = invited.user?.id;
