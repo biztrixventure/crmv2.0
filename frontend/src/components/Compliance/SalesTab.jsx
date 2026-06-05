@@ -56,8 +56,13 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   const [editTarget, setEditTarget] = useState(null);
   const [editStatus, setEditStatus] = useState('');
   const [editReason, setEditReason] = useState('');
+  const [editCancelDate, setEditCancelDate] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
+  // Cancel-like statuses gate the cancellation_date field. Keeps the rule
+  // identical to the bulk endpoint so single + bulk flows behave the same.
+  const CANCEL_LIKE = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
+  const isCancelLikeStatus = CANCEL_LIKE.has(editStatus);
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -110,7 +115,13 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     finally { setReturning(false); }
   };
 
-  const openEdit = (s) => { setEditTarget(s); setEditStatus(s.status); setEditReason(''); setEditMsg(''); };
+  const openEdit = (s) => {
+    setEditTarget(s);
+    setEditStatus(s.status);
+    setEditReason('');
+    setEditCancelDate(s.cancellation_date || '');
+    setEditMsg('');
+  };
 
   // Direct field-level edit for compliance. SaleForm produces a full payload
   // matching the closer flow; we forward it to PUT /sales/:id (backend
@@ -127,9 +138,18 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   };
   const doEdit = async () => {
     if (!editReason.trim()) { setEditMsg('Reason required.'); return; }
+    if (isCancelLikeStatus && !editCancelDate) {
+      setEditMsg('Cancellation date is required for this status.'); return;
+    }
     setEditSaving(true);
     try {
-      await client.post(`sales/${editTarget.id}/compliance`, { status: editStatus, reason: editReason });
+      await client.post(`sales/${editTarget.id}/compliance`, {
+        status: editStatus,
+        reason: editReason,
+        // Always send cancellation_date so a non-cancel status with a
+        // previously-set date can clear it ("" → null on the server).
+        cancellation_date: editCancelDate || null,
+      });
       setEditTarget(null); load();
     } catch (err) { setEditMsg(err.response?.data?.error || 'Failed'); }
     finally { setEditSaving(false); }
@@ -237,6 +257,15 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                           <Badge variant={badgeOf(s.status)} size="sm">
                             {labelOf(s.status)}
                           </Badge>
+                          {s.cancellation_date && (
+                            <span
+                              title={`Cancelled on ${s.cancellation_date}`}
+                              className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)', border: '1px solid var(--color-error-200, #fecaca)' }}
+                            >
+                              {s.cancellation_date}
+                            </span>
+                          )}
                           {s.is_resell && (
                             <span title={`Resell · ${s.resell_intent || ''}`}
                               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
@@ -376,6 +405,27 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                   {COMPLIANCE_EDIT_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
                 </select>
               </div>
+              {/* Cancellation date — surfaces only when the picked status is
+                  cancel-like (cancelled / compliance_cancelled / closed_lost /
+                  chargeback / dispute). Same rule + key as the bulk
+                  endpoint so single + bulk flows stay aligned. */}
+              {isCancelLikeStatus && (
+                <div>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                    Cancellation Date <span className="text-red-500">*</span>
+                  </label>
+                  <input type="date" value={editCancelDate}
+                    onChange={e => setEditCancelDate(e.target.value)}
+                    className="input text-sm w-full"
+                    style={{
+                      borderColor: !editCancelDate ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
+                    }} />
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Business date the cancellation took effect. Drives monthly cancel reports.
+                    {editTarget?.cancellation_date && !editCancelDate && ` Previously: ${editTarget.cancellation_date}.`}
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   Reason <span className="text-red-500">*</span>

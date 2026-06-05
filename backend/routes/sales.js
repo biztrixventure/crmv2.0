@@ -860,21 +860,44 @@ router.post('/:id/compliance', [
   }
 
   const { id } = req.params;
-  const { reason, status, ...otherFields } = req.body;
+  const { reason, status, cancellation_date, ...otherFields } = req.body;
 
   const { data: existing, error: fetchErr } = await supabaseAdmin
     .from('sales').select('*').eq('id', id).single();
   if (fetchErr || !existing) return res.status(404).json({ error: 'Sale not found' });
 
   const COMPLIANCE_STATUSES = ['cancelled', 'compliance_cancelled', 'dispute', 'chargeback', 'open', 'sold', 'follow_up', 'closed_won', 'closed_lost'];
+  const CANCEL_LIKE = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
 
   if (status && !COMPLIANCE_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid status', allowed: COMPLIANCE_STATUSES });
   }
 
+  // Normalize cancellation_date to YYYY-MM-DD (or null). Accepts ISO,
+  // M/D/YYYY, MM/DD/YYYY. Bad input → 400 so the operator sees the rule.
+  let normCancelDate;
+  if (cancellation_date !== undefined && cancellation_date !== null && cancellation_date !== '') {
+    const s = String(cancellation_date).trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const us  = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (iso) normCancelDate = iso.slice(1).join('-');
+    else if (us) normCancelDate = `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+    else return res.status(400).json({ error: 'cancellation_date must be YYYY-MM-DD or MM/DD/YYYY' });
+  } else if (cancellation_date === null || cancellation_date === '') {
+    normCancelDate = null;
+  }
+
   // Build update — only allow specific fields for compliance
   const updates = await stampActor('sales', { updated_at: new Date().toISOString() }, userId);
   if (status) updates.status = status;
+  // Write cancellation_date when caller sent one OR when status is
+  // cancel-like (then default to today if not provided).
+  const isCancelLike = status && CANCEL_LIKE.has(status);
+  if (normCancelDate !== undefined) {
+    updates.cancellation_date = normCancelDate;
+  } else if (isCancelLike && !existing.cancellation_date) {
+    updates.cancellation_date = new Date().toISOString().slice(0, 10);
+  }
 
   // Append audit entry
   const currentHistory = Array.isArray(existing.edit_history) ? existing.edit_history : [];
@@ -882,13 +905,25 @@ router.post('/:id/compliance', [
     editor_id: userId,
     role:      'compliance_manager',
     reason,
-    previous_status: existing.status,
-    new_status:      status || existing.status,
-    edited_at:       new Date().toISOString(),
+    previous_status:   existing.status,
+    new_status:        status || existing.status,
+    cancellation_date: updates.cancellation_date ?? null,
+    edited_at:         new Date().toISOString(),
   }];
 
-  const { data: updated, error: updateErr } = await supabaseAdmin
+  let { data: updated, error: updateErr } = await supabaseAdmin
     .from('sales').update(updates).eq('id', id).select().single();
+
+  // Survive deployments where mig 075 hasn't landed yet — strip
+  // cancellation_date and retry once.
+  if (updateErr && 'cancellation_date' in updates && (
+    updateErr.code === '42703' ||
+    /cancellation_date/i.test(String(updateErr.message || ''))
+  )) {
+    const { cancellation_date: _, ...withoutCancel } = updates;
+    const r2 = await supabaseAdmin.from('sales').update(withoutCancel).eq('id', id).select().single();
+    updated = r2.data; updateErr = r2.error;
+  }
 
   if (updateErr) return res.status(500).json({ error: updateErr.message });
 
