@@ -8,6 +8,7 @@ import {
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, LogIn, Copy, ExternalLink,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
+import SaleStatusBadge from '../../UI/SaleStatusBadge';
 import { fmtSaleDate } from '../../../utils/timezone';
 import Modal from '../../UI/Modal';
 import RoleModal from '../RoleManagement/RoleModal';
@@ -280,7 +281,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                       <td className="px-3 py-2.5 text-xs font-semibold text-success-600">{r.monthly_payment?`$${r.monthly_payment}`:'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.fronter_name||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.closer_name||'—'}</td>
-                      <td className="px-3 py-2.5"><Badge variant={SALE_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
+                      <td className="px-3 py-2.5"><SaleStatusBadge sale={r} size="sm" /></td>
                       <td className="px-3 py-2.5 text-xs text-text-tertiary whitespace-nowrap">{new Date(r.created_at).toLocaleDateString()}</td>
                       {isExpanded && <>
                         <ExTd value={r.customer_phone_2} /><ExTd value={r.customer_email} truncate /><ExTd value={r.customer_address} truncate />

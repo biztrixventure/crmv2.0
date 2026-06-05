@@ -8,6 +8,7 @@ import {
   Hash, PlusCircle, FileText, Shield, Activity, ChevronLeft,
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
+import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
@@ -645,7 +646,7 @@ const FronterManagerDashboard = () => {
                           <td className="px-3 py-3 text-xs font-semibold text-success-600">
                             {s.monthly_payment && hasPermission('view_financial_data') ? `$${s.monthly_payment}` : '—'}
                           </td>
-                          <td className="px-3 py-3"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{s.status}</Badge></td>
+                          <td className="px-3 py-3"><SaleStatusBadge sale={s} size="sm" /></td>
                           <td className="px-3 py-3 text-xs text-text-tertiary">{new Date(s.created_at).toLocaleDateString()}</td>
                         </tr>
                       ))}

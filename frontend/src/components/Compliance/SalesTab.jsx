@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { Badge } from '../UI';
+import SaleStatusBadge from '../UI/SaleStatusBadge';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
@@ -254,18 +255,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <Badge variant={badgeOf(s.status)} size="sm">
-                            {labelOf(s.status)}
-                          </Badge>
-                          {s.cancellation_date && (
-                            <span
-                              title={`Cancelled on ${s.cancellation_date}`}
-                              className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
-                              style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)', border: '1px solid var(--color-error-200, #fecaca)' }}
-                            >
-                              {s.cancellation_date}
-                            </span>
-                          )}
+                          <SaleStatusBadge sale={s} size="sm" />
                           {s.is_resell && (
                             <span title={`Resell · ${s.resell_intent || ''}`}
                               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"

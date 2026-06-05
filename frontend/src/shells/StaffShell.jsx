@@ -48,6 +48,7 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
 };
 import { Card, Badge, Alert } from "../components/UI";
 import StatCardTriple from "../components/UI/StatCardTriple";
+import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -796,7 +797,7 @@ const StaffShell = () => {
                           className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
                           <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
                           <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
-                          <td className="py-3 px-3"><div className="flex items-center gap-1.5"><Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">{SALE_LABEL[s.status] || s.status}</Badge>{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
+                          <td className="py-3 px-3"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
                           {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           {/* Sale date = the day the sale actually happened (carried through
@@ -1027,9 +1028,7 @@ const StaffShell = () => {
                             )}
                           </div>
                           <div className="flex flex-col items-end gap-1 ml-2">
-                            <Badge variant={SALE_BADGE[s.status] || 'secondary'} size="sm">
-                              {SALE_LABEL[s.status] || s.status}
-                            </Badge>
+                            <SaleStatusBadge sale={s} size="sm" />
                             {s.monthly_payment && hasPermission('view_financial_data') && (
                               <span className="text-xs font-semibold text-success-600">${s.monthly_payment}/mo</span>
                             )}

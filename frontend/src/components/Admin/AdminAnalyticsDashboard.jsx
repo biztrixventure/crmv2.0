@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import client from '../../api/client';
 import { Badge } from '../UI';
+import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
@@ -887,7 +888,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       </td>
                       <td className="py-2 px-2.5 font-mono text-[10px] text-text-tertiary">{s.reference_no||'—'}</td>
                       <td className="py-2 px-2.5">
-                        <Badge variant={SALE_BADGE[s.status]||'secondary'} size="sm">{SALE_LABEL[s.status]||s.status||'—'}</Badge>
+                        <SaleStatusBadge sale={s} size="sm" />
                       </td>
                       <td className="py-2 px-2.5 text-text-secondary">{s.fronter_name||'—'}</td>
                       <td className="py-2 px-2.5 text-text-secondary">{s.closer_name||(s.user_profiles?`${s.user_profiles.first_name||''} ${s.user_profiles.last_name||''}`.trim():'—')}</td>

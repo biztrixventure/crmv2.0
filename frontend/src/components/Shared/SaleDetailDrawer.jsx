@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
+import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
 import client from '../../api/client';
@@ -136,9 +137,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
         {/* Status bar */}
         <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0 flex-wrap"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-          <Badge variant={SALE_BADGE[sale.status] || 'secondary'}>
-            {SALE_LABEL[sale.status] || sale.status?.toUpperCase()}
-          </Badge>
+          <SaleStatusBadge sale={sale} size="md" />
           {sale.is_resell && (
             <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded inline-flex items-center gap-1"
               style={{ backgroundColor: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)' }}>
@@ -212,6 +211,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                     {isFieldVisible('sale_info', 'plan')               && sale.plan        && <Row label="Plan"    value={sale.plan} />}
                     {isFieldVisible('sale_info', 'sale_date')          && sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
                     {isFieldVisible('sale_info', 'status')             && <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />}
+                    {sale.cancellation_date && <Row label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" />}
                     {isFieldVisible('sale_info', 'closer_disposition') && sale.closer_disposition && (
                       <Row label="Closer Disposition" value={sale.closer_disposition}
                         highlight="var(--color-primary-600)" />
