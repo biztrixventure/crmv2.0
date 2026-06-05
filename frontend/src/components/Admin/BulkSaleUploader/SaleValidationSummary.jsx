@@ -31,10 +31,11 @@ const Collapsible = ({ icon: Icon, color, title, rows, render }) => {
 // Cards for auto-matched NEW sales: show the picked transfer + let the user
 // switch to another candidate (duplicate transfers for the same phone).
 const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
-  const items = newSales.map((r, idx) => ({ r, idx })).filter(x => x.r.match_note || (x.r.candidate_transfers || []).length > 1);
+  const items = newSales.map((r, idx) => ({ r, idx })).filter(x => x.r.match_note || x.r.resell_of || x.r.client_switch || (x.r.candidate_transfers || []).length > 1);
   // Rows whose vehicle didn't match any transfer go first — they need a human look.
   items.sort((a, b) => (b.r.match_warning ? 1 : 0) - (a.r.match_warning ? 1 : 0));
   const warnCount = items.filter(x => x.r.match_warning).length;
+  const resellCount = items.filter(x => x.r.resell_of).length;
   const [open, setOpen] = useState(warnCount > 0);   // auto-expand when something needs attention
   if (!items.length) return null;
 
@@ -48,6 +49,12 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
               <AlertTriangle size={11} /> {warnCount} need{warnCount === 1 ? 's' : ''} attention
             </span>
           )}
+          {resellCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold flex items-center gap-1"
+              style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+              ♻ {resellCount} resell{resellCount === 1 ? '' : 's'}
+            </span>
+          )}
         </span>
         <ChevronDown size={16} className="transition-transform" style={{ color: '#7c3aed', transform: open ? 'rotate(180deg)' : 'none' }} />
       </button>
@@ -57,9 +64,24 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
             <div key={idx} className="rounded-xl p-3" style={r.match_warning
               ? { backgroundColor: '#fffbeb', border: '1px solid #fbbf24' }
               : { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+              <p className="text-sm font-semibold flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>
                 {r.match_warning && <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0 }} />}
                 {r.customer_name || '—'} <span className="font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {rowLabel(r)}</span>
+                {r.resell_of && (
+                  <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }}
+                    title={`Previous sale: ${r.resell_of.reference_no || '—'} · ${r.resell_of.status} · ${r.resell_of.client_name || '—'}`}>
+                    ♻ Resell of {r.resell_of.reference_no || r.resell_of.id?.slice(0,8)}
+                    {r.resell_of.cancelled_at && ` · cancelled ${r.resell_of.cancelled_at}`}
+                    {!r.resell_of.cancelled_at && r.resell_of.status && ` · ${r.resell_of.status}`}
+                  </span>
+                )}
+                {r.client_switch && (
+                  <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd' }}>
+                    ↔ Client switch
+                  </span>
+                )}
               </p>
               {r.match_note && <p className="text-xs mt-0.5" style={{ color: r.match_warning ? '#b45309' : '#7c3aed' }}>{r.match_note}</p>}
               <div className="flex items-center gap-2 mt-2 text-xs">

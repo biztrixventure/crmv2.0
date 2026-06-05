@@ -349,11 +349,41 @@ function pickBestTransfer(row, candidates, salesByTransfer) {
   return { transfer: best.t, why, saleHasVehicle, vehicleMatched };
 }
 
-// Pick which existing sale on the chosen transfer this row updates (multi-car
-// aware): reference_no → car_vin → year+make+model. If the row carries a
-// distinguishing key but matches none of them, it's a DIFFERENT car → add as a
-// new sale. Only when there's no key at all AND several sales exist is it a true
-// ambiguity that needs a human.
+// Statuses that DON'T block a new sale on the same car (lifecycle has ended,
+// safe to insert a fresh deal). Used by the resell / renewal detection in
+// pickExistingSale so a cancelled sale never gets silently overwritten.
+const TERMINAL_CANCEL_STATUSES = new Set([
+  'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback',
+]);
+
+// Normalize client name for comparison (case-insensitive, whitespace folded).
+const normClient = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+// Pick which existing sale on the chosen transfer this row updates — tier-based
+// rules so cancelled sales are never overwritten and client switches always
+// produce a new row.
+//
+// Tier 1 — reference_no is king
+//   file_ref matches existing.reference_no → UPDATE that exact sale (any status)
+//   file_ref present but matches NOTHING → NEW SALE (different ref = different deal)
+//
+// Tier 2 — no ref in file (fall back to car identity)
+//   same car (VIN or YMM):
+//     • all matches are terminal (cancelled / closed_lost / chargeback /
+//       compliance_cancelled) → NEW SALE flagged as resell, original_sale_id
+//       points at the most recent terminal one
+//     • file row's client differs from every active match's client → NEW SALE
+//       (client switch is always a new deal — MTM ≠ OMEGA ≠ JIM)
+//     • single active match with same client (or file has no client) → UPDATE
+//     • multiple active matches with same client → ambiguous (human picks)
+//   no car identity + 1 sale on transfer → UPDATE that sale
+//   no car identity + N sales → ambiguous
+//
+// Returns:
+//   { match: existing_sale }                        → UPDATE
+//   { match: null, newCar: N }                      → INSERT new sale
+//   { match: null, resellOf: prev_sale, reason }    → INSERT new sale + flag resell
+//   { ambiguous: true }                             → human picks
 function pickExistingSale(row, sales) {
   if (!sales || sales.length === 0) return { match: null };
 
@@ -361,14 +391,66 @@ function pickExistingSale(row, sales) {
   const vin = upper(row.car_vin);
   const ymm = ymmKey(row.car_year, row.car_make, row.car_model);
   const hasYmm = !!ymm.replace(/\|/g, '');
+  const fileClient = normClient(row.client_name);
 
-  if (ref) { const m = sales.find(s => upper(s.reference_no) === ref); if (m) return { match: m }; }
-  if (vin) { const m = sales.find(s => upper(s.car_vin) === vin); if (m) return { match: m }; }
-  if (hasYmm) { const m = sales.find(s => ymmKey(s.car_year, s.car_make, s.car_model) === ymm); if (m) return { match: m }; }
+  // ── Tier 1: reference_no is king ────────────────────────────────────────────
+  if (ref) {
+    const m = sales.find(s => upper(s.reference_no) === ref);
+    if (m) return { match: m };
+    // File carries a ref but it matches nothing → this is a DIFFERENT sale
+    // regardless of car/client. Most common honest case for resells too.
+    return { match: null, newCar: sales.length, reason: 'unique reference_no' };
+  }
 
-  // Has a distinguishing key but nothing matched → it's another car → new sale.
-  if (ref || vin || hasYmm) return { match: null, newCar: sales.length };
-  // No key to tell them apart: safe only when there's a single sale to update.
+  // ── Tier 2: car identity match (when file has no ref) ───────────────────────
+  const carMatches = sales.filter(s => {
+    if (vin && upper(s.car_vin) === vin)                                                       return true;
+    if (hasYmm && ymmKey(s.car_year, s.car_make, s.car_model) === ymm && (!vin || !s.car_vin)) return true;
+    return false;
+  });
+
+  if (carMatches.length > 0) {
+    const active = carMatches.filter(s => !TERMINAL_CANCEL_STATUSES.has(s.status));
+    const terminal = carMatches.filter(s =>  TERMINAL_CANCEL_STATUSES.has(s.status));
+
+    // All car matches are terminal → resell of the most-recent cancelled one.
+    if (active.length === 0 && terminal.length > 0) {
+      const mostRecent = terminal.slice().sort((a, b) =>
+        String(b.sale_date || b.created_at || '').localeCompare(String(a.sale_date || a.created_at || ''))
+      )[0];
+      return {
+        match:    null,
+        resellOf: mostRecent,
+        reason:   `Previous sale on this car (${mostRecent.reference_no || mostRecent.id.slice(0,8)}) is ${mostRecent.status} → treated as resell.`,
+      };
+    }
+
+    // Client switch — file's client doesn't match ANY active sale's client.
+    if (fileClient && active.length > 0 && active.every(s => normClient(s.client_name) && normClient(s.client_name) !== fileClient)) {
+      return {
+        match:    null,
+        newCar:   carMatches.length,
+        clientSwitch: true,
+        reason:   `Different client ("${row.client_name}") vs existing active sale(s) → new deal.`,
+      };
+    }
+
+    // Single active match (with same-or-blank client) → genuine update.
+    if (active.length === 1) return { match: active[0] };
+
+    // Multiple active matches on same car + same client → human decides.
+    if (active.length > 1) return { ambiguous: true };
+
+    // Only terminal matches but no active and we fell through (rare) → resell.
+    if (terminal.length > 0) {
+      return { match: null, resellOf: terminal[0], reason: 'Previous cancelled sale on this car.' };
+    }
+  }
+
+  // Car key in file but no car matches at all → other car under this transfer.
+  if (vin || hasYmm) return { match: null, newCar: sales.length, reason: 'Different car than existing sale(s) on this transfer.' };
+
+  // No distinguishing key — only safe when there's exactly one sale to update.
   if (sales.length === 1) return { match: sales[0] };
   return { ambiguous: true };
 }
@@ -394,9 +476,26 @@ function diffSale(row, sale) {
 async function classifyChunk(rows) {
   const index = buildIndex(await getReference());
 
+  // Intra-file reference_no duplicate detection. Two file rows sharing the
+  // same ref means the operator's source data has a bug — we never want to
+  // resolve them to the same DB row silently. Both copies go to unmatched
+  // with a clear reason so the operator can dedupe the spreadsheet.
+  const refCounts = new Map();
+  rows.forEach(r => {
+    const ref = String(r?.reference_no || '').trim().toUpperCase();
+    if (!ref) return;
+    refCounts.set(ref, (refCounts.get(ref) || 0) + 1);
+  });
+  const dupRefs = new Set([...refCounts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+
   const resolved = [], unmatched = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') { unmatched.push({ reason: 'Empty or invalid row' }); continue; }
+    const ref = String(row.reference_no || '').trim();
+    if (ref && dupRefs.has(ref.toUpperCase())) {
+      unmatched.push({ ...row, reason: `Reference No "${ref}" appears more than once in this file. Each sale must have a unique reference_no — fix the spreadsheet.` });
+      continue;
+    }
     const r = resolveRow(row, index);
     if (!r.ok) { unmatched.push({ ...row, reason: r.reason }); continue; }
     resolved.push({ ...row, _r: r });
@@ -491,7 +590,27 @@ async function classifyChunk(rows) {
     if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales already exist on this transfer and the row has no Reference No / VIN / car to tell them apart — add one so the right sale is updated.` }); continue; }
 
     if (!pick.match) {
-      if (pick.newCar) base.match_note = [base.match_note, `Added as a new car (${pick.newCar} other sale(s) already on this transfer).`].filter(Boolean).join(' ');
+      const noteParts = [base.match_note];
+      if (pick.resellOf) {
+        noteParts.push(`♻ ${pick.reason}`);
+        // Hand the original sale's id + key facts to the frontend so the
+        // review screen can render a "Resell of <ref> (status, sale_date)"
+        // badge inline and the confirm step can set is_resell + original_sale_id.
+        base.resell_of = {
+          id:           pick.resellOf.id,
+          reference_no: pick.resellOf.reference_no,
+          status:       pick.resellOf.status,
+          sale_date:    pick.resellOf.sale_date,
+          client_name:  pick.resellOf.client_name,
+          cancelled_at: pick.resellOf.cancellation_date || null,
+        };
+      } else if (pick.clientSwitch) {
+        noteParts.push(`↔ ${pick.reason}`);
+        base.client_switch = true;
+      } else if (pick.newCar) {
+        noteParts.push(`Added as a new car (${pick.newCar} other sale(s) already on this transfer).`);
+      }
+      base.match_note = noteParts.filter(Boolean).join(' ');
       newSales.push({ ...base, transfer_id: transfer.id });
       continue;
     }
@@ -551,6 +670,13 @@ function buildSaleRow(row, batchId) {
     submitted_for_review_at: cs.submitted_for_review_at,
     compliance_reviewed_at:  cs.compliance_reviewed_at,
     upload_batch_id:    batchId,
+    // Resell linkage — set when classifyChunk flagged the row as a resell of
+    // a previously-cancelled sale on the same transfer/car. Manual closer
+    // flow already populates these the same way via the Resell modal.
+    is_resell:          row.resell_of ? true : false,
+    original_sale_id:   row.resell_of?.id || null,
+    resell_intent:      row.resell_of ? (row.resell_intent || 'resell') : null,
+    resell_reason:      row.resell_of ? (row.resell_reason || 'bulk_upload') : null,
   };
 }
 
