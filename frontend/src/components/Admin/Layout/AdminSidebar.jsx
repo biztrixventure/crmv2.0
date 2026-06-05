@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2 } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye } from 'lucide-react';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -54,8 +54,11 @@ const NAV_SECTIONS = [
   {
     label: 'System',
     items: [
-      { id: 'features',       label: 'Feature Flags',  icon: Zap       },
-      { id: 'business-rules', label: 'Business Rules', icon: Settings2 },
+      { id: 'features',         label: 'Feature Flags',   icon: Zap       },
+      { id: 'business-rules',   label: 'Business Rules',  icon: Settings2 },
+      // SuperAdmin-only — managed at navItems level in AdminPanel, so the
+      // filter step below hides it for everyone else automatically.
+      { id: 'readonly-admins',  label: 'Readonly Admins', icon: Eye       },
     ],
   },
 ];

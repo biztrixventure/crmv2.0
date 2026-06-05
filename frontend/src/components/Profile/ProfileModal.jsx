@@ -1,5 +1,7 @@
-import { User, Building2, Shield, Mail, Hash, Briefcase } from 'lucide-react';
+import { useState } from 'react';
+import { User, Building2, Shield, Mail, Hash, Briefcase, Lock, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import Modal from '../UI/Modal';
+import client from '../../api/client';
 
 const ROLE_COLORS = {
   superadmin:         '#6366f1',
@@ -39,6 +41,82 @@ const InfoRow = ({ icon: Icon, label, value }) => {
           style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
         <p className="text-sm font-medium break-all" style={{ color: 'var(--color-text)' }}>{value}</p>
       </div>
+    </div>
+  );
+};
+
+// Self-service password change. Hits PUT /auth/me/password which verifies
+// the current password by attempting a Supabase sign-in, then updates via
+// the admin API. Available to every logged-in user (including superadmin /
+// readonly_admin) since the endpoint is in the auth router, not the user
+// management router that readonlyGuard would block.
+const PasswordSection = ({ user }) => {
+  const [show, setShow]     = useState(false);
+  const [cur, setCur]       = useState('');
+  const [next, setNext]     = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [msg, setMsg]       = useState('');
+  const [ok, setOk]         = useState(false);
+
+  const reset = () => { setCur(''); setNext(''); setConfirm(''); setMsg(''); setOk(false); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setMsg(''); setOk(false);
+    if (!cur || !next) { setMsg('Both fields are required.'); return; }
+    if (next.length < 8) { setMsg('New password must be at least 8 characters.'); return; }
+    if (next !== confirm) { setMsg('Confirmation does not match.'); return; }
+    if (next === cur)    { setMsg('New password must be different from the current one.'); return; }
+    setBusy(true);
+    try {
+      await client.put('auth/me/password', { current_password: cur, new_password: next });
+      setOk(true); setMsg('Password updated.');
+      setCur(''); setNext(''); setConfirm('');
+      setTimeout(() => { setOk(false); setMsg(''); setShow(false); }, 1500);
+    } catch (e) {
+      setMsg(e.response?.data?.error || 'Update failed.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      <button onClick={() => { if (show) reset(); setShow(s => !s); }}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-secondary transition-colors"
+        style={{ background: 'var(--color-bg-secondary)', borderBottom: show ? '1px solid var(--color-border)' : 'none' }}>
+        <span className="flex items-center gap-2 font-bold text-sm" style={{ color: 'var(--color-text)' }}>
+          <Lock size={15} style={{ color: 'var(--color-primary-600)' }} />
+          Change password
+        </span>
+        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{show ? 'Cancel' : 'Open'}</span>
+      </button>
+      {show && (
+        <form onSubmit={submit} className="px-4 py-4 space-y-3">
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>Current password</label>
+            <input type="password" value={cur} onChange={e => setCur(e.target.value)} className="input text-sm w-full" autoComplete="current-password" required />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>New password</label>
+            <input type="password" value={next} onChange={e => setNext(e.target.value)} className="input text-sm w-full" autoComplete="new-password" minLength={8} required />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>Confirm new password</label>
+            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} className="input text-sm w-full" autoComplete="new-password" minLength={8} required />
+          </div>
+          {msg && (
+            <p className="text-xs flex items-center gap-1.5"
+              style={{ color: ok ? 'var(--color-success-700, #047857)' : 'var(--color-error-600, #dc2626)' }}>
+              {ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />} {msg}
+            </p>
+          )}
+          <button type="submit" disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />} Update password
+          </button>
+        </form>
+      )}
     </div>
   );
 };
@@ -96,6 +174,9 @@ const ProfileModal = ({ isOpen, onClose, user }) => {
             <InfoRow icon={Hash}     label="User ID"     value={user?.id} />
           </div>
         </div>
+
+        {/* ── Password change ── */}
+        <PasswordSection user={user} />
 
       </div>
     </Modal>

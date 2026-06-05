@@ -796,41 +796,67 @@ router.put(
       }
       logger.success('UPDATE_PASSWORD', 'Password validation successful');
 
-      // Get target user assignment
-      logger.debug('UPDATE_PASSWORD', 'Fetching target user assignment', { id });
-      const { data: target, error: fetchError } = await supabaseAdmin
+      // Resolve target user. The :id can be EITHER a user_company_roles.id
+      // (legacy callers, the normal case for company-scoped users) OR a
+      // direct auth user_id (superadmin / readonly_admin / anyone without an
+      // active company assignment). We try the assignment lookup first and
+      // fall back to a direct auth.users lookup when no row is found so
+      // superadmin can reset any user's password regardless of assignment.
+      logger.debug('UPDATE_PASSWORD', 'Fetching target user', { id });
+      let targetUserId = null;
+      let targetCompanyId = null;
+      const { data: target } = await supabaseAdmin
         .from("user_company_roles")
         .select("user_id, company_id")
         .eq("id", id)
-        .single();
+        .maybeSingle();
 
-      if (fetchError || !target) {
-        logger.error('UPDATE_PASSWORD', 'User assignment not found', fetchError || new Error('No data returned'));
+      if (target?.user_id) {
+        targetUserId = target.user_id;
+        targetCompanyId = target.company_id;
+        logger.success('UPDATE_PASSWORD', `Resolved via user_company_roles`, { id, user_id: targetUserId, company_id: targetCompanyId });
+      } else if (req.user.role === 'superadmin') {
+        // Superadmin may target a user directly by auth user_id (covers users
+        // without an active assignment — superadmins, readonly_admins, or
+        // anyone in soft-disabled state).
+        try {
+          const { data: auth } = await supabaseAdmin.auth.admin.getUserById(id);
+          if (auth?.user?.id) {
+            targetUserId = auth.user.id;
+            logger.success('UPDATE_PASSWORD', `Resolved via auth.users (superadmin direct)`, { user_id: targetUserId });
+          }
+        } catch (e) { logger.warn('UPDATE_PASSWORD', `auth.users lookup failed: ${e.message}`); }
+      }
+
+      if (!targetUserId) {
+        logger.error('UPDATE_PASSWORD', 'User not found', new Error('No assignment or auth user'));
         return res.status(404).json({ error: "User not found" });
       }
 
-      logger.success('UPDATE_PASSWORD', `Found target user`, { id, user_id: target.user_id, company_id: target.company_id });
-
       // Prevent users from changing their own password via this endpoint
-      if (userId === target.user_id) {
+      if (userId === targetUserId) {
         logger.error('UPDATE_PASSWORD', 'User attempted to change their own password via admin endpoint', new Error('Cannot change own password'));
-        return res.status(403).json({ error: "Use password change form for your own password" });
+        return res.status(403).json({ error: "Use the profile password change form for your own password" });
       }
 
-      // Check permission
-      logger.debug('UPDATE_PASSWORD', 'Checking edit permissions', { userId, company_id: target.company_id, isSuperAdmin: req.user.role === 'superadmin' });
-      const hasPerm = await hasPermission(userId, target.company_id, "edit_user");
-      logger.success('UPDATE_PASSWORD', `Permission check: ${hasPerm}, isSuperAdmin: ${req.user.role === 'superadmin'}`);
-
-      if (req.user.role !== 'superadmin' && !hasPerm) {
-        logger.error('UPDATE_PASSWORD', 'Permission denied', new Error('User lacks edit_user permission'));
-        return res.status(403).json({ error: "You don't have permission to update user passwords" });
+      // Permission: superadmin always allowed; otherwise needs edit_user on
+      // the resolved company. If we resolved via direct auth lookup,
+      // targetCompanyId is null — only superadmin can land here.
+      logger.debug('UPDATE_PASSWORD', 'Checking edit permissions', { userId, company_id: targetCompanyId, isSuperAdmin: req.user.role === 'superadmin' });
+      if (req.user.role !== 'superadmin') {
+        const hasPerm = targetCompanyId
+          ? await hasPermission(userId, targetCompanyId, "edit_user")
+          : false;
+        if (!hasPerm) {
+          logger.error('UPDATE_PASSWORD', 'Permission denied', new Error('User lacks edit_user permission'));
+          return res.status(403).json({ error: "You don't have permission to update user passwords" });
+        }
       }
 
       // Update password in Supabase Auth
-      logger.debug('UPDATE_PASSWORD', 'Updating password in Supabase Auth', { user_id: target.user_id });
+      logger.debug('UPDATE_PASSWORD', 'Updating password in Supabase Auth', { user_id: targetUserId });
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-        target.user_id,
+        targetUserId,
         { password }
       );
 
@@ -839,7 +865,7 @@ router.put(
         return res.status(400).json({ error: updateError.message || "Failed to update password" });
       }
 
-      logger.success('UPDATE_PASSWORD', `Password updated successfully`, { id, user_id: target.user_id });
+      logger.success('UPDATE_PASSWORD', `Password updated successfully`, { id, user_id: targetUserId });
       res.json({ message: "Password updated successfully" });
     } catch (err) {
       logger.error('UPDATE_PASSWORD', 'Unhandled exception', err);
