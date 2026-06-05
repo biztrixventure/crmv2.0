@@ -796,6 +796,13 @@ function normalizeDate(input) {
 }
 
 router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
+  // Wrap the whole handler in an explicit try/catch and return the actual
+  // failure to the client. The default errorHandler buries the message
+  // behind "Internal server error" which makes diagnosing field-shape /
+  // schema / catalog issues impossible from the browser. This is a
+  // compliance-only route (already permission-gated), so leaking the error
+  // text to the operator is acceptable + necessary.
+  try {
   const userId = req.user.id;
   const role   = req.user.role;
   const body   = req.body || {};
@@ -830,11 +837,14 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
 
   const { getConfig } = require('../utils/businessConfig');
   const catalog = await getConfig(null, 'compliance.status_catalog', null);
+  // Defensive: filter out null/undefined entries before .map() — a
+  // malformed catalog row would otherwise throw "Cannot read properties
+  // of null (reading 'enabled')" and 500 the whole request.
   const allowed = Array.isArray(catalog) && catalog.length
-    ? new Set(catalog.filter(s => s.enabled !== false).map(s => s.key))
+    ? new Set(catalog.filter(s => s && s.key && s.enabled !== false).map(s => s.key))
     : new Set(['open','sold','cancelled','follow_up','closed_won','closed_lost','pending_review','needs_revision','compliance_cancelled','chargeback','dispute']);
   if (!allowed.has(new_status)) {
-    return res.status(400).json({ error: `"${new_status}" is not an allowed status.` });
+    return res.status(400).json({ error: `"${new_status}" is not an allowed status. Allowed: ${[...allowed].join(', ')}` });
   }
 
   const ids = updates.map(u => u.id);
@@ -874,7 +884,8 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
       continue;
     }
 
-    if (sale.status === new_status && (!rowDate || sale.cancellation_date === rowDate)) {
+    const existingCancelDate = sale.cancellation_date ?? null;
+    if (sale.status === new_status && (!rowDate || existingCancelDate === rowDate)) {
       skipped.push({ id: sale.id, reason: `Already ${new_status}${rowDate ? ` on ${rowDate}` : ''}` });
       continue;
     }
@@ -924,6 +935,14 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
 
   logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s)`);
   res.json({ updated: results.length, results, skipped });
+  } catch (e) {
+    logger.error('COMPLIANCE_BULK_STATUS', 'Handler threw', e);
+    return res.status(500).json({
+      error: e?.message || 'Bulk status update failed',
+      code:  e?.code  || null,
+      where: e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
+    });
+  }
 }));
 
 module.exports = router;
