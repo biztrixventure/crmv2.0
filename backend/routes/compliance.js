@@ -852,14 +852,24 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
   const fetchCols = () => _hasCancellationDate
     ? 'id, status, edit_history, compliance_note, cancellation_date'
     : 'id, status, edit_history, compliance_note';
-  let { data: rows, error: fetchErr } = await supabaseAdmin
-    .from('sales').select(fetchCols()).in('id', ids);
-  if (fetchErr && looksLikeMissingCancelCol(fetchErr)) {
-    _hasCancellationDate = false;
-    const r2 = await supabaseAdmin.from('sales').select(fetchCols()).in('id', ids);
-    rows = r2.data; fetchErr = r2.error;
+
+  // Chunked SELECT — .in('id', list) embeds every UUID in the URL query
+  // string. 500 × ~37 chars + encoding crosses the ~16KB PostgREST URL
+  // ceiling and shows up as "TypeError: fetch failed" with no useful
+  // .cause. Batch 100 IDs per request — well clear of any proxy limit.
+  const rows = [];
+  const idChunks = chunk(ids, 100);
+  for (const batch of idChunks) {
+    let { data, error } = await supabaseAdmin
+      .from('sales').select(fetchCols()).in('id', batch);
+    if (error && looksLikeMissingCancelCol(error)) {
+      _hasCancellationDate = false;
+      const r2 = await supabaseAdmin.from('sales').select(fetchCols()).in('id', batch);
+      data = r2.data; error = r2.error;
+    }
+    if (error) return res.status(500).json({ error: error.message, code: error.code || null });
+    if (data?.length) rows.push(...data);
   }
-  if (fetchErr) return res.status(500).json({ error: fetchErr.message });
 
   const byId = new Map((rows || []).map(r => [r.id, r]));
   const results = [];
@@ -937,10 +947,17 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
   res.json({ updated: results.length, results, skipped });
   } catch (e) {
     logger.error('COMPLIANCE_BULK_STATUS', 'Handler threw', e);
+    // undici wraps the real failure in e.cause — surface it so "fetch failed"
+    // doesn't hide an ECONNREFUSED / EAI_AGAIN / URL-too-long.
+    const cause = e?.cause;
     return res.status(500).json({
-      error: e?.message || 'Bulk status update failed',
-      code:  e?.code  || null,
-      where: e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
+      error:    e?.message || 'Bulk status update failed',
+      code:     e?.code     || cause?.code     || null,
+      errno:    cause?.errno || null,
+      syscall:  cause?.syscall || null,
+      hostname: cause?.hostname || null,
+      cause:    cause ? (cause.message || String(cause)) : null,
+      where:    e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
     });
   }
 }));
