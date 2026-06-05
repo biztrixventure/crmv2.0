@@ -26,8 +26,10 @@ import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
+import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
+import client from "../api/client";
 
 // ============================================================================
 // AdminPanel — main component
@@ -44,6 +46,25 @@ const AdminPanel = () => {
   const handleLogout = () => { logout(); navigate("/login"); };
 
   const isReadOnly = user?.role === 'readonly_admin';
+
+  // Per-user nav allowlist for readonly_admin. SuperAdmin sees everything;
+  // a readonly_admin's sidebar is narrowed to the IDs listed in
+  // business_config.readonly_admin.nav.<their_uid>. Empty / missing config
+  // = full SA parity (matches the no-config default the manager UI
+  // documents). We fetch directly so this doesn't compete with the
+  // useShellLayout cache used for the per-shell layouts.
+  const [roNavAllow, setRoNavAllow] = useState(null);
+  useEffect(() => {
+    if (!isReadOnly || !user?.id) { setRoNavAllow(null); return; }
+    let cancelled = false;
+    client.get('business-config').then(r => {
+      if (cancelled) return;
+      const cfg = r.data?.config || {};
+      const list = cfg[`readonly_admin.nav.${user.id}`];
+      setRoNavAllow(Array.isArray(list) ? list : null);
+    }).catch(() => setRoNavAllow(null));
+    return () => { cancelled = true; };
+  }, [isReadOnly, user?.id]);
 
   // Allow AdminAnalyticsDashboard quick-action buttons to navigate
   useEffect(() => {
@@ -84,7 +105,15 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "chat",           label: "Chat Control"         }] : []),
     ...(isSAorRO                                       ? [{ id: "features",       label: "Features"             }] : []),
     ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
-  ];
+    // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
+    ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
+  ].filter(item => {
+    // readonly_admin: when a personal allowlist exists, narrow nav to its IDs.
+    // No allowlist (null) = full SA parity (already filtered above). Keep
+    // 'dashboard' always so the user lands somewhere even on a misconfig.
+    if (!isReadOnly || !Array.isArray(roNavAllow)) return true;
+    return item.id === 'dashboard' || roNavAllow.includes(item.id);
+  });
 
   return (
     <div className="min-h-screen bg-bg">
@@ -143,6 +172,7 @@ const AdminPanel = () => {
                   {activeTab === "chat"          && <ChatAdmin />}
                   {activeTab === "features"    && <FeatureFlagsManager />}
                   {activeTab === "business-rules" && <BusinessRulesHub />}
+                  {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
                   <DevCredit />
                 </div>
               );

@@ -21,11 +21,18 @@ const authMiddleware = async (req, res, next) => {
       // They may have rows in user_company_roles from auto-assign; ignore them.
       // Use case-insensitive comparison + check app_metadata.role as fallback.
       const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      const readonlyAdminEmails = (process.env.READONLY_ADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
       const tokenEmail = (token.email || '').toLowerCase();
       if (token.app_metadata?.role === 'superadmin' || superadminEmails.includes(tokenEmail)) {
         userRole = 'superadmin';
         userCompanyId = null;
         logger.info('AUTH_MIDDLEWARE', `System superadmin identified: ${token.email}`);
+      } else if (token.app_metadata?.role === 'readonly_admin' || readonlyAdminEmails.includes(tokenEmail)) {
+        // Env / metadata-driven readonly_admin. No company scope — sees all.
+        // readonlyGuard middleware blocks every write regardless of UI state.
+        userRole = 'readonly_admin';
+        userCompanyId = null;
+        logger.info('AUTH_MIDDLEWARE', `System readonly_admin identified: ${token.email}`);
       } else {
         // Regular users — resolve role from active company assignment
         const { data: assignments, error } = await supabaseAdmin

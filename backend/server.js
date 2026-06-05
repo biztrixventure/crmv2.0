@@ -12,6 +12,7 @@ const { readonlyGuard } = require('./middleware/readonlyGuard');
 // Import routes
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
+const readonlyAdminsRoutes = require('./routes/readonlyAdmins');
 const companiesRoutes = require('./routes/companies');
 const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
@@ -69,6 +70,35 @@ async function syncSuperadminMetadata() {
     }
   } catch (err) {
     console.error('[SUPERADMIN] Metadata sync failed:', err.message);
+  }
+}
+
+// Mirror sync for READONLY_ADMIN_EMAIL. Same JWT-stamp pattern — listed
+// users get app_metadata.role='readonly_admin' so the auth middleware can
+// recognize them without DB lookup. Existing superadmins are NEVER
+// downgraded by this sync; if an email is in BOTH lists, superadmin wins.
+async function syncReadonlyAdminMetadata() {
+  const emails = (process.env.READONLY_ADMIN_EMAIL || '')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (!emails.length) return;
+  const saEmails = new Set(
+    (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  );
+  try {
+    const { data } = await _saForSync.auth.admin.listUsers({ perPage: 1000 });
+    for (const u of (data?.users || [])) {
+      const e = (u.email || '').toLowerCase();
+      if (!emails.includes(e)) continue;
+      if (saEmails.has(e) || u.app_metadata?.role === 'superadmin') continue; // never downgrade
+      if (u.app_metadata?.role !== 'readonly_admin') {
+        await _saForSync.auth.admin.updateUserById(u.id, {
+          app_metadata: { ...u.app_metadata, role: 'readonly_admin' },
+        });
+        console.log(`[READONLY_ADMIN] Stamped app_metadata.role=readonly_admin for ${u.email}`);
+      }
+    }
+  } catch (err) {
+    console.error('[READONLY_ADMIN] Metadata sync failed:', err.message);
   }
 }
 
@@ -194,6 +224,10 @@ app.use('/api/auth', authRoutes);
 // ============================================================================
 
 app.use('/api/users', authMiddleware, readonlyGuard, usersRoutes);
+// SuperAdmin tool — readonly_admin management. The route file itself gates
+// on req.user.role === 'superadmin', and readonlyGuard would 403 any RO
+// caller trying to PUT/POST/DELETE here anyway.
+app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
 app.use('/api/companies', authMiddleware, readonlyGuard, companiesRoutes);
 app.use('/api/roles', authMiddleware, readonlyGuard, rolesRoutes);
 app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
@@ -285,7 +319,8 @@ const { warm: warmAuditCols } = require('./utils/auditColumnGuard');
 
 app.listen(PORT, () => {
   startCallbackScheduler();
-  syncSuperadminMetadata(); // Stamp JWT metadata for superadmins — no-op if already done
+  syncSuperadminMetadata();    // Stamp JWT metadata for superadmins — no-op if already done
+  syncReadonlyAdminMetadata(); // Same for readonly_admin
   warmAuditCols();          // Probe last_modified_by on tracked tables (mig 063)
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
