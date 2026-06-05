@@ -359,6 +359,23 @@ const TERMINAL_CANCEL_STATUSES = new Set([
 // Normalize client name for comparison (case-insensitive, whitespace folded).
 const normClient = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+// Renewal window — if the file row's sale_date is more than this many days
+// AFTER the existing sale's sale_date, treat it as a renewal (NEW SALE)
+// rather than an update. Catches the "auto-warranty 6 / 12 month renewal"
+// pattern on the same car + same client. Made a constant for clarity;
+// future PR will source from business_config.bulk.renewal_window_days.
+const RENEWAL_WINDOW_DAYS = 30;
+
+// Days between two YYYY-MM-DD strings. Returns null when either side is
+// missing or unparseable so the renewal check can't false-fire on bad data.
+function daysBetween(laterStr, earlierStr) {
+  if (!laterStr || !earlierStr) return null;
+  const later   = new Date(String(laterStr).slice(0, 10));
+  const earlier = new Date(String(earlierStr).slice(0, 10));
+  if (isNaN(later) || isNaN(earlier)) return null;
+  return Math.round((later.getTime() - earlier.getTime()) / 86400000);
+}
+
 // Pick which existing sale on the chosen transfer this row updates — tier-based
 // rules so cancelled sales are never overwritten and client switches always
 // produce a new row.
@@ -435,11 +452,57 @@ function pickExistingSale(row, sales) {
       };
     }
 
-    // Single active match (with same-or-blank client) → genuine update.
-    if (active.length === 1) return { match: active[0] };
+    // Single active match (with same-or-blank client) — could be a true
+    // update OR a renewal months later. Decide by date gap.
+    if (active.length === 1) {
+      const existing = active[0];
+      const gap = daysBetween(row.sale_date, existing.sale_date);
+      // Renewal: file's sale_date is meaningfully AFTER the active sale's
+      // sale_date → treat as a new deal (auto-warranty 6 / 12 / 24 mo
+      // renewal pattern). Same car + same client + later date = next term.
+      if (gap !== null && gap > RENEWAL_WINDOW_DAYS) {
+        return {
+          match:    null,
+          resellOf: existing,
+          renewal:  true,
+          reason:   `Same car + same client but file's sale_date (${String(row.sale_date).slice(0,10)}) is ${gap} days after the active sale (${existing.reference_no || existing.id.slice(0,8)}, ${String(existing.sale_date).slice(0,10)}) → treated as renewal.`,
+        };
+      }
+      // File's date is earlier OR within the renewal window → genuine update.
+      return { match: existing };
+    }
 
-    // Multiple active matches on same car + same client → human decides.
-    if (active.length > 1) return { ambiguous: true };
+    // Multiple active matches on same car + same client — pick the closest
+    // by sale_date if file carries one, else ambiguous.
+    if (active.length > 1) {
+      if (row.sale_date) {
+        const fileDate = String(row.sale_date).slice(0, 10);
+        // Sort by absolute date distance from the file row. The closest one
+        // is the most likely "this is the row to update". If even the
+        // closest is past the renewal window, treat as renewal off the
+        // most-recent one.
+        const sorted = active.slice().sort((a, b) => {
+          const da = Math.abs(daysBetween(fileDate, a.sale_date) ?? 99999);
+          const db = Math.abs(daysBetween(fileDate, b.sale_date) ?? 99999);
+          return da - db;
+        });
+        const closest = sorted[0];
+        const closestGap = daysBetween(fileDate, closest.sale_date);
+        if (closestGap !== null && closestGap > RENEWAL_WINDOW_DAYS) {
+          const mostRecent = active.slice().sort((a, b) =>
+            String(b.sale_date || b.created_at || '').localeCompare(String(a.sale_date || a.created_at || ''))
+          )[0];
+          return {
+            match:    null,
+            resellOf: mostRecent,
+            renewal:  true,
+            reason:   `Same car + same client; file's sale_date (${fileDate}) is ${closestGap} days past the nearest active sale → renewal.`,
+          };
+        }
+        return { match: closest };
+      }
+      return { ambiguous: true };
+    }
 
     // Only terminal matches but no active and we fell through (rare) → resell.
     if (terminal.length > 0) {
@@ -592,7 +655,7 @@ async function classifyChunk(rows) {
     if (!pick.match) {
       const noteParts = [base.match_note];
       if (pick.resellOf) {
-        noteParts.push(`♻ ${pick.reason}`);
+        noteParts.push(pick.renewal ? `🔁 ${pick.reason}` : `♻ ${pick.reason}`);
         // Hand the original sale's id + key facts to the frontend so the
         // review screen can render a "Resell of <ref> (status, sale_date)"
         // badge inline and the confirm step can set is_resell + original_sale_id.
@@ -604,6 +667,10 @@ async function classifyChunk(rows) {
           client_name:  pick.resellOf.client_name,
           cancelled_at: pick.resellOf.cancellation_date || null,
         };
+        if (pick.renewal) {
+          base.is_renewal    = true;
+          base.resell_intent = 'renewal';
+        }
       } else if (pick.clientSwitch) {
         noteParts.push(`↔ ${pick.reason}`);
         base.client_switch = true;
