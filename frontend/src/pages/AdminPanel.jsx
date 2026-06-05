@@ -55,36 +55,35 @@ const AdminPanel = () => {
   // Tell the assistant which section is open so its guidance is section-specific.
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
 
+  // readonly_admin = SuperAdmin replica without writes. UI shows the same
+  // tabs the superadmin sees; the backend readonlyGuard (middleware) 403s
+  // every POST/PUT/DELETE so any visible Save/Delete button is a no-op.
+  // Companies inside each per-page surface respect isReadOnly individually
+  // (forms/business-rules render disabled inputs, etc).
+  const isSAorRO = user?.role === 'superadmin' || isReadOnly;
   const navItems = [
     { id: "dashboard",   label: "Dashboard"    },
     { id: "calendar",    label: "Calendar"     },
-    // Superadmin cross-company shortcuts → ComplianceShell (which lists every
-    // company's sales/transfers/callbacks). Backend already grants full CRUD.
-    ...(user?.role === 'superadmin' ? [
+    // Cross-company shortcuts → ComplianceShell. RO sees them too (no writes).
+    ...(isSAorRO ? [
       { id: "cc-sales",     label: "All Sales"     },
       { id: "cc-transfers", label: "All Transfers" },
       { id: "cc-callbacks", label: "All Callbacks" },
     ] : []),
-    ...(!isReadOnly                                   ? [{ id: "companies",   label: "Companies"          }] : []),
-    ...(!isReadOnly && hasPermission('manage_forms')  ? [{ id: "forms",       label: "Form Builder"       }] : []),
-    // Vehicles + Clients & Plans live inside Form Builder's internal sidebar
-    // now. Direct tab IDs still rendered below so any saved deep link / event
-    // dispatch ('admin-nav') with those values keeps working.
-    ...(hasPermission('search_sales')                 ? [{ id: "sale-search", label: "Lead Search"        }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "numbers",     label: "Numbers Intelligence" }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "data-analyzer", label: "Data Analyzer"      }] : []),
-    ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "faqs", label: "FAQs" }] : []),
-    ...((user?.role === 'superadmin' || hasPermission('manage_faqs')) ? [{ id: "scripts", label: "Scripts" }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "bulk-upload", label: "Bulk Upload" }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "announcements", label: "Announcements" }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "marquee",       label: "Marquee"       }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "spiff",         label: "SPIFF"         }] : []),
-    // Chat Control stays visible for readonly_admin per spec — view-only is
-    // enforced by the backend readonlyGuard, so the moderation panel will
-    // 403 any ban/unban POST without us hiding the screen.
-    ...(user?.role === 'superadmin' || isReadOnly      ? [{ id: "chat",          label: "Chat Control"  }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "features",    label: "Features"           }] : []),
-    ...(user?.role === 'superadmin'                   ? [{ id: "business-rules", label: "Business Rules"  }] : []),
+    ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
+    ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
+    ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
+    ...(isSAorRO                                       ? [{ id: "numbers",        label: "Numbers Intelligence" }] : []),
+    ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
+    ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "faqs",           label: "FAQs"                 }] : []),
+    ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "scripts",        label: "Scripts"              }] : []),
+    ...(isSAorRO                                       ? [{ id: "bulk-upload",    label: "Bulk Upload"          }] : []),
+    ...(isSAorRO                                       ? [{ id: "announcements",  label: "Announcements"        }] : []),
+    ...(isSAorRO                                       ? [{ id: "marquee",        label: "Marquee"              }] : []),
+    ...(isSAorRO                                       ? [{ id: "spiff",          label: "SPIFF"                }] : []),
+    ...(isSAorRO                                       ? [{ id: "chat",           label: "Chat Control"         }] : []),
+    ...(isSAorRO                                       ? [{ id: "features",       label: "Features"             }] : []),
+    ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
   ];
 
   return (
