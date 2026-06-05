@@ -131,6 +131,7 @@ router.post(
       // SUPERADMIN check FIRST — env-level superadmins bypass company role lookup.
       // Case-insensitive + check app_metadata.role (set by startup sync).
       const superadminEmails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      const readonlyEmails = (process.env.READONLY_ADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
       const loginEmail = (data.user.email || '').toLowerCase();
       if (data.user.app_metadata?.role === 'superadmin' || superadminEmails.includes(loginEmail)) {
         const [{ data: allPerms }, { data: saProfile }] = await Promise.all([
@@ -149,6 +150,37 @@ router.post(
             company_name: null,
             first_name: saProfile?.first_name,
             last_name: saProfile?.last_name,
+            permissions: (allPerms || []).map(p => p.name),
+          },
+        });
+      }
+
+      // READONLY_ADMIN — same fast-path as superadmin. They don't get a
+      // user_company_roles row (they audit cross-company), so without
+      // this branch the assignment lookup below 401s "User not assigned
+      // to any company" and the invite-set password appears broken.
+      // Recognized via app_metadata.role (stamped on invite + by
+      // syncReadonlyAdminMetadata on boot) OR the env list.
+      if (data.user.app_metadata?.role === 'readonly_admin' || readonlyEmails.includes(loginEmail)) {
+        const [{ data: allPerms }, { data: roProfile }] = await Promise.all([
+          supabaseAdmin.from('permissions').select('name'),
+          supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', data.user.id).single(),
+        ]);
+        return res.json({
+          token:         data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          user: {
+            id: data.user.id,
+            email: data.user.email,
+            role: 'readonly_admin',
+            role_name: 'Read-only Admin',
+            company_id: null,
+            company_name: null,
+            first_name: roProfile?.first_name,
+            last_name: roProfile?.last_name,
+            // Hand them every permission name so hasPermission() checks
+            // never hide a surface from them. readonlyGuard middleware
+            // still 403s every write on the backend regardless of UI.
             permissions: (allPerms || []).map(p => p.name),
           },
         });
