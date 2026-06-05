@@ -623,8 +623,21 @@ router.put(
       }
     }
 
-    const { data: updated, error: updateError } = await supabaseAdmin
+    let { data: updated, error: updateError } = await supabaseAdmin
       .from('sales').update(updates).eq('id', id).select().single();
+
+    // If sales.cancellation_date doesn't exist yet (mig 075 not applied),
+    // drop it from the patch and retry once so the rest of the edit still
+    // persists. The 42703 code or "cancellation_date does not exist"
+    // message both indicate the missing column.
+    if (updateError && 'cancellation_date' in updates && (
+      updateError.code === '42703' ||
+      /cancellation_date/i.test(String(updateError.message || ''))
+    )) {
+      const { cancellation_date, ...withoutCancel } = updates;
+      const r2 = await supabaseAdmin.from('sales').update(withoutCancel).eq('id', id).select().single();
+      updated = r2.data; updateError = r2.error;
+    }
 
     if (updateError) {
       logger.error('UPDATE_SALE', 'Update failed', updateError);

@@ -632,6 +632,19 @@ const CANCEL_LIKE_STATUSES = new Set([
   'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute',
 ]);
 
+// Module-level guard: tracks whether sales.cancellation_date has been seen.
+// PostgREST returns code 42703 / message contains "cancellation_date" when
+// the column is missing (mig 075 not yet applied). We flip this flag and
+// stop selecting/writing the column until the process restarts. Restart
+// after applying the migration re-probes on the first read.
+let _hasCancellationDate = true;
+const looksLikeMissingCancelCol = (e) =>
+  e && typeof e === 'object' && (
+    e.code === '42703' ||
+    /cancellation_date/i.test(String(e.message || '')) ||
+    /column.*does not exist/i.test(String(e.message || ''))
+  );
+
 // Strip characters that PostgREST .in() and .or() treat as syntax. We never
 // permit them inside ref/policy strings (they're not valid identifiers in
 // practice) so dropping them is safer than escaping and avoids 400s caused
@@ -662,7 +675,9 @@ router.post('/sales/bulk-search', asyncHandler(async (req, res) => {
     else { seen.add(k); refs.push(r); }
   }
 
-  const SELECT_COLS = 'id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id, cancellation_date';
+  const SELECT_COLS = _hasCancellationDate
+    ? 'id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id, cancellation_date'
+    : 'id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id';
   const chunks = chunk(refs, 50);
   const saleById = new Map();
 
@@ -677,8 +692,20 @@ router.post('/sales/bulk-search', asyncHandler(async (req, res) => {
       const refOr = batch.map(r => `reference_no.ilike.${r}`).join(',');
       if (refOr) {
         const { data, error } = await supabaseAdmin.from('sales').select(SELECT_COLS).or(refOr);
-        if (error) logger.warn('BULK_SEARCH_REF', error.message);
-        (data || []).forEach(r => saleById.set(r.id, r));
+        if (error) {
+          if (looksLikeMissingCancelCol(error)) {
+            _hasCancellationDate = false;
+            // Retry without the column.
+            const fallbackCols = 'id, reference_no, status, customer_name, customer_phone, sale_date, monthly_payment, company_id, fronter_id, closer_id, plan, form_data, compliance_note, edit_history, transfer_id';
+            const r2 = await supabaseAdmin.from('sales').select(fallbackCols).or(refOr);
+            if (r2.error) logger.warn('BULK_SEARCH_REF', r2.error.message);
+            (r2.data || []).forEach(r => saleById.set(r.id, r));
+          } else {
+            logger.warn('BULK_SEARCH_REF', error.message);
+          }
+        } else {
+          (data || []).forEach(r => saleById.set(r.id, r));
+        }
       }
 
       // JSON-key matches — one .or() per JSON key so the query stays in a
@@ -812,8 +839,16 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
 
   const ids = updates.map(u => u.id);
   const now = new Date().toISOString();
-  const { data: rows, error: fetchErr } = await supabaseAdmin
-    .from('sales').select('id, status, edit_history, compliance_note, cancellation_date').in('id', ids);
+  const fetchCols = () => _hasCancellationDate
+    ? 'id, status, edit_history, compliance_note, cancellation_date'
+    : 'id, status, edit_history, compliance_note';
+  let { data: rows, error: fetchErr } = await supabaseAdmin
+    .from('sales').select(fetchCols()).in('id', ids);
+  if (fetchErr && looksLikeMissingCancelCol(fetchErr)) {
+    _hasCancellationDate = false;
+    const r2 = await supabaseAdmin.from('sales').select(fetchCols()).in('id', ids);
+    rows = r2.data; fetchErr = r2.error;
+  }
   if (fetchErr) return res.status(500).json({ error: fetchErr.message });
 
   const byId = new Map((rows || []).map(r => [r.id, r]));
@@ -869,14 +904,22 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
     };
     // cancellation_date semantics: write it when the status is cancel-like
     // OR when the caller explicitly sent one (so admins can backfill).
-    if (isCancelLike || rowDate) patch.cancellation_date = rowDate;
+    if ((isCancelLike || rowDate) && _hasCancellationDate) patch.cancellation_date = rowDate;
     if (['closed_won', 'closed_lost', 'cancelled', 'compliance_cancelled', 'needs_revision', 'chargeback', 'dispute'].includes(new_status)) {
       patch.compliance_reviewed_by = userId;
       patch.compliance_reviewed_at = now;
     }
-    const { error: updateErr } = await supabaseAdmin.from('sales').update(patch).eq('id', sale.id);
+    let { error: updateErr } = await supabaseAdmin.from('sales').update(patch).eq('id', sale.id);
+    if (updateErr && looksLikeMissingCancelCol(updateErr) && 'cancellation_date' in patch) {
+      // Race: column was present at SELECT but missing here (or schema cache
+      // stale). Strip it and retry once so the rest of the patch still lands.
+      _hasCancellationDate = false;
+      const { cancellation_date, ...patchWithout } = patch;
+      const r2 = await supabaseAdmin.from('sales').update(patchWithout).eq('id', sale.id);
+      updateErr = r2.error;
+    }
     if (updateErr) { skipped.push({ id: sale.id, reason: updateErr.message }); continue; }
-    results.push({ id: sale.id, previous_status: sale.status, new_status, cancellation_date: rowDate });
+    results.push({ id: sale.id, previous_status: sale.status, new_status, cancellation_date: _hasCancellationDate ? rowDate : null });
   }
 
   logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s)`);
