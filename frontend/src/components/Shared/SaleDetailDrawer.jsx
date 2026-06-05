@@ -62,7 +62,7 @@ const Section = ({ title, children }) => (
 );
 
 export default function SaleDetailDrawer({ sale, onClose, onResold }) {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections, isFieldVisible } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
@@ -82,7 +82,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const closerSide = ['closer', 'closer_manager', 'company_admin', 'operations_manager', 'compliance_manager', 'superadmin', 'readonly_admin'].includes(user?.role);
   const fallback = ['cancelled', 'compliance_cancelled', 'closed_won', 'sold', 'closed_lost', 'expired'];
   const eligible = (enabledStatuses ?? fallback).includes(sale.status);
-  const showResell = closerSide && eligible && !sale.is_resell; // can't resell a resell row directly — use the new sale instead
+  const showResell = !isReadOnly && closerSide && eligible && !sale.is_resell; // can't resell a resell row directly — use the new sale instead
 
   const fd = sale.form_data || {};
   // Same safe filter the transfer drawer uses — object values never leak.
@@ -219,7 +219,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                   </Section>
                 );
               case 'financial':
-                if (!hasPermission('view_financial_data')) return null;
+                if (!hasPermission('view_financial_data') || !roFlag('view_financial_data')) return null;
                 return (
                   <Section key="financial" title={s.label || 'Financial'}>
                     {isFieldVisible('financial', 'monthly_payment') && sale.monthly_payment && (
@@ -282,8 +282,8 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
             }
           })}
 
-          {/* Audit trail — gated by layout config */}
-          {sections.find(s => s.id === 'audit')?.visible && hist.length > 0 && (
+          {/* Audit trail — gated by layout config + readonly_admin flag */}
+          {sections.find(s => s.id === 'audit')?.visible && hist.length > 0 && roFlag('view_audit_history') && (
             <div className="mb-5">
               <p className="text-xs font-bold uppercase tracking-widest mb-2"
                 style={{ color: 'var(--color-primary-600)' }}>Audit Trail</p>

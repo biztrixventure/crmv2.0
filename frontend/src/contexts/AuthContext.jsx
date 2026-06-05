@@ -140,9 +140,38 @@ export const AuthProvider = ({ children }) => {
   // server-side, so a hidden button can't be re-enabled via devtools.
   const isReadOnly = user?.role === 'readonly_admin';
 
+  // Per-user feature flags for a readonly_admin (managed by SuperAdmin in
+  // the Readonly Admins page). Loaded once after login; falls back to "all
+  // permissive" so a fresh deploy never accidentally locks down a screen.
+  // Helpers expose the same API for non-RO users too so call-sites can
+  // call without role-branching: roFlag('view_financial_data') === true
+  // for superadmin / closer / fronter / etc.
+  const [roFlags, setRoFlags] = useState(null);
+  useEffect(() => {
+    if (!isReadOnly || !user?.id) { setRoFlags(null); return; }
+    let cancelled = false;
+    client.get('business-config').then(r => {
+      if (cancelled) return;
+      const v = r.data?.config?.[`readonly_admin.flags.${user.id}`];
+      setRoFlags(v && typeof v === 'object' ? v : {});
+    }).catch(() => setRoFlags({}));
+    return () => { cancelled = true; };
+  }, [isReadOnly, user?.id]);
+
+  // roFlag(key) — returns the boolean value of a readonly_admin flag.
+  // For non-readonly users always returns true (the flag is irrelevant).
+  // Missing keys default to true so adding a new gate never silently
+  // hides surfaces from existing RO users until the SuperAdmin reviews it.
+  const roFlag = useCallback((key) => {
+    if (!isReadOnly) return true;
+    if (!roFlags) return true;
+    return roFlags[key] !== false;
+  }, [isReadOnly, roFlags]);
+
   return (
     <AuthContext.Provider value={{
       user, token, login, logout, updateUser, hasPermission, isReadOnly,
+      roFlags, roFlag,
       isRefreshing, isAuthenticated: !!user && !!token,
     }}>
       {children}

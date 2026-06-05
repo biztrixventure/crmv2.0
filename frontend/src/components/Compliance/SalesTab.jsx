@@ -18,7 +18,7 @@ import {
 } from './shared';
 
 const SalesTab = ({ companyList, initCompany = '' }) => {
-  const { user } = useAuth();
+  const { user, isReadOnly } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
   // Workflow drives the dropdowns, labels, and badge colors. labelOf/badgeOf
   // gracefully fall back to a humanized key / 'secondary' so existing records
@@ -275,24 +275,28 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {s.status === 'pending_review' ? (
-                            <>
-                              <button onClick={() => approve(s)} disabled={approving === s.id}
-                                className="px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
-                                style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
-                                {approving === s.id ? '…' : 'Approve'}
-                              </button>
-                              <button onClick={() => openReturn(s)}
-                                className="px-2.5 py-1 rounded-lg text-xs font-bold hover:opacity-90"
-                                style={{ color: '#d97706', border: '1px solid #fbbf24', backgroundColor: '#fffbeb' }}>
-                                Return
-                              </button>
-                            </>
+                            !isReadOnly && (
+                              <>
+                                <button onClick={() => approve(s)} disabled={approving === s.id}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
+                                  style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+                                  {approving === s.id ? '…' : 'Approve'}
+                                </button>
+                                <button onClick={() => openReturn(s)}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-bold hover:opacity-90"
+                                  style={{ color: '#d97706', border: '1px solid #fbbf24', backgroundColor: '#fffbeb' }}>
+                                  Return
+                                </button>
+                              </>
+                            )
                           ) : (
-                            <button onClick={() => openEdit(s)}
-                              className="px-2.5 py-1 rounded-lg text-xs font-bold text-white hover:opacity-90"
-                              style={{ background: 'var(--gradient-sidebar)' }}>
-                              Update
-                            </button>
+                            !isReadOnly && (
+                              <button onClick={() => openEdit(s)}
+                                className="px-2.5 py-1 rounded-lg text-xs font-bold text-white hover:opacity-90"
+                                style={{ background: 'var(--gradient-sidebar)' }}>
+                                Update
+                              </button>
+                            )
                           )}
                           {Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
                             <button onClick={() => setExpanded(expanded === s.id ? null : s.id)}
@@ -303,18 +307,22 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                           {/* Compliance field-level edit — opens SaleModal pre-filled.
                               Lives next to View so it's discoverable without
                               cluttering the workflow buttons (Approve/Return/Update). */}
-                          <button onClick={() => setEditFieldsTarget(s)} className="px-2 py-1 rounded-lg text-xs font-bold"
-                            style={{ color: 'var(--color-primary-700)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
-                            Edit
-                          </button>
+                          {!isReadOnly && (
+                            <button onClick={() => setEditFieldsTarget(s)} className="px-2 py-1 rounded-lg text-xs font-bold"
+                              style={{ color: 'var(--color-primary-700)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
+                              Edit
+                            </button>
+                          )}
                           <button onClick={() => setDetailSale(s)} className="p-1 rounded"
                             style={{ color: 'var(--color-primary-600)' }}>
                             <Eye size={14} />
                           </button>
-                          <button onClick={() => setDeleteTarget(s)} className="p-1 rounded"
-                            style={{ color: '#ef4444' }}>
-                            <Trash2 size={13} />
-                          </button>
+                          {!isReadOnly && (
+                            <button onClick={() => setDeleteTarget(s)} className="p-1 rounded"
+                              style={{ color: '#ef4444' }}>
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

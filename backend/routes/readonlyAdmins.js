@@ -35,7 +35,28 @@ router.use((req, res, next) => {
   next();
 });
 
-const NAV_KEY = (uid) => `readonly_admin.nav.${uid}`;
+const NAV_KEY   = (uid) => `readonly_admin.nav.${uid}`;
+const FLAGS_KEY = (uid) => `readonly_admin.flags.${uid}`;
+
+// Defaults — every flag visible to the operator in the manager UI, all
+// permissive so a freshly-created RO sees what the SuperAdmin would.
+// The flag keys are checked from the frontend AuthContext + helpers.
+const DEFAULT_FLAGS = {
+  view_financial_data: true,   // monthly_payment / down_payment columns
+  view_pii:            true,   // customer phone / email / full address
+  can_export:          true,   // Export buttons (CSV / Excel)
+  view_audit_history:  true,   // edit_history reveal on drawers
+};
+const VALID_FLAG_KEYS = new Set(Object.keys(DEFAULT_FLAGS));
+function sanitizeFlags(input) {
+  const out = { ...DEFAULT_FLAGS };
+  if (input && typeof input === 'object') {
+    for (const [k, v] of Object.entries(input)) {
+      if (VALID_FLAG_KEYS.has(k)) out[k] = !!v;
+    }
+  }
+  return out;
+}
 
 // Resolve the env list of readonly admin emails so the list endpoint can
 // distinguish env-stamped from DB-assigned. Env users can't be revoked from
@@ -67,11 +88,16 @@ router.get('/', asyncHandler(async (req, res) => {
     (ucr || []).forEach(r => assignedUserIds.add(r.user_id));
   }
 
-  // Pull every nav-allowlist row in one shot so per-user enrichment is O(1).
+  // Pull every nav-allowlist + flags row in one shot.
   const { data: cfgRows } = await supabaseAdmin
     .from('business_config').select('key, value')
-    .like('key', 'readonly_admin.nav.%');
-  const navByUserId = new Map((cfgRows || []).map(r => [r.key.replace('readonly_admin.nav.', ''), r.value]));
+    .or('key.like.readonly_admin.nav.%,key.like.readonly_admin.flags.%');
+  const navByUserId = new Map();
+  const flagsByUserId = new Map();
+  (cfgRows || []).forEach(r => {
+    if (r.key.startsWith('readonly_admin.nav.'))   navByUserId.set(r.key.slice('readonly_admin.nav.'.length), r.value);
+    if (r.key.startsWith('readonly_admin.flags.')) flagsByUserId.set(r.key.slice('readonly_admin.flags.'.length), r.value);
+  });
 
   const users = (authData?.users || []).filter(u => {
     const e = (u.email || '').toLowerCase();
@@ -100,7 +126,8 @@ router.get('/', asyncHandler(async (req, res) => {
       via_env:      envSet.has(e),
       via_metadata: u.app_metadata?.role === 'readonly_admin',
       via_role:     assignedUserIds.has(u.id),
-      nav_allowed:  navByUserId.get(u.id) || null,   // null = full SA parity
+      nav_allowed:  navByUserId.get(u.id) || null,           // null = full SA parity
+      flags:        sanitizeFlags(flagsByUserId.get(u.id)),  // merged with defaults
     };
   });
 
@@ -125,35 +152,69 @@ router.put('/:userId/nav', asyncHandler(async (req, res) => {
   res.json({ user_id: userId, nav_allowed: clean });
 }));
 
+router.put('/:userId/flags', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const clean = sanitizeFlags(req.body?.flags || req.body);
+  const { error } = await supabaseAdmin.from('business_config').upsert({
+    scope: 'global', key: FLAGS_KEY(userId), value: clean,
+    updated_by: req.user.id, updated_at: new Date().toISOString(),
+  }, { onConflict: 'scope,key' });
+  if (error) return res.status(500).json({ error: error.message });
+  logger.success('READONLY_ADMIN_FLAGS', `Updated flags for ${userId}`);
+  res.json({ user_id: userId, flags: clean });
+}));
+
 router.post('/', asyncHandler(async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const password = String(req.body?.password || '').trim();
+  const email      = String(req.body?.email || '').trim().toLowerCase();
+  const password   = String(req.body?.password || '').trim();
   const first_name = String(req.body?.first_name || '').trim();
   const last_name  = String(req.body?.last_name || '').trim();
-  const allowed = Array.isArray(req.body?.allowed) ? req.body.allowed : null;
-  if (!email)            return res.status(400).json({ error: 'email is required' });
-  if (password.length < 8) return res.status(400).json({ error: 'password must be at least 8 chars' });
+  const allowed    = Array.isArray(req.body?.allowed) ? req.body.allowed : null;
+  const flags      = req.body?.flags ? sanitizeFlags(req.body.flags) : null;
+  // send_invite=true → use inviteUserByEmail so Supabase sends the welcome
+  // email with a magic link to set their password. send_invite=false (or
+  // missing) → use createUser with the supplied password (no email sent
+  // because email_confirm=true short-circuits Supabase's confirmation).
+  const sendInvite = req.body?.send_invite === true;
 
-  // Create auth user (already-existing email returns 422 from Supabase — we
-  // pass that back so the operator can use the existing user instead).
-  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-    email, password, email_confirm: true,
-    user_metadata: { first_name, last_name },
-    app_metadata:  { role: 'readonly_admin' },
-  });
-  if (createErr) return res.status(400).json({ error: createErr.message });
+  if (!email) return res.status(400).json({ error: 'email is required' });
+  if (!sendInvite && password.length < 8) {
+    return res.status(400).json({ error: 'password must be at least 8 chars (or set send_invite=true to email a link)' });
+  }
 
-  const userId = created.user?.id;
-  if (!userId) return res.status(500).json({ error: 'User created but no id returned.' });
+  let userId;
+  if (sendInvite) {
+    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: { first_name, last_name, role: 'readonly_admin' },
+    });
+    if (inviteErr) return res.status(400).json({ error: inviteErr.message });
+    userId = invited.user?.id;
+    if (!userId) return res.status(500).json({ error: 'Invite sent but no user id returned.' });
+    // Invite doesn't carry app_metadata; stamp the role on the returned id.
+    try {
+      await supabaseAdmin.auth.admin.updateUserById(userId, {
+        app_metadata: { ...(invited.user?.app_metadata || {}), role: 'readonly_admin' },
+      });
+    } catch (e) { logger.warn('READONLY_ADMIN_CREATE', `metadata stamp on invite failed: ${e.message}`); }
+  } else {
+    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email, password, email_confirm: true,
+      user_metadata: { first_name, last_name },
+      app_metadata:  { role: 'readonly_admin' },
+    });
+    if (createErr) return res.status(400).json({ error: createErr.message });
+    userId = created.user?.id;
+    if (!userId) return res.status(500).json({ error: 'User created but no id returned.' });
+  }
 
-  // Stamp profile row so name shows in lists. Non-fatal.
+  // Profile row for the user-list display. Non-fatal.
   try {
     await supabaseAdmin.from('user_profiles').upsert({
       user_id: userId, first_name, last_name,
     }, { onConflict: 'user_id' });
   } catch { /* ignore */ }
 
-  // Initial nav allowlist if provided.
+  // Initial nav allowlist + flags.
   if (allowed && allowed.length) {
     const clean = [...new Set(allowed.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))].slice(0, 64);
     await supabaseAdmin.from('business_config').upsert({
@@ -161,43 +222,70 @@ router.post('/', asyncHandler(async (req, res) => {
       updated_by: req.user.id, updated_at: new Date().toISOString(),
     }, { onConflict: 'scope,key' });
   }
+  if (flags) {
+    await supabaseAdmin.from('business_config').upsert({
+      scope: 'global', key: FLAGS_KEY(userId), value: flags,
+      updated_by: req.user.id, updated_at: new Date().toISOString(),
+    }, { onConflict: 'scope,key' });
+  }
 
-  logger.success('READONLY_ADMIN_CREATE', `Created readonly_admin ${email} (${userId})`);
-  res.status(201).json({ user_id: userId, email });
+  logger.success('READONLY_ADMIN_CREATE', `Created readonly_admin ${email} (${userId}) via ${sendInvite ? 'invite' : 'password'}`);
+  res.status(201).json({ user_id: userId, email, invited: sendInvite });
 }));
 
 router.delete('/:userId', asyncHandler(async (req, res) => {
   const userId = req.params.userId;
+  // ?permanent=true → wipe the auth user entirely (cascades user_profiles
+  // via FK; business_config keys cleaned up explicitly below). Default
+  // (no flag) only revokes the readonly_admin grant so re-grant is cheap.
+  const permanent = String(req.query?.permanent || '').toLowerCase() === 'true';
 
-  // Strip the metadata role first so the JWT stops treating them as RO on
-  // their next token refresh. Env-stamped users will be re-stamped on
-  // server restart — operator must remove the email from env too.
-  try {
-    const { data: u } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (u?.user) {
-      const meta = { ...(u.user.app_metadata || {}) };
-      if (meta.role === 'readonly_admin') {
-        delete meta.role;
-        await supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: meta });
+  if (!permanent) {
+    // Soft revoke: strip metadata role + deactivate role assignments.
+    try {
+      const { data: u } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (u?.user) {
+        const meta = { ...(u.user.app_metadata || {}) };
+        if (meta.role === 'readonly_admin') {
+          delete meta.role;
+          await supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: meta });
+        }
       }
-    }
-  } catch (err) { logger.warn('READONLY_ADMIN_REVOKE', `metadata strip failed: ${err.message}`); }
+    } catch (err) { logger.warn('READONLY_ADMIN_REVOKE', `metadata strip failed: ${err.message}`); }
 
-  // Deactivate any user_company_roles row tied to a readonly_admin custom_role.
+    const { data: roles } = await supabaseAdmin
+      .from('custom_roles').select('id').eq('level', 'readonly_admin');
+    if (roles?.length) {
+      await supabaseAdmin.from('user_company_roles')
+        .update({ is_active: false })
+        .eq('user_id', userId).in('role_id', roles.map(r => r.id));
+    }
+    await supabaseAdmin.from('business_config').delete()
+      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId)]);
+    logger.success('READONLY_ADMIN_REVOKE', `Soft-revoked readonly_admin from ${userId}`);
+    return res.json({ user_id: userId, revoked: true, permanent: false });
+  }
+
+  // Permanent: wipe config + delete auth user.
+  await supabaseAdmin.from('business_config').delete()
+    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId)]);
+
+  // Best-effort deactivate role assignments first so any FK on
+  // user_company_roles → auth.users doesn't block the delete.
   const { data: roles } = await supabaseAdmin
     .from('custom_roles').select('id').eq('level', 'readonly_admin');
   if (roles?.length) {
-    await supabaseAdmin.from('user_company_roles')
-      .update({ is_active: false })
+    await supabaseAdmin.from('user_company_roles').delete()
       .eq('user_id', userId).in('role_id', roles.map(r => r.id));
   }
 
-  // Drop nav allowlist so a future re-grant starts clean.
-  await supabaseAdmin.from('business_config')
-    .delete().eq('scope', 'global').eq('key', NAV_KEY(userId));
-
-  logger.success('READONLY_ADMIN_REVOKE', `Revoked readonly_admin from ${userId}`);
-  res.json({ user_id: userId, revoked: true });
+  const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
+  if (delErr) {
+    logger.error('READONLY_ADMIN_DELETE', `auth.admin.deleteUser failed: ${delErr.message}`);
+    return res.status(500).json({ error: delErr.message });
+  }
+  logger.success('READONLY_ADMIN_DELETE', `PERMANENTLY deleted readonly_admin ${userId}`);
+  res.json({ user_id: userId, revoked: true, permanent: true });
 }));
 
 module.exports = router;

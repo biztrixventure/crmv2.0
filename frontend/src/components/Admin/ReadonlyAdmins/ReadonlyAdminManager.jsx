@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Shield, Plus, Trash2, Save, Check, X, RotateCcw, AlertTriangle, Mail, User as UserIcon, Eye, EyeOff, Info, Lock,
+  Shield, Plus, Trash2, Save, Check, X, RotateCcw, AlertTriangle, Mail, User as UserIcon, Eye, EyeOff, Info, Lock, Send, Skull, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import client from '../../../api/client';
 
@@ -52,6 +52,17 @@ const GROUP_LABEL = {
 };
 const DEFAULT_ALLOWED = TAB_CATALOG.filter(t => t.default).map(t => t.id);
 
+// Granular permission flags. Kept in sync with the backend DEFAULT_FLAGS
+// constant in routes/readonlyAdmins.js so the matrix mirrors what the
+// server stores. AuthContext.roFlag(key) is the runtime check.
+const FLAG_CATALOG = [
+  { key: 'view_financial_data', label: 'See financial data',  desc: 'Monthly + down payment amounts, revenue rollups' },
+  { key: 'view_pii',            label: 'See customer PII',    desc: 'Customer phone / email / full address columns'   },
+  { key: 'can_export',          label: 'Use Export buttons',  desc: 'Download CSV / Excel from any list view'         },
+  { key: 'view_audit_history',  label: 'See audit history',   desc: 'Expand edit_history audit trail in drawers'      },
+];
+const DEFAULT_FLAGS = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, true]));
+
 export default function ReadonlyAdminManager() {
   const [list, setList]       = useState([]);
   const [loading, setLoading] = useState(false);
@@ -66,6 +77,8 @@ export default function ReadonlyAdminManager() {
   const [newFirst, setNewFirst]     = useState('');
   const [newLast,  setNewLast]      = useState('');
   const [newAllowed, setNewAllowed] = useState(DEFAULT_ALLOWED);
+  const [newFlags, setNewFlags]     = useState(DEFAULT_FLAGS);
+  const [sendInvite, setSendInvite] = useState(false);
   const [creating, setCreating]     = useState(false);
 
   const load = async () => {
@@ -81,9 +94,11 @@ export default function ReadonlyAdminManager() {
   };
   useEffect(() => { load(); }, []);
 
-  // Mutable per-row allowed set the operator is editing. Keyed by user id.
+  // Mutable per-row state the operator is editing. Keyed by user id.
   const [editAllowed, setEditAllowed] = useState({});
-  const setRowAllowed = (id, list) => setEditAllowed(s => ({ ...s, [id]: list }));
+  const [editFlags,   setEditFlags]   = useState({});
+  const setRowAllowed = (id, list)  => setEditAllowed(s => ({ ...s, [id]: list }));
+  const setRowFlag    = (id, k, v)  => setEditFlags(s => ({ ...s, [id]: { ...(s[id] || {}), [k]: v } }));
   // When the server data changes, copy nav_allowed → editAllowed for any
   // row we don't already have a pending edit for. Lets the UI render the
   // catalog matrix immediately.
@@ -92,6 +107,13 @@ export default function ReadonlyAdminManager() {
       const next = { ...prev };
       list.forEach(u => {
         if (next[u.id] === undefined) next[u.id] = u.nav_allowed || null;
+      });
+      return next;
+    });
+    setEditFlags(prev => {
+      const next = { ...prev };
+      list.forEach(u => {
+        if (next[u.id] === undefined) next[u.id] = { ...DEFAULT_FLAGS, ...(u.flags || {}) };
       });
       return next;
     });
@@ -118,8 +140,15 @@ export default function ReadonlyAdminManager() {
   const saveRow = async (userId) => {
     setSavingId(userId);
     try {
+      // Persist both nav allowlist and flags in parallel — the manager UI
+      // mixes the two on one row, so saving them together keeps the dirty
+      // indicator honest.
       const allowed = editAllowed[userId] || [];
-      await client.put(`readonly-admins/${userId}/nav`, { allowed });
+      const flags = editFlags[userId] || DEFAULT_FLAGS;
+      await Promise.all([
+        client.put(`readonly-admins/${userId}/nav`,   { allowed }),
+        client.put(`readonly-admins/${userId}/flags`, { flags }),
+      ]);
       await load();
     } catch (e) {
       setErr(e.response?.data?.error || 'Save failed.');
@@ -141,18 +170,41 @@ export default function ReadonlyAdminManager() {
     }
   };
 
+  // Two-confirm permanent delete — wipes the auth user. Cannot be undone;
+  // operator has to recreate from scratch (new email or re-invite).
+  const permanentDelete = async (userId, email) => {
+    if (!window.confirm(`PERMANENTLY delete ${email}?\n\nThis removes the auth user entirely. They will lose all access immediately and cannot be re-granted without a fresh invite. This is irreversible.`)) return;
+    const phrase = window.prompt(`To confirm, type the email exactly:\n${email}`);
+    if (phrase !== email) { setErr('Email confirmation did not match. Delete cancelled.'); return; }
+    setSavingId(userId);
+    try {
+      await client.delete(`readonly-admins/${userId}?permanent=true`);
+      await load();
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Permanent delete failed.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const doCreate = async (e) => {
     e?.preventDefault?.();
-    if (!newEmail || !newPass) { setErr('Email + password required.'); return; }
+    if (!newEmail) { setErr('Email required.'); return; }
+    if (!sendInvite && !newPass) { setErr('Password required (or check "Send invite email").'); return; }
     setCreating(true); setErr('');
     try {
       await client.post('readonly-admins', {
-        email: newEmail, password: newPass,
+        email: newEmail,
+        password: sendInvite ? undefined : newPass,
+        send_invite: sendInvite,
         first_name: newFirst, last_name: newLast,
         allowed: newAllowed,
+        flags:   newFlags,
       });
       setNewEmail(''); setNewPass(''); setNewFirst(''); setNewLast('');
       setNewAllowed(DEFAULT_ALLOWED);
+      setNewFlags(DEFAULT_FLAGS);
+      setSendInvite(false);
       setShowCreate(false);
       await load();
     } catch (e) {
@@ -218,9 +270,16 @@ export default function ReadonlyAdminManager() {
                 className="input text-sm w-full" placeholder="readonly@yourco.com" required />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>Temp password</label>
+              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>
+                {sendInvite ? 'Password (not used — invite link will be emailed)' : 'Temp password'}
+              </label>
               <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)}
-                className="input text-sm w-full" placeholder="≥8 chars" minLength={8} required />
+                className="input text-sm w-full" placeholder={sendInvite ? '— skipped —' : '≥8 chars'}
+                minLength={sendInvite ? 0 : 8} disabled={sendInvite} required={!sendInvite} />
+              <label className="flex items-center gap-1.5 mt-2 cursor-pointer text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                <input type="checkbox" checked={sendInvite} onChange={e => setSendInvite(e.target.checked)} />
+                <Send size={11} /> Send invite email (magic link to set their own password)
+              </label>
             </div>
             <div>
               <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>First name</label>
@@ -244,6 +303,21 @@ export default function ReadonlyAdminManager() {
                   </label>
                 );
               })}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>Permission flags</label>
+            <div className="rounded-lg p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              {FLAG_CATALOG.map(f => (
+                <label key={f.key} className="flex items-start gap-2 cursor-pointer text-xs">
+                  <input type="checkbox" className="mt-0.5" checked={newFlags[f.key] !== false}
+                    onChange={() => setNewFlags(s => ({ ...s, [f.key]: !s[f.key] }))} />
+                  <span>
+                    <strong>{f.label}</strong>
+                    <span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span>
+                  </span>
+                </label>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -272,7 +346,10 @@ export default function ReadonlyAdminManager() {
         {list.map(u => {
           const expanded = openId === u.id;
           const allowed = editAllowed[u.id] === undefined ? u.nav_allowed : editAllowed[u.id];
-          const dirty = JSON.stringify(allowed || []) !== JSON.stringify(u.nav_allowed || []);
+          const flagsNow = editFlags[u.id] || { ...DEFAULT_FLAGS, ...(u.flags || {}) };
+          const navDirty   = JSON.stringify(allowed || []) !== JSON.stringify(u.nav_allowed || []);
+          const flagsDirty = JSON.stringify(flagsNow) !== JSON.stringify({ ...DEFAULT_FLAGS, ...(u.flags || {}) });
+          const dirty = navDirty || flagsDirty;
           return (
             <div key={u.id} className="rounded-2xl overflow-hidden"
               style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -353,13 +430,43 @@ export default function ReadonlyAdminManager() {
                     ))}
                   </div>
 
+                  {/* Permission flags */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Permission flags</p>
+                    <div className="rounded-lg p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      {FLAG_CATALOG.map(f => {
+                        const flagState = editFlags[u.id] || { ...DEFAULT_FLAGS, ...(u.flags || {}) };
+                        const on = flagState[f.key] !== false;
+                        return (
+                          <label key={f.key} className="flex items-start gap-2 cursor-pointer text-xs">
+                            <input type="checkbox" className="mt-0.5" checked={on}
+                              onChange={() => setRowFlag(u.id, f.key, !on)} />
+                            <span>
+                              <strong>{f.label}</strong>
+                              <span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
-                    <button onClick={() => revoke(u.id, u.email)}
-                      disabled={savingId === u.id}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border disabled:opacity-40"
-                      style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)' }}>
-                      <Trash2 size={12} /> Revoke
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={() => revoke(u.id, u.email)}
+                        disabled={savingId === u.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border disabled:opacity-40"
+                        style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)' }}>
+                        <Trash2 size={12} /> Revoke
+                      </button>
+                      <button onClick={() => permanentDelete(u.id, u.email)}
+                        disabled={savingId === u.id}
+                        title="Permanently deletes the auth user. Cannot be undone."
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                        style={{ backgroundColor: '#dc2626' }}>
+                        <Skull size={12} /> Permanent delete
+                      </button>
+                    </div>
                     <button onClick={() => saveRow(u.id)}
                       disabled={savingId === u.id || !dirty}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
