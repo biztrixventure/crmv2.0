@@ -177,7 +177,22 @@ router.get('/sales', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  const fronterIds = [...new Set((data || []).map(s => s.fronter_id).filter(Boolean))];
+  // Pre-compute a fallback: when sales.fronter_id is null (legacy rows
+  // created before that column was populated, or bulk-uploaded sales whose
+  // file didn't carry a fronter), fall back to the LINKED TRANSFER's
+  // created_by — that IS the fronter for the lead by definition. Without
+  // this, the SuperAdmin sales table shows "—" for the fronter column on
+  // every legacy row.
+  const transferIds = [...new Set((data || []).map(s => s.transfer_id).filter(Boolean))];
+  const transferCreatedBy = {};
+  if (transferIds.length) {
+    const { data: tfs } = await supabaseAdmin
+      .from('transfers').select('id, created_by').in('id', transferIds);
+    (tfs || []).forEach(t => { transferCreatedBy[t.id] = t.created_by; });
+  }
+  const resolvedFronterId = (s) => s.fronter_id || (s.transfer_id ? transferCreatedBy[s.transfer_id] : null) || null;
+
+  const fronterIds = [...new Set((data || []).map(resolvedFronterId).filter(Boolean))];
   const [profileMap, companyMap] = await Promise.all([
     enrichProfiles(data || [], s => s.closer_id),
     enrichCompanies(data || [], s => s.company_id),
@@ -189,13 +204,19 @@ router.get('/sales', asyncHandler(async (req, res) => {
     (fp || []).forEach(p => { fronterProfileMap[p.user_id] = p; });
   }
 
-  const enriched = (data || []).map(s => ({
-    ...s,
-    closer_name:  profileName(profileMap, s.closer_id),
-    fronter_name: profileName(fronterProfileMap, s.fronter_id),
-    companies:    companyMap[s.company_id] || null,
-    user_profiles: profileMap[s.closer_id] || null,
-  }));
+  const enriched = (data || []).map(s => {
+    const frId = resolvedFronterId(s);
+    return {
+      ...s,
+      // Surface the resolved id too so downstream UIs that link to the
+      // fronter's profile don't need to repeat the fallback themselves.
+      fronter_id:    s.fronter_id || frId,
+      closer_name:   profileName(profileMap, s.closer_id),
+      fronter_name:  profileName(fronterProfileMap, frId),
+      companies:     companyMap[s.company_id] || null,
+      user_profiles: profileMap[s.closer_id] || null,
+    };
+  });
 
   res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
 }));
