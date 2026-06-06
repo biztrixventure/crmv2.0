@@ -72,6 +72,10 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   // original_sale_id points at us forward. Result: a linear timeline
   // ordered by sale_date so the auditor sees lifetime customer history.
   const [chain, setChain] = useState([]);
+  // Lifetime customer rollup — fetched when the sale has a customer_uuid
+  // (mig 079 backfilled it). Surfaces cross-company activity from the
+  // /sales/lifetime/by-phone endpoint, role-scoped server-side.
+  const [lifetime, setLifetime] = useState(null);
 
   // Pull resell.enabled_statuses once so the button hides for statuses the
   // superadmin has disabled. Falls back to a safe default when offline.
@@ -99,6 +103,18 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
     }).catch(() => { /* endpoint optional; silent fallback */ });
     return () => { cancelled = true; };
   }, [sale?.id, sale?.original_sale_id]);
+
+  // Lifetime customer fetch — by phone so cross-company sales surface even
+  // when this user has never seen the other rows directly. Server-side
+  // role scoping ensures the response is already permission-filtered.
+  useEffect(() => {
+    if (!sale?.customer_phone) { setLifetime(null); return; }
+    let cancelled = false;
+    client.get(`sales/lifetime/by-phone/${encodeURIComponent(sale.customer_phone)}`)
+      .then(r => { if (!cancelled) setLifetime(r.data || null); })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, [sale?.id, sale?.customer_phone]);
 
   if (!sale) return null;
 
@@ -305,6 +321,26 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 return null;
             }
           })}
+
+          {/* Lifetime customer banner (G17 / G27). Visible only when the
+              customer touched more than one company across the system —
+              this is the cross-co dedup signal auto-warranty audit asks
+              for. Single-company lifetime rolls into the chain section
+              below, so we hide this banner when there's nothing new. */}
+          {lifetime && Array.isArray(lifetime.companies) && lifetime.companies.length > 1 && (
+            <div className="mb-4 rounded-xl p-3 flex items-start gap-2"
+              style={{ backgroundColor: 'var(--color-info-50, #eff6ff)', border: '1px solid var(--color-info-200, #bfdbfe)' }}>
+              <span className="text-lg leading-none">🧬</span>
+              <div className="flex-1 text-xs">
+                <p className="font-bold" style={{ color: 'var(--color-info-700, #1d4ed8)' }}>
+                  Lifetime customer — {lifetime.sales.length} sale{lifetime.sales.length === 1 ? '' : 's'} across {lifetime.companies.length} companies
+                </p>
+                <p className="mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  Same phone has produced sales at multiple fronter / closer companies. Cross-co rollups in the lifetime endpoint show every term — visible to compliance and parent-co.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Resell chain timeline (G9) — only renders when the sale is
               part of a chain (it has an original_sale_id, or another row

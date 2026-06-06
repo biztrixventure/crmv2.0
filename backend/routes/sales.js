@@ -320,6 +320,70 @@ router.post(
 
     const saleDate = sale_date || new Date().toISOString().split('T')[0];
 
+    // G16 manual parity — reference_no collision check on create. If the
+    // closer typed (or pasted) a ref that's already in use anywhere in
+    // the system, reject up-front with a precise message rather than
+    // bouncing off the mig 077 unique index with a generic 23505.
+    const refsToCheck = [reference_no, ...(Array.isArray(additional_cars) ? additional_cars.map(c => c.reference_no) : [])]
+      .map(r => String(r || '').trim()).filter(Boolean);
+    if (refsToCheck.length) {
+      const { data: collisions } = await supabaseAdmin
+        .from('sales').select('id, reference_no, customer_name, sale_date')
+        .in('reference_no', refsToCheck);
+      if (collisions?.length) {
+        return res.status(409).json({
+          error: `Reference No "${collisions[0].reference_no}" already exists on sale ${collisions[0].id.slice(0,8)} (${collisions[0].customer_name || '—'} · ${collisions[0].sale_date || '—'}). Pick a different one.`,
+          collisions: collisions.map(c => ({ id: c.id, reference_no: c.reference_no, customer_name: c.customer_name, sale_date: c.sale_date })),
+          code: 'REF_COLLISION',
+        });
+      }
+    }
+
+    // Scenario 6 manual parity — dup-fingerprint detection. A closer
+    // re-keying the same deal on the same transfer (same VIN OR same
+    // car_year+make+model, same client_name, same sale_date) almost
+    // always means a double-submit. Block instead of inserting a near-
+    // identical row that audit will have to clean up later.
+    if (transfer_id && customer_phone) {
+      const carVin   = car_vin ? String(car_vin).toUpperCase() : null;
+      const ymmKey   = (car_year && car_make && car_model)
+        ? `${car_year}|${String(car_make).toLowerCase()}|${String(car_model).toLowerCase()}` : null;
+      const clientNorm = String(client_name || '').trim().toLowerCase();
+      if ((carVin || ymmKey) && clientNorm && saleDate) {
+        const { data: priorOnTransfer } = await supabaseAdmin
+          .from('sales').select('id, reference_no, car_vin, car_year, car_make, car_model, client_name, sale_date, status')
+          .eq('transfer_id', transfer_id);
+        const dup = (priorOnTransfer || []).find(s => {
+          const sVin = (s.car_vin || '').toUpperCase();
+          const sYmm = (s.car_year && s.car_make && s.car_model)
+            ? `${s.car_year}|${String(s.car_make).toLowerCase()}|${String(s.car_model).toLowerCase()}` : null;
+          const sameCar = (carVin && sVin && carVin === sVin) || (ymmKey && sYmm && ymmKey === sYmm);
+          const sameClient = String(s.client_name || '').trim().toLowerCase() === clientNorm;
+          const sameDate   = String(s.sale_date || '').slice(0,10) === String(saleDate).slice(0,10);
+          return sameCar && sameClient && sameDate;
+        });
+        if (dup) {
+          return res.status(409).json({
+            error: `A sale with the same vehicle + client + sale_date already exists on this transfer (ref ${dup.reference_no || dup.id.slice(0,8)}, status ${dup.status}). If this is a renewal or resell, open the Resell flow on that sale instead.`,
+            duplicate_sale_id: dup.id,
+            code: 'DUP_FINGERPRINT',
+          });
+        }
+      }
+    }
+
+    // G22 — vehicle eligibility for the primary car + every additional car.
+    const { enforceOrAttach: enforceEligibility } = require('../utils/vehicleEligibility');
+    const allCarsForCheck = [
+      { plan, car_year, car_make, car_miles },
+      ...(Array.isArray(additional_cars) ? additional_cars.map(c => ({ plan: c.plan || plan, car_year: c.car_year, car_make: c.car_make, car_miles: c.car_miles })) : []),
+    ];
+    for (const car of allCarsForCheck) {
+      if (!car.plan) continue;
+      const enf = await enforceEligibility(car, companyId);
+      if (!enf.ok) return res.status(enf.status).json(enf.payload);
+    }
+
     // Default status — config-driven via compliance.default_new_sale_status.
     // 'open' lets closer iterate; 'pending_review' auto-submits.
     const defaultStatus = await getConfig(companyId, 'compliance.default_new_sale_status', 'open');
@@ -519,6 +583,50 @@ router.get(
 // PUT /sales/:id - Update sale
 // ============================================================================
 // ============================================================================
+// GET /sales/lifetime/by-phone/:phone — every sale tied to this customer
+// across every company (G17 / G27). Resolved by customer_uuid (mig 079) so
+// cross-co reports finally have a stable identity to roll up by.
+// Permission-scoped identically to the chain endpoint: fronter sees own
+// non-resells; closer sees own closer-side; compliance + superadmin see
+// everything. Returned rows include company_id so the UI can group by co.
+// ============================================================================
+router.get('/lifetime/by-phone/:phone', asyncHandler(async (req, res) => {
+  const role = req.user.role;
+  const userId = req.user.id;
+  const companyId = req.user.company_id;
+  const raw = String(req.params.phone || '').replace(/\D/g, '');
+  // Match the SQL fn app_norm_phone — strip a leading 1 from 11-digit US numbers.
+  const norm = raw.length === 11 && raw.startsWith('1') ? raw.slice(1) : raw;
+  if (!norm || norm.length < 7) return res.status(400).json({ error: 'phone must be at least 7 digits' });
+
+  // Look up customer_uuid via any existing sale row carrying this phone
+  // (cheaper than recomputing the uuidv5 in JS).
+  const { data: anchor } = await supabaseAdmin
+    .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+    .or(`customer_phone.eq.${norm},customer_phone.eq.+1${norm}`)
+    .limit(1).maybeSingle();
+  if (!anchor?.customer_uuid) return res.json({ customer_uuid: null, sales: [], companies: [] });
+
+  let query = supabaseAdmin
+    .from('sales')
+    .select('id, reference_no, status, sale_date, plan, client_name, monthly_payment, is_resell, cancellation_date, fronter_id, closer_id, customer_name, company_id, transfer_id, original_sale_id, original_fronter_id')
+    .eq('customer_uuid', anchor.customer_uuid)
+    .order('sale_date', { ascending: true });
+
+  if (role === 'fronter')         query = query.eq('fronter_id', userId).eq('is_resell', false);
+  else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (role === 'closer')     query = query.eq('closer_id', userId);
+  else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+    return res.status(403).json({ error: 'Not permitted' });
+  }
+
+  const { data: rows } = await query;
+  const companies = [...new Set((rows || []).map(s => s.company_id).filter(Boolean))];
+  res.json({ customer_uuid: anchor.customer_uuid, sales: rows || [], companies });
+}));
+
+// ============================================================================
 // GET /sales/:id/chain — resell chain timeline for a sale
 // Returns every sale in the lineage: walk original_sale_id back to the root,
 // then forward from the root to every descendant. Ordered by sale_date asc
@@ -641,6 +749,42 @@ router.put(
       return res.status(400).json({ error: 'This status can only be set through the compliance workflow' });
     }
 
+    // G16 manual parity — reference_no collision check on edit. Before the
+    // mig 077 unique index would have caught this at write time with a
+    // useless 23505 error message; checking up-front lets us tell the
+    // operator exactly which row owns the ref.
+    if (reference_no !== undefined && String(reference_no).trim()
+        && String(reference_no).trim().toUpperCase() !== String(existing.reference_no || '').trim().toUpperCase()) {
+      const { data: collision } = await supabaseAdmin
+        .from('sales').select('id, reference_no, customer_name, sale_date, company_id')
+        .eq('reference_no', String(reference_no).trim()).neq('id', id).maybeSingle();
+      if (collision) {
+        return res.status(409).json({
+          error: `Reference No "${reference_no}" is already used by another sale (${collision.customer_name || '—'} · ${collision.sale_date || '—'}). Every policy must be globally unique — pick a different one.`,
+          collision_sale_id: collision.id,
+          code: 'REF_COLLISION',
+        });
+      }
+    }
+
+    // Scenario 2 (manual parity) — client_name change on an active won
+    // sale almost always means a NEW deal with a different underwriter.
+    // Block the silent overwrite the same way G20 blocks plan changes;
+    // the closer should use the Resell flow w/ resell_intent='resell' so
+    // the original client is preserved as a historical row.
+    if (!isCompliance
+        && client_name !== undefined
+        && existing.client_name
+        && String(client_name).trim()
+        && String(client_name).trim().toLowerCase() !== String(existing.client_name).trim().toLowerCase()
+        && ['closed_won', 'sold'].includes(existing.status)) {
+      return res.status(403).json({
+        error: 'Changing the client on an active sale isn\'t allowed — that\'s a different deal with a different underwriter. Open the Resell flow on this sale; the prior client + sale price stay intact as a historical record.',
+        existing_client: existing.client_name,
+        attempted_client: client_name,
+      });
+    }
+
     // G20 — plan-switch guard. Changing the plan on an already-won sale
     // is almost always a closer mistake; the right operation is to RESELL
     // the existing sale w/ resell_intent='renewal' or 'resell'. Block here
@@ -667,6 +811,24 @@ router.put(
         error: 'This sale is compliance-locked. Contact compliance for changes.',
         locked_at: existing.compliance_locked_at,
       });
+    }
+
+    // G22 — vehicle eligibility. Run when the edit touches any vehicle
+    // field OR the plan name. Effective values = incoming OR existing
+    // (so a row that was already ineligible isn't suddenly unblockable
+    // by a no-op edit). Enforcement mode comes from business_config.
+    const touchesEligibility = (plan !== undefined || car_year !== undefined || car_make !== undefined || car_miles !== undefined);
+    if (touchesEligibility) {
+      const { enforceOrAttach } = require('../utils/vehicleEligibility');
+      const candidate = {
+        plan:      plan      !== undefined ? plan      : existing.plan,
+        car_year:  car_year  !== undefined ? car_year  : existing.car_year,
+        car_make:  car_make  !== undefined ? car_make  : existing.car_make,
+        car_miles: car_miles !== undefined ? car_miles : existing.car_miles,
+      };
+      const enforcement = await enforceOrAttach(candidate, existing.company_id);
+      if (!enforcement.ok) return res.status(enforcement.status).json(enforcement.payload);
+      if (enforcement.eligibility_warning) req._eligibility_warning = enforcement.eligibility_warning;
     }
 
     const updates = await stampActor('sales', { updated_at: new Date().toISOString() }, userId);
