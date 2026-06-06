@@ -148,6 +148,11 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     if (isCancelLikeStatus && !editCancelDate) {
       setEditMsg('Cancellation date is required for this status.'); return;
     }
+    // G28 — frontend mirror of the server-side requirement so the
+    // operator sees the gate immediately instead of round-tripping.
+    if (isCancelLikeStatus && !editReasonKey) {
+      setEditMsg('Pick a canonical Reason from the dropdown.'); return;
+    }
     setEditSaving(true);
     try {
       await client.post(`sales/${editTarget.id}/compliance`, {

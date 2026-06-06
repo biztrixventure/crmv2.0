@@ -522,20 +522,49 @@ router.get(
 // GET /sales/:id/chain — resell chain timeline for a sale
 // Returns every sale in the lineage: walk original_sale_id back to the root,
 // then forward from the root to every descendant. Ordered by sale_date asc
-// so the auditor reads it as a customer-lifetime timeline. Read-only.
+// so the auditor reads it as a customer-lifetime timeline.
+//
+// G18 — Permission-scoped. Fronter / fronter_manager see only rows in
+// their own company AND only non-resell rows (resells are privacy-hidden
+// from the fronter view). Closer / closer_manager see closer-side rows
+// they own. Compliance + superadmin see everything. The endpoint never
+// leaks a sale a caller couldn't already access through the list views.
 // ============================================================================
 router.get('/:id/chain', asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const role = req.user.role;
+  const userId = req.user.id;
+  const companyId = req.user.company_id;
+
   const { data: anchor, error: anchorErr } = await supabaseAdmin
     .from('sales').select('id, original_sale_id').eq('id', id).single();
   if (anchorErr || !anchor) return res.status(404).json({ error: 'Sale not found' });
   const rootId = anchor.original_sale_id || anchor.id;
-  // One query for the root + everything that points at it.
-  const { data: chain } = await supabaseAdmin
+
+  let query = supabaseAdmin
     .from('sales')
-    .select('id, reference_no, status, sale_date, plan, client_name, monthly_payment, is_resell, original_sale_id, cancellation_date, fronter_id, closer_id, customer_name')
+    .select('id, reference_no, status, sale_date, plan, client_name, monthly_payment, is_resell, original_sale_id, cancellation_date, fronter_id, closer_id, customer_name, company_id')
     .or(`id.eq.${rootId},original_sale_id.eq.${rootId}`)
     .order('sale_date', { ascending: true });
+
+  // Role-scope the result so the chain doesn't reveal sales the caller
+  // couldn't see through the normal list views.
+  if (role === 'fronter') {
+    query = query.eq('fronter_id', userId).eq('is_resell', false);
+  } else if (role === 'fronter_manager') {
+    if (companyId) query = query.eq('company_id', companyId).eq('is_resell', false);
+    else query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+  } else if (role === 'closer') {
+    query = query.eq('closer_id', userId);
+  } else if (role === 'closer_manager') {
+    if (companyId) query = query.eq('company_id', companyId);
+    else query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+  } else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+    // Unknown role → safest is to return only the anchor itself.
+    query = query.eq('id', id);
+  }
+
+  const { data: chain } = await query;
   res.json({ root_id: rootId, chain: chain || [] });
 }));
 
@@ -610,6 +639,34 @@ router.put(
     }
     if (status && ['closed_won', 'closed_lost'].includes(status) && !isCompliance) {
       return res.status(400).json({ error: 'This status can only be set through the compliance workflow' });
+    }
+
+    // G20 — plan-switch guard. Changing the plan on an already-won sale
+    // is almost always a closer mistake; the right operation is to RESELL
+    // the existing sale w/ resell_intent='renewal' or 'resell'. Block here
+    // for closer/manager edits; compliance keeps the override path for
+    // post-hoc corrections.
+    if (!isCompliance
+        && plan !== undefined
+        && existing.plan
+        && String(plan).trim()
+        && String(plan).trim().toLowerCase() !== String(existing.plan).trim().toLowerCase()
+        && ['closed_won', 'sold'].includes(existing.status)) {
+      return res.status(403).json({
+        error: 'Changing the plan on an active sale isn\'t allowed. Open the Resell flow on this sale to record the new plan as a fresh deal — the prior plan + price history stays intact.',
+        existing_plan: existing.plan,
+        attempted_plan: plan,
+      });
+    }
+
+    // G24 — compliance lock. Once compliance terminally adjudicates the
+    // row, only compliance / superadmin can mutate. Stops a closer from
+    // reverting a chargeback or compliance_cancelled mid-window.
+    if (existing.compliance_locked_at && !isCompliance) {
+      return res.status(403).json({
+        error: 'This sale is compliance-locked. Contact compliance for changes.',
+        locked_at: existing.compliance_locked_at,
+      });
     }
 
     const updates = await stampActor('sales', { updated_at: new Date().toISOString() }, userId);
@@ -915,9 +972,20 @@ router.post('/:id/compliance', [
 
   const COMPLIANCE_STATUSES = ['cancelled', 'compliance_cancelled', 'dispute', 'chargeback', 'open', 'sold', 'follow_up', 'closed_won', 'closed_lost'];
   const CANCEL_LIKE = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
+  // G24 — statuses where compliance is terminally adjudicating the row.
+  // We stamp compliance_locked_at on transition so closers can't revert.
+  const TERMINAL_LOCK = new Set(['compliance_cancelled', 'chargeback', 'dispute']);
 
   if (status && !COMPLIANCE_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid status', allowed: COMPLIANCE_STATUSES });
+  }
+
+  // G28 — when applying a cancel-like status, require a canonical reason key
+  // alongside the free-text reason so top-reason reports work. Aligns the
+  // single-sale path with the bulk path (which already enforces this).
+  const reasonKeyIn = req.body?.cancellation_reason_key;
+  if (status && CANCEL_LIKE.has(status) && !String(reasonKeyIn || '').trim()) {
+    return res.status(400).json({ error: 'A canonical cancellation_reason_key is required when applying a cancellation status. Pick from the cancellation_reasons catalog.' });
   }
 
   // Normalize cancellation_date to YYYY-MM-DD (or null). Accepts ISO,
@@ -944,6 +1012,19 @@ router.post('/:id/compliance', [
     updates.cancellation_date = normCancelDate;
   } else if (isCancelLike && !existing.cancellation_date) {
     updates.cancellation_date = new Date().toISOString().slice(0, 10);
+  }
+  // G28 — canonical reason key (validator above already enforced it for
+  // cancel-like statuses; this just persists what was sent).
+  if (reasonKeyIn !== undefined) {
+    updates.cancellation_reason_key = String(reasonKeyIn || '').trim() || null;
+  }
+  // G24 — stamp compliance_locked_at on terminal-lock transition; clear
+  // it when compliance restores the row to a non-terminal state so a
+  // mistaken cancel can be undone without manual SQL.
+  if (status && TERMINAL_LOCK.has(status)) {
+    updates.compliance_locked_at = new Date().toISOString();
+  } else if (status && existing.compliance_locked_at && !TERMINAL_LOCK.has(status)) {
+    updates.compliance_locked_at = null;
   }
 
   // Append audit entry
@@ -1130,6 +1211,11 @@ router.post('/:id/resell', [
     original_sale_id: old.id,
     resell_intent:    intent,
     resell_reason:    reason || null,
+    // G19 — preserve lifetime-customer fronter credit across resells.
+    // If the old row was itself a resell, walk its chain; else use its
+    // fronter_id as the original. New resell rows always know who first
+    // brought this customer, even after re-fronts.
+    original_fronter_id: old.original_fronter_id || old.fronter_id || null,
     // vehicle: carry over for resell/renewal, blank for additional_car
     car_year:  isAdditional ? null : old.car_year,
     car_make:  isAdditional ? null : old.car_make,

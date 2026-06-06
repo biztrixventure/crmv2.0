@@ -613,6 +613,25 @@ async function classifyChunk(rows) {
   });
   const massVins = new Set([...vinCounts.entries()].filter(([, n]) => n > 5).map(([k]) => k));
 
+  // G16 — pre-flight cross-transfer reference_no collision check. Every
+  // unique file_ref is looked up across the WHOLE sales table; a hit
+  // outside the chosen transfer means inserting this row would either
+  // collide with an existing ref on a different transfer (no-go: every
+  // policy/ref must be globally unique per the auto-warranty audit) OR
+  // the operator is trying to update the wrong sale by mis-routing.
+  // Existing-ref-on-same-transfer is the legitimate "Tier 1 update" case
+  // and is handled in pickExistingSale, so we exclude those below.
+  const fileRefs = [...new Set(rows.map(r => String(r?.reference_no || '').trim().toUpperCase()).filter(Boolean))];
+  const refToSaleRow = new Map();   // upper(ref) → { id, transfer_id }
+  for (let i = 0; i < fileRefs.length; i += 100) {
+    const slice = fileRefs.slice(i, i + 100);
+    const { data } = await withRetry(() => supabaseAdmin
+      .from('sales').select('id, reference_no, transfer_id').in('reference_no', slice));
+    (data || []).forEach(r => {
+      if (r.reference_no) refToSaleRow.set(String(r.reference_no).toUpperCase(), { id: r.id, transfer_id: r.transfer_id });
+    });
+  }
+
   const resolved = [], unmatched = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') { unmatched.push({ reason: 'Empty or invalid row' }); continue; }
@@ -747,6 +766,19 @@ async function classifyChunk(rows) {
     if (transfer.status === 'rejected' || transfer.status === 'cancelled') {
       unmatched.push({ ...base, reason: `Chosen transfer is in "${transfer.status}" state. A sale cannot land on a rejected/cancelled transfer — re-route to a different transfer or restore this one first.` });
       continue;
+    }
+
+    // G16 — cross-transfer ref collision. file_ref already exists on
+    // some OTHER transfer → inserting this row would either dup the ref
+    // (violating the new sales_reference_no UNIQUE index) or hijack an
+    // unrelated sale's identity. Reject so the operator fixes the file.
+    const fileRefUpper = String(r.reference_no || '').trim().toUpperCase();
+    if (fileRefUpper) {
+      const collision = refToSaleRow.get(fileRefUpper);
+      if (collision && collision.transfer_id !== transfer.id) {
+        unmatched.push({ ...base, reason: `Reference No "${r.reference_no}" already exists on a DIFFERENT transfer (sale ${collision.id.slice(0,8)} on transfer ${collision.transfer_id.slice(0,8)}). Every ref must be globally unique — pick a new ref or re-route to the correct transfer.` });
+        continue;
+      }
     }
 
     // G5 — mass-VIN warning chip (doesn't block; flags for review).
