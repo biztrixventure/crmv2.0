@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import client from '../../api/client';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
+import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 
 /*
  * BulkStatusUpdate
@@ -78,6 +79,7 @@ function parseLines(text) {
 
 export default function BulkStatusUpdate() {
   const { catalog } = useComplianceStatuses();
+  const { activeReasons: cancelReasonChoices } = useCancellationReasons();
   const enabledStatuses = useMemo(
     () => (catalog || []).filter(s => s && s.key && s.enabled !== false),
     [catalog],
@@ -90,6 +92,8 @@ export default function BulkStatusUpdate() {
   const [rowState, setRowState]     = useState({});     // id → { selected, date, note }
   const [newStatus, setNewStatus]   = useState('');
   const [bulkReason, setBulkReason] = useState('');
+  const [bulkReasonKey, setBulkReasonKey] = useState('');
+  const [bulkChargebackAmt, setBulkChargebackAmt] = useState('');
   const [bulkDate,   setBulkDate]   = useState('');
   const [applying, setApplying]     = useState(false);
   const [applyMsg, setApplyMsg]     = useState('');
@@ -191,14 +195,17 @@ export default function BulkStatusUpdate() {
         updates,
         new_status: newStatus,
         reason: bulkReason.trim() || undefined,
+        cancellation_reason_key: bulkReasonKey || undefined,
         cancellation_date: bulkDate || undefined,
+        chargeback_date: newStatus === 'chargeback' ? (bulkDate || undefined) : undefined,
+        chargeback_amount: newStatus === 'chargeback' ? (bulkChargebackAmt || undefined) : undefined,
       });
       const skippedLine = data.skipped?.length
         ? ` Skipped ${data.skipped.length}: ${data.skipped.slice(0, 3).map(s => s.reason).join('; ')}${data.skipped.length > 3 ? '…' : ''}`
         : '';
       setApplyMsg(`Updated ${data.updated}/${updates.length}.${skippedLine}`);
       await doSearch(parsed.entries);
-      setBulkReason(''); setBulkDate('');
+      setBulkReason(''); setBulkDate(''); setBulkReasonKey(''); setBulkChargebackAmt('');
     } catch (e) {
       setApplyMsg(e.response?.data?.error || 'Update failed.');
     } finally {
@@ -451,6 +458,33 @@ export default function BulkStatusUpdate() {
                   <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                     Pick one date here to apply to every row. Rows that already have their own date in the table above keep their own.
                   </p>
+                </div>
+              )}
+              {isCancelStatus && (
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>
+                    Reason (canonical) for all rows
+                  </label>
+                  <select value={bulkReasonKey} onChange={e => setBulkReasonKey(e.target.value)}
+                    className="input text-sm">
+                    <option value="">— pick a canonical reason —</option>
+                    {cancelReasonChoices.map(r => (
+                      <option key={r.key} value={r.key}>{r.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Canonical reason key drives top-reason reports. Free-text note below stays per-row.
+                  </p>
+                </div>
+              )}
+              {newStatus === 'chargeback' && (
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>
+                    Chargeback amount (USD) for all rows
+                  </label>
+                  <input type="number" step="0.01" min="0" value={bulkChargebackAmt}
+                    onChange={e => setBulkChargebackAmt(e.target.value)}
+                    className="input text-sm" placeholder="e.g. 1250.00" />
                 </div>
               )}
               <div>

@@ -10,6 +10,7 @@ import TabStatsStrip from './TabStatsStrip';
 import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
+import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -24,6 +25,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   // gracefully fall back to a humanized key / 'secondary' so existing records
   // with legacy statuses always render correctly.
   const { allStatuses: cfgAll, editStatuses: cfgEdit, labelOf, badgeOf } = useComplianceStatuses();
+  const { activeReasons: cancelReasonChoices } = useCancellationReasons();
   const ALL_SALE_STATUSES        = cfgAll?.length  ? cfgAll  : FALLBACK_ALL;
   const COMPLIANCE_EDIT_STATUSES = cfgEdit?.length ? cfgEdit : FALLBACK_EDIT;
   const [sales, setSales]       = useState([]);
@@ -57,7 +59,9 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   const [editTarget, setEditTarget] = useState(null);
   const [editStatus, setEditStatus] = useState('');
   const [editReason, setEditReason] = useState('');
+  const [editReasonKey, setEditReasonKey] = useState('');
   const [editCancelDate, setEditCancelDate] = useState('');
+  const [editChargebackAmt, setEditChargebackAmt] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
   // Cancel-like statuses gate the cancellation_date field. Keeps the rule
@@ -120,7 +124,9 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
     setEditTarget(s);
     setEditStatus(s.status);
     setEditReason('');
+    setEditReasonKey(s.cancellation_reason_key || '');
     setEditCancelDate(s.cancellation_date || '');
+    setEditChargebackAmt(s.chargeback_amount || '');
     setEditMsg('');
   };
 
@@ -150,6 +156,9 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         // Always send cancellation_date so a non-cancel status with a
         // previously-set date can clear it ("" → null on the server).
         cancellation_date: editCancelDate || null,
+        cancellation_reason_key: editReasonKey || null,
+        chargeback_amount: editStatus === 'chargeback' ? (editChargebackAmt || null) : undefined,
+        chargeback_date:   editStatus === 'chargeback' ? (editCancelDate || null) : undefined,
       });
       setEditTarget(null); load();
     } catch (err) { setEditMsg(err.response?.data?.error || 'Failed'); }
@@ -408,21 +417,53 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                   chargeback / dispute). Same rule + key as the bulk
                   endpoint so single + bulk flows stay aligned. */}
               {isCancelLikeStatus && (
-                <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                    Cancellation Date <span className="text-red-500">*</span>
-                  </label>
-                  <input type="date" value={editCancelDate}
-                    onChange={e => setEditCancelDate(e.target.value)}
-                    className="input text-sm w-full"
-                    style={{
-                      borderColor: !editCancelDate ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
-                    }} />
-                  <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                    Business date the cancellation took effect. Drives monthly cancel reports.
-                    {editTarget?.cancellation_date && !editCancelDate && ` Previously: ${editTarget.cancellation_date}.`}
-                  </p>
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                      Cancellation Date <span className="text-red-500">*</span>
+                    </label>
+                    <input type="date" value={editCancelDate}
+                      onChange={e => setEditCancelDate(e.target.value)}
+                      className="input text-sm w-full"
+                      style={{
+                        borderColor: !editCancelDate ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
+                      }} />
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      Business date the cancellation took effect. Drives monthly cancel reports.
+                      {editTarget?.cancellation_date && !editCancelDate && ` Previously: ${editTarget.cancellation_date}.`}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                      Reason (catalog)
+                    </label>
+                    <select value={editReasonKey}
+                      onChange={e => setEditReasonKey(e.target.value)}
+                      className="input text-sm w-full">
+                      <option value="">— pick a canonical reason —</option>
+                      {cancelReasonChoices.map(r => (
+                        <option key={r.key} value={r.key}>{r.label}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      Optional canonical key for top-reason reports. Free-text reason below still appended to the compliance note.
+                    </p>
+                  </div>
+                  {editStatus === 'chargeback' && (
+                    <div>
+                      <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                        Chargeback Amount (USD)
+                      </label>
+                      <input type="number" step="0.01" min="0" value={editChargebackAmt}
+                        onChange={e => setEditChargebackAmt(e.target.value)}
+                        className="input text-sm w-full"
+                        placeholder="e.g. 1250.00" />
+                      <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                        Money charged back. Used in net-revenue + chargeback-rate reports.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>

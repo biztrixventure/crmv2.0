@@ -518,6 +518,27 @@ router.get(
 // ============================================================================
 // PUT /sales/:id - Update sale
 // ============================================================================
+// ============================================================================
+// GET /sales/:id/chain — resell chain timeline for a sale
+// Returns every sale in the lineage: walk original_sale_id back to the root,
+// then forward from the root to every descendant. Ordered by sale_date asc
+// so the auditor reads it as a customer-lifetime timeline. Read-only.
+// ============================================================================
+router.get('/:id/chain', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { data: anchor, error: anchorErr } = await supabaseAdmin
+    .from('sales').select('id, original_sale_id').eq('id', id).single();
+  if (anchorErr || !anchor) return res.status(404).json({ error: 'Sale not found' });
+  const rootId = anchor.original_sale_id || anchor.id;
+  // One query for the root + everything that points at it.
+  const { data: chain } = await supabaseAdmin
+    .from('sales')
+    .select('id, reference_no, status, sale_date, plan, client_name, monthly_payment, is_resell, original_sale_id, cancellation_date, fronter_id, closer_id, customer_name')
+    .or(`id.eq.${rootId},original_sale_id.eq.${rootId}`)
+    .order('sale_date', { ascending: true });
+  res.json({ root_id: rootId, chain: chain || [] });
+}));
+
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -556,7 +577,12 @@ router.put(
     if (!isCompliance) {
       const lockDays = parseInt(await getConfig(existing.company_id, 'compliance.lock_window_days', 90), 10) || 0;
       if (lockDays > 0) {
-        const ageDays = (Date.now() - new Date(existing.created_at).getTime()) / 86400000;
+        // G12 — anchor the lock on sale_date (the business day the sale
+        // happened), falling back to created_at only when the row predates
+        // the sale_date column being populated. Anchoring on created_at
+        // means a bulk import resets the lock clock on every old row.
+        const anchor = existing.sale_date || existing.created_at;
+        const ageDays = (Date.now() - new Date(anchor).getTime()) / 86400000;
         if (ageDays > lockDays) {
           return res.status(403).json({
             error: `This sale is older than ${lockDays} days and is locked. Contact compliance for changes.`,
@@ -572,7 +598,7 @@ router.put(
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition,
-      cancellation_date,
+      cancellation_date, cancellation_reason_key, chargeback_date, chargeback_amount,
     } = req.body;
 
     // Allowed statuses sourced from business_config — superadmin can enable
@@ -621,6 +647,27 @@ router.put(
         else if (us) updates.cancellation_date = `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
         else return res.status(400).json({ error: 'cancellation_date must be YYYY-MM-DD or MM/DD/YYYY' });
       }
+    }
+    // Cancellation reason key — canonical key from the cancellation_reasons
+    // catalog. Free text still goes into compliance_note. Compliance-only.
+    if (cancellation_reason_key !== undefined && isCompliance) {
+      updates.cancellation_reason_key = cancellation_reason_key || null;
+    }
+    // Chargeback fields — distinct from cancellation_date because the
+    // money has already moved by the time a chargeback hits.
+    if (chargeback_date !== undefined && isCompliance) {
+      if (!chargeback_date) {
+        updates.chargeback_date = null;
+      } else {
+        const m = String(chargeback_date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) updates.chargeback_date = m.slice(1).join('-');
+        else return res.status(400).json({ error: 'chargeback_date must be YYYY-MM-DD' });
+      }
+    }
+    if (chargeback_amount !== undefined && isCompliance) {
+      const n = parseFloat(chargeback_amount);
+      updates.chargeback_amount = (chargeback_amount === null || chargeback_amount === '') ? null
+        : (Number.isFinite(n) ? n : null);
     }
 
     let { data: updated, error: updateError } = await supabaseAdmin

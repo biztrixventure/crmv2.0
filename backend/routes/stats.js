@@ -184,9 +184,17 @@ router.get(
         .eq('status', 'closed_won')
         .eq('sale_date', todayStr);
       stats.todayClosedWon = sTodayWon.count || 0;
+      // ── Cancellation count (G7) ────────────────────────────────────────────
+      // Config picks the anchor: 'cancellation_date' (default, matches what
+      // auditors expect — "cancels that happened in May") OR 'sale_date'
+      // (legacy — counts sales SOLD in May that later cancelled, regardless
+      // of when the cancel was filed). Switchable per company so downstream
+      // BI tools aren't surprised by a silent shift.
+      const cancelKey = await getConfig(companyId, 'kpi.cancel_count_keys_on', 'cancellation_date');
+      const cancelAnchor = cancelKey === 'sale_date' ? 'sale_date' : 'cancellation_date';
       const sTodayCancelled = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
         .eq('status', 'cancelled')
-        .eq('sale_date', todayStr);
+        .eq(cancelAnchor, todayStr);
       stats.todayCancelled = sTodayCancelled.count || 0;
 
       // ── Month-to-date sales metrics — same scope/privacy as today, just a
@@ -199,7 +207,7 @@ router.get(
         .eq('status', 'closed_won').gte('sale_date', monthStart).lte('sale_date', todayStr);
       stats.monthClosedWon = monthWon.count || 0;
       const monthCanc = await scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))
-        .eq('status', 'cancelled').gte('sale_date', monthStart).lte('sale_date', todayStr);
+        .eq('status', 'cancelled').gte(cancelAnchor, monthStart).lte(cancelAnchor, todayStr);
       stats.monthCancelled = monthCanc.count || 0;
 
       // Month-to-date transfers — keyed on created_at (no business-date col).

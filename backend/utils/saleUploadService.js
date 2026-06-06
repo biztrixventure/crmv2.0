@@ -355,6 +355,11 @@ function pickBestTransfer(row, candidates, salesByTransfer) {
 const TERMINAL_CANCEL_STATUSES = new Set([
   'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback',
 ]);
+// Same set + dispute for validator purposes (dispute is open-ended; a
+// cancellation_date is still needed if the file row carries that status).
+const CANCEL_LIKE_STATUSES = new Set([
+  'cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute',
+]);
 
 // Normalize client name for comparison (case-insensitive, whitespace folded).
 const normClient = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -362,9 +367,22 @@ const normClient = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '
 // Renewal window — if the file row's sale_date is more than this many days
 // AFTER the existing sale's sale_date, treat it as a renewal (NEW SALE)
 // rather than an update. Catches the "auto-warranty 6 / 12 month renewal"
-// pattern on the same car + same client. Made a constant for clarity;
-// future PR will source from business_config.bulk.renewal_window_days.
-const RENEWAL_WINDOW_DAYS = 30;
+// pattern on the same car + same client. Default constant + a getter that
+// reads the per-company override from business_config so each closer co
+// can tune to their average term length.
+const DEFAULT_RENEWAL_WINDOW_DAYS = 30;
+async function getRenewalWindow(companyId) {
+  try {
+    const { getConfig } = require('./businessConfig');
+    const v = await getConfig(companyId, 'bulk.renewal_window_days', DEFAULT_RENEWAL_WINDOW_DAYS);
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_RENEWAL_WINDOW_DAYS;
+  } catch { return DEFAULT_RENEWAL_WINDOW_DAYS; }
+}
+
+// Normalize a plan / client name for comparison — same rules as normClient
+// but kept separate so future PRs can diverge (e.g. plan tier-fuzzy match).
+const normPlan = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 // Days between two YYYY-MM-DD strings. Returns null when either side is
 // missing or unparseable so the renewal check can't false-fire on bad data.
@@ -401,7 +419,8 @@ function daysBetween(laterStr, earlierStr) {
 //   { match: null, newCar: N }                      → INSERT new sale
 //   { match: null, resellOf: prev_sale, reason }    → INSERT new sale + flag resell
 //   { ambiguous: true }                             → human picks
-function pickExistingSale(row, sales) {
+function pickExistingSale(row, sales, opts = {}) {
+  const renewalWindow = Number.isFinite(opts.renewalWindow) ? opts.renewalWindow : DEFAULT_RENEWAL_WINDOW_DAYS;
   if (!sales || sales.length === 0) return { match: null };
 
   const ref = upper(row.reference_no);
@@ -460,12 +479,27 @@ function pickExistingSale(row, sales) {
       // Renewal: file's sale_date is meaningfully AFTER the active sale's
       // sale_date → treat as a new deal (auto-warranty 6 / 12 / 24 mo
       // renewal pattern). Same car + same client + later date = next term.
-      if (gap !== null && gap > RENEWAL_WINDOW_DAYS) {
+      if (gap !== null && gap > renewalWindow) {
         return {
           match:    null,
           resellOf: existing,
           renewal:  true,
           reason:   `Same car + same client but file's sale_date (${String(row.sale_date).slice(0,10)}) is ${gap} days after the active sale (${existing.reference_no || existing.id.slice(0,8)}, ${String(existing.sale_date).slice(0,10)}) → treated as renewal.`,
+        };
+      }
+      // G1 — Plan switch on same client treated as a NEW SALE rather than
+      // a silent in-place plan update. The original plan + price history
+      // is preserved instead of being overwritten by the new plan.
+      const filePlan     = normPlan(row.plan);
+      const existingPlan = normPlan(existing.plan);
+      if (filePlan && existingPlan && filePlan !== existingPlan) {
+        return {
+          match:        null,
+          planSwitch:   true,
+          previousPlan: existing.plan,
+          newPlan:      row.plan,
+          newCar:       carMatches.length,   // still on the same car, but new deal
+          reason:       `Plan switch on same client: "${existing.plan}" → "${row.plan}". Inserted as a new sale; original plan + sale price preserved.`,
         };
       }
       // File's date is earlier OR within the renewal window → genuine update.
@@ -488,7 +522,7 @@ function pickExistingSale(row, sales) {
         });
         const closest = sorted[0];
         const closestGap = daysBetween(fileDate, closest.sale_date);
-        if (closestGap !== null && closestGap > RENEWAL_WINDOW_DAYS) {
+        if (closestGap !== null && closestGap > renewalWindow) {
           const mostRecent = active.slice().sort((a, b) =>
             String(b.sale_date || b.created_at || '').localeCompare(String(a.sale_date || a.created_at || ''))
           )[0];
@@ -538,6 +572,7 @@ function diffSale(row, sale) {
 // ============================================================================
 async function classifyChunk(rows) {
   const index = buildIndex(await getReference());
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   // Intra-file reference_no duplicate detection. Two file rows sharing the
   // same ref means the operator's source data has a bug — we never want to
@@ -551,12 +586,61 @@ async function classifyChunk(rows) {
   });
   const dupRefs = new Set([...refCounts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
 
+  // G2 — intra-file VIN+client+sale_date duplicate detection. Two closers
+  // double-keying the same deal often produces identical (VIN, client,
+  // sale_date) triples with different reference_nos. Without this guard
+  // they'd both pass and the second one might land on the first one's
+  // row via Tier 2 (single active match), silently collapsing the dup.
+  const tripleCounts = new Map();
+  rows.forEach(r => {
+    const v  = upper(r?.car_vin);
+    const cl = normClient(r?.client_name);
+    const d  = String(r?.sale_date || '').slice(0, 10);
+    if (!v || !cl || !d) return;
+    const k = `${v}|${cl}|${d}`;
+    tripleCounts.set(k, (tripleCounts.get(k) || 0) + 1);
+  });
+  const dupTriples = new Set([...tripleCounts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+
+  // G5 — mass-VIN guard. >5 file rows sharing the same VIN is almost
+  // always a copy-paste mistake; surface as a warning on each affected
+  // row so the operator can pull them out of the batch.
+  const vinCounts = new Map();
+  rows.forEach(r => {
+    const v = upper(r?.car_vin);
+    if (!v) return;
+    vinCounts.set(v, (vinCounts.get(v) || 0) + 1);
+  });
+  const massVins = new Set([...vinCounts.entries()].filter(([, n]) => n > 5).map(([k]) => k));
+
   const resolved = [], unmatched = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') { unmatched.push({ reason: 'Empty or invalid row' }); continue; }
     const ref = String(row.reference_no || '').trim();
     if (ref && dupRefs.has(ref.toUpperCase())) {
       unmatched.push({ ...row, reason: `Reference No "${ref}" appears more than once in this file. Each sale must have a unique reference_no — fix the spreadsheet.` });
+      continue;
+    }
+    // G2 — intra-file VIN+client+date duplicate.
+    const tripleKey = `${upper(row.car_vin)}|${normClient(row.client_name)}|${String(row.sale_date || '').slice(0,10)}`;
+    if (upper(row.car_vin) && normClient(row.client_name) && row.sale_date && dupTriples.has(tripleKey)) {
+      unmatched.push({ ...row, reason: `Same VIN + client + sale_date appears more than once in this file. Looks like a duplicate sale — fix the spreadsheet or assign different reference_nos.` });
+      continue;
+    }
+    // S4 — future-dated sale_date is almost always a typo (year off by 1).
+    if (row.sale_date) {
+      const d = String(row.sale_date).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > todayIso) {
+        unmatched.push({ ...row, reason: `Sale Date "${row.sale_date}" is in the future. Auto-warranty sales can't post-date today — check for typos (year column).` });
+        continue;
+      }
+    }
+    // S5 — when status is cancel-like, require cancellation_date so the
+    // bulk insert doesn't land cancelled rows without the audit date the
+    // compliance team needs for reports.
+    const status = String(row.status || '').toLowerCase().trim();
+    if (CANCEL_LIKE_STATUSES.has(status) && !row.cancellation_date) {
+      unmatched.push({ ...row, reason: `Status "${status}" requires a Cancellation Date column. Add one before re-uploading.` });
       continue;
     }
     const r = resolveRow(row, index);
@@ -609,6 +693,15 @@ async function classifyChunk(rows) {
     sales.forEach(s => { (salesByTransfer.get(s.transfer_id) || salesByTransfer.set(s.transfer_id, []).get(s.transfer_id)).push(s); });
   }
 
+  // Resolve renewal window once per chunk (one config read per chunk vs
+  // per-row), keyed on the chunk's primary closer company. All resolved
+  // rows in a chunk share at most a few company_ids so we pick the
+  // dominant one as the lookup target.
+  const companyTallies = new Map();
+  resolved.forEach(r => companyTallies.set(r._r.company_id, (companyTallies.get(r._r.company_id) || 0) + 1));
+  const primaryCompanyId = [...companyTallies.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  const renewalWindow = await getRenewalWindow(primaryCompanyId);
+
   const newSales = [], updates = [], skipped = [], ambiguous = [];
   for (const r of resolved) {
     const base = { ...r, company_id: r._r.company_id, fronter_user_id: r._r.fronter_user_id, closer_user_id: r._r.closer_user_id };
@@ -647,8 +740,30 @@ async function classifyChunk(rows) {
     base.matched_transfer = summarizeTransfer(transfer, salesByTransfer);
     if (r._xfers.length > 1) base.candidate_transfers = r._xfers.map(t => summarizeTransfer(t, salesByTransfer));
 
+    // G6 — sale-on-rejected-transfer guard. Chosen transfer that's
+    // already in a terminal state (rejected by closer / cancelled by
+    // fronter) can't legitimately produce a new sale row. Reject and
+    // surface the reason instead of inserting silently.
+    if (transfer.status === 'rejected' || transfer.status === 'cancelled') {
+      unmatched.push({ ...base, reason: `Chosen transfer is in "${transfer.status}" state. A sale cannot land on a rejected/cancelled transfer — re-route to a different transfer or restore this one first.` });
+      continue;
+    }
+
+    // G5 — mass-VIN warning chip (doesn't block; flags for review).
+    if (upper(r.car_vin) && massVins.has(upper(r.car_vin))) {
+      base.match_warning = true;
+      notes.push(`⚠ Same VIN appears more than 5 times in this file — likely copy-paste error. Verify.`);
+    }
+    // G3 — null client on closed_won / sold rows is a reporting hole.
+    const fileStatus = String(r.status || '').toLowerCase().trim();
+    if (!normClient(r.client_name) && (fileStatus === 'closed_won' || fileStatus === 'sold')) {
+      base.match_warning = true;
+      notes.push(`⚠ Client column is blank on a closed deal — client-switch detection and revenue reports both need this. Add the client name.`);
+    }
+    if (notes.length) base.match_note = notes.filter(Boolean).join(' ');
+
     const existing = salesByTransfer.get(transfer.id) || [];
-    const pick = pickExistingSale(r, existing);
+    const pick = pickExistingSale(r, existing, { renewalWindow });
 
     if (pick.ambiguous) { ambiguous.push({ ...base, transfer_id: transfer.id, reason: `${existing.length} sales already exist on this transfer and the row has no Reference No / VIN / car to tell them apart — add one so the right sale is updated.` }); continue; }
 
@@ -674,6 +789,10 @@ async function classifyChunk(rows) {
       } else if (pick.clientSwitch) {
         noteParts.push(`↔ ${pick.reason}`);
         base.client_switch = true;
+      } else if (pick.planSwitch) {
+        noteParts.push(`🪄 ${pick.reason}`);
+        base.plan_switch = true;
+        base.previous_plan = pick.previousPlan;
       } else if (pick.newCar) {
         noteParts.push(`Added as a new car (${pick.newCar} other sale(s) already on this transfer).`);
       }
@@ -686,6 +805,19 @@ async function classifyChunk(rows) {
     if (changes.length === 0) {
       skipped.push({ ...base, reason: 'Identical sale already exists' });
     } else {
+      // G13 — refuse updates to sales older than compliance.lock_window_days.
+      // Sale's sale_date is the right anchor (G12) — created_at on bulk-
+      // imported rows is the upload day, which would let the same uploader
+      // unlock everything by re-importing. Lock by business date instead.
+      const { getConfig } = require('./businessConfig');
+      const lockDays = parseInt(await getConfig(r._r.company_id, 'compliance.lock_window_days', 90), 10) || 0;
+      if (lockDays > 0 && pick.match.sale_date) {
+        const ageDays = (Date.now() - new Date(pick.match.sale_date).getTime()) / 86400000;
+        if (ageDays > lockDays) {
+          unmatched.push({ ...base, reason: `Existing sale (ref ${pick.match.reference_no || pick.match.id.slice(0,8)}) is ${Math.floor(ageDays)} days old — past the ${lockDays}-day compliance lock. Compliance must unlock it before a bulk update can land.` });
+          continue;
+        }
+      }
       updates.push({ ...base, transfer_id: transfer.id, sale_id: pick.match.id, changes });
     }
   }
@@ -744,6 +876,21 @@ function buildSaleRow(row, batchId) {
     original_sale_id:   row.resell_of?.id || null,
     resell_intent:      row.resell_of ? (row.resell_intent || 'resell') : null,
     resell_reason:      row.resell_of ? (row.resell_reason || 'bulk_upload') : null,
+    // G11 — original_fronter_id preserves who first brought this customer
+    // even when the new transfer is fronted by someone else (re-front).
+    // On a primary sale this stays null; on a resell row, copy the old
+    // sale's original_fronter_id if it had one, else the old sale's
+    // fronter_id (the fronter on the prior transfer).
+    original_fronter_id: row.resell_of
+      ? (row.resell_of.original_fronter_id || row.resell_of.fronter_id || null)
+      : null,
+    // Cancellation metadata — populated only when the file row carries a
+    // cancel-like status. The validator already enforced cancellation_date
+    // presence so we only need to format it here.
+    cancellation_date:        row.cancellation_date ? toIsoDate(row.cancellation_date) : null,
+    cancellation_reason_key:  row.cancellation_reason_key || null,
+    chargeback_date:          row.chargeback_date ? toIsoDate(row.chargeback_date) : null,
+    chargeback_amount:        Number.isFinite(parseFloat(row.chargeback_amount)) ? parseFloat(row.chargeback_amount) : null,
   };
 }
 

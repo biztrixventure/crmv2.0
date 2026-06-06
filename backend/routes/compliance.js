@@ -834,9 +834,12 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
   // Per-row fields override the top-level ones. The bulk fields stay as the
   // fallback so the operator can apply the same date/reason to every row
   // without typing it 50 times.
-  const new_status        = String(body.new_status || '').trim();
-  const bulkReason        = String(body.reason || '').trim();
-  const bulkCancelDate    = normalizeDate(body.cancellation_date);
+  const new_status          = String(body.new_status || '').trim();
+  const bulkReason          = String(body.reason || '').trim();
+  const bulkReasonKey       = String(body.cancellation_reason_key || '').trim() || null;
+  const bulkCancelDate      = normalizeDate(body.cancellation_date);
+  const bulkChargebackDate  = normalizeDate(body.chargeback_date);
+  const bulkChargebackAmt   = Number.isFinite(parseFloat(body.chargeback_amount)) ? parseFloat(body.chargeback_amount) : null;
   let updates             = Array.isArray(body.updates) ? body.updates : null;
   if (!updates) {
     const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean) : [];
@@ -947,6 +950,16 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
     // cancellation_date semantics: write it when the status is cancel-like
     // OR when the caller explicitly sent one (so admins can backfill).
     if ((isCancelLike || rowDate) && _hasCancellationDate) patch.cancellation_date = rowDate;
+    // Cancellation reason key — per-row override wins, else bulk-level.
+    const rowReasonKey = String(upd.cancellation_reason_key || '').trim() || bulkReasonKey;
+    if (rowReasonKey) patch.cancellation_reason_key = rowReasonKey;
+    // Chargeback fields — only meaningful when status === 'chargeback'.
+    if (new_status === 'chargeback') {
+      const rowCbDate = normalizeDate(upd.chargeback_date) || bulkChargebackDate || rowDate;
+      const rowCbAmt  = Number.isFinite(parseFloat(upd.chargeback_amount)) ? parseFloat(upd.chargeback_amount) : bulkChargebackAmt;
+      if (rowCbDate) patch.chargeback_date = rowCbDate;
+      if (rowCbAmt !== null && rowCbAmt !== undefined) patch.chargeback_amount = rowCbAmt;
+    }
     if (['closed_won', 'closed_lost', 'cancelled', 'compliance_cancelled', 'needs_revision', 'chargeback', 'dispute'].includes(new_status)) {
       patch.compliance_reviewed_by = userId;
       patch.compliance_reviewed_at = now;

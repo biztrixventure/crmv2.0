@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
+import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
-import client from '../../api/client';
 import ResellModal from '../Closer/ResellModal';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
@@ -66,6 +66,12 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const { sections, isFieldVisible } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
+  // Resell chain — fetched on open when this sale carries an
+  // original_sale_id OR has been resold into another row. Walk both
+  // directions: original_sale_id chain backward + any row whose
+  // original_sale_id points at us forward. Result: a linear timeline
+  // ordered by sale_date so the auditor sees lifetime customer history.
+  const [chain, setChain] = useState([]);
 
   // Pull resell.enabled_statuses once so the button hides for statuses the
   // superadmin has disabled. Falls back to a safe default when offline.
@@ -75,6 +81,24 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
       .then(r => setEnabledStatuses(r.data?.config?.['resell.enabled_statuses'] || null))
       .catch(() => setEnabledStatuses(null));
   }, [sale?.id]);
+
+  // Resell chain fetch — only runs when this sale is part of one.
+  useEffect(() => {
+    if (!sale) { setChain([]); return; }
+    if (!sale.is_resell && !sale.original_sale_id) {
+      // Could still be the ORIGINAL with resells off it; do a forward check.
+    }
+    let cancelled = false;
+    // Use the existing compliance sales endpoint for cross-company visibility;
+    // any user inside the drawer already has read access to this sale's
+    // company, so the role-scoped endpoint is the safe shared fallback.
+    const rootId = sale.original_sale_id || sale.id;
+    client.get(`sales/${rootId}/chain`).then(r => {
+      if (cancelled) return;
+      setChain(Array.isArray(r.data?.chain) ? r.data.chain : []);
+    }).catch(() => { /* endpoint optional; silent fallback */ });
+    return () => { cancelled = true; };
+  }, [sale?.id, sale?.original_sale_id]);
 
   if (!sale) return null;
 
@@ -281,6 +305,69 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 return null;
             }
           })}
+
+          {/* Resell chain timeline (G9) — only renders when the sale is
+              part of a chain (it has an original_sale_id, or another row
+              points at it). Lifetime customer view: each term as a node. */}
+          {chain && chain.length > 1 && (
+            <div className="mb-5">
+              <p className="text-xs font-bold uppercase tracking-widest mb-2"
+                style={{ color: 'var(--color-primary-600)' }}>
+                Sale Chain · {chain.length} term{chain.length === 1 ? '' : 's'}
+              </p>
+              <div className="space-y-1.5">
+                {chain.map((c, i) => {
+                  const isCurrent = c.id === sale.id;
+                  return (
+                    <div key={c.id} className="rounded-xl p-2.5 flex items-center gap-2.5 flex-wrap"
+                      style={{
+                        backgroundColor: isCurrent ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)',
+                        border: isCurrent ? '1px solid var(--color-primary-300, #c7d2fe)' : '1px solid var(--color-border)',
+                      }}>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ backgroundColor: isCurrent ? 'var(--color-primary-200, #c7d2fe)' : 'var(--color-surface)', color: isCurrent ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)' }}>
+                        #{i + 1}
+                      </span>
+                      <code className="text-xs font-mono font-bold" style={{ color: 'var(--color-text)' }}>
+                        {c.reference_no || c.id.slice(0, 8)}
+                      </code>
+                      <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.sale_date || '—'}
+                      </span>
+                      {c.client_name && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded font-semibold"
+                          style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text)' }}>
+                          {c.client_name}
+                        </span>
+                      )}
+                      {c.plan && (
+                        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                          {c.plan}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: c.is_resell ? '#ede9fe' : '#dcfce7',
+                          color:           c.is_resell ? '#6d28d9' : '#166534',
+                        }}>
+                        {c.is_resell ? 'resell' : 'original'}
+                      </span>
+                      <span className="text-[10px] uppercase tracking-wide font-bold ml-auto"
+                        style={{ color: 'var(--color-text-secondary)' }}>
+                        {(c.status || '').replace(/_/g, ' ')}
+                      </span>
+                      {c.cancellation_date && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)' }}>
+                          cancelled {c.cancellation_date}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Audit trail — gated by layout config + readonly_admin flag */}
           {sections.find(s => s.id === 'audit')?.visible && hist.length > 0 && roFlag('view_audit_history') && (
