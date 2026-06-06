@@ -86,6 +86,10 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const [errors, setErrors]           = useState({});
   const { plans, clients, fetchConfigs } = useSaleConfigs(user?.company_id);
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
+  // Closer-side preview of /sales/eligibility-check so the closer sees an
+  // ineligibility warning while they're filling the form instead of
+  // bouncing off a 400 after Submit.
+  const [eligPreview, setEligPreview] = useState(null);
 
   useEffect(() => { fetchConfigs(); }, [fetchConfigs]);
   useEffect(() => { fetchFields(); }, [fetchFields]);
@@ -102,6 +106,34 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       })
       .catch(() => {});
   }, [user?.company_id]);
+
+  // Eligibility preview — debounced check on the plan + vehicle fields
+  // currently in formData. Runs only when the closer has at least a plan
+  // AND a year-or-make-or-miles. Cancels prior requests so the latest
+  // result wins. Never blocks Submit; the real enforcement happens on the
+  // backend POST/PUT.
+  useEffect(() => {
+    const plan = formData.SalePlan || formData.sale_plan || formData.plan;
+    const year = formData.CarYear || formData.car_year || formData.Year;
+    const make = formData.CarMake || formData.car_make || formData.Make;
+    const miles = formData.CarMiles || formData.car_miles || formData.Miles;
+    if (!plan || (!year && !make && !miles)) { setEligPreview(null); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      client.post('sales/eligibility-check', {
+        plan, car_year: year, car_make: make, car_miles: miles,
+        company_id: transfer?.company_id || user?.company_id || null,
+      }).then(r => { if (!cancelled) setEligPreview(r.data || null); })
+        .catch(() => { /* silent — preview is optional */ });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [
+    formData.SalePlan, formData.sale_plan, formData.plan,
+    formData.CarYear, formData.car_year, formData.Year,
+    formData.CarMake, formData.car_make, formData.Make,
+    formData.CarMiles, formData.car_miles, formData.Miles,
+    transfer?.company_id, user?.company_id,
+  ]);
 
   // Auto-fill fronter field from transfer once fields + fronters are ready
   useEffect(() => {
@@ -507,6 +539,31 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
 
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
+
+      {/* Vehicle eligibility preview — surfaces the same verdict the
+          backend POST/PUT will run. Red when blocked, amber when warn-
+          mode, hidden when ok or skipped. Doesn't block Submit; the
+          server still enforces. */}
+      {eligPreview && !eligPreview.ok && eligPreview.reason && (
+        <div className="mb-5 rounded-xl p-3 flex items-start gap-2"
+          style={{
+            backgroundColor: 'var(--color-error-50, #fef2f2)',
+            border: '1px solid var(--color-error-300, #fca5a5)',
+          }}>
+          <span className="text-lg leading-none">🚫</span>
+          <div className="flex-1 text-xs">
+            <p className="font-bold" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+              Vehicle ineligible for this plan
+            </p>
+            <p className="mt-0.5" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+              {eligPreview.reason}
+            </p>
+            <p className="mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+              Adjust the vehicle or pick a different plan. Submitting now will be rejected by compliance.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Lead source banner */}
       {transfer && (transfer.fronter_name || transfer.company_slug || transfer.company_name) && (

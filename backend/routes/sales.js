@@ -583,6 +583,79 @@ router.get(
 // PUT /sales/:id - Update sale
 // ============================================================================
 // ============================================================================
+// POST /sales/eligibility-check — closer-side preview of a sale before submit.
+// Returns the same eligibility verdict the real POST/PUT would run, but
+// never writes anything. Lets the SaleForm warn the closer about an
+// ineligible vehicle while they're filling the form, instead of bouncing
+// off a 400 after they hit Submit.
+// ============================================================================
+router.post('/eligibility-check', asyncHandler(async (req, res) => {
+  const { plan, car_year, car_make, car_miles, company_id } = req.body || {};
+  const { checkEligibility } = require('../utils/vehicleEligibility');
+  const resolvedCompany = company_id || req.user.company_id || null;
+  const result = await checkEligibility({ plan, car_year, car_make, car_miles }, resolvedCompany);
+  res.json({
+    ok:       !!(result.ok || result.skipped),
+    skipped:  !!result.skipped,
+    reason:   result.reason || null,
+    field:    result.field  || null,
+    value:    result.value  ?? null,
+    rule:     result.rule   || null,
+    match:    result.match  || null,
+  });
+}));
+
+// ============================================================================
+// GET /sales/customer-history/by-phone/:phone — light summary of prior
+// sales tied to this customer (cross-co aware via customer_uuid). Used by
+// closers in PhoneSearch + the closer drawer to spot a returning customer
+// before they create a duplicate or miss a renewal opportunity. Returns a
+// trimmed shape (no PII beyond first name) and is role-scoped exactly like
+// the lifetime endpoint.
+// ============================================================================
+router.get('/customer-history/by-phone/:phone', asyncHandler(async (req, res) => {
+  const role = req.user.role;
+  const userId = req.user.id;
+  const companyId = req.user.company_id;
+  const raw = String(req.params.phone || '').replace(/\D/g, '');
+  const norm = raw.length === 11 && raw.startsWith('1') ? raw.slice(1) : raw;
+  if (!norm || norm.length < 7) return res.status(400).json({ error: 'phone must be at least 7 digits' });
+
+  const { data: anchor } = await supabaseAdmin
+    .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+    .or(`customer_phone.eq.${norm},customer_phone.eq.+1${norm}`)
+    .limit(1).maybeSingle();
+  if (!anchor?.customer_uuid) return res.json({ customer_uuid: null, history: [], summary: { total: 0, active: 0, cancelled: 0 } });
+
+  let query = supabaseAdmin
+    .from('sales')
+    .select('id, reference_no, status, sale_date, plan, client_name, company_id, is_resell, cancellation_date, chargeback_amount')
+    .eq('customer_uuid', anchor.customer_uuid)
+    .order('sale_date', { ascending: false });
+
+  // Same scope rules as /lifetime.
+  if (role === 'fronter')         query = query.eq('fronter_id', userId).eq('is_resell', false);
+  else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (role === 'closer')     query = query.eq('closer_id', userId);
+  else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+    return res.status(403).json({ error: 'Not permitted' });
+  }
+
+  const { data: history } = await query;
+  const rows = history || [];
+  const TERMINAL_CANCEL = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback']);
+  const summary = {
+    total: rows.length,
+    active: rows.filter(r => !TERMINAL_CANCEL.has(r.status)).length,
+    cancelled: rows.filter(r => TERMINAL_CANCEL.has(r.status)).length,
+    chargebacks: rows.filter(r => r.status === 'chargeback').length,
+    chargeback_total: rows.reduce((sum, r) => sum + (parseFloat(r.chargeback_amount) || 0), 0),
+  };
+  res.json({ customer_uuid: anchor.customer_uuid, history: rows, summary });
+}));
+
+// ============================================================================
 // GET /sales/lifetime/by-phone/:phone — every sale tied to this customer
 // across every company (G17 / G27). Resolved by customer_uuid (mig 079) so
 // cross-co reports finally have a stable identity to roll up by.
