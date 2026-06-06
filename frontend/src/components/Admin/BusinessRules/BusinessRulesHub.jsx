@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
 import KpiRules from './KpiRules';
 import ComplianceRules from './ComplianceRules';
 import TransferStatusRules from './TransferStatusRules';
+import VehicleEligibilityRules from './VehicleEligibilityRules';
 import ShellLayoutRules from './ShellLayoutRules';
 import NotificationsRules from './NotificationsRules';
 import DrawerLayoutRules from './DrawerLayoutRules';
@@ -21,6 +22,7 @@ const PAGES = [
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
   { id: 'transfer',     label: 'Transfer Lifecycle',     icon: Workflow,    Component: TransferStatusRules },
+  { id: 'vehicle',      label: 'Vehicle Eligibility',    icon: Car,         Component: VehicleEligibilityRules },
   { id: 'shells',       label: 'Shell Layouts',          icon: LayoutDashboard, Component: ShellLayoutRules },
   { id: 'notifications',label: 'Notifications',          icon: Bell,        Component: NotificationsRules },
   { id: 'drawer',       label: 'Drawer Layout',          icon: LayoutTemplate, Component: DrawerLayoutRules },
