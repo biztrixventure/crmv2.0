@@ -298,15 +298,25 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
               Custom range
             </p>
             <div className="space-y-1.5">
+              {/* Keypress blocked — calendar-only selection per audit
+                  requirement. The browser's native picker still opens on
+                  click; only the typed-input path is disabled so users
+                  can't paste an invalid string. */}
               <input
                 type="date" value={customFrom}
                 onChange={e => setCustomFrom(e.target.value)}
+                onKeyDown={e => e.preventDefault()}
+                onPaste={e => e.preventDefault()}
                 className="input text-sm py-1.5 w-full"
+                title="Pick a date from the calendar — manual typing disabled"
               />
               <input
                 type="date" value={customTo}
                 onChange={e => setCustomTo(e.target.value)}
+                onKeyDown={e => e.preventDefault()}
+                onPaste={e => e.preventDefault()}
                 className="input text-sm py-1.5 w-full"
+                title="Pick a date from the calendar — manual typing disabled"
               />
               <button
                 type="button"

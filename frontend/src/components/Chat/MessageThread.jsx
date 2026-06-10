@@ -55,7 +55,14 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
       <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-        {showName && !mine && <p className="text-xs font-semibold mb-0.5 px-1" style={{ color: 'var(--color-primary-600)' }}>{m.sender_name}</p>}
+        {/* Sender name takes the per-user font color (Chat Control → Font
+            Colors) when set, falling back to the system primary. */}
+        {showName && !mine && (
+          <p className="text-xs font-semibold mb-0.5 px-1"
+            style={{ color: m.sender_font_color || 'var(--color-primary-600)' }}>
+            {m.sender_name}
+          </p>
+        )}
         <div className="relative flex items-end gap-1">
           {/* hover actions (own messages) */}
           {mine && !m.deleted && (

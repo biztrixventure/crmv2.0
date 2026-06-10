@@ -469,6 +469,15 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const hasMore = (data || []).length > limit;
   const page = (data || []).slice(0, limit);
   const cards = await getUserCards(page.map(m => m.sender_id));
+  // Per-sender chat font color (mig 082). Single query for every distinct
+  // sender on the page. Missing rows → no override (frontend renders default).
+  const senderIds = [...new Set(page.map(m => m.sender_id).filter(Boolean))];
+  const stylesById = {};
+  if (senderIds.length) {
+    const { data: styles } = await supabaseAdmin
+      .from('chat_user_styles').select('user_id, font_color').in('user_id', senderIds);
+    (styles || []).forEach(s => { stylesById[s.user_id] = s.font_color || null; });
+  }
 
   // Reactions for this page, grouped per message as [{ emoji, user_ids }].
   const ids = page.map(m => m.id);
@@ -488,6 +497,7 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
     conversation_id: m.conversation_id,
     sender_id: m.sender_id,
     sender_name: cards.get(m.sender_id)?.name || 'User',
+    sender_font_color: stylesById[m.sender_id] || null,
     body: m.deleted_at ? null : m.body,
     body_html: m.deleted_at ? null : (m.body_html || null),
     attachments: m.deleted_at ? null : (m.attachments || null),

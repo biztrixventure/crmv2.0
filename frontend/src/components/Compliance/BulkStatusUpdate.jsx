@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Upload, Search, ListChecks, X, AlertTriangle, CheckCircle2, Loader2, Trash2, Calendar,
+  Upload, Search, ListChecks, X, AlertTriangle, CheckCircle2, Loader2, Trash2, Calendar, History, RotateCcw,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
@@ -529,6 +529,104 @@ export default function BulkStatusUpdate() {
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Batches list — every Bulk Status Update operation is tracked as
+          its own batch (similar to Sale + Transfer bulk uploads). Operator
+          can revert any un-reverted batch to restore prior state. */}
+      <BatchesSection key={`batches-${applyMsg}`} />
+    </div>
+  );
+}
+
+function BatchesSection() {
+  const [batches, setBatches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busyId,  setBusyId]  = useState(null);
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await client.get('compliance/bulk-status/batches');
+      setBatches(data?.batches || []);
+    } catch (e) {
+      setMsg(e.response?.data?.error || 'Failed to load batches');
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const revert = async (id) => {
+    if (!window.confirm('Revert this batch? Every affected sale will be restored to its prior status + cancellation_date + reason + chargeback fields. This action is logged in edit_history.')) return;
+    setBusyId(id); setMsg('');
+    try {
+      const { data } = await client.delete(`compliance/bulk-status/batches/${id}`);
+      setMsg(`Restored ${data.restored} sale(s)${data.skipped?.length ? ` · ${data.skipped.length} skipped` : ''}.`);
+      await load();
+    } catch (e) {
+      setMsg(e.response?.data?.error || 'Revert failed');
+    } finally { setBusyId(null); }
+  };
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap" style={{ borderColor: 'var(--color-border)' }}>
+        <p className="text-xs font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+          <History size={12} /> Bulk Status Update history
+        </p>
+        <div className="flex items-center gap-2">
+          {msg && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{msg}</span>}
+          <button onClick={load} disabled={loading}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            {loading ? <Loader2 size={11} className="animate-spin" /> : 'Refresh'}
+          </button>
+        </div>
+      </div>
+      {batches.length === 0 ? (
+        <p className="text-sm italic text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>
+          No bulk-status batches yet. Apply an update above to see history here.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
+                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>When</th>
+                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Operator</th>
+                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>New status</th>
+                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Reason key</th>
+                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Affected</th>
+                <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {batches.map(b => (
+                <tr key={b.id} className="border-b" style={{ borderColor: 'var(--color-border)', opacity: b.reverted_at ? 0.55 : 1 }}>
+                  <td className="px-3 py-2 text-xs">{new Date(b.created_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs">{b.created_by_name || '—'}</td>
+                  <td className="px-3 py-2 text-xs font-semibold">{b.new_status}</td>
+                  <td className="px-3 py-2 text-xs">{b.cancellation_reason_key || '—'}</td>
+                  <td className="px-3 py-2 text-xs">{b.applied_count}</td>
+                  <td className="px-3 py-2 text-right">
+                    {b.reverted_at ? (
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                        reverted {new Date(b.reverted_at).toLocaleDateString()}
+                      </span>
+                    ) : (
+                      <button onClick={() => revert(b.id)} disabled={busyId === b.id}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold border disabled:opacity-40"
+                        style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)' }}>
+                        {busyId === b.id ? <Loader2 size={11} className="animate-spin" /> : <><RotateCcw size={11} /> Revert</>}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   MessageSquare, Activity, Users, Lock, Unlock, Trash2, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
-  UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw,
+  UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw, Palette,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
@@ -26,6 +26,7 @@ const TABS = [
   { id: 'search',        label: 'Message Search', icon: Search },
   { id: 'users',         label: 'Users',          icon: Users },
   { id: 'broadcast',     label: 'Broadcast',      icon: Megaphone },
+  { id: 'colors',        label: 'Font Colors',    icon: Palette },
   { id: 'log',           label: 'Moderation Log', icon: ScrollText },
   { id: 'companies',     label: 'Rollout',        icon: Building2 },
 ];
@@ -536,8 +537,156 @@ const ChatAdmin = () => {
       {tab === 'search' && <SearchTab setOpenId={openConversation} />}
       {tab === 'users' && <UsersTab />}
       {tab === 'broadcast' && <BroadcastTab />}
+      {tab === 'colors' && <ColorsTab />}
       {tab === 'log' && <ModerationTab />}
       {tab === 'companies' && <CompaniesTab />}
+    </div>
+  );
+};
+
+// ── Font Colors ──────────────────────────────────────────────────────────────
+const ColorsTab = () => {
+  const [styles, setStyles] = useState([]);
+  const [users, setUsers]   = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [color, setColor] = useState('#1d4ed8');
+  const [selUsers, setSelUsers] = useState([]);
+  const [companyId, setCompanyId] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, u, c] = await Promise.all([
+        client.get('chat-admin/styles'),
+        client.get('chat-admin/users', { params: { limit: 500 } }),
+        client.get('companies').catch(() => ({ data: { companies: [] } })),
+      ]);
+      setStyles(s.data?.styles || []);
+      setUsers(u.data?.users || []);
+      setCompanies(c.data?.companies || c.data || []);
+    } catch { /* silent */ } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const colorMap = Object.fromEntries(styles.map(s => [s.user_id, s.font_color]));
+
+  const toggleUser = (id) => setSelUsers(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const selectAllShown = () => setSelUsers(users.map(u => u.id));
+  const clearSel = () => setSelUsers([]);
+
+  const applyToSelected = async () => {
+    if (!selUsers.length) return;
+    setMsg('');
+    try {
+      const { data } = await client.post('chat-admin/styles/bulk', { user_ids: selUsers, font_color: color });
+      setMsg(`Applied to ${data.updated} user(s).`);
+      await load();
+    } catch (e) { setMsg(e.response?.data?.error || 'Failed'); }
+  };
+  const resetSelected = async () => {
+    if (!selUsers.length) return;
+    setMsg('');
+    try {
+      await Promise.all(selUsers.map(id => client.delete(`chat-admin/styles/${id}`)));
+      setMsg(`Reset ${selUsers.length} user(s) to default.`);
+      await load();
+    } catch (e) { setMsg(e.response?.data?.error || 'Reset failed'); }
+  };
+  const applyCompany = async () => {
+    if (!companyId) return;
+    setMsg('');
+    try {
+      const { data } = await client.post('chat-admin/styles/by-company', { company_id: companyId, font_color: color, role: roleFilter || undefined });
+      setMsg(`Applied to ${data.updated} user(s) in company.`);
+      await load();
+    } catch (e) { setMsg(e.response?.data?.error || 'Failed'); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+            <Palette size={14} /> Color
+            <input type="color" value={color} onChange={e => setColor(e.target.value)}
+              className="w-10 h-8 rounded border-0 cursor-pointer" />
+            <input type="text" value={color} onChange={e => setColor(e.target.value)}
+              className="input text-sm py-1 w-28 font-mono" />
+          </label>
+          <span className="px-3 py-1 rounded-lg font-bold" style={{ backgroundColor: color, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
+            preview
+          </span>
+        </div>
+
+        {/* Company-wide */}
+        <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Apply to entire company</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1">
+              <option value="">— pick a company —</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="input text-sm py-1">
+              <option value="">All roles</option>
+              {['fronter', 'closer', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin', 'compliance_manager'].map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <button onClick={applyCompany} disabled={!companyId}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              Apply
+            </button>
+          </div>
+        </div>
+
+        {msg && <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{msg}</p>}
+      </div>
+
+      {/* User list */}
+      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="p-3 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: 'var(--color-border)' }}>
+          <p className="text-xs font-bold uppercase tracking-widest flex-1" style={{ color: 'var(--color-text-secondary)' }}>
+            Users · {users.length} · {selUsers.length} selected
+          </p>
+          <button onClick={selectAllShown} className="text-[11px] underline" style={{ color: 'var(--color-text-secondary)' }}>Select all</button>
+          <button onClick={clearSel} className="text-[11px] underline" style={{ color: 'var(--color-text-secondary)' }}>Clear</button>
+          <button onClick={applyToSelected} disabled={!selUsers.length}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            Apply color
+          </button>
+          <button onClick={resetSelected} disabled={!selUsers.length}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border disabled:opacity-40"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            Reset
+          </button>
+        </div>
+        {loading ? <Spinner /> : (
+          <div className="max-h-96 overflow-y-auto">
+            {users.map(u => {
+              const c = colorMap[u.id];
+              const checked = selUsers.includes(u.id);
+              return (
+                <label key={u.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-bg-secondary border-b"
+                  style={{ borderColor: 'var(--color-border)' }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleUser(u.id)} />
+                  <span className="text-sm flex-1" style={{ color: c || 'var(--color-text)', fontWeight: c ? 700 : 500 }}>
+                    {u.name || u.email}
+                  </span>
+                  {c && (
+                    <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{c}</code>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -873,8 +873,10 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
 
   const ids = updates.map(u => u.id);
   const now = new Date().toISOString();
+  // Wider SELECT — we need the prior-state for each affected row so the
+  // batch payload can replay it on revert.
   const fetchCols = () => _hasCancellationDate
-    ? 'id, status, edit_history, compliance_note, cancellation_date'
+    ? 'id, status, edit_history, compliance_note, cancellation_date, cancellation_reason_key, chargeback_date, chargeback_amount, compliance_locked_at'
     : 'id, status, edit_history, compliance_note';
 
   // Chunked SELECT — .in('id', list) embeds every UUID in the URL query
@@ -898,6 +900,11 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
   const byId = new Map((rows || []).map(r => [r.id, r]));
   const results = [];
   const skipped = [];
+  // Prior-state payload for the batch row — captured BEFORE the patch
+  // mutates each sale so the revert flow can replay precisely. We only
+  // push entries for rows that actually got updated (no payload for
+  // skipped rows).
+  const batchPayload = [];
 
   for (const upd of updates) {
     const sale = byId.get(upd.id);
@@ -975,10 +982,48 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
     }
     if (updateErr) { skipped.push({ id: sale.id, reason: updateErr.message }); continue; }
     results.push({ id: sale.id, previous_status: sale.status, new_status, cancellation_date: _hasCancellationDate ? rowDate : null });
+    batchPayload.push({
+      sale_id:                          sale.id,
+      previous_status:                  sale.status,
+      previous_compliance_note:         sale.compliance_note ?? null,
+      previous_cancellation_date:       sale.cancellation_date ?? null,
+      previous_cancellation_reason_key: sale.cancellation_reason_key ?? null,
+      previous_chargeback_date:         sale.chargeback_date ?? null,
+      previous_chargeback_amount:       sale.chargeback_amount ?? null,
+      previous_compliance_locked_at:    sale.compliance_locked_at ?? null,
+    });
   }
 
-  logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s)`);
-  res.json({ updated: results.length, results, skipped });
+  // Create the batch row so the operator can list past operations + revert
+  // any of them. Fire-and-forget on failure: a missing batch row never
+  // blocks the actual status updates (which already landed).
+  let batchId = null;
+  if (results.length) {
+    try {
+      const { data: actor } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const actorName = actor?.user?.user_metadata?.first_name
+        ? `${actor.user.user_metadata.first_name} ${actor.user.user_metadata.last_name || ''}`.trim()
+        : (actor?.user?.email || null);
+      const { data: batchRow } = await supabaseAdmin.from('compliance_status_batches').insert({
+        created_by:              userId,
+        created_by_name:         actorName,
+        new_status,
+        reason:                  bulkReason || null,
+        cancellation_reason_key: bulkReasonKey || null,
+        cancellation_date:       bulkCancelDate || null,
+        chargeback_date:         bulkChargebackDate || null,
+        chargeback_amount:       bulkChargebackAmt || null,
+        applied_count:           results.length,
+        payload:                 batchPayload,
+      }).select('id').single();
+      batchId = batchRow?.id || null;
+    } catch (e) {
+      logger.warn('COMPLIANCE_BULK_STATUS_BATCH', `batch insert failed: ${e.message}`);
+    }
+  }
+
+  logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s) · batch ${batchId || '(skipped)'}`);
+  res.json({ updated: results.length, results, skipped, batch_id: batchId });
   } catch (e) {
     logger.error('COMPLIANCE_BULK_STATUS', 'Handler threw', e);
     // undici wraps the real failure in e.cause — surface it so "fetch failed"
@@ -994,6 +1039,98 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
       where:    e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
     });
   }
+}));
+
+// ============================================================================
+// Bulk-status batches — list + revert.
+//
+//   GET    /compliance/bulk-status/batches            list (last 200, newest first)
+//   GET    /compliance/bulk-status/batches/:id        one batch w/ payload
+//   DELETE /compliance/bulk-status/batches/:id        revert + mark reverted
+//
+// Revert replays the prior-state snapshots in the payload back onto each
+// sale. Only un-reverted batches can be reverted (idempotency). Audit log
+// gets a 'bulk_status_reverted' entry on every affected sale.
+// ============================================================================
+router.get('/bulk-status/batches', asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('compliance_status_batches')
+    .select('id, created_by, created_by_name, created_at, new_status, reason, cancellation_reason_key, cancellation_date, chargeback_date, chargeback_amount, applied_count, reverted_at, reverted_by')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ batches: data || [] });
+}));
+
+router.get('/bulk-status/batches/:id', asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('compliance_status_batches')
+    .select('*').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data)  return res.status(404).json({ error: 'Batch not found' });
+  res.json({ batch: data });
+}));
+
+router.delete('/bulk-status/batches/:id', asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const role = req.user.role;
+  // Only superadmin + compliance_manager can revert.
+  if (role !== 'superadmin' && role !== 'compliance_manager') {
+    return res.status(403).json({ error: 'Only compliance_manager or superadmin can revert a batch.' });
+  }
+
+  const { data: batch, error: fetchErr } = await supabaseAdmin
+    .from('compliance_status_batches').select('*').eq('id', req.params.id).single();
+  if (fetchErr || !batch) return res.status(404).json({ error: 'Batch not found' });
+  if (batch.reverted_at)  return res.status(409).json({ error: 'Batch already reverted', reverted_at: batch.reverted_at });
+
+  const payload = Array.isArray(batch.payload) ? batch.payload : [];
+  const now = new Date().toISOString();
+  const restored = [];
+  const skipped = [];
+
+  for (const snap of payload) {
+    if (!snap?.sale_id) { skipped.push({ id: null, reason: 'No sale_id in snapshot' }); continue; }
+    const { data: current } = await supabaseAdmin
+      .from('sales').select('id, status, edit_history').eq('id', snap.sale_id).maybeSingle();
+    if (!current) { skipped.push({ id: snap.sale_id, reason: 'Sale no longer exists' }); continue; }
+
+    const history = Array.isArray(current.edit_history) ? current.edit_history : [];
+    const revertPatch = {
+      status:                  snap.previous_status,
+      compliance_note:         snap.previous_compliance_note,
+      cancellation_date:       snap.previous_cancellation_date,
+      cancellation_reason_key: snap.previous_cancellation_reason_key,
+      chargeback_date:         snap.previous_chargeback_date,
+      chargeback_amount:       snap.previous_chargeback_amount,
+      compliance_locked_at:    snap.previous_compliance_locked_at,
+      updated_at:              now,
+      edit_history: [...history, {
+        editor_id: userId, role,
+        action: 'bulk_status_reverted',
+        batch_id: batch.id,
+        previous_status: current.status,
+        new_status: snap.previous_status,
+        edited_at: now,
+      }],
+    };
+    let { error: updErr } = await supabaseAdmin.from('sales').update(revertPatch).eq('id', snap.sale_id);
+    if (updErr && /cancellation_date|chargeback_date|chargeback_amount|cancellation_reason_key|compliance_locked_at/i.test(String(updErr.message || ''))) {
+      // Strip newer columns + retry once for deployments where a column is missing.
+      const minimal = { status: snap.previous_status, compliance_note: snap.previous_compliance_note, updated_at: now, edit_history: revertPatch.edit_history };
+      const r2 = await supabaseAdmin.from('sales').update(minimal).eq('id', snap.sale_id);
+      updErr = r2.error;
+    }
+    if (updErr) { skipped.push({ id: snap.sale_id, reason: updErr.message }); continue; }
+    restored.push(snap.sale_id);
+  }
+
+  await supabaseAdmin.from('compliance_status_batches')
+    .update({ reverted_at: now, reverted_by: userId })
+    .eq('id', batch.id);
+
+  logger.success('COMPLIANCE_BULK_STATUS_REVERT', `User ${userId} reverted batch ${batch.id} — ${restored.length} restored, ${skipped.length} skipped`);
+  res.json({ batch_id: batch.id, restored: restored.length, skipped });
 }));
 
 module.exports = router;

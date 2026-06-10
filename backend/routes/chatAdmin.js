@@ -326,6 +326,89 @@ router.post('/users/:id/unban', asyncHandler(async (req, res) => {
   res.json({ message: 'unbanned' });
 }));
 
+// ============================================================================
+// Chat user styles — per-user font_color overrides.
+//
+//   GET    /styles                                    list every assigned style
+//   GET    /styles/:userId                            one user's style
+//   PUT    /styles/:userId        body { font_color } single-user assign
+//   POST   /styles/bulk           body { user_ids[], font_color } batch assign
+//   POST   /styles/by-company     body { company_id, font_color, role? }
+//                                 → applies to every user in that company
+//                                   (optionally filtered by role level)
+//   DELETE /styles/:userId                            reset to default
+//
+// font_color = "#RRGGBB" or null/empty (reset). Backend stores verbatim.
+// Frontend chat render reads chat_user_styles.font_color and applies it
+// to the author's name + message body color.
+// ============================================================================
+const isHex = (s) => typeof s === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.trim());
+
+router.get('/styles', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin
+    .from('chat_user_styles').select('user_id, font_color, set_by, set_at')
+    .order('set_at', { ascending: false });
+  res.json({ styles: data || [] });
+}));
+
+router.get('/styles/:userId', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin
+    .from('chat_user_styles').select('user_id, font_color, set_by, set_at')
+    .eq('user_id', req.params.userId).maybeSingle();
+  res.json({ style: data || null });
+}));
+
+router.put('/styles/:userId', asyncHandler(async (req, res) => {
+  const color = String(req.body?.font_color || '').trim();
+  if (color && !isHex(color)) return res.status(400).json({ error: 'font_color must be "#RRGGBB"' });
+  const { error } = await supabaseAdmin.from('chat_user_styles').upsert({
+    user_id: req.params.userId, font_color: color || null,
+    set_by: req.user.id, set_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: color ? 'color assigned' : 'reset to default' });
+}));
+
+router.post('/styles/bulk', asyncHandler(async (req, res) => {
+  const ids = Array.isArray(req.body?.user_ids) ? req.body.user_ids.filter(Boolean) : [];
+  const color = String(req.body?.font_color || '').trim();
+  if (!ids.length) return res.status(400).json({ error: 'user_ids array required' });
+  if (color && !isHex(color)) return res.status(400).json({ error: 'font_color must be "#RRGGBB"' });
+  const now = new Date().toISOString();
+  const rows = ids.map(user_id => ({ user_id, font_color: color || null, set_by: req.user.id, set_at: now }));
+  const { error } = await supabaseAdmin.from('chat_user_styles').upsert(rows, { onConflict: 'user_id' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ updated: rows.length });
+}));
+
+router.post('/styles/by-company', asyncHandler(async (req, res) => {
+  const company_id = String(req.body?.company_id || '').trim();
+  const color = String(req.body?.font_color || '').trim();
+  const role  = String(req.body?.role || '').trim();
+  if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  if (color && !isHex(color)) return res.status(400).json({ error: 'font_color must be "#RRGGBB"' });
+  let q = supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, custom_roles(level)')
+    .eq('company_id', company_id).eq('is_active', true);
+  const { data: members } = await q;
+  let ids = (members || []).map(m => m.user_id).filter(Boolean);
+  if (role) ids = (members || []).filter(m => m.custom_roles?.level === role).map(m => m.user_id);
+  ids = [...new Set(ids)];
+  if (!ids.length) return res.json({ updated: 0 });
+  const now = new Date().toISOString();
+  const rows = ids.map(user_id => ({ user_id, font_color: color || null, set_by: req.user.id, set_at: now }));
+  const { error } = await supabaseAdmin.from('chat_user_styles').upsert(rows, { onConflict: 'user_id' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ updated: rows.length });
+}));
+
+router.delete('/styles/:userId', asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('chat_user_styles').delete().eq('user_id', req.params.userId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'reset' });
+}));
+
 // Resolve broadcast recipients by audience.
 async function resolveBroadcastTargets({ target_type, target_company_ids, target_roles }) {
   let q = supabaseAdmin.from('user_company_roles').select('user_id, company_id, custom_roles(level)').eq('is_active', true);
