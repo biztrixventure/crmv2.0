@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
+import FilterBar from '../UI/FilterBar';
 import TransferFormModal from '../Transfers/TransferFormModal';
 import { useFormFields } from '../../hooks/useFormFields';
 import {
@@ -181,23 +182,36 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
         </button>
       </div>
 
-      <Filters onSubmit={() => { setPage(1); load(); }}>
-        {/* Free-text search runs against customer name + phone + reference
-            on the backend (compliance/transfers route). Hitting Enter submits
-            via the parent Filters form's onSubmit, same UX as SalesTab. */}
-        <FInput label="Search" placeholder="Name, phone, or reference…"
-          value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
-        <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
-          <option value="">All companies</option>
-          {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </FSelect>
-        <FSelect label="Status" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-        </FSelect>
-        <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
-      </Filters>
+      <FilterBar
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search name / phone / reference…',
+        }}
+        dateRange={{
+          value: { date_from: dateFrom, date_to: dateTo },
+          onChange: (r) => { setDateFrom(r.date_from || ''); setDateTo(r.date_to || ''); setPage(1); },
+          defaultPreset: 'all',
+        }}
+        extras={
+          <>
+            <select value={company} onChange={e => { setCompany(e.target.value); setPage(1); }}
+              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+              <option value="">All companies</option>
+              {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
+              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+              <option value="">All statuses</option>
+              {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+            </select>
+          </>
+        }
+        onClearAll={() => {
+          setSearch(''); setCompany(''); setStatus('');
+          setDateFrom(''); setDateTo(''); setPage(1);
+        }}
+      />
 
       {/* Stats strip — total matches + per-status breakdown of the page. */}
       <TabStatsStrip total={total} records={transfers} />

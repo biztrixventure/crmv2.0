@@ -51,6 +51,7 @@ import StatCardTriple from "../components/UI/StatCardTriple";
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
+import FilterBar from "../components/UI/FilterBar";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -177,6 +178,7 @@ const StaffShell = () => {
   const [xferTabLoading, setXferTabLoading] = useState(false);
   const [xferStatus,     setXferStatus]     = useState('');
   const [xferAgent,      setXferAgent]      = useState('');
+  const [xferSearch,     setXferSearch]     = useState('');
   const [xferPage,       setXferPage]       = useState(1);
 
   // ── Team Sales tab (rich server-side view) ───────────────────────────────
@@ -185,6 +187,7 @@ const StaffShell = () => {
   const [salesTabLoading, setSalesTabLoading] = useState(false);
   const [salesStatus,     setSalesStatus]     = useState('');
   const [salesAgent,      setSalesAgent]      = useState('');
+  const [salesSearch,     setSalesSearch]     = useState('');
   const [salesPage,       setSalesPage]       = useState(1);
 
   // ── Company agents (for agent selector dropdowns) ────────────────────────
@@ -296,11 +299,12 @@ const StaffShell = () => {
       const params = { company_id: user.company_id, page: xferPage, limit: PAGE_SIZE, date_from, date_to };
       if (xferStatus) params.status  = xferStatus;
       if (xferAgent)  params.user_id = xferAgent;
+      if (xferSearch) params.search  = xferSearch;
       const res = await client.get('transfers', { params });
       setXferTabRows(res.data.transfers || []);
       setXferTabTotal(res.data.total    || 0);
     } catch {} finally { setXferTabLoading(false); }
-  }, [user?.company_id, xferPage, xferStatus, xferAgent, date_from, date_to]);
+  }, [user?.company_id, xferPage, xferStatus, xferAgent, xferSearch, date_from, date_to]);
 
   const fetchSalesTab = useCallback(async () => {
     if (!user?.company_id) return;
@@ -309,11 +313,12 @@ const StaffShell = () => {
       const params = { company_id: user.company_id, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
       if (salesStatus) params.status  = salesStatus;
       if (salesAgent)  params.user_id = salesAgent;
+      if (salesSearch) params.search  = salesSearch;
       const res = await client.get('sales', { params });
       setSalesTabRows(res.data.sales || []);
       setSalesTabTotal(res.data.total || 0);
     } catch {} finally { setSalesTabLoading(false); }
-  }, [user?.company_id, salesPage, salesStatus, salesAgent, date_from, date_to]);
+  }, [user?.company_id, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to]);
 
   // Team tab data — only fetch when the tab is active
   useEffect(() => { if (activeTab === 'team_transfers') fetchXferTab();  }, [activeTab, fetchXferTab]);
@@ -651,14 +656,19 @@ const StaffShell = () => {
               <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
             </div>
 
-            {/* Filter bar — transfer pills come from the admin-configured
-                transfer.status_catalog (Business Rules → Transfer Lifecycle). */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              <TransferStatusFilterPills
-                value={xferStatus}
-                onChange={(k) => { setXferStatus(k); setXferPage(1); }}
-              />
-              {companyAgents.length > 0 && (
+            <FilterBar
+              search={{
+                value: xferSearch,
+                onChange: (v) => { setXferSearch(v); setXferPage(1); },
+                placeholder: 'Search customer / phone…',
+              }}
+              statusPills={
+                <TransferStatusFilterPills
+                  value={xferStatus}
+                  onChange={(k) => { setXferStatus(k); setXferPage(1); }}
+                />
+              }
+              extras={companyAgents.length > 0 && (
                 <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
@@ -667,14 +677,8 @@ const StaffShell = () => {
                   ))}
                 </select>
               )}
-              {(xferStatus || xferAgent) && (
-                <button onClick={() => { setXferStatus(''); setXferAgent(''); setXferPage(1); }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-error-50"
-                  style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-                  <XCircle size={11} /> Clear filters
-                </button>
-              )}
-            </div>
+              onClearAll={() => { setXferSearch(''); setXferStatus(''); setXferAgent(''); setXferPage(1); }}
+            />
 
             {xferTabLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
@@ -750,15 +754,19 @@ const StaffShell = () => {
               <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
             </div>
 
-            {/* Filter bar — pills come from the admin-configured
-                compliance.status_catalog so any status change in Business
-                Rules → Compliance Workflow shows up here automatically. */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              <SaleStatusFilterPills
-                value={salesStatus}
-                onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
-              />
-              {companyAgents.length > 0 && (
+            <FilterBar
+              search={{
+                value: salesSearch,
+                onChange: (v) => { setSalesSearch(v); setSalesPage(1); },
+                placeholder: 'Search customer / phone / reference…',
+              }}
+              statusPills={
+                <SaleStatusFilterPills
+                  value={salesStatus}
+                  onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
+                />
+              }
+              extras={companyAgents.length > 0 && (
                 <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
@@ -767,14 +775,8 @@ const StaffShell = () => {
                   ))}
                 </select>
               )}
-              {(salesStatus || salesAgent) && (
-                <button onClick={() => { setSalesStatus(''); setSalesAgent(''); setSalesPage(1); }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-error-50"
-                  style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-                  <XCircle size={11} /> Clear filters
-                </button>
-              )}
-            </div>
+              onClearAll={() => { setSalesSearch(''); setSalesStatus(''); setSalesAgent(''); setSalesPage(1); }}
+            />
 
             {salesTabLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>

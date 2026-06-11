@@ -6,6 +6,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
+import FilterBar from '../UI/FilterBar';
 import TabStatsStrip from './TabStatsStrip';
 import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
@@ -199,22 +200,36 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         onExport={() => setExportOpen(true)}
       />
 
-      <Filters onSubmit={() => { setPage(1); load(); }}>
-        <div className="relative flex-1" style={{ minWidth: 200 }}>
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, phone, reference…" className="input text-sm w-full" />
-        </div>
-        <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
-          <option value="">All companies</option>
-          {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </FSelect>
-        <FSelect label="Status" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
-        </FSelect>
-        <FInput label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <FInput label="To"   type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)} />
-      </Filters>
+      <FilterBar
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search name / phone / reference…',
+        }}
+        dateRange={{
+          value: { date_from: dateFrom, date_to: dateTo },
+          onChange: (r) => { setDateFrom(r.date_from || ''); setDateTo(r.date_to || ''); setPage(1); },
+          defaultPreset: 'all',
+        }}
+        extras={
+          <>
+            <select value={company} onChange={e => { setCompany(e.target.value); setPage(1); }}
+              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+              <option value="">All companies</option>
+              {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
+              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+              <option value="">All statuses</option>
+              {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
+            </select>
+          </>
+        }
+        onClearAll={() => {
+          setSearch(''); setCompany(''); setStatus('');
+          setDateFrom(''); setDateTo(''); setPage(1);
+        }}
+      />
 
       {/* Stats strip — total matches + per-status breakdown of the page.
           Catalog-driven labels + badges via the compliance hook. */}
