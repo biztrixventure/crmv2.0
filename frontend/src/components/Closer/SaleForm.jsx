@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DollarSign, Users, Calendar, Hash, FileText, Building2, Car, Plus, X } from 'lucide-react';
+import { DollarSign, Users, Hash, FileText, Building2, Car, Plus, X } from 'lucide-react';
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
-import { normalize as normalizeField, maxLengthFor, isCarMake, isCarModel, classify as classifyField } from '../../utils/formFieldNorm';
+import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, classify as classifyField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
+import CalendarDateInput from '../Form/CalendarDateInput';
+import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
+import { useUserColors } from '../../hooks/useUserColors';
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -86,6 +89,8 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const [errors, setErrors]           = useState({});
   const { plans, clients, fetchConfigs } = useSaleConfigs(user?.company_id);
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
+  const { years: vehicleYears } = useVehicleYearRange();
+  const { colorFor } = useUserColors();
   // Closer-side preview of /sales/eligibility-check so the closer sees an
   // ineligibility warning while they're filling the form instead of
   // bouncing off a 400 after Submit.
@@ -316,6 +321,17 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     const listId = sug.length ? `ff-${errKey}` : undefined;
     const Dl = listId ? <datalist id={listId}>{sug.map(s => <option key={s} value={s} />)}</datalist> : null;
 
+    // Vehicle year — bounded dropdown (newest first). Range is admin-set via
+    // business_config vehicle.year_min / vehicle.year_max.
+    if (isCarYear(field)) {
+      return (
+        <select value={val} onChange={onChange} required={field.is_required}
+          className={`input ${errClass}`}>
+          <option value="">Select year…</option>
+          {vehicleYears.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      );
+    }
     // Car make/model MUST come before the generic select / textarea branches
     // — admins frequently set CarMake to field_type=select (it IS a dropdown)
     // and that would otherwise render a plain empty <select> instead of the
@@ -429,25 +445,30 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Users size={16} style={{ color: 'var(--color-text-tertiary)' }} />
           </div>
-          <select value={val} onChange={onChange} className={`input pl-9 ${errClass}`}>
-            <option value="">Select fronter…</option>
+          <select value={val} onChange={onChange} className={`input pl-9 ${errClass}`}
+            style={{ color: colorFor(val, 'var(--color-text)'), fontWeight: colorFor(val) ? 600 : undefined }}>
+            <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>Select fronter…</option>
             {fronters.map(f => (
-              <option key={f.user_id} value={f.user_id}>{f.first_name} {f.last_name}</option>
+              <option key={f.user_id} value={f.user_id}
+                style={{ color: colorFor(f.user_id, 'var(--color-text)'), fontWeight: colorFor(f.user_id) ? 600 : 400 }}>
+                {f.first_name} {f.last_name}
+              </option>
             ))}
           </select>
         </div>
       );
     }
-    if (field.field_type === 'sale_date') {
+    // Date fields (Sale Date / Monthly Date / any field_type=date) — calendar
+    // only, defaulted to today, MM/DD/YYYY. Manual typing disabled so a
+    // MM/DD vs DD/MM slip can't reach Compliance.
+    if (field.field_type === 'sale_date' || isDateField(field)) {
       return (
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Calendar size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-          </div>
-          <input type="date"
-            value={val || new Date().toISOString().split('T')[0]}
-            onChange={onChange} className={`input pl-9 ${errClass}`} />
-        </div>
+        <CalendarDateInput
+          value={val}
+          onChange={(iso) => setValue(field.name, iso)}
+          required={field.is_required}
+          className={errClass}
+        />
       );
     }
     if (field.field_type === 'sale_disposition' || field.field_type === 'sale_status') {
@@ -501,6 +522,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
       : field.field_type;
     const ml = maxLengthFor(field);
+    const im = inputModeFor(field);
     const normalizedOnChange = (e) => {
       const next = normalizeField(field, e.target.value);
       onChange({ target: { value: next } });
@@ -509,7 +531,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       <>
         <input type={inputType} value={val} onChange={normalizedOnChange} onBlur={onBlur}
           required={field.is_required} placeholder={ph} list={listId}
-          maxLength={ml}
+          maxLength={ml} inputMode={im}
           className={`input ${errClass}`} />
         {Dl}
       </>

@@ -93,6 +93,19 @@ router.get('/users', asyncHandler(async (req, res) => {
   res.json({ users });
 }));
 
+// ── GET /chat/styles — per-user font colors (read-only, all roles) ────────────
+// The admin-only writer lives at /chat/admin/styles; this read endpoint lets
+// every shell tint a user's name in their assigned color wherever it shows
+// (chat search, conversation list, transfer/sale forms). Colors aren't
+// sensitive, so any authenticated chat user may read the full map.
+router.get('/styles', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin
+    .from('chat_user_styles')
+    .select('user_id, font_color')
+    .not('font_color', 'is', null);
+  res.json({ styles: data || [] });
+}));
+
 // ── GET /chat/conversations ───────────────────────────────────────────────────
 router.get('/conversations', asyncHandler(async (req, res) => {
   const uid = req.user.id;

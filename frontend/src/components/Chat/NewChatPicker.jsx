@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, Check, ArrowLeft, Users } from 'lucide-react';
 import client from '../../api/client';
+import { useUserColors } from '../../hooks/useUserColors';
 import Avatar from './Avatar';
 
 // Searchable global directory → start a DM (1 user) or a group (many + title).
@@ -15,6 +16,7 @@ const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState('');
   const debRef = useRef(null);
+  const { colorFor } = useUserColors();
 
   useEffect(() => {
     clearTimeout(debRef.current);
@@ -107,7 +109,7 @@ const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
                 style={{ backgroundColor: isSel(u.id) ? 'var(--color-primary-50, #f5f3ff)' : 'transparent' }}>
                 <Avatar name={u.name} size={40} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</p>
+                  <p className="text-sm font-semibold truncate" style={{ color: colorFor(u.id, 'var(--color-text)') }}>{u.name}</p>
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                     {u.role && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{u.role}</span>}
                     {u.company && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{u.company}</span>}

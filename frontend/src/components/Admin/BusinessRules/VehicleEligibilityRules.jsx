@@ -146,6 +146,28 @@ export default function VehicleEligibilityRules({ config, scope, onSave }) {
         </p>
       </div>
 
+      {/* Year dropdown range — drives the vehicle Year picker on the Sale +
+          Transfer forms (free-text year is gone; closers pick from this span). */}
+      <Section accent="primary" title="Vehicle year dropdown range"
+        desc="Bounds the Year dropdown shown on the fronter + closer forms (and the manual entry form). Newest year appears first. Independent of the per-plan min_year eligibility caps below.">
+        <div className="flex items-end gap-6 flex-wrap">
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Oldest year (min)</label>
+            <NumInput value={intOrNull(config?.['vehicle.year_min']) ?? null}
+              onChange={v => onSave('vehicle.year_min', v)} placeholder="1990" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Newest year (max)</label>
+            <NumInput value={intOrNull(config?.['vehicle.year_max']) ?? null}
+              onChange={v => onSave('vehicle.year_max', v)} placeholder={String(new Date().getFullYear() + 1)} />
+          </div>
+        </div>
+        <p className="text-xs mt-3 flex items-start gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          <Info size={12} className="flex-shrink-0 mt-0.5" />
+          Leave blank to use defaults (min 1990, max next model year). Takes effect on the next time a form is opened.
+        </p>
+      </Section>
+
       {/* Enforcement mode */}
       <Section accent="info" title="Enforcement mode"
         desc="block — POST/PUT return 400 VEHICLE_INELIGIBLE when a rule fails. warn — request succeeds but the response carries eligibility_warning so the UI can flag it.">

@@ -82,6 +82,7 @@ const SHELL_STAT_CARDS = {
     { key: 'cancelled',               label: 'Cancelled',       group: 'Closer view'  },
     { key: 'awaiting_review',         label: 'Awaiting Review', group: 'Closer view'  },
     { key: 'resells',                 label: 'Resells',         group: 'Closer view'  },
+    { key: 'conversion',              label: 'Conversion',      group: 'Closer view'  },
     { key: 'total_leads',             label: 'Total Leads',     group: 'Fronter view' },
     { key: 'fronter_approved',        label: 'Approved',        group: 'Fronter view' },
     { key: 'fronter_awaiting_review', label: 'Awaiting Review', group: 'Fronter view' },
@@ -96,6 +97,10 @@ const SHELL_STAT_CARDS = {
     { key: 'dup_attempts',            label: 'Dup Attempts' },
   ],
 };
+
+// The conversion card is display-only (no label override is useful — it's a
+// fixed "X%" tile), so the label field is hidden for it in the editor.
+const LABEL_LOCKED = new Set(['conversion']);
 
 const findCard = (layout, key) =>
   (Array.isArray(layout?.stat_cards) ? layout.stat_cards : []).find(c => c.key === key);
@@ -136,14 +141,20 @@ const StatCardRow = ({ card, layout, layoutKey, onSave }) => {
                  backgroundColor: enabled ? 'var(--color-primary-50, #eef2ff)' : 'transparent' }}>
         {enabled ? <Eye size={16} /> : <EyeOff size={16} />}
       </button>
-      <input type="text" value={label} placeholder={card.label}
-        onChange={(e) => setLabel(e.target.value)}
-        onBlur={commitLabel}
-        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-        disabled={!enabled}
-        className="input text-sm py-1.5 flex-1 min-w-0"
-        title="Custom label shown on the card — leave blank to use the default" />
-      {label && label !== card.label && (
+      {LABEL_LOCKED.has(card.key) ? (
+        <span className="text-sm flex-1 min-w-0 truncate" style={{ color: enabled ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>
+          {card.label} <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>· show / hide only</span>
+        </span>
+      ) : (
+        <input type="text" value={label} placeholder={card.label}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={commitLabel}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          disabled={!enabled}
+          className="input text-sm py-1.5 flex-1 min-w-0"
+          title="Custom label shown on the card — leave blank to use the default" />
+      )}
+      {!LABEL_LOCKED.has(card.key) && label && label !== card.label && (
         <button type="button" onClick={reset} title="Reset to default label"
           className="p-1.5 rounded-lg flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
           <RotateCcw size={14} />

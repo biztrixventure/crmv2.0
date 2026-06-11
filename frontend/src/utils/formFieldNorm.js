@@ -26,9 +26,22 @@ export const classify = (field) => {
   if (t === 'zip')                      return 'zip';
   if (t === 'phone' || t === 'tel')     return 'phone';
   if (t === 'email')                    return 'email';
+  if (t === 'date' || t === 'sale_date') return 'date';
   if (matches(field, /\bzip|postal\b/)) return 'zip';
   if (matches(field, /\b(vin)\b/))      return 'vin';
-  if (matches(field, /\b(phone|mobile|cell|cli[_ ]?number)\b/)) return 'phone';
+  // CLI = the secondary "Calling Line Identification" phone field. Treat any
+  // phone/mobile/cell, "cli_number", or a standalone "cli" token (e.g.
+  // "Other CLI") as a phone so it digit-strips + caps at 10. `\bcli\b` will not
+  // match "client" — the boundary fails after "cli".
+  if (matches(field, /\b(phone|mobile|cell)\b|\bcli\b|cli[_ ]?number/)) return 'phone';
+  // Mileage / odometer → digits only. Substring match so camelCase "CarMiles"
+  // and spaced "Car Miles" both classify.
+  if (matches(field, /mileage|odometer|miles/)) return 'mileage';
+  // Vehicle model year → rendered as a dropdown (see isCarYear). Substring so
+  // "CarYear" / "Model Year" / "Year" all match.
+  if (matches(field, /year/))           return 'car_year';
+  // Any field that looks like a date → calendar-only picker (no manual typing).
+  if (matches(field, /\bdate\b/))       return 'date';
   // Name detection is intentionally conservative — only first/last/full name
   // patterns. "Plan name" or "company name" shouldn't strip digits.
   if (matches(field, /\b(first|last|full|customer|client|fronter|closer)?[_ ]?name$/)) return 'name';
@@ -53,6 +66,10 @@ export const normalize = (field, raw) => {
       return s.replace(/\D/g, '').slice(0, 10);
     case 'vin':
       return s.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '').slice(0, 17);
+    case 'mileage':
+      // Digits only. Cap at 7 (9,999,999 mi) — anything longer is a typo and
+      // poisons the integer cast on the sales row.
+      return s.replace(/\D/g, '').slice(0, 7);
     case 'name': {
       // Strip digits, collapse runs of whitespace, and title-case while typing.
       // Trailing space is preserved so the next word can start mid-keystroke
@@ -106,10 +123,19 @@ export const formatPhoneDisplay = (digits) => {
   return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
 };
 
+// Mobile keyboard hint — numeric pad for the digit-only kinds.
+export const inputModeFor = (field) => {
+  const kind = classify(field);
+  return (kind === 'zip' || kind === 'phone' || kind === 'mileage') ? 'numeric' : undefined;
+};
+
 // Convenience predicates the renderers use to switch input behavior.
-export const isZip   = (f) => classify(f) === 'zip';
-export const isPhone = (f) => classify(f) === 'phone';
-export const isVin   = (f) => classify(f) === 'vin';
-export const isName  = (f) => classify(f) === 'name';
+export const isZip     = (f) => classify(f) === 'zip';
+export const isPhone   = (f) => classify(f) === 'phone';
+export const isVin     = (f) => classify(f) === 'vin';
+export const isName    = (f) => classify(f) === 'name';
+export const isMileage = (f) => classify(f) === 'mileage';
+export const isCarYear = (f) => classify(f) === 'car_year';
+export const isDateField = (f) => classify(f) === 'date';
 export const isCarMake  = (f) => classify(f) === 'car_make';
 export const isCarModel = (f) => classify(f) === 'car_model';

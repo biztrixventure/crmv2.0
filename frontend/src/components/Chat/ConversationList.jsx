@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Users, Lock, MessageSquarePlus, Loader2 } from 'lucide-react';
 import client from '../../api/client';
+import { useUserColors } from '../../hooks/useUserColors';
 import Avatar from './Avatar';
 import PresenceDot from './PresenceDot';
 
@@ -20,9 +21,11 @@ const SectionLabel = ({ children }) => (
 );
 
 // One conversation row.
-const ConvRow = ({ c, onlineIds, meId, activeId, onSelect }) => {
+const ConvRow = ({ c, onlineIds, meId, activeId, onSelect, colorFor }) => {
   const online = c.other && onlineIds?.has(c.other.id);
   const isActive = c.id === activeId;
+  // DM titles are the other person's name → tint them in their chat color.
+  const titleColor = c.type === 'dm' && c.other ? colorFor(c.other.id, 'var(--color-text)') : 'var(--color-text)';
   const preview = c.last_message
     ? (c.last_message.deleted ? 'Message deleted'
       : `${c.last_message.sender_id === meId ? 'You: ' : ''}${c.last_message.body || '📎 Attachment'}`)
@@ -39,7 +42,7 @@ const ConvRow = ({ c, onlineIds, meId, activeId, onSelect }) => {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <p className="text-sm font-bold truncate flex-1" style={{ color: 'var(--color-text)' }}>{c.title}</p>
+          <p className="text-sm font-bold truncate flex-1" style={{ color: titleColor }}>{c.title}</p>
           {c.is_locked && <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />}
           <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{timeAgo(c.last_message_at)}</span>
         </div>
@@ -57,13 +60,13 @@ const ConvRow = ({ c, onlineIds, meId, activeId, onSelect }) => {
 };
 
 // One "start a new chat" person row (from the global directory).
-const PersonRow = ({ u, onStartDM }) => (
+const PersonRow = ({ u, onStartDM, colorFor }) => (
   <button onClick={() => onStartDM(u)}
     className="w-full flex items-center gap-3 px-3 py-2.5 transition-colors text-left hover:bg-bg-secondary"
     style={{ borderBottom: '1px solid var(--color-border)' }}>
     <Avatar name={u.name} size={40} />
     <div className="flex-1 min-w-0">
-      <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</p>
+      <p className="text-sm font-semibold truncate" style={{ color: colorFor(u.id, 'var(--color-text)') }}>{u.name}</p>
       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
         {u.role && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{u.role}</span>}
         {u.company && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{u.company}</span>}
@@ -80,6 +83,7 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
   const [people, setPeople] = useState([]);
   const [searching, setSearching] = useState(false);
   const debRef = useRef(null);
+  const { colorFor } = useUserColors();
 
   const query = q.trim();
 
@@ -134,15 +138,15 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
               <MessageSquarePlus size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
               <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No conversations yet. Search a name above to message anyone in the company.</p>
             </div>
-          ) : conversations.map(c => <ConvRow key={c.id} c={c} onlineIds={onlineIds} meId={meId} activeId={activeId} onSelect={onSelect} />)
+          ) : conversations.map(c => <ConvRow key={c.id} c={c} onlineIds={onlineIds} meId={meId} activeId={activeId} onSelect={onSelect} colorFor={colorFor} />)
         ) : (
           /* Searching → categorized results */
           <>
             {filteredConvos.length > 0 && <SectionLabel>Chats</SectionLabel>}
-            {filteredConvos.map(c => <ConvRow key={c.id} c={c} onlineIds={onlineIds} meId={meId} activeId={activeId} onSelect={onSelect} />)}
+            {filteredConvos.map(c => <ConvRow key={c.id} c={c} onlineIds={onlineIds} meId={meId} activeId={activeId} onSelect={onSelect} colorFor={colorFor} />)}
 
             {newPeople.length > 0 && <SectionLabel>Start a new chat</SectionLabel>}
-            {newPeople.map(u => <PersonRow key={u.id} u={u} onStartDM={onStartDM} />)}
+            {newPeople.map(u => <PersonRow key={u.id} u={u} onStartDM={onStartDM} colorFor={colorFor} />)}
 
             {!searching && filteredConvos.length === 0 && newPeople.length === 0 && (
               <div className="flex flex-col items-center justify-center py-14 px-6 text-center gap-3">

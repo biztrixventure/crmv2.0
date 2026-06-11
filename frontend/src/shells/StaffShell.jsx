@@ -893,6 +893,7 @@ const StaffShell = () => {
               )}
 
               {/* Conversion — display-only, kept in the same row. */}
+              {isStaffCardVisible('conversion') && (
               <Card
                 className="p-4 min-h-[140px] flex flex-col justify-between"
                 style={{ background: 'linear-gradient(135deg, var(--color-info-50, #ecfeff) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-info-500, #06b6d4)' }}
@@ -910,6 +911,7 @@ const StaffShell = () => {
                 </div>
                 <p className="text-[10px] text-text-tertiary text-center">Approved ÷ total transfers</p>
               </Card>
+              )}
 
             </div>
 
@@ -1158,6 +1160,7 @@ const StaffShell = () => {
               )}
 
               {/* Conversion — display-only, same color theme as the closer side. */}
+              {isStaffCardVisible('conversion') && (
               <Card
                 className="p-4 min-h-[140px] flex flex-col justify-between"
                 style={{ background: 'linear-gradient(135deg, var(--color-info-50, #ecfeff) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-info-500, #06b6d4)' }}
@@ -1175,6 +1178,7 @@ const StaffShell = () => {
                 </div>
                 <p className="text-[10px] text-text-tertiary text-center">Approved ÷ total transfers</p>
               </Card>
+              )}
             </div>
 
             {/* Create Transfer modal — fronter fields only, sized like the sale modal */}

@@ -2,8 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { Send, FileText } from 'lucide-react';
 import { Button } from '../UI';
 import client from '../../api/client';
-import { normalize as normalizeField, maxLengthFor, classify as classifyField, isCarMake, isCarModel } from '../../utils/formFieldNorm';
+import { normalize as normalizeField, maxLengthFor, inputModeFor, classify as classifyField, isCarMake, isCarModel, isCarYear, isDateField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
+import CalendarDateInput from '../Form/CalendarDateInput';
+import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
+import { useUserColors } from '../../hooks/useUserColors';
 
 const TransferFormModal = ({
   isOpen, onClose,
@@ -23,6 +26,8 @@ const TransferFormModal = ({
   const [editReason, setEditReason]     = useState('');
   const [error, setError]               = useState('');
   const isEdit = !!existingTransfer;
+  const { years: vehicleYears } = useVehicleYearRange();
+  const { colorFor } = useUserColors();
 
   // Hydrate from existing row whenever the modal opens or a different row is
   // loaded. Resetting on close happens via the modal teardown in handleSubmit.
@@ -163,7 +168,20 @@ const TransferFormModal = ({
                         // for a dropdown) would hit the generic select branch
                         // below and get an empty native <select> instead of
                         // the VehicleSelect typeahead.
-                        if (isCarMake(field)) {
+                        if (isCarYear(field)) {
+                          input = (
+                            <select value={val} onChange={onChange} required={field.is_required} className="input">
+                              <option value="">Select year…</option>
+                              {vehicleYears.map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                          );
+                        } else if (isDateField(field)) {
+                          input = (
+                            <CalendarDateInput value={val}
+                              onChange={(iso) => setField(field.name, iso)}
+                              required={field.is_required} />
+                          );
+                        } else if (isCarMake(field)) {
                           input = <VehicleSelect mode="make" value={val} makes={makesList} strict
                             onChange={v => {
                               setField(field.name, v);
@@ -236,9 +254,10 @@ const TransferFormModal = ({
                           const type = field.field_type === 'phone' || field.field_type === 'tel' ? 'tel'
                             : field.field_type === 'zip' ? 'text' : field.field_type;
                           const ml = maxLengthFor(field);
+                          const im = inputModeFor(field);
                           const normalizedOnChange = e => setField(field.name, normalizeField(field, e.target.value));
                           input = <input type={type} value={val} onChange={normalizedOnChange} required={field.is_required}
-                            maxLength={ml}
+                            maxLength={ml} inputMode={im}
                             placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input" />;
                         }
 
@@ -262,10 +281,12 @@ const TransferFormModal = ({
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     Transfer to Closer <span className="text-error-500">*</span>
                   </label>
-                  <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required>
-                    <option value="">— Select a closer —</option>
+                  <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required
+                    style={{ color: colorFor(selectedCloser, 'var(--color-text)'), fontWeight: colorFor(selectedCloser) ? 600 : undefined }}>
+                    <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>— Select a closer —</option>
                     {closers.map(c => (
-                      <option key={c.id} value={c.id}>
+                      <option key={c.id} value={c.id}
+                        style={{ color: colorFor(c.id, 'var(--color-text)'), fontWeight: colorFor(c.id) ? 600 : 400 }}>
                         {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ''}
                       </option>
                     ))}
