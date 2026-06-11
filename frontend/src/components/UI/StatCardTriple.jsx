@@ -100,7 +100,7 @@ const StatCardTriple = ({
         aria-label={`${label} stats`}
       >
         {today && <Segment data={today} label="Today" isPrimary />}
-        {month && <Segment data={month} label="MTD"  isPrimary={!today} />}
+        {month && <Segment data={month} label="Current Month" isPrimary={!today} />}
         {total && <Segment data={total} label="Total" />}
       </div>
 

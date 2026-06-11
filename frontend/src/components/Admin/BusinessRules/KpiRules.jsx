@@ -1,4 +1,4 @@
-import { BarChart3, AlertTriangle, Info } from 'lucide-react';
+import { BarChart3, AlertTriangle, Info, LayoutDashboard } from 'lucide-react';
 
 const cfg = (config, key, fallback) => (config?.[key] !== undefined ? config[key] : fallback);
 
@@ -70,11 +70,49 @@ const TIMEZONES = [
   { v: 'UTC',                 l: 'UTC' },
 ];
 
+const SHELL_STAT_CARDS = {
+  staff: [
+    { key: 'my_sales',                label: 'My Sales' },
+    { key: 'approved',                label: 'Approved' },
+    { key: 'cancelled',               label: 'Cancelled' },
+    { key: 'awaiting_review',         label: 'Awaiting Review' },
+    { key: 'resells',                 label: 'Resells' },
+    { key: 'total_leads',             label: 'Total Leads' },
+    { key: 'fronter_approved',        label: 'Fronter Approved' },
+    { key: 'fronter_awaiting_review', label: 'Fronter Awaiting Review' },
+  ],
+  manager: [
+    { key: 'transfers',               label: 'Transfers' },
+    { key: 'sales',                   label: 'Sales' },
+    { key: 'approved',                label: 'Approved' },
+    { key: 'awaiting_review',         label: 'Awaiting Review' },
+    { key: 'cancelled',               label: 'Cancelled' },
+    { key: 'resells',                 label: 'Resells' },
+    { key: 'dup_attempts',            label: 'Duplicate Attempts' },
+  ],
+};
+
+function cardVisible(layout, key) {
+  const cards = Array.isArray(layout?.stat_cards) ? layout.stat_cards : [];
+  const found = cards.find(c => c.key === key);
+  return found ? found.enabled !== false : true;
+}
+
+function toggleCard(layout, key, enabled) {
+  const cards = Array.isArray(layout?.stat_cards) ? [...layout.stat_cards] : [];
+  const idx = cards.findIndex(c => c.key === key);
+  if (idx >= 0) cards[idx] = { ...cards[idx], enabled };
+  else cards.push({ key, enabled });
+  return { ...(layout || {}), stat_cards: cards };
+}
+
 const KpiRules = ({ config, scope, onSave }) => {
   const numerator   = cfg(config, 'kpi.conversion_numerator',   'closed_won');
   const denominator = cfg(config, 'kpi.conversion_denominator', 'all_transfers');
   const counts      = cfg(config, 'kpi.resell_counts_in', { closer_total: true, conversion: false, fronter_stats: false, resells_card: true });
   const tz          = cfg(config, 'kpi.today_timezone', 'America/New_York');
+  const staffLayout = cfg(config, 'shell.layout.staff',   null) || {};
+  const mgrLayout   = cfg(config, 'shell.layout.manager', null) || {};
 
   const updateCount = (key, val) => onSave('kpi.resell_counts_in', { ...counts, [key]: val });
 
@@ -139,6 +177,44 @@ const KpiRules = ({ config, scope, onSave }) => {
           <Info size={12} className="flex-shrink-0 mt-0.5" />
           Changing this affects when "Today" rolls over for every user, regardless of their browser timezone.
         </p>
+      </Section>
+
+      <div className="mt-8 mb-4 flex items-center gap-2">
+        <LayoutDashboard size={20} className="text-primary-600" />
+        <h2 className="text-xl font-bold text-text" style={{ fontFamily: 'var(--font-display)' }}>
+          KPI Card Visibility per Shell
+        </h2>
+      </div>
+      <p className="text-sm text-text-secondary mb-4 max-w-2xl leading-relaxed">
+        Toggle which stat cards appear on each shell. Hidden cards are removed from the dashboard — closers and managers won't see them. Takes effect on next page load.
+      </p>
+
+      <Section accent="success" title="Staff Shell — Stat Cards"
+        desc="Stat cards shown to closers and fronters on their dashboard.">
+        <div className="space-y-1">
+          {SHELL_STAT_CARDS.staff.map(card => (
+            <CheckboxRow
+              key={card.key}
+              checked={cardVisible(staffLayout, card.key)}
+              onChange={(v) => onSave('shell.layout.staff', toggleCard(staffLayout, card.key, v))}
+              label={card.label}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section accent="success" title="Manager Shell — Stat Cards"
+        desc="Stat cards shown to managers, operations managers, and company admins.">
+        <div className="space-y-1">
+          {SHELL_STAT_CARDS.manager.map(card => (
+            <CheckboxRow
+              key={card.key}
+              checked={cardVisible(mgrLayout, card.key)}
+              onChange={(v) => onSave('shell.layout.manager', toggleCard(mgrLayout, card.key, v))}
+              label={card.label}
+            />
+          ))}
+        </div>
       </Section>
     </div>
   );

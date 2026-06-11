@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, ChevronDown, X } from 'lucide-react';
+import { Calendar, X } from 'lucide-react';
 import { todayET } from '../../utils/timezone';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -209,21 +209,37 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
         ref={btnRef}
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors"
+        title={label}
+        className="relative flex items-center justify-center rounded-lg border transition-colors"
         style={{
-          borderColor:     'var(--color-border)',
-          backgroundColor: 'var(--color-surface)',
-          color:           'var(--color-text)',
+          borderColor:     (isCustom || preset !== defaultPreset)
+            ? 'var(--color-primary-400, #818cf8)'
+            : open ? 'var(--color-primary-300, #a5b4fc)' : 'var(--color-border)',
+          backgroundColor: open ? 'var(--color-bg-secondary)' : 'var(--color-surface)',
+          width: 34,
+          height: 34,
+          flexShrink: 0,
         }}
       >
-        <Calendar size={14} style={{ color: 'var(--color-primary-500)', flexShrink: 0 }} />
-        <span className="whitespace-nowrap">{label}</span>
-        <ChevronDown size={13} style={{
-          color: 'var(--color-text-tertiary)',
-          transform: open ? 'rotate(180deg)' : 'none',
-          transition: 'transform 0.15s',
+        <Calendar size={15} style={{
+          color: (isCustom || preset !== defaultPreset)
+            ? 'var(--color-primary-500)'
+            : 'var(--color-text-secondary)',
           flexShrink: 0,
         }} />
+        {(isCustom || preset !== defaultPreset) && (
+          <span
+            className="absolute"
+            style={{
+              top: 4, right: 4,
+              width: 7, height: 7,
+              borderRadius: '50%',
+              backgroundColor: 'var(--color-primary-500)',
+              border: '1.5px solid var(--color-surface)',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
       </button>
 
       {open && createPortal((
