@@ -1,9 +1,24 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, X } from 'lucide-react';
+import { Calendar, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { todayET } from '../../utils/timezone';
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const WEEKDAYS = ['S','M','T','W','T','F','S'];
+
+// Calendar matrix for a month — leading nulls pad to the first weekday so the
+// grid aligns to Sun-start columns. Trailing nulls pad the final week.
+function buildMonthMatrix(year, monthIdx) {
+  const startDow = new Date(year, monthIdx, 1).getDay();
+  const days = new Date(year, monthIdx + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+const isoOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
 // Calendar-month range [first day, last day] as YYYY-MM-DD strings. Honors
 // February + leap years via Date(y, m+1, 0).getDate(). Never returns a future
@@ -90,10 +105,14 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   const [customFrom, setCustomFrom] = useState('');
   const [customTo,   setCustomTo]   = useState('');
   const [isCustom,   setIsCustom]   = useState(false);
-  // Month picker — defaults to current calendar month in ET.
+  // Calendar grid — defaults to current calendar month in ET.
   const _t = todayET();
-  const [monthYear, setMonthYear] = useState(parseInt(_t.slice(0, 4), 10));
-  const [monthIdx,  setMonthIdx]  = useState(parseInt(_t.slice(5, 7), 10) - 1);
+  const [calY, setCalY] = useState(parseInt(_t.slice(0, 4), 10));
+  const [calM, setCalM] = useState(parseInt(_t.slice(5, 7), 10) - 1);
+  // Two-click range selection: first click sets pickStart (single, uncommitted),
+  // second click commits the [min,max] range. hoverDay drives the live preview.
+  const [pickStart, setPickStart] = useState(null);
+  const [hoverDay,  setHoverDay]  = useState(null);
   const ref      = useRef(null);
   const btnRef   = useRef(null);
   const popRef   = useRef(null);
@@ -164,33 +183,66 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
 
   const selectPreset = (key) => {
     setPreset(key); setIsCustom(false);
+    setPickStart(null); setHoverDay(null);
     onChange(getPresetRange(key));
     setOpen(false);
   };
 
-  const applyCustom = () => {
-    if (!customFrom && !customTo) return;
-    setIsCustom(true);
-    onChange({ date_from: customFrom || null, date_to: customTo || null });
+  // On open: jump the grid to the active range's month and reset the in-flight
+  // first-click so each open starts a fresh selection.
+  useEffect(() => {
+    if (!open) return;
+    setPickStart(null); setHoverDay(null);
+    const anchor = customFrom || customTo;
+    if (anchor) {
+      setCalY(parseInt(anchor.slice(0, 4), 10));
+      setCalM(parseInt(anchor.slice(5, 7), 10) - 1);
+    }
+  }, [open]); // eslint-disable-line
+
+  const todayIso = _t;
+
+  // Two-click range: first click arms pickStart (renders as a single selected
+  // day); second click commits [min,max] and fires onChange. Future days are
+  // disabled so a range never reaches past today.
+  const pickDay = (iso) => {
+    if (iso > todayIso) return;
+    if (!pickStart) {
+      setPickStart(iso);
+      setCustomFrom(iso); setCustomTo('');
+      setHoverDay(null);
+      return;
+    }
+    const lo = iso < pickStart ? iso : pickStart;
+    const hi = iso < pickStart ? pickStart : iso;
+    setCustomFrom(lo); setCustomTo(hi);
+    setIsCustom(true); setPreset('');
+    setPickStart(null); setHoverDay(null);
+    onChange({ date_from: lo, date_to: hi });
     setOpen(false);
   };
 
-  // Month select: range = whole calendar month (clamped to today for the
-  // current month). Custom-from/custom-to inputs pre-fill to the month bounds
-  // so the user can fine-tune within that month without leaving the popover.
-  const selectMonth = (y, m) => {
-    const r = monthRange(y, m);
-    setCustomFrom(r.date_from);
-    setCustomTo(r.date_to);
-    setIsCustom(true);
-    setPreset('');
-    onChange(r);
-    setOpen(false);
+  const goMonth = (delta) => {
+    let m = calM + delta, y = calY;
+    if (m < 0)  { m = 11; y -= 1; }
+    if (m > 11) { m = 0;  y += 1; }
+    setCalM(m); setCalY(y);
   };
+
+  // Cells between these two bounds render as "in range". During an active
+  // first-click selection, hoverDay drives a live preview band.
+  const selLo = pickStart ? (hoverDay && hoverDay < pickStart ? hoverDay : pickStart) : customFrom;
+  const selHi = pickStart ? (hoverDay && hoverDay > pickStart ? hoverDay : (hoverDay && hoverDay < pickStart ? pickStart : null))
+                          : customTo;
+  // Next-month arrow stops at the real current month (no navigating into the future).
+  const curY = parseInt(_t.slice(0, 4), 10);
+  const curM = parseInt(_t.slice(5, 7), 10) - 1;
+  const viewIsCurrentOrFuture = calY > curY || (calY === curY && calM >= curM);
 
   const handleClear = () => {
     setIsCustom(false);
     setCustomFrom(''); setCustomTo('');
+    setPickStart(null); setHoverDay(null);
     setPreset(defaultPreset);
     onChange(getPresetRange(defaultPreset));
     if (onClear) onClear();
@@ -274,80 +326,66 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
             ))}
           </div>
 
-          {/* Month select — applies the full calendar month (clamped to today
-              for the current month). Year selector covers last 4 + this year. */}
-          <div style={{ borderTop: '1px solid var(--color-border)' }} className="pt-2 mb-2">
-            <p className="text-xs font-semibold mb-2 px-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Pick a month
-            </p>
-            <div className="flex gap-1.5 mb-2">
-              <select
-                value={monthIdx}
-                onChange={e => setMonthIdx(parseInt(e.target.value, 10))}
-                className="input text-sm py-1.5 flex-1"
-              >
-                {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
-              </select>
-              <select
-                value={monthYear}
-                onChange={e => setMonthYear(parseInt(e.target.value, 10))}
-                className="input text-sm py-1.5 w-20"
-              >
-                {Array.from({ length: 5 }, (_, i) => {
-                  const y = parseInt(_t.slice(0, 4), 10) - i;
-                  return <option key={y} value={y}>{y}</option>;
-                })}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => selectMonth(monthYear, monthIdx)}
-              className="w-full py-1.5 rounded-lg text-sm font-semibold text-white"
-              style={{ background: 'var(--gradient-sidebar)' }}
-            >
-              Apply {MONTHS[monthIdx]} {monthYear}
-            </button>
-          </div>
-
+          {/* Calendar — click a start date, then an end date to set the range.
+              Future days are disabled so a range never reaches past today. */}
           <div style={{ borderTop: '1px solid var(--color-border)' }} className="pt-2">
-            <p className="text-xs font-semibold mb-2 px-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Custom range
-            </p>
-            <div className="space-y-1.5">
-              {/* Keypress blocked — calendar-only selection per audit
-                  requirement. The browser's native picker still opens on
-                  click; only the typed-input path is disabled so users
-                  can't paste an invalid string. */}
-              <input
-                type="date" value={customFrom}
-                onChange={e => setCustomFrom(e.target.value)}
-                onKeyDown={e => e.preventDefault()}
-                onPaste={e => e.preventDefault()}
-                className="input text-sm py-1.5 w-full"
-                title="Pick a date from the calendar — manual typing disabled"
-              />
-              <input
-                type="date" value={customTo}
-                onChange={e => setCustomTo(e.target.value)}
-                onKeyDown={e => e.preventDefault()}
-                onPaste={e => e.preventDefault()}
-                className="input text-sm py-1.5 w-full"
-                title="Pick a date from the calendar — manual typing disabled"
-              />
-              <button
-                type="button"
-                onClick={applyCustom}
-                disabled={!customFrom && !customTo}
-                className="w-full py-1.5 rounded-lg text-sm font-semibold text-white transition-opacity"
-                style={{
-                  background: 'var(--gradient-sidebar)',
-                  opacity: (!customFrom && !customTo) ? 0.4 : 1,
-                  cursor: (!customFrom && !customTo) ? 'not-allowed' : 'pointer',
-                }}
-              >
-                Apply
+            <div className="flex items-center justify-between mb-1.5">
+              <button type="button" onClick={() => goMonth(-1)}
+                className="p-1 rounded-md hover:bg-bg-secondary" style={{ color: 'var(--color-text-secondary)' }}>
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                {MONTHS_FULL[calM]} {calY}
+              </span>
+              <button type="button" onClick={() => goMonth(1)}
+                disabled={viewIsCurrentOrFuture}
+                className="p-1 rounded-md hover:bg-bg-secondary disabled:opacity-30"
+                style={{ color: 'var(--color-text-secondary)', cursor: viewIsCurrentOrFuture ? 'not-allowed' : 'pointer' }}>
+                <ChevronRight size={16} />
               </button>
             </div>
+
+            <div className="grid grid-cols-7 gap-0.5 mb-0.5">
+              {WEEKDAYS.map((w, i) => (
+                <div key={i} className="text-center text-[10px] font-bold py-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w}</div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-0.5" onMouseLeave={() => pickStart && setHoverDay(null)}>
+              {buildMonthMatrix(calY, calM).map((d, i) => {
+                if (d === null) return <div key={i} />;
+                const iso        = isoOf(calY, calM, d);
+                const future     = iso > todayIso;
+                const isEndpoint = (selLo && iso === selLo) || (selHi && iso === selHi);
+                const inRange    = selLo && selHi && iso > selLo && iso < selHi;
+                const isToday    = iso === todayIso;
+                return (
+                  <button key={i} type="button"
+                    disabled={future}
+                    onClick={() => pickDay(iso)}
+                    onMouseEnter={() => pickStart && setHoverDay(iso)}
+                    className="h-7 text-xs rounded-md transition-colors flex items-center justify-center"
+                    style={{
+                      backgroundColor: isEndpoint ? 'var(--color-primary-600)'
+                                      : inRange   ? 'var(--color-primary-50, #eef2ff)'
+                                      : 'transparent',
+                      color:      isEndpoint ? '#fff' : 'var(--color-text)',
+                      fontWeight: (isEndpoint || isToday) ? 700 : 400,
+                      opacity:    future ? 0.3 : 1,
+                      cursor:     future ? 'not-allowed' : 'pointer',
+                      border:     (isToday && !isEndpoint) ? '1px solid var(--color-primary-400, #818cf8)' : '1px solid transparent',
+                    }}>
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[11px] mt-1.5 px-0.5 font-medium" style={{ color: pickStart ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>
+              {pickStart ? 'Now click the end date →'
+                : (customFrom && customTo) ? `${fmtDate(customFrom)} – ${fmtDate(customTo)}`
+                : 'Click a start date'}
+            </p>
           </div>
 
           {/* Clear — resets the picker back to the default preset and lets the

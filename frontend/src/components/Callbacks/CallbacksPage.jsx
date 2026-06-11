@@ -606,7 +606,6 @@ const CallbacksPage = ({ user }) => {
   const [dateTo,       setDateTo]       = useState('');     // scheduled callback_at <=
   const [createdFrom,  setCreatedFrom]  = useState('');     // created_at >= (manager parity)
   const [createdTo,    setCreatedTo]    = useState('');     // created_at <=
-  const [filtersOpen,  setFiltersOpen]  = useState(false);  // advanced filter drawer toggle
   const [modal,        setModal]        = useState(null);
   const [drawerCb,     setDrawerCb]     = useState(null);
   const [deleting,     setDeleting]     = useState(null);
@@ -781,28 +780,12 @@ const CallbacksPage = ({ user }) => {
         );
       })()}
 
-      <button type="button"
-        onClick={() => setFiltersOpen(o => !o)}
-        className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
-        style={{
-          backgroundColor: filtersOpen ? 'var(--color-primary-50)' : 'transparent',
-          color: filtersOpen ? 'var(--color-primary-700)' : 'var(--color-text-secondary)',
-          border: '1px solid var(--color-border)',
-        }}>
-        {filtersOpen ? 'Hide' : 'More'} filters
-        {(priority || search || dateFrom || dateTo) && (
-          <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
-            style={{ backgroundColor: 'var(--color-primary-600)', color: '#fff' }}>
-            {[priority, search, dateFrom, dateTo].filter(Boolean).length}
-          </span>
-        )}
-      </button>
       </div>
 
-      {/* Advanced filter drawer — same fields ManagerCallbacksTab uses except
-          the cross-user picker (a staff member only sees their own callbacks). */}
-      {filtersOpen && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3 p-3 rounded-xl"
+      {/* Filters — always visible on the dashboard (same fields
+          ManagerCallbacksTab uses except the cross-user picker, since a staff
+          member only sees their own callbacks). */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3 p-3 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
@@ -855,7 +838,6 @@ const CallbacksPage = ({ user }) => {
             </div>
           )}
         </div>
-      )}
 
       {/* Compact list */}
       {loading ? (

@@ -554,14 +554,15 @@ const ColorsTab = () => {
   const [selUsers, setSelUsers] = useState([]);
   const [companyId, setCompanyId] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [userQ, setUserQ] = useState('');
   const [msg, setMsg] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
       const [s, u, c] = await Promise.all([
-        client.get('chat-admin/styles'),
-        client.get('chat-admin/users', { params: { limit: 500 } }),
+        client.get('chat/admin/styles'),
+        client.get('chat/admin/users', { params: { limit: 500 } }),
         client.get('companies').catch(() => ({ data: { companies: [] } })),
       ]);
       setStyles(s.data?.styles || []);
@@ -573,15 +574,19 @@ const ColorsTab = () => {
 
   const colorMap = Object.fromEntries(styles.map(s => [s.user_id, s.font_color]));
 
+  const shownUsers = userQ.trim()
+    ? users.filter(u => `${u.name || ''} ${u.email || ''} ${u.company || ''} ${u.role || ''}`.toLowerCase().includes(userQ.trim().toLowerCase()))
+    : users;
+
   const toggleUser = (id) => setSelUsers(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
-  const selectAllShown = () => setSelUsers(users.map(u => u.id));
+  const selectAllShown = () => setSelUsers(shownUsers.map(u => u.id));
   const clearSel = () => setSelUsers([]);
 
   const applyToSelected = async () => {
     if (!selUsers.length) return;
     setMsg('');
     try {
-      const { data } = await client.post('chat-admin/styles/bulk', { user_ids: selUsers, font_color: color });
+      const { data } = await client.post('chat/admin/styles/bulk', { user_ids: selUsers, font_color: color });
       setMsg(`Applied to ${data.updated} user(s).`);
       await load();
     } catch (e) { setMsg(e.response?.data?.error || 'Failed'); }
@@ -590,7 +595,7 @@ const ColorsTab = () => {
     if (!selUsers.length) return;
     setMsg('');
     try {
-      await Promise.all(selUsers.map(id => client.delete(`chat-admin/styles/${id}`)));
+      await Promise.all(selUsers.map(id => client.delete(`chat/admin/styles/${id}`)));
       setMsg(`Reset ${selUsers.length} user(s) to default.`);
       await load();
     } catch (e) { setMsg(e.response?.data?.error || 'Reset failed'); }
@@ -599,7 +604,7 @@ const ColorsTab = () => {
     if (!companyId) return;
     setMsg('');
     try {
-      const { data } = await client.post('chat-admin/styles/by-company', { company_id: companyId, font_color: color, role: roleFilter || undefined });
+      const { data } = await client.post('chat/admin/styles/by-company', { company_id: companyId, font_color: color, role: roleFilter || undefined });
       setMsg(`Applied to ${data.updated} user(s) in company.`);
       await load();
     } catch (e) { setMsg(e.response?.data?.error || 'Failed'); }
@@ -649,9 +654,14 @@ const ColorsTab = () => {
       {/* User list */}
       <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="p-3 border-b flex items-center gap-2 flex-wrap" style={{ borderColor: 'var(--color-border)' }}>
-          <p className="text-xs font-bold uppercase tracking-widest flex-1" style={{ color: 'var(--color-text-secondary)' }}>
-            Users · {users.length} · {selUsers.length} selected
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>
+            Users · {shownUsers.length}/{users.length} · {selUsers.length} selected
           </p>
+          <div className="relative flex-1 min-w-[180px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input value={userQ} onChange={e => setUserQ(e.target.value)} placeholder="Filter by name, email, company, role…"
+              className="input text-sm py-1 w-full" style={{ paddingLeft: 30 }} />
+          </div>
           <button onClick={selectAllShown} className="text-[11px] underline" style={{ color: 'var(--color-text-secondary)' }}>Select all</button>
           <button onClick={clearSel} className="text-[11px] underline" style={{ color: 'var(--color-text-secondary)' }}>Clear</button>
           <button onClick={applyToSelected} disabled={!selUsers.length}
@@ -667,7 +677,10 @@ const ColorsTab = () => {
         </div>
         {loading ? <Spinner /> : (
           <div className="max-h-96 overflow-y-auto">
-            {users.map(u => {
+            {shownUsers.length === 0 && (
+              <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users match.</p>
+            )}
+            {shownUsers.map(u => {
               const c = colorMap[u.id];
               const checked = selUsers.includes(u.id);
               return (

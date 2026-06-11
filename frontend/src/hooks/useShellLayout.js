@@ -104,6 +104,16 @@ export function useShellLayout(shellId) {
   const isFilterVisible = (key) => isVisible('filters',    key);
   const isActionVisible = (key) => isVisible('actions',    key);
 
+  // Per-card display label override (admin can rename a KPI card without a
+  // deploy). Falls back to the code-defined label when unset/blank.
+  const cardLabel = (key, fallback) => {
+    const col = layout?.stat_cards;
+    if (!Array.isArray(col)) return fallback;
+    const hit = col.find(x => x && x.key === key);
+    const lbl = hit?.label;
+    return (typeof lbl === 'string' && lbl.trim()) ? lbl.trim() : fallback;
+  };
+
   return {
     layout,
     applyTabs,
@@ -111,6 +121,7 @@ export function useShellLayout(shellId) {
     isCardVisible,
     isFilterVisible,
     isActionVisible,
+    cardLabel,
     ready: !!_cache.get(shellId),
   };
 }

@@ -176,6 +176,7 @@ const ManagerShell = () => {
     isCardVisible: isMgrCardVisible,
     isFilterVisible: isMgrFilterVisible,
     isActionVisible: isMgrActionVisible,
+    cardLabel: mgrCardLabel,
   } = useShellLayout('manager');
   const TABS = useMemo(() => applyManagerLayout(CODE_TABS), [applyManagerLayout, CODE_TABS]);
 
@@ -517,7 +518,7 @@ const ManagerShell = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {isMgrCardVisible('transfers') && (
               <StatCardTriple
-                label="Total Transfers"  icon={Send}        color="info"
+                label={mgrCardLabel('transfers', 'Total Transfers')}  icon={Send}        color="info"
                 loading={loading || !stats}
                 today={{ value: stats?.todayTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('today')); setActiveTab('transfers'); } }}
                 month={{ value: stats?.monthTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('month')); setActiveTab('transfers'); } }}
@@ -527,7 +528,7 @@ const ManagerShell = () => {
               )}
               {isMgrCardVisible('sales') && (
               <StatCardTriple
-                label="Total Sales"      icon={DollarSign}  color="success"
+                label={mgrCardLabel('sales', 'Total Sales')}      icon={DollarSign}  color="success"
                 loading={loading || !stats}
                 today={{ value: stats?.todaySales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
                 month={{ value: stats?.monthSales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
@@ -537,7 +538,7 @@ const ManagerShell = () => {
               )}
               {isMgrCardVisible('approved') && (
               <StatCardTriple
-                label="Approved"         icon={CheckCircle} color="success"
+                label={mgrCardLabel('approved', 'Approved')}         icon={CheckCircle} color="success"
                 loading={loading || !stats}
                 today={{ value: stats?.todayClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
                 month={{ value: stats?.monthClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
@@ -547,7 +548,7 @@ const ManagerShell = () => {
               )}
               {isMgrCardVisible('awaiting_review') && (
               <StatCardTriple
-                label="Awaiting Review"  icon={Clock}       color="warning"
+                label={mgrCardLabel('awaiting_review', 'Awaiting Review')}  icon={Clock}       color="warning"
                 loading={loading || !stats}
                 total={{ value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' }}
                 caption={overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear'}
@@ -555,7 +556,7 @@ const ManagerShell = () => {
               )}
               {isMgrCardVisible('cancelled') && (
               <StatCardTriple
-                label="Cancelled"        icon={XCircle}     color="error"
+                label={mgrCardLabel('cancelled', 'Cancelled')}        icon={XCircle}     color="error"
                 loading={loading || !stats}
                 today={{ value: stats?.todayCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
                 month={{ value: stats?.monthCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
@@ -564,7 +565,7 @@ const ManagerShell = () => {
               )}
               {isMgrCardVisible('resells') && (
               <StatCardTriple
-                label="Resells"          icon={RefreshCw}
+                label={mgrCardLabel('resells', 'Resells')}          icon={RefreshCw}
                 accent="#8b5cf6" gradientFrom="#ede9fe" color="primary"
                 loading={loading || !stats}
                 month={{ value: stats?.resellsThisMonth || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); }, title: 'Resells this month' }}
@@ -575,7 +576,7 @@ const ManagerShell = () => {
               {/* Dup Attempts — fronter re-submitted an existing phone. */}
               {isMgrCardVisible('dup_attempts') && (
               <StatCardTriple
-                label="Dup Attempts"     icon={Copy}        color="warning"
+                label={mgrCardLabel('dup_attempts', 'Dup Attempts')}     icon={Copy}        color="warning"
                 loading={loading || !stats}
                 today={{ value: stats?.dupToday || 0, title: 'Duplicate attempts today (refresh + reengage + sale_overlap)' }}
                 month={{ value: stats?.dupMonth || 0, title: 'Duplicate attempts this month' }}

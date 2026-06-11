@@ -1,4 +1,5 @@
-import { BarChart3, AlertTriangle, Info, LayoutDashboard } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { BarChart3, AlertTriangle, Info, LayoutDashboard, RotateCcw, Eye, EyeOff } from 'lucide-react';
 
 const cfg = (config, key, fallback) => (config?.[key] !== undefined ? config[key] : fallback);
 
@@ -70,41 +71,111 @@ const TIMEZONES = [
   { v: 'UTC',                 l: 'UTC' },
 ];
 
+// `label` here is the SHIPPED default label each card renders with in the
+// shell (the fallback useShellLayout.cardLabel returns). `group` tags which
+// part of the staff shell a card belongs to so the admin can tell the closer
+// and fronter cards apart.
 const SHELL_STAT_CARDS = {
   staff: [
-    { key: 'my_sales',                label: 'My Sales' },
-    { key: 'approved',                label: 'Approved' },
-    { key: 'cancelled',               label: 'Cancelled' },
-    { key: 'awaiting_review',         label: 'Awaiting Review' },
-    { key: 'resells',                 label: 'Resells' },
-    { key: 'total_leads',             label: 'Total Leads' },
-    { key: 'fronter_approved',        label: 'Fronter Approved' },
-    { key: 'fronter_awaiting_review', label: 'Fronter Awaiting Review' },
+    { key: 'my_sales',                label: 'My Sales',        group: 'Closer view'  },
+    { key: 'approved',                label: 'Approved',        group: 'Closer view'  },
+    { key: 'cancelled',               label: 'Cancelled',       group: 'Closer view'  },
+    { key: 'awaiting_review',         label: 'Awaiting Review', group: 'Closer view'  },
+    { key: 'resells',                 label: 'Resells',         group: 'Closer view'  },
+    { key: 'total_leads',             label: 'Total Leads',     group: 'Fronter view' },
+    { key: 'fronter_approved',        label: 'Approved',        group: 'Fronter view' },
+    { key: 'fronter_awaiting_review', label: 'Awaiting Review', group: 'Fronter view' },
   ],
   manager: [
-    { key: 'transfers',               label: 'Transfers' },
-    { key: 'sales',                   label: 'Sales' },
+    { key: 'transfers',               label: 'Total Transfers' },
+    { key: 'sales',                   label: 'Total Sales' },
     { key: 'approved',                label: 'Approved' },
     { key: 'awaiting_review',         label: 'Awaiting Review' },
     { key: 'cancelled',               label: 'Cancelled' },
     { key: 'resells',                 label: 'Resells' },
-    { key: 'dup_attempts',            label: 'Duplicate Attempts' },
+    { key: 'dup_attempts',            label: 'Dup Attempts' },
   ],
 };
 
-function cardVisible(layout, key) {
-  const cards = Array.isArray(layout?.stat_cards) ? layout.stat_cards : [];
-  const found = cards.find(c => c.key === key);
-  return found ? found.enabled !== false : true;
-}
+const findCard = (layout, key) =>
+  (Array.isArray(layout?.stat_cards) ? layout.stat_cards : []).find(c => c.key === key);
 
-function toggleCard(layout, key, enabled) {
+// Merge one field into a card entry, creating the entry if it's the first edit.
+function patchCard(layout, key, patch) {
   const cards = Array.isArray(layout?.stat_cards) ? [...layout.stat_cards] : [];
   const idx = cards.findIndex(c => c.key === key);
-  if (idx >= 0) cards[idx] = { ...cards[idx], enabled };
-  else cards.push({ key, enabled });
+  if (idx >= 0) cards[idx] = { ...cards[idx], ...patch };
+  else cards.push({ key, ...patch });
   return { ...(layout || {}), stat_cards: cards };
 }
+
+// One editable card row: show/hide toggle + custom-label field. The label
+// commits on blur (not per keystroke) so we don't PUT business-config on every
+// character. Blank label = render the shipped default.
+const StatCardRow = ({ card, layout, layoutKey, onSave }) => {
+  const entry   = findCard(layout, card.key);
+  const enabled = entry ? entry.enabled !== false : true;
+  const saved   = entry?.label ?? '';
+  const [label, setLabel] = useState(saved);
+  useEffect(() => { setLabel(saved); }, [saved]);
+
+  const commitLabel = () => {
+    const next = label.trim();
+    if (next !== saved) onSave(layoutKey, patchCard(layout, card.key, { label: next }));
+  };
+  const toggle = () => onSave(layoutKey, patchCard(layout, card.key, { enabled: !enabled }));
+  const reset  = () => { setLabel(''); onSave(layoutKey, patchCard(layout, card.key, { label: '' })); };
+
+  return (
+    <div className="flex items-center gap-2 py-2 px-3 rounded-lg transition-colors"
+      style={{ border: '1px solid', borderColor: enabled ? 'var(--color-border)' : 'transparent',
+               backgroundColor: enabled ? 'transparent' : 'var(--color-bg-secondary)', opacity: enabled ? 1 : 0.7 }}>
+      <button type="button" onClick={toggle} title={enabled ? 'Visible — click to hide' : 'Hidden — click to show'}
+        className="p-1.5 rounded-lg flex-shrink-0 transition-colors"
+        style={{ color: enabled ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)',
+                 backgroundColor: enabled ? 'var(--color-primary-50, #eef2ff)' : 'transparent' }}>
+        {enabled ? <Eye size={16} /> : <EyeOff size={16} />}
+      </button>
+      <input type="text" value={label} placeholder={card.label}
+        onChange={(e) => setLabel(e.target.value)}
+        onBlur={commitLabel}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        disabled={!enabled}
+        className="input text-sm py-1.5 flex-1 min-w-0"
+        title="Custom label shown on the card — leave blank to use the default" />
+      {label && label !== card.label && (
+        <button type="button" onClick={reset} title="Reset to default label"
+          className="p-1.5 rounded-lg flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
+          <RotateCcw size={14} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+// Renders a shell's card rows, inserting a subheader whenever the card group
+// changes (staff has Closer view + Fronter view groups).
+const StatCardsEditor = ({ cards, layout, layoutKey, onSave }) => {
+  let lastGroup = null;
+  return (
+    <div className="space-y-1.5">
+      {cards.map(card => {
+        const header = card.group && card.group !== lastGroup
+          ? (lastGroup = card.group)
+          : null;
+        return (
+          <div key={card.key}>
+            {header && (
+              <p className="text-[10px] font-bold uppercase tracking-widest mt-2 mb-1 px-1"
+                style={{ color: 'var(--color-text-tertiary)' }}>{header}</p>
+            )}
+            <StatCardRow card={card} layout={layout} layoutKey={layoutKey} onSave={onSave} />
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const KpiRules = ({ config, scope, onSave }) => {
   const numerator   = cfg(config, 'kpi.conversion_numerator',   'closed_won');
@@ -182,39 +253,23 @@ const KpiRules = ({ config, scope, onSave }) => {
       <div className="mt-8 mb-4 flex items-center gap-2">
         <LayoutDashboard size={20} className="text-primary-600" />
         <h2 className="text-xl font-bold text-text" style={{ fontFamily: 'var(--font-display)' }}>
-          KPI Card Visibility per Shell
+          KPI Cards per Shell
         </h2>
       </div>
       <p className="text-sm text-text-secondary mb-4 max-w-2xl leading-relaxed">
-        Toggle which stat cards appear on each shell. Hidden cards are removed from the dashboard — closers and managers won't see them. Takes effect on next page load.
+        Control which KPI cards each shell shows and what they're called. The
+        <Eye size={13} className="inline mx-1 align-text-bottom" /> toggle hides or shows a card; the text field renames it
+        (leave blank to keep the built-in label). Takes effect on the next dashboard refresh — no deploy needed.
       </p>
 
-      <Section accent="success" title="Staff Shell — Stat Cards"
-        desc="Stat cards shown to closers and fronters on their dashboard.">
-        <div className="space-y-1">
-          {SHELL_STAT_CARDS.staff.map(card => (
-            <CheckboxRow
-              key={card.key}
-              checked={cardVisible(staffLayout, card.key)}
-              onChange={(v) => onSave('shell.layout.staff', toggleCard(staffLayout, card.key, v))}
-              label={card.label}
-            />
-          ))}
-        </div>
+      <Section accent="success" title="Staff Shell — Closer &amp; Fronter cards"
+        desc="KPI cards shown to closers and fronters on their dashboard.">
+        <StatCardsEditor cards={SHELL_STAT_CARDS.staff} layout={staffLayout} layoutKey="shell.layout.staff" onSave={onSave} />
       </Section>
 
-      <Section accent="success" title="Manager Shell — Stat Cards"
-        desc="Stat cards shown to managers, operations managers, and company admins.">
-        <div className="space-y-1">
-          {SHELL_STAT_CARDS.manager.map(card => (
-            <CheckboxRow
-              key={card.key}
-              checked={cardVisible(mgrLayout, card.key)}
-              onChange={(v) => onSave('shell.layout.manager', toggleCard(mgrLayout, card.key, v))}
-              label={card.label}
-            />
-          ))}
-        </div>
+      <Section accent="success" title="Manager Shell — Stat cards"
+        desc="KPI cards shown to managers, operations managers, and company admins.">
+        <StatCardsEditor cards={SHELL_STAT_CARDS.manager} layout={mgrLayout} layoutKey="shell.layout.manager" onSave={onSave} />
       </Section>
     </div>
   );

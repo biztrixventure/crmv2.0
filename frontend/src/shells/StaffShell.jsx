@@ -562,6 +562,7 @@ const StaffShell = () => {
     defaultTab: staffDefaultTab,
     isCardVisible: isStaffCardVisible,
     isFilterVisible: isStaffFilterVisible,
+    cardLabel: staffCardLabel,
   } = useShellLayout('staff');
   const TABS = useMemo(() => applyStaffLayout(CODE_TABS), [applyStaffLayout, CODE_TABS]);
 
@@ -847,7 +848,7 @@ const StaffShell = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
               {isStaffCardVisible('my_sales') && (
               <StatCardTriple
-                label="My Sales"        icon={DollarSign}  color="success"
+                label={staffCardLabel('my_sales', 'My Sales')}        icon={DollarSign}  color="success"
                 loading={statsLoading}
                 today={{ value: stats.todaySales   || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('today')); } }}
                 month={{ value: stats.monthSales   || 0, onClick: () => { setCloserSection('sales'); setSalesStatus(''); setDateRange(getPresetRange('month')); } }}
@@ -856,7 +857,7 @@ const StaffShell = () => {
               )}
               {isStaffCardVisible('approved') && (
               <StatCardTriple
-                label="Approved"        icon={CheckCircle} color="primary"
+                label={staffCardLabel('approved', 'Approved')}        icon={CheckCircle} color="primary"
                 loading={statsLoading}
                 today={{ value: stats.todayClosedWon || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('today')); } }}
                 month={{ value: stats.monthClosedWon || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('closed_won'); setDateRange(getPresetRange('month')); } }}
@@ -865,7 +866,7 @@ const StaffShell = () => {
               )}
               {isStaffCardVisible('cancelled') && (
               <StatCardTriple
-                label="Cancelled"       icon={XCircle}     color="error"
+                label={staffCardLabel('cancelled', 'Cancelled')}       icon={XCircle}     color="error"
                 loading={statsLoading}
                 today={{ value: stats.todayCancelled || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('today')); } }}
                 month={{ value: stats.monthCancelled || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('cancelled'); setDateRange(getPresetRange('month')); } }}
@@ -874,7 +875,7 @@ const StaffShell = () => {
               )}
               {isStaffCardVisible('awaiting_review') && (
               <StatCardTriple
-                label="Awaiting Review" icon={Clock}       color="warning"
+                label={staffCardLabel('awaiting_review', 'Awaiting Review')} icon={Clock}       color="warning"
                 loading={statsLoading}
                 total={{ value: stats.awaitingCompliance || 0, onClick: () => { setCloserSection('sales'); setSalesStatus('pending_review'); setDateRange(getPresetRange('all')); }, title: 'Show all sales awaiting compliance review' }}
                 caption="Pending compliance check"
@@ -882,7 +883,7 @@ const StaffShell = () => {
               )}
               {isStaffCardVisible('resells') && (
               <StatCardTriple
-                label="Resells"
+                label={staffCardLabel('resells', 'Resells')}
                 icon={RefreshCw} color="primary"
                 accent="#8b5cf6" gradientFrom="#ede9fe"
                 loading={statsLoading}
@@ -1124,7 +1125,7 @@ const StaffShell = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {isStaffCardVisible('total_leads') && (
               <StatCardTriple
-                label="Total Leads"  icon={Send}         color="info"
+                label={staffCardLabel('total_leads', 'Total Leads')}  icon={Send}         color="info"
                 loading={statsLoading}
                 today={{ value: stats.todayTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('today')); } }}
                 month={{ value: stats.monthTransfers || 0, onClick: () => { setXferStatus(''); setXferPage(1); setDateRange(getPresetRange('month')); } }}
@@ -1140,7 +1141,7 @@ const StaffShell = () => {
                   on click. */}
               {isStaffCardVisible('fronter_approved') && (
               <StatCardTriple
-                label="Approved"     icon={CheckCircle}  color="success"
+                label={staffCardLabel('fronter_approved', 'Approved')}     icon={CheckCircle}  color="success"
                 loading={statsLoading}
                 today={{ value: stats.todayCompletedTransfers || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('today')); } }}
                 month={{ value: stats.monthCompletedTransfers || 0, onClick: () => { setXferStatus('completed'); setXferPage(1); setDateRange(getPresetRange('month')); } }}
@@ -1149,7 +1150,7 @@ const StaffShell = () => {
               )}
               {isStaffCardVisible('fronter_awaiting_review') && (
               <StatCardTriple
-                label="Awaiting Review" icon={Clock}     color="warning"
+                label={staffCardLabel('fronter_awaiting_review', 'Awaiting Review')} icon={Clock}     color="warning"
                 loading={statsLoading}
                 total={{ value: stats.awaitingCompliance || 0, onClick: () => { setXferStatus('assigned'); setXferPage(1); }, title: 'Show leads in-flight with a closer' }}
                 caption="In-flight with closer"
