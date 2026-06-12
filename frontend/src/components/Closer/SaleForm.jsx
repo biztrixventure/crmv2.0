@@ -49,6 +49,17 @@ const Field = ({ label, required, error, hint, children, className = '' }) => (
 );
 
 
+// Guarantees a <select> always shows its stored value as a selected option,
+// even when the option source (per-company plans / clients / fronters) doesn't
+// contain it — e.g. a compliance manager editing another company's sale, where
+// that company's configs aren't in the editing user's lists. Without this the
+// field renders blank and looks like it "lost" the saved value. Renders nothing
+// when the value is empty or already present in the list.
+const StaleOption = ({ value, present, label }) =>
+  (value && !present)
+    ? <option value={value}>{label || value}</option>
+    : null;
+
 // Maps known form field names to sales table columns for search indexing
 function mapToSaleColumns(formData) {
   const firstName = (formData.FirstName || formData.first_name || '').trim();
@@ -108,16 +119,19 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
 
   const [formData, setFormData] = useState(existingSale?.form_data || transfer?.form_data || {});
 
-  // Fetch fronters in the same company
+  // Fetch fronters for the sale's company (configCompanyId) rather than the
+  // editing user's — so a compliance manager editing another company's sale
+  // still gets that company's fronters in the dropdown. StaleOption below keeps
+  // the stored fronter selectable even if the list still doesn't include them.
   useEffect(() => {
-    client.get('users', { params: { company_id: user?.company_id } })
+    client.get('users', { params: { company_id: configCompanyId } })
       .then(res => {
         setFronters((res.data.users || []).filter(
           u => u.role_level === 'fronter' || u.role_level === 'operations'
         ));
       })
       .catch(() => {});
-  }, [user?.company_id]);
+  }, [configCompanyId]);
 
   // Eligibility preview — debounced check on the plan + vehicle fields
   // currently in formData. Runs only when the closer has at least a plan
@@ -386,6 +400,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select {field.label}</option>
+          <StaleOption value={val} present={(field.options || []).includes(val)} />
           {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       );
@@ -395,6 +410,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select client…</option>
+          <StaleOption value={val} present={clients.some(c => c.value === val)} />
           {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
         </select>
       );
@@ -411,6 +427,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select plan…</option>
+          <StaleOption value={val} present={planOptions.some(p => p.value === val)} />
           {planOptions.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
         </select>
       );
@@ -455,6 +472,8 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           <select value={val} onChange={onChange} className={`input pl-9 ${errClass}`}
             style={{ color: colorFor(val, 'var(--color-text)'), fontWeight: colorFor(val) ? 600 : undefined }}>
             <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>Select fronter…</option>
+            <StaleOption value={val} present={fronters.some(f => f.user_id === val)}
+              label={existingSale?.fronter_name || transfer?.fronter_name || 'Current fronter'} />
             {fronters.map(f => (
               <option key={f.user_id} value={f.user_id}
                 style={{ color: colorFor(f.user_id, 'var(--color-text)'), fontWeight: colorFor(f.user_id) ? 600 : 400 }}>
@@ -485,6 +504,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select disposition…</option>
+          <StaleOption value={val} present={opts.includes(val)} label={String(val).replace(/_/g, ' ')} />
           {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
         </select>
       );
@@ -496,6 +516,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <select value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Rate the call…</option>
+          <StaleOption value={val} present={opts.includes(val)} label={String(val).replace(/_/g, ' ')} />
           {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
         </select>
       );
