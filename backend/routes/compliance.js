@@ -60,7 +60,14 @@ async function enrichCompanies(records, companyIdFn) {
 }
 
 // ── GET /compliance/companies ─────────────────────────────────────────────────
+// Optional ?date_from=&date_to= (YYYY-MM-DD, ET) filters the time-based KPI
+// counts — sales, pending sales, and transfers — to the selected window. User
+// headcount is a live total and intentionally not date-bound. Every company is
+// always returned (the counts shrink, the list does not) so the company
+// dropdowns elsewhere keep working.
 router.get('/companies', asyncHandler(async (req, res) => {
+  const { date_from, date_to } = req.query;
+
   const { data: companies, error } = await supabaseAdmin
     .from('companies')
     .select('id, name, company_type, is_active, created_at')
@@ -70,25 +77,35 @@ router.get('/companies', asyncHandler(async (req, res) => {
   const ids = (companies || []).map(c => c.id);
   if (!ids.length) return res.json({ companies: [], total: 0 });
 
-  const [usersRes, salesRes, pendingRes] = await Promise.all([
+  // Apply the created_at window to a sales/transfers count query when set.
+  const withWindow = (q) => {
+    if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
+    if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
+    return q;
+  };
+
+  const [usersRes, salesRes, pendingRes, transfersRes] = await Promise.all([
     supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids),
-    supabaseAdmin.from('sales').select('company_id').in('company_id', ids),
-    supabaseAdmin.from('sales').select('company_id').eq('status', 'pending_review').in('company_id', ids),
+    withWindow(supabaseAdmin.from('sales').select('company_id').in('company_id', ids)),
+    withWindow(supabaseAdmin.from('sales').select('company_id').eq('status', 'pending_review').in('company_id', ids)),
+    withWindow(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids)),
   ]);
 
-  const userCount = {}, saleCount = {}, pendingCount = {};
-  (usersRes.data  || []).forEach(u => { userCount[u.company_id]   = (userCount[u.company_id]   || 0) + 1; });
-  (salesRes.data  || []).forEach(s => { saleCount[s.company_id]   = (saleCount[s.company_id]   || 0) + 1; });
-  (pendingRes.data|| []).forEach(p => { pendingCount[p.company_id] = (pendingCount[p.company_id]|| 0) + 1; });
+  const userCount = {}, saleCount = {}, pendingCount = {}, transferCount = {};
+  (usersRes.data    || []).forEach(u => { userCount[u.company_id]     = (userCount[u.company_id]     || 0) + 1; });
+  (salesRes.data    || []).forEach(s => { saleCount[s.company_id]     = (saleCount[s.company_id]     || 0) + 1; });
+  (pendingRes.data  || []).forEach(p => { pendingCount[p.company_id]  = (pendingCount[p.company_id]  || 0) + 1; });
+  (transfersRes.data|| []).forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
 
   const enriched = (companies || []).map(c => ({
     ...c,
-    user_count:           userCount[c.id]   || 0,
-    sale_count:           saleCount[c.id]   || 0,
-    pending_review_count: pendingCount[c.id] || 0,
+    user_count:           userCount[c.id]     || 0,
+    sale_count:           saleCount[c.id]     || 0,
+    pending_review_count: pendingCount[c.id]  || 0,
+    transfer_count:       transferCount[c.id] || 0,
   }));
 
-  logger.info('COMPLIANCE', `Loaded ${enriched.length} companies`);
+  logger.info('COMPLIANCE', `Loaded ${enriched.length} companies${date_from || date_to ? ` (${date_from || '…'} → ${date_to || '…'})` : ''}`);
   res.json({ companies: enriched, total: enriched.length });
 }));
 

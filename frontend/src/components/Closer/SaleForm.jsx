@@ -87,7 +87,14 @@ function mapToSaleColumns(formData) {
 const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoading = false }) => {
   const [fronters, setFronters]       = useState([]);
   const [errors, setErrors]           = useState({});
-  const { plans, clients, fetchConfigs } = useSaleConfigs(user?.company_id);
+  // Plans + clients are per-company and live under the CLOSER company. When
+  // editing (esp. from the Compliance shell, where the editing user's company
+  // differs from the sale's), load the SALE's own company so the stored
+  // client/plan values have matching options and render as selected instead of
+  // blank. For a new sale the editing closer's company is correct. We never use
+  // the transfer's company here — that's the fronter side, which has no plans.
+  const configCompanyId = existingSale?.company_id || user?.company_id;
+  const { plans, clients, fetchConfigs } = useSaleConfigs(configCompanyId);
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
   const { years: vehicleYears } = useVehicleYearRange();
   const { colorFor } = useUserColors();
