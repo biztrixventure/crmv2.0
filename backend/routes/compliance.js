@@ -152,28 +152,27 @@ router.get('/users', asyncHandler(async (req, res) => {
 router.get('/sales', asyncHandler(async (req, res) => {
   const { company_id, user_ids, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
-  let query = applySort(
-    supabaseAdmin.from('sales').select('*', { count: 'exact' }),
-    sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false },
-  );
-
-  // If filtering by a fronter company, translate to transfer_id scope
-  // (sales are stored under the closer company, not the fronter company).
+  // Determine the company type up front so sales get scoped correctly. Sales
+  // are stored under the CLOSER company; a fronter company owns transfers, not
+  // sales, so we scope those by the LINKED transfer's company.
+  let companyType = null;
   if (company_id) {
     const { data: co } = await supabaseAdmin
-      .from('companies').select('company_type').eq('id', company_id).single();
-    if (co?.company_type === 'fronter') {
-      const { data: xfers } = await supabaseAdmin
-        .from('transfers').select('id').eq('company_id', company_id);
-      const xferIds = (xfers || []).map(t => t.id).filter(Boolean);
-      if (xferIds.length === 0) {
-        return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-      }
-      query = query.in('transfer_id', xferIds);
-    } else {
-      query = query.eq('company_id', company_id);
-    }
+      .from('companies').select('company_type').eq('id', company_id).maybeSingle();
+    companyType = co?.company_type || null;
   }
+
+  // For a fronter company, filter via a server-side inner join on the linked
+  // transfer (transfers!inner) instead of pulling every transfer id into an
+  // .in() clause. A busy fronter has thousands of transfers, and that id list
+  // overflowed the request URL — the source of the 500 on this endpoint.
+  let query = (companyType === 'fronter')
+    ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact' }).eq('transfers.company_id', company_id)
+    : supabaseAdmin.from('sales').select('*', { count: 'exact' });
+
+  query = applySort(query, sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false });
+
+  if (company_id && companyType !== 'fronter') query = query.eq('company_id', company_id);
 
   if (user_ids) {
     const ids = user_ids.split(',').filter(Boolean);
@@ -221,7 +220,10 @@ router.get('/sales', asyncHandler(async (req, res) => {
     (fp || []).forEach(p => { fronterProfileMap[p.user_id] = p; });
   }
 
-  const enriched = (data || []).map(s => {
+  const enriched = (data || []).map(row => {
+    // Drop the join-only `transfers` embed (present when scoping by a fronter
+    // company) so the response shape matches the non-join path exactly.
+    const { transfers: _join, ...s } = row;
     const frId = resolvedFronterId(s);
     return {
       ...s,
