@@ -82,6 +82,33 @@ import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
+
+// Closer-facing transfer status — the raw lifecycle keys are ambiguous from the
+// closer's seat ("pending" / "completed" mean little). Map each to a plain label
+// + one-line meaning shown as a tooltip so the closer knows exactly what to do.
+const TRANSFER_STATUS_INFO = {
+  pending:   { label: 'Awaiting assignment', desc: 'Lead created but not yet assigned to a closer.' },
+  assigned:  { label: 'Ready to work',       desc: 'Assigned to you — convert it to a sale or reject it.' },
+  completed: { label: 'Converted to sale',   desc: 'You already created a sale from this lead.' },
+  rejected:  { label: 'Rejected',            desc: 'Sent back as not a valid/workable lead.' },
+  cancelled: { label: 'Cancelled',           desc: 'This lead was cancelled.' },
+};
+const transferStatusInfo = (st) => TRANSFER_STATUS_INFO[st] || { label: (st || '—').replace(/_/g, ' '), desc: '' };
+
+// Short, safe date formatter for card chips.
+const fmtCardDate = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+};
+// Pull a "Year Make Model" string out of a transfer's form_data, if present.
+const transferVehicle = (fd) => {
+  if (!fd) return '';
+  const y = fd.CarYear || fd.car_year || fd.Year || '';
+  const mk = fd.CarMake || fd.car_make || fd.Make || '';
+  const md = fd.CarModel || fd.car_model || fd.Model || '';
+  return [y, mk, md].filter(Boolean).join(' ').trim();
+};
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
   closed_won: 'success', closed_lost: 'error',
@@ -385,9 +412,16 @@ const StaffShell = () => {
     setEditSaleError('');
     try {
       await client.put(`sales/${editSale.id}`, formData);
+      // A closer only ever edits a draft ('open') or a compliance-returned
+      // ('needs_revision') sale. After saving the fix, push it back to
+      // compliance so the revision actually re-enters review instead of
+      // silently sitting as a draft.
+      const resubmit = ['needs_revision', 'open'].includes(editSale.status);
+      if (resubmit) await client.post(`sales/${editSale.id}/submit-review`);
       setEditSale(null);
-      setSaleSuccess('Sale updated!');
+      setSaleSuccess(resubmit ? 'Sale resubmitted to compliance!' : 'Sale updated!');
       fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
+      fetchStats();
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setEditSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to update sale');
@@ -953,9 +987,17 @@ const StaffShell = () => {
 
             {closerSection === 'assigned' && (
               <Card className="p-6">
-                <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
-                  <Clock size={20} /> Assigned Transfers
-                </h3>
+                <div className="mb-4">
+                  <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                    <Clock size={20} /> Assigned Transfers
+                    <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transferTotal}</span>
+                  </h3>
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Every lead handed to you — counts leads you still need to work <strong>and</strong> ones already
+                    converted or rejected. This is why it differs from “My Sales” (only deals you created).
+                  </p>
+                </div>
                 {tLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : transfers.length === 0 ? (
@@ -963,13 +1005,17 @@ const StaffShell = () => {
                 ) : (
                   <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {transfers.map(t => (
+                    {transfers.map(t => {
+                      const si = transferStatusInfo(t.status);
+                      const veh = transferVehicle(t.form_data);
+                      const dt = fmtCardDate(t.created_at || t.assigned_at);
+                      return (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
-                        <div className="flex items-start justify-between mb-1">
-                          <div>
-                            <p className="font-semibold text-text">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-text truncate">
                               {t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
                                 : t.form_data?.customer_name || 'Unknown'}
                             </p>
@@ -977,7 +1023,12 @@ const StaffShell = () => {
                               <CopyableNumber value={t.form_data?.Phone || t.form_data?.customer_phone || ''} size={10} />
                             </p>
                           </div>
-                          <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge>
+                          <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm" title={si.desc}>{si.label}</Badge>
+                        </div>
+                        {/* Date + vehicle context */}
+                        <div className="flex items-center gap-3 flex-wrap text-[11px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                          {dt && <span className="flex items-center gap-1"><CalendarDays size={11} /> {dt}</span>}
+                          {veh && <span className="flex items-center gap-1"><Car size={11} /> {veh}</span>}
                         </div>
                         {t.status === 'assigned' && (
                           <div className="flex gap-2 mt-3">
@@ -998,7 +1049,8 @@ const StaffShell = () => {
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <Pagination page={transfersPage} total={transferTotal} pageSize={PAGE_SIZE} onChange={setTransfersPage} />
                   </>
@@ -1008,9 +1060,17 @@ const StaffShell = () => {
 
             {closerSection === 'sales' && (
               <Card className="p-6">
-                <h3 className="text-xl font-bold mb-4 text-text flex items-center gap-2">
-                  <DollarSign size={20} /> My Sales
-                </h3>
+                <div className="mb-4">
+                  <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                    <DollarSign size={20} /> My Sales
+                    <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
+                  </h3>
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Every sale you’ve created, in any status (draft, awaiting review, approved, returned…). Includes resells,
+                    which is why it can exceed the leads assigned to you.
+                  </p>
+                </div>
                 {sLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : sales.length === 0 ? (
@@ -1043,12 +1103,22 @@ const StaffShell = () => {
                               <User size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                               <p className="font-semibold text-text truncate">{s.customer_name || 'Sale'}</p>
                             </div>
+                            {(s.customer_phone || s.reference_no) && (
+                              <div className="flex items-center gap-2 mt-0.5 flex-wrap text-xs text-text-secondary">
+                                {s.customer_phone && <CopyableNumber value={s.customer_phone} size={10} />}
+                                {s.reference_no && <span className="font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</span>}
+                              </div>
+                            )}
                             {s.car_year && (
                               <div className="flex items-center gap-1 mt-0.5">
                                 <Car size={11} style={{ color: 'var(--color-text-tertiary)' }} />
                                 <p className="text-xs text-text-secondary">{s.car_year} {s.car_make} {s.car_model}</p>
                               </div>
                             )}
+                            <div className="flex items-center gap-3 flex-wrap text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                              <span className="flex items-center gap-1"><CalendarDays size={11} /> Sale {fmtCardDate(s.sale_date || s.created_at)}</span>
+                              {s.plan && <span className="truncate">{s.plan}</span>}
+                            </div>
                           </div>
                           <div className="flex flex-col items-end gap-1 ml-2">
                             <SaleStatusBadge sale={s} size="sm" />

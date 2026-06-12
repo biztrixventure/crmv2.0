@@ -61,10 +61,12 @@ async function enrichCompanies(records, companyIdFn) {
 
 // ── GET /compliance/companies ─────────────────────────────────────────────────
 // Optional ?date_from=&date_to= (YYYY-MM-DD, ET) filters the time-based KPI
-// counts — sales, pending sales, and transfers — to the selected window. User
-// headcount is a live total and intentionally not date-bound. Every company is
-// always returned (the counts shrink, the list does not) so the company
-// dropdowns elsewhere keep working.
+// counts to the selected window. Sales + pending are filtered on the business
+// SALE DATE (sale_date) — the day the deal happened — to match the All Sales
+// tab and the closer's own numbers, NOT created_at (the upload/entry moment).
+// Transfers have no sale_date, so they're filtered on created_at. User headcount
+// is a live total and not date-bound. Every company is always returned (the
+// counts shrink, the list does not) so the company dropdowns elsewhere keep working.
 router.get('/companies', asyncHandler(async (req, res) => {
   const { date_from, date_to } = req.query;
 
@@ -77,8 +79,14 @@ router.get('/companies', asyncHandler(async (req, res) => {
   const ids = (companies || []).map(c => c.id);
   if (!ids.length) return res.json({ companies: [], total: 0 });
 
-  // Apply the created_at window to a sales/transfers count query when set.
-  const withWindow = (q) => {
+  // Sales/pending → filter on sale_date (plain YYYY-MM-DD column, ET business day).
+  const bySaleDate = (q) => {
+    if (date_from) q = q.gte('sale_date', date_from);
+    if (date_to)   q = q.lte('sale_date', date_to);
+    return q;
+  };
+  // Transfers → filter on created_at (no sale_date on transfers).
+  const byCreatedAt = (q) => {
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     return q;
@@ -86,9 +94,9 @@ router.get('/companies', asyncHandler(async (req, res) => {
 
   const [usersRes, salesRes, pendingRes, transfersRes] = await Promise.all([
     supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids),
-    withWindow(supabaseAdmin.from('sales').select('company_id').in('company_id', ids)),
-    withWindow(supabaseAdmin.from('sales').select('company_id').eq('status', 'pending_review').in('company_id', ids)),
-    withWindow(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids)),
+    bySaleDate(supabaseAdmin.from('sales').select('company_id').in('company_id', ids)),
+    bySaleDate(supabaseAdmin.from('sales').select('company_id').eq('status', 'pending_review').in('company_id', ids)),
+    byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids)),
   ]);
 
   const userCount = {}, saleCount = {}, pendingCount = {}, transferCount = {};

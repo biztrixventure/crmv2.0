@@ -317,7 +317,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       client_name:      dynVal('sale_client')           || null,
       fronter_id:          dynVal('sale_fronter')     || null,
       sale_date:           dynVal('sale_date')         || new Date().toISOString().split('T')[0],
-      status:              'open',
+      // Only stamp 'open' when CREATING. On an edit (e.g. a closer fixing a
+      // needs_revision sale) we must not force the status — the caller resubmits
+      // it for review separately, and forcing 'open' can 400 when a company's
+      // allowed_statuses list doesn't include the internal draft status.
+      ...(existingSale ? {} : { status: 'open' }),
       closer_disposition:  dynVal('sale_disposition') || dynVal('sale_status') || null,
       // One extra sale per additional car. Strip car-field values from the shared
       // base so a blank field on car #2 doesn't inherit car #1's vehicle data.
