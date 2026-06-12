@@ -104,6 +104,20 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
   );
 };
 
+// Per-card visual meta (icon + color tints). The label / description / which
+// numbers each card shows now come from the KPI catalog + SuperAdmin overrides
+// (resolved via useShellLayout.cardConfig); only the look lives here.
+const MGR_CARD_META = {
+  transfers:       { icon: Send,        color: 'info' },
+  sales:           { icon: DollarSign,  color: 'success' },
+  approved:        { icon: CheckCircle, color: 'success' },
+  awaiting_review: { icon: Clock,       color: 'warning' },
+  cancelled:       { icon: XCircle,     color: 'error' },
+  resells:         { icon: RefreshCw,   color: 'primary', accent: '#8b5cf6', gradientFrom: '#ede9fe' },
+  dup_attempts:    { icon: Copy,        color: 'warning' },
+};
+const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'cancelled', 'resells', 'dup_attempts'];
+
 const ManagerShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -177,7 +191,7 @@ const ManagerShell = () => {
     isCardVisible: isMgrCardVisible,
     isFilterVisible: isMgrFilterVisible,
     isActionVisible: isMgrActionVisible,
-    cardLabel: mgrCardLabel,
+    cardConfig: mgrCardConfig,
   } = useShellLayout('manager');
   const TABS = useMemo(() => applyManagerLayout(CODE_TABS), [applyManagerLayout, CODE_TABS]);
 
@@ -434,6 +448,55 @@ const ManagerShell = () => {
   const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
+  // ── KPI metric map ──────────────────────────────────────────────────────
+  // Every data point a manager KPI card can display, keyed to match the
+  // kpiCatalog metric keys. The SuperAdmin builder decides which of these land
+  // in which card / slot; here we just supply each one's value + drill-down.
+  const goSales = (status, range) => () => {
+    setSalesStatus(status); setSalesAgent?.(''); setSalesPage(1);
+    setDateRange(getPresetRange(range)); setActiveTab('team_sales');
+  };
+  const goXfer = (range) => () => {
+    setXferStatus?.(''); setXferPage?.(1);
+    setDateRange(getPresetRange(range)); setActiveTab('transfers');
+  };
+  const mgrMetrics = {
+    transfers_today: { value: stats?.todayTransfers || 0, onClick: goXfer('today'), title: 'Transfers today' },
+    transfers_month: { value: stats?.monthTransfers || 0, onClick: goXfer('month'), title: 'Transfers this month' },
+    transfers_total: { value: overviewTotals.transfers,   onClick: goXfer('all'),   title: 'All transfers' },
+    sales_today:     { value: stats?.todaySales || 0,     onClick: goSales('', 'today'),  title: 'Sales today' },
+    sales_month:     { value: stats?.monthSales || 0,     onClick: goSales('', 'month'),  title: 'Sales this month' },
+    sales_total:     { value: overviewTotals.sales,       onClick: goSales('', 'all'),    title: 'All sales' },
+    approved_today:  { value: stats?.todayClosedWon || 0, onClick: goSales('closed_won', 'today') },
+    approved_month:  { value: stats?.monthClosedWon || 0, onClick: goSales('closed_won', 'month') },
+    approved_total:  { value: overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
+    pending_total:   { value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
+    cancelled_today: { value: stats?.todayCancelled || 0, onClick: goSales('cancelled', 'today') },
+    cancelled_month: { value: stats?.monthCancelled || 0, onClick: goSales('cancelled', 'month') },
+    cancelled_total: { value: stats?.cancelledSales || 0, onClick: goSales('cancelled', 'all') },
+    resells_month:   { value: stats?.resellsThisMonth || 0, onClick: goSales('', 'month'), title: 'Resells this month' },
+    resells_total:   { value: stats?.resellsTotal || 0,     onClick: goSales('', 'all'),   title: 'All resells' },
+    dup_today:       { value: stats?.dupToday || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (today)' },
+    dup_month:       { value: stats?.dupMonth || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (this month)' },
+    dup_total:       { value: stats?.dupTotal || 0, onClick: () => setDupOpen(true), title: 'View all duplicate records' },
+  };
+
+  const renderMgrCard = (key) => {
+    if (!isMgrCardVisible(key)) return null;
+    const meta = MGR_CARD_META[key] || {};
+    const cfg  = mgrCardConfig(key);
+    const segments = (cfg.segments || [])
+      .map(s => { const m = mgrMetrics[s.metric]; return m ? { key: s.metric, label: s.label, value: m.value, onClick: m.onClick, title: m.title, isPrimary: s.primary } : null; })
+      .filter(Boolean);
+    if (!segments.length) return null;
+    return (
+      <StatCardTriple key={key} label={cfg.label} icon={meta.icon} color={meta.color}
+        accent={meta.accent} gradientFrom={meta.gradientFrom}
+        loading={loading || !stats} segments={segments}
+        caption={cfg.description || undefined} />
+    );
+  };
+
   return (
     <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
       {updateAvailable && <UpdateBanner />}
@@ -519,75 +582,7 @@ const ManagerShell = () => {
                 pre-existing overviewTotals so the manager's company-scoped
                 aggregate stays correct even before stats hook loads. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {isMgrCardVisible('transfers') && (
-              <StatCardTriple
-                label={mgrCardLabel('transfers', 'Total Transfers')}  icon={Send}        color="info"
-                loading={loading || !stats}
-                today={{ value: stats?.todayTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('today')); setActiveTab('transfers'); } }}
-                month={{ value: stats?.monthTransfers || 0, onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('month')); setActiveTab('transfers'); } }}
-                total={{ value: overviewTotals.transfers   , onClick: () => { setXferStatus?.(''); setXferPage?.(1); setDateRange(getPresetRange('all'));   setActiveTab('transfers'); } }}
-                caption={overviewTotals.transfers > 0 && overviewTotals.sales > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}% → sales` : null}
-              />
-              )}
-              {isMgrCardVisible('sales') && (
-              <StatCardTriple
-                label={mgrCardLabel('sales', 'Total Sales')}      icon={DollarSign}  color="success"
-                loading={loading || !stats}
-                today={{ value: stats?.todaySales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
-                month={{ value: stats?.monthSales || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
-                total={{ value: overviewTotals.sales      , onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
-                caption={overviewTotals.sales > 0 ? `${overviewTotals.approved} approved` : null}
-              />
-              )}
-              {isMgrCardVisible('approved') && (
-              <StatCardTriple
-                label={mgrCardLabel('approved', 'Approved')}         icon={CheckCircle} color="success"
-                loading={loading || !stats}
-                today={{ value: stats?.todayClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
-                month={{ value: stats?.monthClosedWon || 0, onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
-                total={{ value: overviewTotals.approved   , onClick: () => { setSalesStatus('closed_won'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
-                caption={overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}% win rate` : null}
-              />
-              )}
-              {isMgrCardVisible('awaiting_review') && (
-              <StatCardTriple
-                label={mgrCardLabel('awaiting_review', 'Awaiting Review')}  icon={Clock}       color="warning"
-                loading={loading || !stats}
-                total={{ value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' }}
-                caption={overviewTotals.pendingReview > 0 ? 'needs action' : 'all clear'}
-              />
-              )}
-              {isMgrCardVisible('cancelled') && (
-              <StatCardTriple
-                label={mgrCardLabel('cancelled', 'Cancelled')}        icon={XCircle}     color="error"
-                loading={loading || !stats}
-                today={{ value: stats?.todayCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('today')); setActiveTab('team_sales'); } }}
-                month={{ value: stats?.monthCancelled || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); } }}
-                total={{ value: stats?.cancelledSales || 0, onClick: () => { setSalesStatus('cancelled'); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); } }}
-              />
-              )}
-              {isMgrCardVisible('resells') && (
-              <StatCardTriple
-                label={mgrCardLabel('resells', 'Resells')}          icon={RefreshCw}
-                accent="#8b5cf6" gradientFrom="#ede9fe" color="primary"
-                loading={loading || !stats}
-                month={{ value: stats?.resellsThisMonth || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('month')); setActiveTab('team_sales'); }, title: 'Resells this month' }}
-                total={{ value: stats?.resellsTotal     || 0, onClick: () => { setSalesStatus(''); setSalesAgent?.(''); setSalesPage(1); setDateRange(getPresetRange('all'));   setActiveTab('team_sales'); }, title: 'All resells' }}
-                caption={(stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet'}
-              />
-              )}
-              {/* Dup Attempts — fronter re-submitted an existing phone.
-                  Any segment opens the auditable duplicate-records list. */}
-              {isMgrCardVisible('dup_attempts') && (
-              <StatCardTriple
-                label={mgrCardLabel('dup_attempts', 'Dup Attempts')}     icon={Copy}        color="warning"
-                loading={loading || !stats}
-                today={{ value: stats?.dupToday || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (today)' }}
-                month={{ value: stats?.dupMonth || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (this month)' }}
-                total={{ value: stats?.dupTotal || 0, onClick: () => setDupOpen(true), title: 'View all duplicate records' }}
-                caption="Click to view duplicate details"
-              />
-              )}
+              {MGR_CARD_ORDER.map(renderMgrCard)}
             </div>
 
             {/* ── Conversion funnel ── */}

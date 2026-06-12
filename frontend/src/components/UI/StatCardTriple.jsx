@@ -20,6 +20,11 @@ import { Card } from './index';
  *   label, icon (lucide), color (Tailwind family: success, info, primary,
  *   warning, error), loading (bool), tints (optional accent + gradient),
  *   today / month / total = { value, onClick, title? }
+ *
+ *   segments (optional) — when provided, drives a fully admin-configurable card:
+ *     an ordered array (1–3) of { label, value, onClick?, title?, isPrimary? }.
+ *     Overrides the today/month/total trio so SuperAdmin can choose how many
+ *     numbers show and what each represents. Falls back to the trio when absent.
  */
 const StatCardTriple = ({
   label,
@@ -29,6 +34,7 @@ const StatCardTriple = ({
   today,
   month,
   total,
+  segments,
   caption,
   accent,
   gradientFrom,
@@ -36,7 +42,18 @@ const StatCardTriple = ({
   const stripe = accent || `var(--color-${color}-500, #6366f1)`;
   const tint  = gradientFrom || `var(--color-${color}-50, #f5f3ff)`;
 
-  const Segment = ({ data, label: segLabel, isPrimary }) => {
+  // Resolve the segments to render: explicit `segments` config wins, otherwise
+  // build the classic Today / Current Month / Total trio from the legacy props.
+  const resolved = Array.isArray(segments)
+    ? segments.filter(Boolean)
+    : [
+        today && { label: 'Today',         ...today, isPrimary: true },
+        month && { label: 'Current Month', ...month, isPrimary: !today },
+        total && { label: 'Total',         ...total, isPrimary: !today && !month },
+      ].filter(Boolean);
+
+  const Segment = ({ data, isPrimary }) => {
+    const segLabel = data?.label ?? '';
     const value = loading ? '—' : (data?.value ?? 0);
     const clickable = !!data?.onClick;
     return (
@@ -89,20 +106,22 @@ const StatCardTriple = ({
         )}
       </div>
 
-      <div
-        className="flex rounded-xl divide-x overflow-hidden"
-        style={{
-          backgroundColor: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          // divide-x uses border-color; tailwind sets a CSS var fallback
-        }}
-        role="group"
-        aria-label={`${label} stats`}
-      >
-        {today && <Segment data={today} label="Today" isPrimary />}
-        {month && <Segment data={month} label="Current Month" isPrimary={!today} />}
-        {total && <Segment data={total} label="Total" />}
-      </div>
+      {resolved.length > 0 && (
+        <div
+          className="flex rounded-xl divide-x overflow-hidden"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
+            // divide-x uses border-color; tailwind sets a CSS var fallback
+          }}
+          role="group"
+          aria-label={`${label} stats`}
+        >
+          {resolved.map((seg, i) => (
+            <Segment key={seg.key || seg.label || i} data={seg} isPrimary={seg.isPrimary} />
+          ))}
+        </div>
+      )}
 
       {caption && (
         <p className="text-[10px] text-text-tertiary mt-1.5">{caption}</p>

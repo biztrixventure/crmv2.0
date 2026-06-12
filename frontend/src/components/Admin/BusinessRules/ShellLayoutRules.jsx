@@ -206,8 +206,12 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
   // doesn't matter (last edit wins). role_overrides is carried through
   // untouched unless the caller explicitly patches it.
   const persistAll = (patch = {}) => {
+    // Preserve any richer per-card config (label / description / segments set by
+    // the KPI Card Builder) — this page only owns visibility, so it must not
+    // strip the builder's fields when it rewrites stat_cards.
+    const storedCardByKey = new Map((stored?.stat_cards || []).map((c) => [c.key, c]));
     const nextTabs       = (patch.tabs       || tabs).map((t, i) => ({ key: t.key, enabled: t.enabled !== false, label: t.label, order: i }));
-    const nextCards      = (patch.statCards  || statCards).map((c) => ({ key: c.key, enabled: c.enabled !== false }));
+    const nextCards      = (patch.statCards  || statCards).map((c) => ({ ...(storedCardByKey.get(c.key) || {}), key: c.key, enabled: c.enabled !== false }));
     const nextFilters    = (patch.filters    || filters).map((f) => ({ key: f.key, enabled: f.enabled !== false }));
     const nextActions    = (patch.actions    || actions).map((a) => ({ key: a.key, enabled: a.enabled !== false }));
     const nextDefault    = patch.default_tab || defaultTabKey;
@@ -237,8 +241,18 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
   const setRoleFeature = (category, key, enabled) => {
     const ro = { ...(stored?.role_overrides || {}) };
     const block = { ...(ro[activeRole] || {}) };
-    let arr = Array.isArray(block[category]) ? block[category].filter((x) => x?.key !== key) : [];
-    if (!enabled) arr = [...arr, { key, enabled: false }];   // store hides only
+    const list = Array.isArray(block[category]) ? block[category] : [];
+    // Keep any richer per-role card config (label / description / segments the
+    // KPI builder may have stored) when flipping visibility.
+    const existing = list.find((x) => x?.key === key) || {};
+    let arr = list.filter((x) => x?.key !== key);
+    if (!enabled) {
+      arr.push({ ...existing, key, enabled: false });          // hide, preserve fields
+    } else {
+      const rest = { ...existing }; delete rest.enabled; delete rest.key;
+      if (Object.keys(rest).length) arr.push({ ...rest, key, enabled: true }); // show but keep config
+      // else: nothing but the hide → drop the entry entirely (clean default)
+    }
     block[category] = arr;
     ro[activeRole] = block;
     persistAll({ role_overrides: ro });

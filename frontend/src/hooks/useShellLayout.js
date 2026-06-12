@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { resolveCardConfig } from '../config/kpiCatalog';
 
 /*
  * useShellLayout
@@ -135,6 +136,11 @@ export function useShellLayout(shellId) {
     return (typeof lbl === 'string' && lbl.trim()) ? lbl.trim() : fallback;
   };
 
+  // Full per-card config (label + description + segment layout) resolved with
+  // role → shell → catalog-default precedence. Drives the configurable KPI
+  // cards: how many numbers show, what each one represents, and its sub-label.
+  const cardConfig = (key) => resolveCardConfig(shellId, key, layout, role);
+
   return {
     layout,
     role,
@@ -144,6 +150,7 @@ export function useShellLayout(shellId) {
     isFilterVisible,
     isActionVisible,
     cardLabel,
+    cardConfig,
     ready: !!_cache.get(shellId),
   };
 }
