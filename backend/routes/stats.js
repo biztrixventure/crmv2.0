@@ -122,9 +122,9 @@ router.get(
         }
         return q;
       };
-      const [sAll, sOpen, sWon, sLost, sReview, sCancelled] = await Promise.all([
+      const [sAll, sOpen, sWon, sLost, sReview, sCancelled, sRevision] = await Promise.all([
         saleCount(), saleCount('open'), saleCount('closed_won'), saleCount('closed_lost'), saleCount('pending_review'),
-        saleCount('cancelled'),
+        saleCount('cancelled'), saleCount('needs_revision'),
       ]);
       stats.totalSales         = sAll.count || 0;
       stats.openSales          = sOpen.count || 0;
@@ -132,6 +132,12 @@ router.get(
       stats.closedLost         = sLost.count || 0;
       stats.awaitingCompliance = sReview.count || 0;
       stats.cancelledSales     = sCancelled.count || 0;
+      // Live backlog of sales compliance returned for revision. This is a
+      // CURRENT count, not cumulative — when compliance's issue is resolved and
+      // the sale moves out of needs_revision (resubmitted / approved), it stops
+      // being counted, so the "Returned from compliance" KPI decrements on its
+      // own. Closer scope = own returns; manager scope = company.
+      stats.needsRevision      = sRevision.count || 0;
 
       // Per-status sale counts — drives the dynamic pipeline bar on the
       // SuperAdmin dashboard so adding a custom status in Business Rules →

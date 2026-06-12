@@ -32,6 +32,7 @@ export const KPI_METRICS = {
     { key: 'cancelled_total', label: 'Cancelled · Total' },
     { key: 'awaiting',        label: 'Awaiting Compliance (sales)' },
     { key: 'awaiting_inflight', label: 'In-flight With Closer (leads)' },
+    { key: 'returned',        label: 'Returned from Compliance (live)' },
     { key: 'resells_month',   label: 'Resells · This Month' },
     { key: 'resells_total',   label: 'Resells · Total' },
     { key: 'leads_today',     label: 'Leads · Today' },
@@ -52,6 +53,7 @@ export const KPI_METRICS = {
     { key: 'approved_month',  label: 'Approved · This Month' },
     { key: 'approved_total',  label: 'Approved · Total' },
     { key: 'pending_total',   label: 'Awaiting Review · Total' },
+    { key: 'returned',        label: 'Returned from Compliance (live)' },
     { key: 'cancelled_today', label: 'Cancelled · Today' },
     { key: 'cancelled_month', label: 'Cancelled · This Month' },
     { key: 'cancelled_total', label: 'Cancelled · Total' },
@@ -82,6 +84,10 @@ export const KPI_CARDS = {
     awaiting_review: {
       label: 'Awaiting Review', description: 'Pending compliance check',
       segments: [seg('awaiting', 'Total', true)],
+    },
+    returned: {
+      label: 'Returned from Compliance', description: 'Sent back for revision — clears when resolved',
+      segments: [seg('returned', 'Open', true)],
     },
     resells: {
       label: 'Resells', description: '',
@@ -116,6 +122,10 @@ export const KPI_CARDS = {
     awaiting_review: {
       label: 'Awaiting Review', description: '',
       segments: [seg('pending_total', 'Total', true)],
+    },
+    returned: {
+      label: 'Returned from Compliance', description: 'Sent back for revision — clears when resolved',
+      segments: [seg('returned', 'Open', true)],
     },
     cancelled: {
       label: 'Cancelled', description: '',

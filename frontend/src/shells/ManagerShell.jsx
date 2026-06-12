@@ -112,11 +112,12 @@ const MGR_CARD_META = {
   sales:           { icon: DollarSign,  color: 'success' },
   approved:        { icon: CheckCircle, color: 'success' },
   awaiting_review: { icon: Clock,       color: 'warning' },
+  returned:        { icon: AlertCircle, color: 'error', accent: '#f97316', gradientFrom: '#fff7ed' },
   cancelled:       { icon: XCircle,     color: 'error' },
   resells:         { icon: RefreshCw,   color: 'primary', accent: '#8b5cf6', gradientFrom: '#ede9fe' },
   dup_attempts:    { icon: Copy,        color: 'warning' },
 };
-const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'cancelled', 'resells', 'dup_attempts'];
+const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
 
 const ManagerShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
@@ -471,6 +472,7 @@ const ManagerShell = () => {
     approved_month:  { value: stats?.monthClosedWon || 0, onClick: goSales('closed_won', 'month') },
     approved_total:  { value: overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
     pending_total:   { value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
+    returned:        { value: stats?.needsRevision || 0, onClick: () => { setSalesStatus('needs_revision'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Sales compliance returned for revision' },
     cancelled_today: { value: stats?.todayCancelled || 0, onClick: goSales('cancelled', 'today') },
     cancelled_month: { value: stats?.monthCancelled || 0, onClick: goSales('cancelled', 'month') },
     cancelled_total: { value: stats?.cancelledSales || 0, onClick: goSales('cancelled', 'all') },

@@ -127,16 +127,17 @@ const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706'
 // numbers show now come from the KPI catalog + SuperAdmin overrides; only the
 // icon + color tints live here.
 const STAFF_CARD_META = {
-  my_sales:                { icon: DollarSign,  color: 'success' },
-  approved:                { icon: CheckCircle, color: 'primary' },
-  cancelled:               { icon: XCircle,     color: 'error' },
-  awaiting_review:         { icon: Clock,       color: 'warning' },
-  resells:                 { icon: RefreshCw,   color: 'primary', accent: '#8b5cf6', gradientFrom: '#ede9fe' },
-  total_leads:             { icon: Send,        color: 'info' },
-  fronter_approved:        { icon: CheckCircle, color: 'success' },
-  fronter_awaiting_review: { icon: Clock,       color: 'warning' },
+  my_sales:                { icon: DollarSign,   color: 'success' },
+  approved:                { icon: CheckCircle,  color: 'primary' },
+  cancelled:               { icon: XCircle,      color: 'error' },
+  awaiting_review:         { icon: Clock,        color: 'warning' },
+  returned:                { icon: AlertTriangle, color: 'error', accent: '#f97316', gradientFrom: '#fff7ed' },
+  resells:                 { icon: RefreshCw,    color: 'primary', accent: '#8b5cf6', gradientFrom: '#ede9fe' },
+  total_leads:             { icon: Send,         color: 'info' },
+  fronter_approved:        { icon: CheckCircle,  color: 'success' },
+  fronter_awaiting_review: { icon: Clock,        color: 'warning' },
 };
-const STAFF_CLOSER_CARDS  = ['my_sales', 'approved', 'cancelled', 'awaiting_review', 'resells'];
+const STAFF_CLOSER_CARDS  = ['my_sales', 'approved', 'cancelled', 'awaiting_review', 'returned', 'resells'];
 const STAFF_FRONTER_CARDS = ['total_leads', 'fronter_approved', 'fronter_awaiting_review'];
 
 const StaffShell = () => {
@@ -644,6 +645,7 @@ const StaffShell = () => {
     cancelled_total: { value: stats.cancelledSales || 0, onClick: goCloser('cancelled', 'all') },
     awaiting:        { value: stats.awaitingCompliance || 0, onClick: goCloser('pending_review', 'all'), title: 'Show all sales awaiting compliance review' },
     awaiting_inflight: { value: stats.awaitingCompliance || 0, onClick: () => { setXferStatus('assigned'); setXferPage(1); }, title: 'Show leads in-flight with a closer' },
+    returned:        { value: stats.needsRevision || 0, onClick: goCloser('needs_revision', 'all'), title: 'Sales compliance returned to you for revision' },
     resells_month:   { value: stats.resellsThisMonth || 0, onClick: goCloser('', 'month'), title: 'Resells this month' },
     resells_total:   { value: stats.resellsTotal || 0,     onClick: goCloser('', 'all'),   title: 'All resells' },
     leads_today:     { value: stats.todayTransfers || 0, onClick: goLeads('', 'today') },
@@ -1023,7 +1025,22 @@ const StaffShell = () => {
                               <CopyableNumber value={t.form_data?.Phone || t.form_data?.customer_phone || ''} size={10} />
                             </p>
                           </div>
-                          <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm" title={si.desc}>{si.label}</Badge>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm" title={si.desc}>{si.label}</Badge>
+                            {/* Latest disposition the closer/fronter set on this lead — shown
+                                next to the status so "Awaiting assignment" / "Ready to work"
+                                also tells you what was last decided (callback, not interested…). */}
+                            {t.latest_disposition?.disposition_name && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                                title={`Last disposition${t.latest_disposition.note ? ` — ${t.latest_disposition.note}` : ''}`}
+                                style={{
+                                  backgroundColor: `${t.latest_disposition.color || '#6b7280'}22`,
+                                  color: t.latest_disposition.color || '#6b7280',
+                                }}>
+                                {t.latest_disposition.disposition_name}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         {/* Date + vehicle context */}
                         <div className="flex items-center gap-3 flex-wrap text-[11px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
