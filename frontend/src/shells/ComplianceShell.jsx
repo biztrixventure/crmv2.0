@@ -10,8 +10,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
 import EngagementBanners from '../components/Engagement/EngagementBanners';
 import { useNotifications } from '../hooks/useNotifications';
+import { useFormFields } from '../hooks/useFormFields';
+import { dispositionTabs, isPostDateDispo } from '../utils/dispositions';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
+import { CalendarClock } from 'lucide-react';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
 import QueueTab            from '../components/Compliance/QueueTab';
@@ -47,6 +50,13 @@ const ComplianceShell = () => {
   const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
   const TABS = useMemo(() => applyComplianceLayout(CODE_TABS), [applyComplianceLayout]);
 
+  // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition
+  // the admin configured on the sale-disposition form field. Renaming a
+  // disposition in Form Builder retitles the tab automatically.
+  const { fields: dispoFields, fetchFields } = useFormFields();
+  useEffect(() => { fetchFields(); }, [fetchFields]);
+  const dispoTabs = useMemo(() => dispositionTabs(dispoFields), [dispoFields]);
+
   // Honor an initial-tab hint passed via router state (the AdminPanel sidebar
   // links straight into specific tabs, e.g. "All Sales", so superadmin lands on
   // the right view instead of always on Companies).
@@ -58,7 +68,9 @@ const ComplianceShell = () => {
   const [activeTab, setActiveTab]   = useState(initialTab);
 
   // Reconcile activeTab when admin layout hides the persisted tab key.
+  // Dynamic disposition tabs (dispo:*) are exempt — they aren't in TABS.
   useEffect(() => {
+    if (activeTab.startsWith('dispo:')) return;
     if (TABS.length && !TABS.some(t => t.key === activeTab)) {
       const fallback = complianceDefaultTab(TABS) || TABS[0]?.key;
       if (fallback) setActiveTab(fallback);
@@ -134,6 +146,23 @@ const ComplianceShell = () => {
               {t.label}
             </button>
           ))}
+          {/* Dynamic disposition tabs (e.g. Post Date), sit beside All Sales. */}
+          {dispoTabs.map(d => {
+            const k = `dispo:${d.value}`;
+            const active = activeTab === k;
+            return (
+              <button key={k} onClick={() => setActiveTab(k)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                style={{
+                  background: active ? 'var(--gradient-sidebar)' : 'transparent',
+                  color:      active ? 'white' : 'var(--color-text-secondary)',
+                  boxShadow:  active ? 'var(--shadow-sm)' : 'none',
+                }}>
+                <CalendarClock size={14} />
+                {d.label}
+              </button>
+            );
+          })}
         </div>
           {user?.role === 'superadmin' && (
             <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
@@ -166,6 +195,15 @@ const ComplianceShell = () => {
             key={tabInit.company || 'all'}
             companyList={companyList}
             initCompany={tabInit.company || ''}
+          />
+        )}
+        {/* Disposition tab content — same SalesTab, scoped to one disposition. */}
+        {activeTab.startsWith('dispo:') && (
+          <SalesTab
+            key={activeTab}
+            companyList={companyList}
+            disposition={activeTab.slice(6)}
+            isPostDate={isPostDateDispo(activeTab.slice(6))}
           />
         )}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}

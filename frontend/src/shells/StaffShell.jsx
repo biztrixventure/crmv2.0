@@ -61,6 +61,7 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
 import { useFormFields } from "../hooks/useFormFields";
+import { dispositionTabs, isPostDateDispo, prettyDispo } from "../utils/dispositions";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import PhoneSearch from "../components/Closer/PhoneSearch";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
@@ -330,11 +331,20 @@ const StaffShell = () => {
   useEffect(() => {
     fetchStats();
     if (isFronter) { fetchFields(); fetchConfigs(); }
+    // Closers need the form fields too, to resolve the dynamic disposition tabs
+    // (e.g. "Post Date") from the sale-disposition field options.
+    else if (isCloser) { fetchFields(); }
   }, []);
   // Debounce the fronter lead filter into a server-side search; reset to page 1.
   useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
   useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ]);
-  useEffect(() => { if (isCloser) fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) }); }, [fetchSales, date_from, date_to, isCloser, closerSalesPage, salesStatus]);
+  useEffect(() => {
+    if (!isCloser) return;
+    const base = { date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE };
+    if (closerSection.startsWith('dispo:')) base.disposition = closerSection.slice(6);  // dynamic disposition tab
+    else if (salesStatus) base.status = salesStatus;
+    fetchSales(base);
+  }, [fetchSales, date_from, date_to, isCloser, closerSalesPage, salesStatus, closerSection]);
   // Keep page within range when the date filter narrows the dataset.
   useEffect(() => { setTransfersPage(1); setCloserSalesPage(1); }, [date_from, date_to]);
 
@@ -405,6 +415,20 @@ const StaffShell = () => {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
     } finally {
       setSaleLoading(false);
+    }
+  };
+
+  // Charge a post-dated sale: flip its disposition to "sale" (and clear the
+  // schedule) so it leaves the Post Date tab and lands in My Sales / All Sales.
+  const chargeSale = async (saleId, dispoFilter) => {
+    try {
+      await client.put(`sales/${saleId}`, { closer_disposition: 'sale', charge_at: null });
+      setSaleSuccess('Charged — moved to Sale.');
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(dispoFilter ? { disposition: dispoFilter } : {}) });
+      fetchStats();
+      setTimeout(() => setSaleSuccess(''), 4000);
+    } catch (err) {
+      setSaleError(err.response?.data?.error || 'Failed to charge sale');
     }
   };
 
@@ -969,12 +993,12 @@ const StaffShell = () => {
 
             </div>
 
-            {/* Sub-nav: Assigned Transfers | My Sales */}
+            {/* Sub-nav: Assigned Transfers | My Sales | <dynamic disposition tabs> */}
             <div className="flex gap-1 p-1 rounded-xl w-fit mb-5 overflow-x-auto"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               {[{ k: 'assigned', l: 'Assigned Transfers', icon: Clock, count: transferTotal },
                 { k: 'sales',    l: 'My Sales',           icon: DollarSign, count: salesTotal }].map(s => (
-                <button key={s.k} onClick={() => setCloserSection(s.k)}
+                <button key={s.k} onClick={() => { setCloserSection(s.k); setCloserSalesPage(1); }}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap"
                   style={{ background: closerSection === s.k ? 'var(--gradient-sidebar)' : 'transparent',
                     color: closerSection === s.k ? 'white' : 'var(--color-text-secondary)',
@@ -985,6 +1009,20 @@ const StaffShell = () => {
                       color: closerSection === s.k ? 'white' : 'var(--color-text-tertiary)' }}>{s.count}</span>
                 </button>
               ))}
+              {/* One tab per non-"sale" disposition the admin configured. */}
+              {dispositionTabs(fields).map(d => {
+                const key = `dispo:${d.value}`;
+                const active = closerSection === key;
+                return (
+                  <button key={key} onClick={() => { setCloserSection(key); setCloserSalesPage(1); }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap"
+                    style={{ background: active ? 'var(--gradient-sidebar)' : 'transparent',
+                      color: active ? 'white' : 'var(--color-text-secondary)',
+                      boxShadow: active ? 'var(--shadow-sm)' : 'none' }}>
+                    {isPostDateDispo(d.value) ? <CalendarPlus size={15} /> : <FileText size={15} />} {d.label}
+                  </button>
+                );
+              })}
             </div>
 
             {closerSection === 'assigned' && (
@@ -1221,6 +1259,71 @@ const StaffShell = () => {
                 )}
               </Card>
             )}
+
+            {/* Dynamic disposition tab (e.g. Post Date) — sales the closer
+                marked with this disposition. Post-date sales carry a charge
+                date + a "Charge → Sale" button that moves them to My Sales. */}
+            {closerSection.startsWith('dispo:') && (() => {
+              const dispo = closerSection.slice(6);
+              const isPost = isPostDateDispo(dispo);
+              return (
+              <Card className="p-6">
+                <div className="mb-4">
+                  <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                    {isPost ? <CalendarPlus size={20} /> : <FileText size={20} />} {prettyDispo(dispo)}
+                    <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
+                  </h3>
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Sales you marked “{prettyDispo(dispo)}”.{isPost ? ' Each is charged at its scheduled time — click “Charge → Sale” once done to move it to My Sales.' : ''}
+                  </p>
+                </div>
+                {sLoading ? (
+                  <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+                ) : sales.length === 0 ? (
+                  <p className="text-text-secondary text-center py-8">No “{prettyDispo(dispo)}” sales.</p>
+                ) : (
+                  <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {sales.map(s => (
+                      <div key={s.id} onClick={() => setDetailSale(s)}
+                        className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-text truncate">{s.customer_name || 'Sale'}</p>
+                            {s.customer_phone && <div className="text-xs text-text-secondary mt-0.5"><CopyableNumber value={s.customer_phone} size={10} /></div>}
+                            {s.charge_at && (
+                              <p className="text-[11px] mt-1 flex items-center gap-1 font-semibold" style={{ color: '#b45309' }}>
+                                <CalendarDays size={11} /> Charge {new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              </p>
+                            )}
+                          </div>
+                          <SaleStatusBadge sale={s} size="sm" />
+                        </div>
+                        <div className="flex gap-2 mt-3" onClick={e => e.stopPropagation()}>
+                          {isPost && (
+                            <button onClick={() => chargeSale(s.id, dispo)}
+                              className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all"
+                              style={{ background: 'var(--gradient-sidebar)' }}>
+                              <DollarSign size={12} /> Charge → Sale
+                            </button>
+                          )}
+                          <button onClick={() => { setEditSale(s); setEditSaleError(''); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1 transition-all hover:bg-bg-secondary"
+                            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                            <Pencil size={11} /> Edit
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
+                  </>
+                )}
+              </Card>
+              );
+            })()}
           </div>
         )}
 

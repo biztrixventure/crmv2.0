@@ -7,7 +7,9 @@ import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
 import FilterBar from '../UI/FilterBar';
+import DateRangePicker from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
+import { prettyDispo } from '../../utils/dispositions';
 import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
@@ -19,7 +21,7 @@ import {
   Overlay, ModalBox, ModalHeader,
 } from './shared';
 
-const SalesTab = ({ companyList, initCompany = '' }) => {
+const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate = false }) => {
   const { user, isReadOnly } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
   // Workflow drives the dropdowns, labels, and badge colors. labelOf/badgeOf
@@ -73,6 +75,10 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting]         = useState(false);
+  // Post Date tab — charge-date window filter + in-flight charge action.
+  const [chargeFrom, setChargeFrom] = useState('');
+  const [chargeTo, setChargeTo]     = useState('');
+  const [charging, setCharging]     = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +87,8 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
         params: {
           search: search || undefined, status: status || undefined,
           company_id: company || undefined,
+          disposition: disposition || undefined,
+          charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
           sort_by: sort.col, sort_dir: sort.dir,
           page, limit: LIMIT,
@@ -89,7 +97,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [search, status, company, dateFrom, dateTo, page, sort]);
+  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -108,6 +116,17 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
       if (updated) setSales(list => list.map(x => x.id === sale.id ? { ...x, ...updated } : x));
       load();
     } catch { /* user retries */ } finally { setApproving(null); }
+  };
+
+  // Charge a post-dated sale → flip disposition to "sale" so it leaves this tab
+  // and lands in All Sales (mirrors the closer-side Charge button).
+  const chargeSale = async (s) => {
+    setCharging(s.id);
+    try {
+      await client.put(`sales/${s.id}`, { closer_disposition: 'sale', charge_at: null });
+      setSales(list => list.filter(x => x.id !== s.id));
+      load();
+    } catch { /* user retries */ } finally { setCharging(null); }
   };
 
   const openReturn = (s) => { setReturnTarget(s); setReturnNote(''); setReturnMsg(''); };
@@ -194,8 +213,12 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
   return (
     <div>
       <TabHeader
-        title="All Sales"
-        subtitle="Closer sales across all companies — full management access"
+        title={disposition ? prettyDispo(disposition) : 'All Sales'}
+        subtitle={disposition
+          ? (isPostDate
+              ? 'Post-dated sales awaiting their charge date. Charge one to move it to All Sales.'
+              : `Sales with the “${prettyDispo(disposition)}” disposition, across all companies.`)
+          : 'Closer sales across all companies — full management access'}
         onRefresh={() => { setPage(1); load(); }}
         onExport={() => setExportOpen(true)}
       />
@@ -223,11 +246,26 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
               <option value="">All statuses</option>
               {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
             </select>
+            {isPostDate && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Charge:</span>
+                <DateRangePicker
+                  value={{ date_from: chargeFrom ? chargeFrom.slice(0, 10) : '', date_to: chargeTo ? chargeTo.slice(0, 10) : '' }}
+                  defaultPreset="all"
+                  onChange={(r) => {
+                    setChargeFrom(r.date_from ? `${r.date_from}T00:00:00` : '');
+                    setChargeTo(r.date_to ? `${r.date_to}T23:59:59` : '');
+                    setPage(1);
+                  }}
+                  onClear={() => { setChargeFrom(''); setChargeTo(''); setPage(1); }}
+                />
+              </span>
+            )}
           </>
         }
         onClearAll={() => {
           setSearch(''); setCompany(''); setStatus('');
-          setDateFrom(''); setDateTo(''); setPage(1);
+          setDateFrom(''); setDateTo(''); setChargeFrom(''); setChargeTo(''); setPage(1);
         }}
       />
 
@@ -264,6 +302,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                   <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
                   <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
+                  {isPostDate && <Th>Charge Date</Th>}
                   <Th>Actions</Th>
                 </tr>
               </thead>
@@ -301,8 +340,21 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                           bulk uploads) instead of the upload moment. Falls back to
                           created_at on legacy rows where sale_date wasn't captured. */}
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at)}</td>
+                      {isPostDate && (
+                        <td className="px-4 py-3 text-xs font-semibold" style={{ color: s.charge_at ? '#b45309' : 'var(--color-text-tertiary)' }}>
+                          {s.charge_at ? new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
+                        </td>
+                      )}
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {isPostDate && !isReadOnly && (
+                            <button onClick={() => chargeSale(s)} disabled={charging === s.id}
+                              title="Charge the card and move this to All Sales"
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
+                              style={{ background: 'var(--gradient-sidebar)' }}>
+                              {charging === s.id ? '…' : 'Charge → Sale'}
+                            </button>
+                          )}
                           {s.status === 'pending_review' ? (
                             !isReadOnly && (
                               <>
@@ -357,7 +409,7 @@ const SalesTab = ({ companyList, initCompany = '' }) => {
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={7} className="px-5 py-3">
+                        <td colSpan={isPostDate ? 8 : 7} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (

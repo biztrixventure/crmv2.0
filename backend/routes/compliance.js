@@ -158,7 +158,7 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+  const { company_id, user_ids, status, disposition, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
   // Determine the company type up front so sales get scoped correctly. Sales
   // are stored under the CLOSER company; a fronter company owns transfers, not
@@ -187,6 +187,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
     if (ids.length) query = query.in('closer_id', ids);
   }
   if (status)    query = query.eq('status', status);
+  // Disposition tab filter (closer_disposition) — drives the dynamic per-
+  // disposition tabs (e.g. "Post Date") in compliance.
+  if (disposition) query = query.eq('closer_disposition', disposition);
+  // Charge-date window for the Post Date tab.
+  if (charge_from) query = query.gte('charge_at', charge_from);
+  if (charge_to)   query = query.lte('charge_at', charge_to);
   // Date filter keys on sale_date (the business day the sale happened) so the
   // From/To range matches the UI Sale Date column. A bulk-imported April
   // workbook landed today would otherwise leak into May 1-31 selections

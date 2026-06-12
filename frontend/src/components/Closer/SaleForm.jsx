@@ -10,6 +10,16 @@ import VehicleSelect from '../Form/VehicleSelect';
 import CalendarDateInput from '../Form/CalendarDateInput';
 import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
 import { useUserColors } from '../../hooks/useUserColors';
+import { isPostDateDispo } from '../../utils/dispositions';
+
+// ISO timestamp → <input type="datetime-local"> value (local wall-clock).
+const isoToLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 // ─── Section header ──────────────────────────────────────────────────────────
 const Section = ({ icon: Icon, title, children }) => (
@@ -118,6 +128,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   useEffect(() => { fetchFields(); }, [fetchFields]);
 
   const [formData, setFormData] = useState(existingSale?.form_data || transfer?.form_data || {});
+  // Charging date/time for a post-dated sale. Shown only when the closer
+  // disposition resolves to a "post date" option (see showChargeDate below).
+  const [chargeAt, setChargeAt] = useState(isoToLocalInput(existingSale?.charge_at));
 
   // Fetch fronters for the sale's company (configCompanyId) rather than the
   // editing user's — so a compliance manager editing another company's sale
@@ -273,6 +286,10 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     // Vehicle sanity guard (catches shifted columns: bad year / numeric make).
     Object.assign(e, vehicleFieldIssues(fields, formData));
     extraCars.forEach((car, i) => Object.assign(e, vehicleFieldIssues(carFields, car, `x${i}:`)));
+    // Post-date disposition requires a charging date/time so the reminder fires.
+    const df = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
+    const dv = df ? (formData[df.name] || '') : '';
+    if (isPostDateDispo(dv) && !chargeAt) e.__charge_at = 'Pick a charging date & time';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -323,6 +340,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       // allowed_statuses list doesn't include the internal draft status.
       ...(existingSale ? {} : { status: 'open' }),
       closer_disposition:  dynVal('sale_disposition') || dynVal('sale_status') || null,
+      // Charge date only travels when the post-date disposition is selected;
+      // otherwise null so flipping a sale back to "sale" clears the schedule.
+      charge_at: isPostDateDispo(dynVal('sale_disposition') || dynVal('sale_status'))
+        ? (chargeAt ? new Date(chargeAt).toISOString() : null)
+        : null,
       // One extra sale per additional car. Strip car-field values from the shared
       // base so a blank field on car #2 doesn't inherit car #1's vehicle data.
       additional_cars: extraCars.map(car => buildCarPayload({ ...personalData, ...car })),
@@ -695,6 +717,31 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           </div>
         </Section>
       ) : null}
+
+      {/* ── Charging date — appears when the closer picks the post-date
+            disposition. Date + time; the closer is reminded at this moment. ── */}
+      {(() => {
+        const df = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
+        const dv = df ? (formData[df.name] || '') : '';
+        if (!isPostDateDispo(dv)) return null;
+        return (
+          <div className="mb-5 rounded-xl p-4"
+            style={{ border: '1px solid var(--color-warning-300, #fcd34d)', backgroundColor: 'var(--color-warning-50, #fffbeb)' }}>
+            <label className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide mb-1.5"
+              style={{ color: 'var(--color-warning-800, #92400e)' }}>
+              Charging Date &amp; Time <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <input type="datetime-local" value={chargeAt}
+              onChange={e => { setChargeAt(e.target.value); if (errors.__charge_at) setErrors(p => ({ ...p, __charge_at: '' })); }}
+              className={`input text-sm ${errors.__charge_at ? 'ring-2 ring-red-400/60 border-red-400' : ''}`} style={{ maxWidth: 280 }} />
+            {errors.__charge_at
+              ? <p className="text-[11px] mt-1 font-semibold flex items-center gap-1" style={{ color: '#dc2626' }}><span>⚠</span> {errors.__charge_at}</p>
+              : <p className="text-[11px] mt-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}>
+                  The card will be charged at this time. You’ll get a reminder, and once charged you can move it to “Sale”.
+                </p>}
+          </div>
+        );
+      })()}
 
       {/* ── Additional vehicles ── */}
       {allowMultiCar && extraCars.map((car, idx) => (

@@ -90,7 +90,7 @@ router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, r
 
   let searchQuery = supabaseAdmin
     .from('sales')
-    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at', { count: 'exact' });
+    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at,closer_disposition,charge_at', { count: 'exact' });
   if (companyId) searchQuery = searchQuery.eq('company_id', companyId);
   const { data, error, count } = await searchQuery
     .or(filter)
@@ -112,7 +112,7 @@ router.get(
     const userId = req.user.id;
     const companyId = req.query.company_id || req.user.company_id;
     const userRole = req.user.role;
-    const { status, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
+    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -181,6 +181,13 @@ router.get(
     if (safeCloserId && isManagerRole) query = query.eq('closer_id', safeCloserId);
 
     if (status)    query = query.eq('status', status);
+    // Disposition tab filter (closer_disposition) — drives the dynamic per-
+    // disposition tabs (e.g. "Post Date"). Generic: the frontend resolves which
+    // value is the post-date one from the live form-field options and passes it.
+    if (disposition) query = query.eq('closer_disposition', disposition);
+    // Charge-date window (post-dated sales) — closer + compliance Post Date tabs.
+    if (charge_from) query = query.gte('charge_at', charge_from);
+    if (charge_to)   query = query.lte('charge_at', charge_to);
     // Date filter keys on sale_date (the business day the sale happened) so the
     // "Today" preset and any custom range match what the UI Date column shows.
     // Bulk-uploaded April sales no longer count as "Today" just because they
@@ -294,7 +301,7 @@ router.post(
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
       reference_no, client_name, fronter_id,
-      sale_date, status, form_data, closer_disposition,
+      sale_date, status, form_data, closer_disposition, charge_at,
       additional_cars,
     } = req.body;
 
@@ -405,6 +412,8 @@ router.post(
       client_name: titleCase(client_name) || null,
       fronter_id:  fronter_id  || null,
       sale_date:   saleDate,
+      // Scheduled charge for a post-dated sale (null for normal sales).
+      charge_at:   charge_at || null,
     }, userId);
 
     // Build the per-vehicle portion of a sale row from a car payload.
@@ -807,7 +816,7 @@ router.put(
       status, customer_name, customer_phone, customer_phone_2, customer_email, customer_address,
       car_year, car_make, car_model, car_miles, car_vin,
       plan, down_payment, monthly_payment, payment_due_note,
-      reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition,
+      reference_no, client_name, fronter_id, sale_date, form_data, closer_disposition, charge_at,
       cancellation_date, cancellation_reason_key, chargeback_date, chargeback_amount,
     } = req.body;
 
@@ -926,6 +935,13 @@ router.put(
     if (sale_date !== undefined)           updates.sale_date           = sale_date;
     if (form_data !== undefined)           updates.form_data           = titleCaseFormData(expandStateInFormData(form_data));
     if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;
+    // Charge date for a post-dated sale. Re-arm the scheduler reminder whenever
+    // it changes (clear charge_notified_at) so a moved charge date notifies
+    // again; clearing it (null) silences the reminder.
+    if (charge_at !== undefined) {
+      updates.charge_at = charge_at || null;
+      updates.charge_notified_at = null;
+    }
     // Cancellation date — only compliance/superadmin can set it directly,
     // and only meaningful when the row transitions into a cancellation-like
     // status. Stored as YYYY-MM-DD (or null to clear).

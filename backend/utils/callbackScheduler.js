@@ -115,6 +115,56 @@ async function processDueCallbacks() {
   }
 }
 
+// Post-dated sales: when a closer schedules a charge (post-date disposition),
+// charge_at holds the date/time. Fire a one-time reminder to the closer when it
+// comes due, then stamp charge_notified_at so it never repeats. Editing the
+// charge date clears charge_notified_at (see PUT /sales/:id), re-arming this.
+async function processDueCharges() {
+  try {
+    const soon = new Date(Date.now() + 60 * 1000).toISOString();
+    const { data: due, error } = await supabaseAdmin
+      .from('sales')
+      .select('id, closer_id, company_id, customer_name, reference_no, charge_at')
+      .not('charge_at', 'is', null)
+      .is('charge_notified_at', null)
+      .lte('charge_at', soon);
+
+    if (error) { logger.warn('SCHEDULER', `Charge query error: ${error.message}`); return; }
+    if (!due?.length) return;
+
+    logger.info('SCHEDULER', `Processing ${due.length} due charge reminder(s)`);
+
+    for (const s of due) {
+      try {
+        if (!s.closer_id) { // no one to notify — stamp so we don't re-scan it
+          await supabaseAdmin.from('sales').update({ charge_notified_at: new Date().toISOString() }).eq('id', s.id);
+          continue;
+        }
+        const whenStr = s.charge_at
+          ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(s.charge_at))
+          : '';
+        const title   = `💳 Charge due: ${s.customer_name || 'sale'}`;
+        const message = [whenStr || null, s.reference_no ? `Ref ${String(s.reference_no).toUpperCase()}` : null, 'Charge the card and move it to Sale.']
+          .filter(Boolean).join(' · ');
+
+        await supabaseAdmin.from('notifications').insert({
+          user_id: s.closer_id, company_id: s.company_id, type: 'charge_due',
+          title, message, data: { sale_id: s.id, charge_at: s.charge_at }, is_read: false,
+        });
+        await sendPushToUser(s.closer_id, {
+          title, body: message, tag: `charge-${s.id}`, requireInteraction: true,
+          data: { type: 'charge_due', sale_id: s.id },
+        });
+        await supabaseAdmin.from('sales').update({ charge_notified_at: new Date().toISOString() }).eq('id', s.id);
+      } catch (e) {
+        logger.warn('SCHEDULER', `Failed to process charge reminder ${s.id}: ${e.message}`);
+      }
+    }
+  } catch (err) {
+    logger.warn('SCHEDULER', `processDueCharges error: ${err.message}`);
+  }
+}
+
 async function processCallbackNumberExpiry() {
   try {
     const now = new Date().toISOString();
@@ -206,6 +256,7 @@ async function runAll() {
   isRunning = true;
   try {
     await processDueCallbacks();
+    await processDueCharges();
     await processCallbackNumberExpiry();
   } finally {
     isRunning = false;
