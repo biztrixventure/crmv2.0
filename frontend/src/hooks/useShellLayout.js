@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import client from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 /*
  * useShellLayout
@@ -31,6 +32,11 @@ const _cache = new Map();
 
 export function useShellLayout(shellId) {
   const [layout, setLayout] = useState(() => _cache.get(shellId)?.data || null);
+  // The active role level (e.g. fronter_manager) — drives the per-role feature
+  // overrides layered on top of the shell-wide config. Superadmin is exempt so
+  // an admin never accidentally hides a surface from themselves while testing.
+  const { user } = useAuth();
+  const role = user?.role || null;
 
   useEffect(() => {
     if (!shellId) return;
@@ -71,11 +77,22 @@ export function useShellLayout(shellId) {
    * permission/flag-filtered) and returns the version the user actually
    * sees. Stable for the lifetime of a given layout snapshot.
    */
+  // Keys this role is explicitly forbidden from seeing for a given collection.
+  // Role overrides can only *hide* (narrow) — never widen past the shell-wide
+  // config or the user's permissions. Superadmin is never restricted.
+  const roleHiddenSet = (category) => {
+    if (!role || role === 'superadmin') return null;
+    const col = layout?.role_overrides?.[role]?.[category];
+    if (!Array.isArray(col)) return null;
+    return new Set(col.filter(x => x && x.enabled === false).map(x => x.key));
+  };
+
   const applyTabs = (catalog) => {
     if (!Array.isArray(catalog) || catalog.length === 0) return catalog || [];
+    const roHidden = roleHiddenSet('tabs');
     const decorated = catalog.map((t, codeIdx) => {
       const override = tabOverrides.get(t.key);
-      const enabled  = override ? override.enabled : true;
+      const enabled  = (override ? override.enabled : true) && !(roHidden && roHidden.has(t.key));
       const label    = override?.label || t.label;
       const order = override ? override.order : 1000 + codeIdx;
       return enabled ? { ...t, label, __order: order } : null;
@@ -94,6 +111,10 @@ export function useShellLayout(shellId) {
   // sub-collections. Default-on so a fresh deploy never silently hides a
   // surface the admin hasn't customized.
   const isVisible = (category, key, fallback = true) => {
+    // Per-role override is the most specific gate and can only hide.
+    const roHidden = roleHiddenSet(category);
+    if (roHidden && roHidden.has(key)) return false;
+    // Shell-wide setting next.
     const col = layout?.[category];
     if (!Array.isArray(col)) return fallback;
     const hit = col.find(x => x && x.key === key);
@@ -116,6 +137,7 @@ export function useShellLayout(shellId) {
 
   return {
     layout,
+    role,
     applyTabs,
     defaultTab,
     isCardVisible,

@@ -48,6 +48,10 @@ const SHELLS = [
       { key: 'agent_select', label: 'Agent select dropdown' },
     ],
     actions: [],
+    roles: [
+      { key: 'closer',  label: 'Closer' },
+      { key: 'fronter', label: 'Fronter' },
+    ],
   },
   {
     id: 'manager',
@@ -83,6 +87,12 @@ const SHELLS = [
     actions: [
       { key: 'export', label: 'Export button (header)' },
     ],
+    roles: [
+      { key: 'company_admin',       label: 'Company Admin' },
+      { key: 'operations_manager',  label: 'Operations Manager' },
+      { key: 'closer_manager',      label: 'Closer Manager' },
+      { key: 'fronter_manager',     label: 'Fronter Manager' },
+    ],
   },
   {
     id: 'compliance',
@@ -103,6 +113,9 @@ const SHELLS = [
     statCards: [],
     filters:   [],
     actions:   [],
+    roles: [
+      { key: 'compliance_manager', label: 'Compliance Manager' },
+    ],
   },
 ];
 
@@ -187,25 +200,63 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
 
   const [editingKey, setEditingKey] = useState('');
   const [editValue, setEditValue]   = useState('');
+  const [activeRole, setActiveRole] = useState((shellMeta.roles && shellMeta.roles[0]?.key) || '');
 
   // Centralized save — writes the full merged shape so order of edits
-  // doesn't matter (last edit wins).
+  // doesn't matter (last edit wins). role_overrides is carried through
+  // untouched unless the caller explicitly patches it.
   const persistAll = (patch = {}) => {
     const nextTabs       = (patch.tabs       || tabs).map((t, i) => ({ key: t.key, enabled: t.enabled !== false, label: t.label, order: i }));
     const nextCards      = (patch.statCards  || statCards).map((c) => ({ key: c.key, enabled: c.enabled !== false }));
     const nextFilters    = (patch.filters    || filters).map((f) => ({ key: f.key, enabled: f.enabled !== false }));
     const nextActions    = (patch.actions    || actions).map((a) => ({ key: a.key, enabled: a.enabled !== false }));
     const nextDefault    = patch.default_tab || defaultTabKey;
+    const nextRoleOv     = patch.role_overrides !== undefined ? patch.role_overrides : (stored?.role_overrides || {});
     const payload = {
       tabs: nextTabs,
       default_tab: nextDefault,
       stat_cards: nextCards,
       filters: nextFilters,
       actions: nextActions,
+      role_overrides: nextRoleOv,
     };
     onSave(`shell.layout.${shellId}`, payload);
     clearShellLayoutCache(shellId);
   };
+
+  // ── Per-role feature gating ────────────────────────────────────────────────
+  // role_overrides only ever store HIDES (enabled:false). Absence = visible
+  // (inherits the shell-wide setting). This keeps the "admin can only narrow"
+  // contract: a role override can take a feature away from one role but never
+  // grant something the shell or the role's permissions don't already allow.
+  const roleHidden = (category, key) => {
+    const arr = stored?.role_overrides?.[activeRole]?.[category];
+    return Array.isArray(arr) && arr.some((x) => x?.key === key && x.enabled === false);
+  };
+
+  const setRoleFeature = (category, key, enabled) => {
+    const ro = { ...(stored?.role_overrides || {}) };
+    const block = { ...(ro[activeRole] || {}) };
+    let arr = Array.isArray(block[category]) ? block[category].filter((x) => x?.key !== key) : [];
+    if (!enabled) arr = [...arr, { key, enabled: false }];   // store hides only
+    block[category] = arr;
+    ro[activeRole] = block;
+    persistAll({ role_overrides: ro });
+  };
+
+  // Count of features this role has hidden — surfaced as a badge so an admin
+  // can see at a glance which roles are restricted.
+  const roleHideCount = (roleKey) => {
+    const block = stored?.role_overrides?.[roleKey];
+    if (!block) return 0;
+    return ['tabs', 'stat_cards', 'filters', 'actions']
+      .reduce((n, cat) => n + (Array.isArray(block[cat]) ? block[cat].filter((x) => x?.enabled === false).length : 0), 0);
+  };
+
+  // Build a role-scoped item list for a category: visible unless hidden for
+  // the active role. `category` is the stored key (stat_cards/filters/actions/tabs).
+  const roleItems = (category, defs) =>
+    defs.map((d) => ({ key: d.key, label: d.label, enabled: !roleHidden(category, d.key) }));
 
   const updateTab = (idx, p) => persistAll({ tabs: tabs.map((t, i) => (i === idx ? { ...t, ...p } : t)) });
   const moveTab = (idx, delta) => {
@@ -225,6 +276,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
       filters:    shellMeta.filters.map((f) => ({ key: f.key, enabled: true })),
       actions:    shellMeta.actions.map((a) => ({ key: a.key, enabled: true })),
       default_tab: shellMeta.defaultTabs[0]?.key || '',
+      role_overrides: {},
     });
   };
 
@@ -313,8 +365,10 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
         </h2>
         <p className="text-sm text-text-secondary max-w-2xl leading-relaxed">
           Hide tabs, rename labels, reorder them, pick the default landing tab, and toggle stat cards,
-          filters, and action buttons per shell. One setting, everywhere — change here and every user in
-          that shell sees the change on next mount. Permissions and feature flags still apply first.
+          filters, and action buttons per shell. The <strong>Role-based feature permissions</strong> section
+          below takes a feature away from a single role (e.g. hide Export for Fronter Managers only). One
+          setting, everywhere — change here and every user in that shell sees it on next mount. Permissions
+          and feature flags still apply first; overrides can only narrow.
         </p>
       </div>
 
@@ -329,7 +383,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
             <button
               key={s.id}
               type="button"
-              onClick={() => { setShellId(s.id); setEditingKey(''); }}
+              onClick={() => { setShellId(s.id); setEditingKey(''); setActiveRole((s.roles && s.roles[0]?.key) || ''); }}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
               style={{
                 background: active ? 'var(--gradient-sidebar)' : 'transparent',
@@ -479,6 +533,82 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
           onToggle={(idx, enabled) => persistAll({ actions: actions.map((a, i) => (i === idx ? { ...a, enabled } : a)) })}
           emptyLabel="This shell has no action toggles configured yet."
         />
+      </Section>
+
+      {/* ── Role-based feature permissions ──────────────────────────────────── */}
+      <Section accent="error" title={`Role-based feature permissions — ${shellMeta.label}`}
+        desc="Take a feature away from ONE role within this shell, leaving every other role untouched. Example: hide the Export button for Fronter Managers only. These overrides can only narrow — they never grant a feature the shell or the role's permissions don't already allow. Superadmin is never restricted.">
+        {(!shellMeta.roles || shellMeta.roles.length === 0) ? (
+          <p className="text-xs text-text-tertiary italic py-2">No roles configured for this shell.</p>
+        ) : (
+          <>
+            {/* Role picker */}
+            <div className="flex gap-1 p-1 rounded-xl overflow-x-auto mb-4"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              {shellMeta.roles.map((r) => {
+                const active = r.key === activeRole;
+                const hides = roleHideCount(r.key);
+                return (
+                  <button key={r.key} type="button" onClick={() => setActiveRole(r.key)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 flex items-center gap-1.5"
+                    style={{
+                      background: active ? 'var(--gradient-sidebar)' : 'transparent',
+                      color: active ? 'white' : 'var(--color-text-secondary)',
+                      boxShadow: active ? 'var(--shadow-sm)' : 'none',
+                    }}>
+                    {r.label}
+                    {hides > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'var(--color-error-100, #fee2e2)', color: active ? 'white' : 'var(--color-error-700, #b91c1c)' }}>
+                        {hides} hidden
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Modules / Tabs</p>
+            <ToggleList
+              items={roleItems('tabs', shellMeta.defaultTabs)}
+              onToggle={(idx, enabled) => setRoleFeature('tabs', shellMeta.defaultTabs[idx].key, enabled)}
+              emptyLabel="No tabs."
+            />
+
+            {shellMeta.statCards.length > 0 && (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mt-4 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>KPI cards</p>
+                <ToggleList
+                  items={roleItems('stat_cards', shellMeta.statCards)}
+                  onToggle={(idx, enabled) => setRoleFeature('stat_cards', shellMeta.statCards[idx].key, enabled)}
+                  emptyLabel="No KPI cards."
+                />
+              </>
+            )}
+
+            {shellMeta.filters.length > 0 && (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mt-4 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Filters</p>
+                <ToggleList
+                  items={roleItems('filters', shellMeta.filters)}
+                  onToggle={(idx, enabled) => setRoleFeature('filters', shellMeta.filters[idx].key, enabled)}
+                  emptyLabel="No filters."
+                />
+              </>
+            )}
+
+            {shellMeta.actions.length > 0 && (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mt-4 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Actions</p>
+                <ToggleList
+                  items={roleItems('actions', shellMeta.actions)}
+                  onToggle={(idx, enabled) => setRoleFeature('actions', shellMeta.actions[idx].key, enabled)}
+                  emptyLabel="No actions."
+                />
+              </>
+            )}
+          </>
+        )}
       </Section>
 
       <div className="flex items-center justify-between gap-2 mt-4">
