@@ -28,10 +28,39 @@ import client from '../api/client';
 import { supabase, setRealtimeAuth } from '../api/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-// Tiny sound via Web Audio API
+// Tiny notification chime via the Web Audio API.
+//
+// One shared AudioContext, created ONLY after the first real user gesture.
+// Browsers block (and console-warn: "The AudioContext was not allowed to
+// start…") any context that tries to make sound before the user has interacted
+// with the page — which is exactly what happened when a background notification
+// poll fired a beep on load. We now skip the sound until the page has been
+// interacted with, then reuse the single unlocked context for every beep.
+let _audioCtx = null;
+
+if (typeof window !== 'undefined') {
+  const unlock = () => {
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (Ctor) {
+        if (!_audioCtx) _audioCtx = new Ctor();        // created within a gesture → starts "running"
+        if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+      }
+    } catch { /* ignore — no audio support */ }
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('keydown', unlock);
+    window.removeEventListener('touchstart', unlock);
+  };
+  window.addEventListener('pointerdown', unlock, { passive: true });
+  window.addEventListener('keydown', unlock);
+  window.addEventListener('touchstart', unlock, { passive: true });
+}
+
 export function playNotificationSound() {
   try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    // No gesture yet (or audio unsupported) → skip silently. No warning.
+    if (!ctx || ctx.state !== 'running') return;
     const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
