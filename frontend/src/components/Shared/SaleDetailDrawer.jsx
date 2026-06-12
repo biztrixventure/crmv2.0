@@ -38,6 +38,15 @@ const renderVal = (v) => {
   return String(v);
 };
 
+// Reference / policy / code-like fields are identifiers whose casing is
+// meaningful — always show them uppercase (e.g. MBH4220SBN), even on legacy
+// rows whose form_data was stored title-cased before the storage fix.
+const REF_KEY_RE = /(reference|ref[_ ]?no|refno|policy|\bcode\b|sku|vin)/i;
+const displayFieldValue = (key, v) => {
+  const s = renderVal(v);
+  return REF_KEY_RE.test(String(key)) ? s.toUpperCase() : s;
+};
+
 const Row = ({ label, value, mono = false, highlight }) => {
   if (!value && value !== 0) return null;
   return (
@@ -185,7 +194,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
             </span>
           )}
           {sale.reference_no && (
-            <span className="text-xs font-mono text-text-tertiary">#{sale.reference_no}</span>
+            <span className="text-xs font-mono text-text-tertiary">#{String(sale.reference_no).toUpperCase()}</span>
           )}
           <span className="text-xs text-text-tertiary ml-auto">
             {new Date(sale.created_at).toLocaleString()}
@@ -279,7 +288,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 return (
                   <Section key="additional" title={s.label || 'Additional Info'}>
                     {extraFields.map(([k, v]) => (
-                      <Row key={k} label={k.replace(/_/g, ' ')} value={renderVal(v)} />
+                      <Row key={k} label={k.replace(/_/g, ' ')} value={displayFieldValue(k, v)} />
                     ))}
                   </Section>
                 );

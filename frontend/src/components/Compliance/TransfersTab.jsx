@@ -1,7 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ArrowRight, AlertTriangle, CalendarDays, X } from 'lucide-react';
+import { ArrowRight, AlertTriangle, CalendarDays, X, Copy } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { todayET } from '../../utils/timezone';
+
+// Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
+const DUP_REASON_LABEL = {
+  reengage:     'Re-engaged after the dedup window (a fresh transfer was created)',
+  sale_overlap: 'A completed sale already existed on the prior lead',
+};
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
 const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
@@ -141,13 +147,20 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
     const res = await client.get('compliance/transfers', {
       params: { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
     });
-    const rows = (res.data.transfers || []).map(t => [
+    const all = res.data.transfers || [];
+    const dupCount = all.filter(t => t.is_duplicate).length;
+    const rows = all.map(t => [
       customerName(t), t.form_data?.Phone || '',
       t.created_by_name || '', t.assigned_closer_name || '',
       t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
       fmtDate(t.created_at),
+      t.is_duplicate ? 'Yes' : 'No',
+      t.is_duplicate ? (DUP_REASON_LABEL[t.duplicate_reason] || t.duplicate_reason || '') : '',
     ]);
-    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Company','Status','Created'],
+    // Trailing summary row so the duplicate count travels with the export.
+    rows.push([]);
+    rows.push([`Total transfers: ${all.length}`, '', '', '', '', '', '', `Duplicates: ${dupCount}`, '']);
+    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Company','Status','Created','Is Duplicate','Duplicate Reason'],
       `transfers_${todayET()}.csv`);
   };
 
@@ -246,6 +259,14 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                         {t.form_data?.Phone || t.form_data?.customer_phone || ''}
                       </p>
+                      {t.is_duplicate && (
+                        <button onClick={e => { e.stopPropagation(); setDetail(t); }}
+                          title="Created as a duplicate — click to see its full history"
+                          className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-colors"
+                          style={{ backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' }}>
+                          <Copy size={10} /> Duplicate Transfer
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.created_by_name || '—'}
@@ -324,6 +345,36 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                   <InfoTile label="Last Updated"    value={fmtDateTime(detail.updated_at)} />
                 </div>
               </section>
+
+              {/* Duplicate origin / history — only for transfers created as a duplicate. */}
+              {detail.is_duplicate && (
+                <section>
+                  <p className="text-xs font-bold uppercase tracking-wide mb-2 flex items-center gap-1.5"
+                    style={{ color: '#b45309' }}>
+                    <Copy size={12} /> Duplicate transfer — history
+                  </p>
+                  <div className="rounded-xl p-4 space-y-1.5 text-sm"
+                    style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: 'var(--color-text)' }}>
+                    <p><span className="font-semibold">Why flagged:</span> {DUP_REASON_LABEL[detail.duplicate_reason] || detail.duplicate_reason || 'Duplicate of an existing lead'}</p>
+                    {detail.duplicate_detected_at && (
+                      <p><span className="font-semibold">Detected:</span> {fmtDateTime(detail.duplicate_detected_at)}</p>
+                    )}
+                    {detail.original_transfer && (
+                      <p>
+                        <span className="font-semibold">Original transfer:</span>{' '}
+                        {detail.original_transfer.created_at
+                          ? <>created {fmtDate(detail.original_transfer.created_at)}
+                              {detail.original_transfer.created_by_name ? ` by ${detail.original_transfer.created_by_name}` : ''}
+                              {detail.original_transfer.status ? ` · status ${detail.original_transfer.status}` : ''}</>
+                          : `#${String(detail.original_transfer.id || '').slice(0, 8)}`}
+                      </p>
+                    )}
+                    <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                      This entry stays in the transfers list so today’s count reflects every transfer created — real and duplicate.
+                    </p>
+                  </div>
+                </section>
+              )}
 
               {detail.form_data && Object.keys(detail.form_data).length > 0 && (
                 <section>

@@ -339,8 +339,53 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     });
   }
 
+  // Duplicate-attempt origin. A transfer is flagged "duplicate" when it's the
+  // NEW row a dedup event created — 'reengage' (re-submitted past the dedup
+  // window) or 'sale_overlap' (a completed sale already existed on the prior
+  // lead). 'refresh' updates an existing row in place, so it isn't a new entry
+  // and is intentionally not flagged. Duplicates stay in the normal list so the
+  // tab still shows every transfer created (real + duplicate) for easy counting.
+  let dupMap = {};
+  if (transferIds.length > 0) {
+    const { data: dedup } = await supabaseAdmin
+      .from('transfer_dedup_events')
+      .select('transfer_id, prior_transfer_id, event_type, created_at')
+      .in('transfer_id', transferIds)
+      .in('event_type', ['reengage', 'sale_overlap'])
+      .order('created_at', { ascending: false });
+
+    const priorIds = [...new Set((dedup || []).map(d => d.prior_transfer_id).filter(Boolean))];
+    let priorMap = {};
+    if (priorIds.length) {
+      const { data: priors } = await supabaseAdmin
+        .from('transfers').select('id, created_at, created_by, status').in('id', priorIds);
+      (priors || []).forEach(p => { priorMap[p.id] = p; });
+      // Pull in any prior-creator names not already in profileMap.
+      const missing = [...new Set((priors || []).map(p => p.created_by).filter(id => id && !profileMap[id]))];
+      if (missing.length) {
+        const { data: mp } = await supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', missing);
+        (mp || []).forEach(p => { profileMap[p.user_id] = p; });
+      }
+    }
+    (dedup || []).forEach(d => {
+      if (dupMap[d.transfer_id]) return;   // keep the most recent event per transfer
+      const prior = d.prior_transfer_id ? priorMap[d.prior_transfer_id] : null;
+      dupMap[d.transfer_id] = {
+        duplicate_reason:      d.event_type,
+        duplicate_detected_at: d.created_at,
+        original_transfer: prior ? {
+          id: prior.id,
+          created_at: prior.created_at,
+          created_by_name: profileName(profileMap, prior.created_by),
+          status: prior.status,
+        } : (d.prior_transfer_id ? { id: d.prior_transfer_id } : null),
+      };
+    });
+  }
+
   const enriched = (data || []).map(t => {
     const sale = saleMap[t.id] || null;
+    const dup  = dupMap[t.id] || null;
     return {
       ...t,
       created_by_name:       profileName(profileMap, t.created_by),
@@ -351,6 +396,10 @@ router.get('/transfers', asyncHandler(async (req, res) => {
       sale_compliance_note:  sale?.compliance_note || null,
       sale_reference_no:     sale?.reference_no || null,
       latest_disposition:    latestDispoMap[t.id] || null,
+      is_duplicate:          !!dup,
+      duplicate_reason:      dup?.duplicate_reason || null,
+      duplicate_detected_at: dup?.duplicate_detected_at || null,
+      original_transfer:     dup?.original_transfer || null,
     };
   });
 

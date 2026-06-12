@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, Copy } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -23,7 +23,6 @@ import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 import BulkStatusUpdate    from '../components/Compliance/BulkStatusUpdate';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
-import DuplicateRecordsModal from '../components/Shared/DuplicateRecordsModal';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -67,7 +66,6 @@ const ComplianceShell = () => {
   }, [TABS, activeTab, complianceDefaultTab]);
   const [tabInit, setTabInit]       = useState({});
   const [infoOpen, setInfoOpen]     = useState(false);
-  const [dupOpen, setDupOpen]       = useState(false);
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
@@ -137,24 +135,16 @@ const ComplianceShell = () => {
             </button>
           ))}
         </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={() => setDupOpen(true)} title="View duplicate transfer records"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
+          {user?.role === 'superadmin' && (
+            <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
-              <Copy size={15} /> Duplicates
+              <Info size={15} /> Numbers info
             </button>
-            {user?.role === 'superadmin' && (
-              <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
-                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
-                <Info size={15} /> Numbers info
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {infoOpen && <ComplianceInfoModal onClose={() => setInfoOpen(false)} />}
-        {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} showCompany title="Duplicate Transfer Records — All Companies" />}
 
         {/* Tab content */}
         {activeTab === 'companies' && (
