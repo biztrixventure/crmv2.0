@@ -699,6 +699,135 @@ router.post('/manual-entry', [
 }));
 
 // ============================================================================
+// GET /transfers/dedup-events — auditable list of duplicate-attempt records.
+//
+// Every duplicate attempt a fronter makes is logged in transfer_dedup_events
+// (refresh = updated within the dedup window, reengage = past the window, a new
+// row, sale_overlap = a completed sale already exists on the prior). This
+// endpoint enriches each event with the who/when/why every shell needs to
+// display and audit duplicates consistently:
+//   - detected_at        : when the duplicate was caught
+//   - reason / status    : event_type → human label
+//   - fronter            : who submitted the duplicate
+//   - current transfer   : the resulting/updated transfer (status, customer)
+//   - original transfer  : the prior record (created_at + creator + status)
+//   - dedup_window_days  : the SuperAdmin-configured detection window in effect
+//
+// Scope mirrors the transfers list: fronter → own events; manager tier → their
+// company; superadmin / readonly / compliance → all companies (optional
+// company_id filter).
+// ============================================================================
+router.get('/dedup-events', asyncHandler(async (req, res) => {
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { company_id, event_type, date_from, date_to, page = 1, limit = 50 } = req.query;
+
+  const globalView = ['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole);
+
+  let query = supabaseAdmin
+    .from('transfer_dedup_events')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (globalView) {
+    if (company_id) query = query.eq('company_id', safeUuid(company_id) || company_id);
+  } else if (userRole === 'fronter') {
+    query = query.eq('fronter_id', userId);
+  } else {
+    // Manager tier — scoped to their own company (where transfers are stored).
+    query = query.eq('company_id', req.user.company_id);
+  }
+
+  if (event_type) query = query.eq('event_type', event_type);
+  if (date_from)  query = query.gte('created_at', etDateToUtcStart(date_from));
+  if (date_to)    query = query.lte('created_at', etDateToUtcEnd(date_to));
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  query = query.range(offset, offset + parseInt(limit) - 1);
+
+  const { data: events, error, count } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  if (!events?.length) return res.json({ events: [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+
+  // Resolve the two transfers referenced by each event (current + prior).
+  const transferIds = [...new Set(events.flatMap(e => [e.transfer_id, e.prior_transfer_id]).filter(Boolean))];
+  let tMap = {};
+  if (transferIds.length) {
+    const { data: tfs } = await supabaseAdmin
+      .from('transfers')
+      .select('id, status, created_at, created_by, assigned_closer_id, form_data')
+      .in('id', transferIds);
+    (tfs || []).forEach(t => { tMap[t.id] = t; });
+  }
+
+  // Names for fronters + transfer creators.
+  const nameIds = [...new Set([
+    ...events.map(e => e.fronter_id),
+    ...Object.values(tMap).map(t => t.created_by),
+  ].filter(Boolean))];
+  let nameMap = {};
+  if (nameIds.length) {
+    const { data: profs } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', nameIds);
+    (profs || []).forEach(p => { nameMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null; });
+  }
+
+  // Company names (global view spans companies).
+  const companyIds = [...new Set(events.map(e => e.company_id).filter(Boolean))];
+  let coMap = {};
+  if (companyIds.length) {
+    const { data: cos } = await supabaseAdmin.from('companies').select('id, name, slug').in('id', companyIds);
+    (cos || []).forEach(c => { coMap[c.id] = c; });
+  }
+
+  // SuperAdmin-configured dedup window per company (the time limit the logic
+  // follows). getConfig falls back to the global value, then 30.
+  const { getConfig } = require('../utils/businessConfig');
+  const windowByCompany = {};
+  await Promise.all(companyIds.map(async (cid) => {
+    windowByCompany[cid] = parseInt(await getConfig(cid, 'dedup.window_days', 30), 10) || 30;
+  }));
+
+  const REASON = {
+    refresh:      'Refreshed within window',
+    reengage:     'Re-engaged after window',
+    sale_overlap: 'Completed sale on prior',
+  };
+  const custName = (fd) => {
+    if (!fd) return null;
+    const n = `${fd.FirstName || fd.first_name || ''} ${fd.LastName || fd.last_name || ''}`.trim();
+    return n || fd.customer_name || fd.Name || fd.name || null;
+  };
+
+  const out = events.map(e => {
+    const cur   = e.transfer_id ? tMap[e.transfer_id] : null;
+    const prior = e.prior_transfer_id ? tMap[e.prior_transfer_id] : null;
+    const co    = coMap[e.company_id];
+    return {
+      id:               e.id,
+      detected_at:      e.created_at,
+      event_type:       e.event_type,
+      reason:           REASON[e.event_type] || e.event_type,
+      normalized_phone: e.normalized_phone || null,
+      dedup_window_days: windowByCompany[e.company_id] ?? 30,
+      company:          co ? { id: co.id, name: co.name, slug: co.slug } : null,
+      fronter:          { id: e.fronter_id, name: nameMap[e.fronter_id] || 'Unknown' },
+      current_transfer: cur ? {
+        id: cur.id, status: cur.status, created_at: cur.created_at,
+        customer_name: custName(cur.form_data),
+      } : null,
+      original_transfer: prior ? {
+        id: prior.id, status: prior.status, created_at: prior.created_at,
+        created_by_name: nameMap[prior.created_by] || 'Unknown',
+        customer_name: custName(prior.form_data),
+      } : null,
+    };
+  });
+
+  res.json({ events: out, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
+
+// ============================================================================
 // POST /transfers — fronter creates + directly assigns to a closer
 // ============================================================================
 router.post('/', [

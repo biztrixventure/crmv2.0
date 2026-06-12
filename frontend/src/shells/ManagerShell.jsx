@@ -43,6 +43,7 @@ import ReviewsPanel from "../components/Navigation/ReviewsPanel";
 import ReportsPanel from "../components/Navigation/ReportsPanel";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import ManagerExportModal from "../components/Manager/ManagerExportModal";
+import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
@@ -189,6 +190,7 @@ const ManagerShell = () => {
   const [activeTab, setActiveTab] = usePersistedState(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = usePersistedState(mgrNavKey, 'dashboard');
   const [exportOpen, setExportOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
 
   // Reconcile activeTab when admin layout hides the persisted tab key.
   // Without this, landing on a tab the admin just disabled would show
@@ -476,6 +478,7 @@ const ManagerShell = () => {
         </div>
 
         {exportOpen && <ManagerExportModal onClose={() => setExportOpen(false)} agents={companyAgents} />}
+        {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="Duplicate Transfer Records" />}
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
@@ -573,15 +576,16 @@ const ManagerShell = () => {
                 caption={(stats?.resellsTotal || 0) > 0 ? `${stats.resellsTotal} all-time` : 'no resells yet'}
               />
               )}
-              {/* Dup Attempts — fronter re-submitted an existing phone. */}
+              {/* Dup Attempts — fronter re-submitted an existing phone.
+                  Any segment opens the auditable duplicate-records list. */}
               {isMgrCardVisible('dup_attempts') && (
               <StatCardTriple
                 label={mgrCardLabel('dup_attempts', 'Dup Attempts')}     icon={Copy}        color="warning"
                 loading={loading || !stats}
-                today={{ value: stats?.dupToday || 0, title: 'Duplicate attempts today (refresh + reengage + sale_overlap)' }}
-                month={{ value: stats?.dupMonth || 0, title: 'Duplicate attempts this month' }}
-                total={{ value: stats?.dupTotal || 0, title: 'All-time duplicate attempts' }}
-                caption="refresh · reengage · overlap"
+                today={{ value: stats?.dupToday || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (today)' }}
+                month={{ value: stats?.dupMonth || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (this month)' }}
+                total={{ value: stats?.dupTotal || 0, onClick: () => setDupOpen(true), title: 'View all duplicate records' }}
+                caption="Click to view duplicate details"
               />
               )}
             </div>

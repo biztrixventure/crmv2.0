@@ -17,7 +17,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
-  ChevronLeft, ChevronRight, HelpCircle, CalendarDays,
+  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -52,6 +52,7 @@ import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
 import FilterBar from "../components/UI/FilterBar";
+import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
@@ -211,6 +212,7 @@ const StaffShell = () => {
 
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
   const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
 
   // Vehicle registry — populates the CarMake / CarModel typeahead inside the
@@ -1392,6 +1394,11 @@ const StaffShell = () => {
                     <input type="tel" value={leadSearch} onChange={e => setLeadSearch(e.target.value)}
                       placeholder="Filter by phone or name…" className="input pl-8 text-sm" />
                   </div>
+                  <button onClick={() => setDupOpen(true)} title="View your duplicate-attempt records"
+                    className="flex items-center gap-1.5 py-2 px-3 rounded-xl text-sm font-semibold transition-colors flex-shrink-0"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+                    <Copy size={14} /> Duplicates
+                  </button>
                   {hasPermission('create_transfer') && (
                     <button onClick={() => { setShowCreateForm(true); setFormData({}); setDupCheck(null); lastPrefilledId.current = null; }}
                       className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] flex-shrink-0"
@@ -1490,6 +1497,7 @@ const StaffShell = () => {
 
       {/* ── MODALS ── */}
 
+      {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="My Duplicate Records" />}
 
       <SaleModal isOpen={modalOpen} onClose={() => setModalOpen(false)} user={user}
         transfer={activeTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
