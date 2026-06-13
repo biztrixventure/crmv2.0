@@ -117,7 +117,9 @@ router.get('/admin/activity', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Superadmin access required' });
   }
 
-  if (_activityCache && Date.now() - _activityCache.at < ACTIVITY_TTL) {
+  // ?force=1 (the panel's Refresh button) bypasses the cache for a truly fresh
+  // pull; the 30s auto-poll uses the cache.
+  if (req.query.force !== '1' && _activityCache && Date.now() - _activityCache.at < ACTIVITY_TTL) {
     return res.json(_activityCache.payload);
   }
 

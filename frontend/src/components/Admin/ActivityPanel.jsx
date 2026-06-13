@@ -133,9 +133,10 @@ const ActivityPanel = () => {
   const [coF, setCoF]         = useState('');
   const { onlineIds, idleIds, sessions, pages } = usePresenceContext();
 
-  const load = useCallback(async () => {
+  // force=true (Refresh button) bypasses the server's 15s cache for a fresh pull.
+  const load = useCallback(async (force = false) => {
     setLoading(true);
-    try { const r = await client.get('presence/admin/activity'); setData(r.data); }
+    try { const r = await client.get('presence/admin/activity', { params: force ? { force: 1 } : {} }); setData(r.data); }
     catch { /* non-critical */ } finally { setLoading(false); }
   }, []);
 
@@ -222,7 +223,7 @@ const ActivityPanel = () => {
             </span>
           </span>
           <div className="flex items-center gap-1">
-            <button onClick={load} disabled={loading} title="Refresh aggregates"
+            <button onClick={() => load(true)} disabled={loading} title="Refresh now (fresh pull)"
               className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30">
               <RefreshCw size={14} className={`text-white ${loading ? 'animate-spin' : ''}`} />
             </button>

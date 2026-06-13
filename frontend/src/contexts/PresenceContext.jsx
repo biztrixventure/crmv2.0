@@ -114,7 +114,13 @@ export const PresenceProvider = ({ children }) => {
     const onUnload = () => {
       if (unloaded) return;
       unloaded = true;
+      // Send a clean channel LEAVE (phx_leave), not just an untrack. unsubscribe
+      // makes Supabase drop this connection's presence and broadcast 'leave'
+      // immediately — works the same whether the tab was open 5s or 5min. untrack
+      // alone could fail to flush, leaving the user "stuck online" until the
+      // heartbeat timeout. Belt-and-suspenders: untrack first, then unsubscribe.
       try { ch.untrack(); } catch { /* socket may already be closing */ }
+      try { ch.unsubscribe(); } catch { /* ignore */ }
       sendLastSeen(true);
     };
 
