@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, X, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { todayET } from '../../utils/timezone';
 
 const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -265,15 +265,17 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, al
         type="button"
         onClick={() => setOpen(o => !o)}
         title={label}
-        className="relative flex items-center justify-center rounded-lg border transition-colors"
+        className="flex items-center gap-2 rounded-lg border text-sm font-medium transition-colors"
         style={{
           borderColor:     (isCustom || preset !== defaultPreset)
             ? 'var(--color-primary-400, #818cf8)'
             : open ? 'var(--color-primary-300, #a5b4fc)' : 'var(--color-border)',
           backgroundColor: open ? 'var(--color-bg-secondary)' : 'var(--color-surface)',
-          width: 34,
-          height: 34,
-          flexShrink: 0,
+          color:           'var(--color-text)',
+          height:          38,
+          paddingLeft:     12,
+          paddingRight:    10,
+          flexShrink:      0,
         }}
       >
         <Calendar size={15} style={{
@@ -282,19 +284,16 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, al
             : 'var(--color-text-secondary)',
           flexShrink: 0,
         }} />
-        {(isCustom || preset !== defaultPreset) && (
-          <span
-            className="absolute"
-            style={{
-              top: 4, right: 4,
-              width: 7, height: 7,
-              borderRadius: '50%',
-              backgroundColor: 'var(--color-primary-500)',
-              border: '1.5px solid var(--color-surface)',
-              pointerEvents: 'none',
-            }}
-          />
-        )}
+        <span className="whitespace-nowrap" style={{
+          color: (isCustom || preset !== defaultPreset) ? 'var(--color-primary-600)' : 'var(--color-text)',
+          fontWeight: (isCustom || preset !== defaultPreset) ? 600 : 500,
+        }}>{label}</span>
+        <ChevronDown size={14} style={{
+          color: 'var(--color-text-tertiary)',
+          transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.15s',
+          flexShrink: 0,
+        }} />
       </button>
 
       {open && createPortal((

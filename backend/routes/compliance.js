@@ -92,25 +92,36 @@ router.get('/companies', asyncHandler(async (req, res) => {
     return q;
   };
 
-  const [usersRes, salesRes, pendingRes, transfersRes] = await Promise.all([
+  // One sales scan carries every per-company sales metric the Overview card
+  // shows — total, pending, completed (approved), cancelled, and gross value
+  // (sum of down payments). Cheaper than separate count round-trips.
+  const [usersRes, salesRes, transfersRes] = await Promise.all([
     supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids),
-    bySaleDate(supabaseAdmin.from('sales').select('company_id').in('company_id', ids)),
-    bySaleDate(supabaseAdmin.from('sales').select('company_id').eq('status', 'pending_review').in('company_id', ids)),
+    bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids)),
     byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids)),
   ]);
 
-  const userCount = {}, saleCount = {}, pendingCount = {}, transferCount = {};
-  (usersRes.data    || []).forEach(u => { userCount[u.company_id]     = (userCount[u.company_id]     || 0) + 1; });
-  (salesRes.data    || []).forEach(s => { saleCount[s.company_id]     = (saleCount[s.company_id]     || 0) + 1; });
-  (pendingRes.data  || []).forEach(p => { pendingCount[p.company_id]  = (pendingCount[p.company_id]  || 0) + 1; });
-  (transfersRes.data|| []).forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
+  const userCount = {}, saleCount = {}, pendingCount = {}, completedCount = {}, cancelledCount = {}, grossValue = {}, transferCount = {};
+  (usersRes.data || []).forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
+  (salesRes.data || []).forEach(s => {
+    const c = s.company_id;
+    saleCount[c] = (saleCount[c] || 0) + 1;
+    if (s.status === 'pending_review')                          pendingCount[c]   = (pendingCount[c]   || 0) + 1;
+    if (s.status === 'closed_won' || s.status === 'sold')       completedCount[c] = (completedCount[c] || 0) + 1;
+    if (s.status === 'cancelled' || s.status === 'compliance_cancelled') cancelledCount[c] = (cancelledCount[c] || 0) + 1;
+    grossValue[c] = (grossValue[c] || 0) + (Number(s.down_payment) || 0);
+  });
+  (transfersRes.data || []).forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
 
   const enriched = (companies || []).map(c => ({
     ...c,
-    user_count:           userCount[c.id]     || 0,
-    sale_count:           saleCount[c.id]     || 0,
-    pending_review_count: pendingCount[c.id]  || 0,
-    transfer_count:       transferCount[c.id] || 0,
+    user_count:           userCount[c.id]      || 0,
+    sale_count:           saleCount[c.id]      || 0,
+    pending_review_count: pendingCount[c.id]   || 0,
+    completed_count:      completedCount[c.id] || 0,
+    cancelled_count:      cancelledCount[c.id] || 0,
+    gross_value:          grossValue[c.id]     || 0,
+    transfer_count:       transferCount[c.id]  || 0,
   }));
 
   logger.info('COMPLIANCE', `Loaded ${enriched.length} companies${date_from || date_to ? ` (${date_from || '…'} → ${date_to || '…'})` : ''}`);

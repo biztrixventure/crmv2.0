@@ -4,6 +4,13 @@ import client from '../../api/client';
 import DateRangePicker from '../UI/DateRangePicker';
 import { TabHeader, Spinner, Empty } from './shared';
 
+// Compact money label: $0 / $850 / $1.2k / $14k — keeps the KPI card tight.
+const fmtMoney = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1000) return `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`;
+  return `$${Math.round(v)}`;
+};
+
 // Overview of every company with live KPI counts. The date range filters the
 // time-based KPIs (Sales / Pending / Transfers) to the selected window via the
 // backend; User headcount is a live total and stays unfiltered. The shared
@@ -87,20 +94,37 @@ const CompanyCard = ({ company: c, onNavigate }) => (
       </div>
     </div>
 
-    {/* Stats */}
-    <div className="grid grid-cols-2 gap-2 text-center mb-4">
+    {/* Stats — compact label/value rows (denser than the old big tiles). */}
+    <div className="grid grid-cols-2 gap-x-2.5 gap-y-1.5 mb-2.5">
       {[
-        { label: 'Users',     val: c.user_count,           color: 'var(--color-text)' },
-        { label: 'Transfers', val: c.transfer_count ?? 0,  color: 'var(--color-text)' },
-        { label: 'Sales',     val: c.sale_count,           color: 'var(--color-text)' },
-        { label: 'Pending',   val: c.pending_review_count, color: c.pending_review_count > 0 ? '#d97706' : 'var(--color-text-secondary)' },
+        { label: 'Users',     val: c.user_count },
+        { label: 'Transfers', val: c.transfer_count ?? 0 },
+        { label: 'Sales',     val: c.sale_count, strong: true },
+        { label: 'Pending',   val: c.pending_review_count, color: c.pending_review_count > 0 ? '#d97706' : undefined },
       ].map(s => (
-        <div key={s.label} className="rounded-xl py-2"
+        <div key={s.label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <p className="text-lg font-bold" style={{ color: s.color }}>{s.val}</p>
-          <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
+          <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</span>
+          <span className={`${s.strong ? 'text-base' : 'text-sm'} font-bold`} style={{ color: s.color || 'var(--color-text)' }}>{s.val}</span>
         </div>
       ))}
+    </div>
+
+    {/* Sales breakdown — completed / cancelled / gross, packed into one row. */}
+    <div className="flex items-center gap-1.5 flex-wrap mb-4">
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: '#dcfce7', color: '#166534' }} title="Completed (approved) sales">
+        ✓ {c.completed_count ?? 0} done
+      </span>
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} title="Cancelled sales">
+        ✕ {c.cancelled_count ?? 0} cancelled
+      </span>
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+        title="Gross sales value (sum of down payments)">
+        {fmtMoney(c.gross_value)} gross
+      </span>
     </div>
 
     {/* Actions */}
