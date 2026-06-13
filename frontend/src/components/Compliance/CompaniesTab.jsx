@@ -4,13 +4,6 @@ import client from '../../api/client';
 import DateRangePicker from '../UI/DateRangePicker';
 import { TabHeader, Spinner, Empty } from './shared';
 
-// Compact money label: $0 / $850 / $1.2k / $14k — keeps the KPI card tight.
-const fmtMoney = (n) => {
-  const v = Number(n) || 0;
-  if (v >= 1000) return `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`;
-  return `$${Math.round(v)}`;
-};
-
 // Overview of every company with live KPI counts. The date range filters the
 // time-based KPIs (Sales / Pending / Transfers) to the selected window via the
 // backend; User headcount is a live total and stays unfiltered. The shared
@@ -94,37 +87,34 @@ const CompanyCard = ({ company: c, onNavigate }) => (
       </div>
     </div>
 
-    {/* Stats — compact label/value rows (denser than the old big tiles). */}
-    <div className="grid grid-cols-2 gap-x-2.5 gap-y-1.5 mb-2.5">
+    {/* Operational counts — Users / Transfers / Pending. */}
+    <div className="grid grid-cols-3 gap-2 mb-2.5">
       {[
         { label: 'Users',     val: c.user_count },
         { label: 'Transfers', val: c.transfer_count ?? 0 },
-        { label: 'Sales',     val: c.sale_count, strong: true },
         { label: 'Pending',   val: c.pending_review_count, color: c.pending_review_count > 0 ? '#d97706' : undefined },
       ].map(s => (
-        <div key={s.label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
+        <div key={s.label} className="rounded-lg px-2 py-1.5 text-center"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</span>
-          <span className={`${s.strong ? 'text-base' : 'text-sm'} font-bold`} style={{ color: s.color || 'var(--color-text)' }}>{s.val}</span>
+          <p className="text-base font-bold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
         </div>
       ))}
     </div>
 
-    {/* Sales breakdown — completed / cancelled / gross, packed into one row. */}
+    {/* Sales status capsules — Total / Approved / Cancelled, accurate filtered
+        counts (no gross), styled like the other status capsules. */}
     <div className="flex items-center gap-1.5 flex-wrap mb-4">
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
-        style={{ backgroundColor: '#dcfce7', color: '#166534' }} title="Completed (approved) sales">
-        ✓ {c.completed_count ?? 0} done
-      </span>
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
-        style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} title="Cancelled sales">
-        ✕ {c.cancelled_count ?? 0} cancelled
-      </span>
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
-        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
-        title="Gross sales value (sum of down payments)">
-        {fmtMoney(c.gross_value)} gross
-      </span>
+      {[
+        { label: 'Total Sales',     val: c.sale_count ?? 0,      bg: '#dbeafe', fg: '#1e40af' },
+        { label: 'Approved Sales',  val: c.completed_count ?? 0, bg: '#dcfce7', fg: '#166534' },
+        { label: 'Cancelled Sales', val: c.cancelled_count ?? 0, bg: '#fee2e2', fg: '#991b1b' },
+      ].map(s => (
+        <span key={s.label} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+          style={{ backgroundColor: s.bg, color: s.fg }}>
+          {s.label} <span className="font-bold">{s.val}</span>
+        </span>
+      ))}
     </div>
 
     {/* Actions */}
