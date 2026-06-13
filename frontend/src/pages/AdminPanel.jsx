@@ -29,6 +29,7 @@ import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
+import ActivityPanel from "../components/Admin/ActivityPanel";
 import client from "../api/client";
 
 // ============================================================================
@@ -180,6 +181,10 @@ const AdminPanel = () => {
           )}
         </main>
       </div>
+
+      {/* Slide-out user-activity monitor — arrow tab on the right edge,
+          opposite the sidebar. Live presence + per-user activity insights. */}
+      <ActivityPanel />
     </div>
   );
 };

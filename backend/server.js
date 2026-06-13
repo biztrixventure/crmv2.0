@@ -46,6 +46,7 @@ const dataAnalyzerRoutes        = require('./routes/dataAnalyzer');
 const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
+const presenceRoutes            = require('./routes/presence');
 const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
 const { requireFeature }        = require('./utils/featureGate');
@@ -267,6 +268,10 @@ app.use('/api/chat',               authMiddleware, readonlyGuard, requireFeature
 app.use('/api/events',             authMiddleware, readonlyGuard, eventsRoutes);
 // FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)
 app.use('/api/search',             authMiddleware, readonlyGuard, searchRoutes);
+// Presence / last-seen / activity. Intentionally NO readonlyGuard — the
+// heartbeat is telemetry, not a business write, and readonly admins must be
+// able to register presence; the admin endpoint guards itself in-route.
+app.use('/api/presence',           authMiddleware, presenceRoutes);
 
 // ============================================================================
 // SPA FALLBACK - Serve index.html for all non-API routes (React Router)

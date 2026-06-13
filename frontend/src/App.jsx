@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
 import { FeatureFlagsProvider, useFeatureFlags } from "./contexts/FeatureFlagsContext";
+import { PresenceProvider } from "./contexts/PresenceContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
@@ -129,8 +130,13 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <FeatureFlagsProvider>
-          <AppToaster />
-          <AppContent />
+          {/* App-wide realtime presence — online from login to logout, every
+              shell. Chat dots, last-seen, and the admin activity panel all
+              read from this one channel. */}
+          <PresenceProvider>
+            <AppToaster />
+            <AppContent />
+          </PresenceProvider>
         </FeatureFlagsProvider>
       </AuthProvider>
     </ThemeProvider>

@@ -1,6 +1,8 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
+import { useLastSeen } from '../../hooks/useLastSeen';
+import { formatLastSeen } from '../../utils/lastSeen';
 import { sanitizeChatHtml } from '../../utils/chatHtml';
 import Avatar from './Avatar';
 import PresenceDot from './PresenceDot';
@@ -187,6 +189,9 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
 
   const isBroadcast = conversation.type === 'broadcast';
   const online = conversation.other && onlineIds?.has(conversation.other.id);
+  // Last-seen timestamp for the DM partner — shown instead of a bare "Offline".
+  const lastSeenMap = useLastSeen(conversation.type === 'dm' && conversation.other && !online ? [conversation.other.id] : []);
+  const lastSeenStr = conversation.other ? formatLastSeen(lastSeenMap[conversation.other.id]) : null;
   const disabledReason = banned ? 'You are banned from chat'
     : isBroadcast ? 'Broadcast announcement — read only'
     : conversation.is_locked ? 'This room is locked by an admin'
@@ -195,7 +200,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
 
   const subtitle = typingNames.length ? null
     : isBroadcast ? 'Announcement'
-    : conversation.type === 'dm' ? (online ? 'Active now' : 'Offline')
+    : conversation.type === 'dm' ? (online ? 'Active now' : (lastSeenStr || 'Offline'))
     : `${(conversation.members || []).length} members`;
 
   return (
