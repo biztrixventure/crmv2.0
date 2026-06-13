@@ -30,7 +30,9 @@ const QueueTab = ({ companyList }) => {
     setLoading(true); setMsg('');
     try {
       const res = await client.get('compliance/sales', {
-        params: { status: 'pending_review', limit: 100, company_id: company || undefined },
+        // Un-charged post-date sales are not yet eligible for review — they
+        // only enter the queue once "Charge → Sale" submits them.
+        params: { status: 'pending_review', exclude_post_date: 1, limit: 100, company_id: company || undefined },
       });
       setQueue(res.data.sales || []);
     } catch { setMsg('Failed to load review queue.'); } finally { setLoading(false); }
@@ -65,7 +67,7 @@ const QueueTab = ({ companyList }) => {
 
   const handleExport = async ({ dateFrom, dateTo, company: co, userIds }) => {
     const res = await client.get('compliance/sales', {
-      params: { status: 'pending_review', date_from: dateFrom || undefined, date_to: dateTo || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
+      params: { status: 'pending_review', exclude_post_date: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
     });
     const rows = (res.data.sales || []).map(s => [
       s.customer_name || '', s.customer_phone || '', s.reference_no || '',

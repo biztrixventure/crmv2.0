@@ -169,7 +169,7 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, disposition, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+  const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
   // Determine the company type up front so sales get scoped correctly. Sales
   // are stored under the CLOSER company; a fronter company owns transfers, not
@@ -200,7 +200,17 @@ router.get('/sales', asyncHandler(async (req, res) => {
   if (status)    query = query.eq('status', status);
   // Disposition tab filter (closer_disposition) — drives the dynamic per-
   // disposition tabs (e.g. "Post Date") in compliance.
-  if (disposition) query = query.eq('closer_disposition', disposition);
+  if (disposition) {
+    query = query.eq('closer_disposition', disposition);
+  } else if (exclude_post_date) {
+    // All Sales + the review Queue hide un-charged post-date sales. A post-date
+    // sale lives ONLY in its Post Date tab until "Charge → Sale" flips
+    // closer_disposition to 'sale' (and clears charge_at); only then is it
+    // eligible for review/approval. NULL-safe (keeps rows with no/other
+    // disposition) and mirrors isPostDateDispo() on the frontend
+    // (/post[\s_-]?date|postdate/i ≈ ilike '%post%date%').
+    query = query.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
+  }
   // Charge-date window for the Post Date tab.
   if (charge_from) query = query.gte('charge_at', charge_from);
   if (charge_to)   query = query.lte('charge_at', charge_to);

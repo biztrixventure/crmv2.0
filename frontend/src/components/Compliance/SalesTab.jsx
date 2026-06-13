@@ -88,6 +88,9 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
           search: search || undefined, status: status || undefined,
           company_id: company || undefined,
           disposition: disposition || undefined,
+          // All Sales (no disposition) hides un-charged post-date sales — they
+          // belong only to the Post Date tab until "Charge → Sale" is clicked.
+          exclude_post_date: disposition ? undefined : 1,
           charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
           sort_by: sort.col, sort_dir: sort.dir,
@@ -201,7 +204,10 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
     const res = await client.get('compliance/sales', {
-      params: { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
+      // Export mirrors the active tab: a disposition tab exports its own
+      // disposition; All Sales excludes un-charged post-date sales.
+      params: { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
+        date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
     });
     const rows = (res.data.sales || []).map(s => [
       s.customer_name || '', s.customer_phone || '', s.customer_email || '',
