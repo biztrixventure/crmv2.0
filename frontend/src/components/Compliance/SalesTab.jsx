@@ -118,12 +118,14 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
     } catch { /* user retries */ } finally { setApproving(null); }
   };
 
-  // Charge a post-dated sale → flip disposition to "sale" so it leaves this tab
-  // and lands in All Sales (mirrors the closer-side Charge button).
+  // Charge a post-dated sale → flip disposition to "sale" so it leaves this tab,
+  // then submit it to review so it appears — approvable — in All Sales (mirrors
+  // the closer-side Charge button). Approve is NOT shown in the Post Date tab.
   const chargeSale = async (s) => {
     setCharging(s.id);
     try {
       await client.put(`sales/${s.id}`, { closer_disposition: 'sale', charge_at: null });
+      try { await client.post(`sales/${s.id}/submit-review`); } catch { /* already in review */ }
       setSales(list => list.filter(x => x.id !== s.id));
       load();
     } catch { /* user retries */ } finally { setCharging(null); }
@@ -349,13 +351,16 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {isPostDate && !isReadOnly && (
                             <button onClick={() => chargeSale(s)} disabled={charging === s.id}
-                              title="Charge the card and move this to All Sales"
+                              title="Charge the card and move this to All Sales for approval"
                               className="px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
                               style={{ background: 'var(--gradient-sidebar)' }}>
                               {charging === s.id ? '…' : 'Charge → Sale'}
                             </button>
                           )}
-                          {s.status === 'pending_review' ? (
+                          {/* Approve / Return / Update are hidden in the Post Date tab —
+                              a post-dated sale isn't reviewed until it's charged and lands
+                              in All Sales. */}
+                          {!isPostDate && (s.status === 'pending_review' ? (
                             !isReadOnly && (
                               <>
                                 <button onClick={() => approve(s)} disabled={approving === s.id}
@@ -378,7 +383,7 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
                                 Update
                               </button>
                             )
-                          )}
+                          ))}
                           {Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
                             <button onClick={() => setExpanded(expanded === s.id ? null : s.id)}
                               className="p-1 rounded" style={{ color: 'var(--color-text-secondary)' }}>

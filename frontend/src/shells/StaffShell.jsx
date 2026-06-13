@@ -401,11 +401,18 @@ const StaffShell = () => {
     setSaleError('');
     try {
       const res = await createSale(formData);
-      // Auto-submit every created sale (one per car) for compliance review
       const created = res?.sales?.length ? res.sales : (res?.sale ? [res.sale] : []);
-      await Promise.all(created.filter(s => s?.id).map(s => client.post(`sales/${s.id}/submit-review`)));
+      // Post-dated sales are NOT auto-submitted — they sit in the Post Date tab
+      // (closer-editable, no compliance lock) until charged. Everything else is
+      // auto-submitted for compliance review as before.
+      const isPost = isPostDateDispo(formData.closer_disposition);
+      if (!isPost) {
+        await Promise.all(created.filter(s => s?.id).map(s => client.post(`sales/${s.id}/submit-review`)));
+      }
       setModalOpen(false);
-      setSaleSuccess(created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!');
+      setSaleSuccess(isPost
+        ? 'Post-dated sale saved — in the Post Date tab until you charge it.'
+        : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!'));
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
@@ -419,11 +426,14 @@ const StaffShell = () => {
   };
 
   // Charge a post-dated sale: flip its disposition to "sale" (and clear the
-  // schedule) so it leaves the Post Date tab and lands in My Sales / All Sales.
+  // schedule) so it leaves the Post Date tab, then submit it to compliance so it
+  // shows up — approvable — in All Sales. submit-review is best-effort (a legacy
+  // already-in-review sale just stays in review).
   const chargeSale = async (saleId, dispoFilter) => {
     try {
       await client.put(`sales/${saleId}`, { closer_disposition: 'sale', charge_at: null });
-      setSaleSuccess('Charged — moved to Sale.');
+      try { await client.post(`sales/${saleId}/submit-review`); } catch { /* already in review */ }
+      setSaleSuccess('Charged — sent to compliance as a sale.');
       fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(dispoFilter ? { disposition: dispoFilter } : {}) });
       fetchStats();
       setTimeout(() => setSaleSuccess(''), 4000);
@@ -437,15 +447,17 @@ const StaffShell = () => {
     setEditSaleError('');
     try {
       await client.put(`sales/${editSale.id}`, formData);
-      // A closer only ever edits a draft ('open') or a compliance-returned
-      // ('needs_revision') sale. After saving the fix, push it back to
-      // compliance so the revision actually re-enters review instead of
-      // silently sitting as a draft.
-      const resubmit = ['needs_revision', 'open'].includes(editSale.status);
+      // Resubmit to compliance after a closer edit — but NOT while the sale is
+      // still post-dated. Editing a post-date record (its charging time / note)
+      // keeps it in the Post Date tab; it only enters review when the closer
+      // either flips the disposition off "post date" here or clicks Charge.
+      const nowPostDate = isPostDateDispo(formData.closer_disposition);
+      const resubmit = !nowPostDate && ['needs_revision', 'open'].includes(editSale.status);
       if (resubmit) await client.post(`sales/${editSale.id}/submit-review`);
       setEditSale(null);
-      setSaleSuccess(resubmit ? 'Sale resubmitted to compliance!' : 'Sale updated!');
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
+      setSaleSuccess(nowPostDate ? 'Post-dated sale updated.' : (resubmit ? 'Sale resubmitted to compliance!' : 'Sale updated!'));
+      const dispoFilter = closerSection.startsWith('dispo:') ? closerSection.slice(6) : null;
+      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(dispoFilter ? { disposition: dispoFilter } : (salesStatus ? { status: salesStatus } : {})) });
       fetchStats();
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {

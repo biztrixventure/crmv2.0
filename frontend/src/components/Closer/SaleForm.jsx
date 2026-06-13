@@ -739,6 +739,13 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
               : <p className="text-[11px] mt-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}>
                   The card will be charged at this time. You’ll get a reminder, and once charged you can move it to “Sale”.
                 </p>}
+            {/* Charging note — stored in form_data so compliance sees it on the record. */}
+            <label className="block text-[11px] font-bold uppercase tracking-wide mt-3 mb-1.5"
+              style={{ color: 'var(--color-warning-800, #92400e)' }}>Charging Note</label>
+            <textarea value={formData.ChargeNote || ''}
+              onChange={e => setDynField('ChargeNote', e.target.value)}
+              rows={2} placeholder="Optional — context for the charge (visible to compliance)"
+              className="input text-sm w-full" style={{ resize: 'vertical' }} />
           </div>
         );
       })()}

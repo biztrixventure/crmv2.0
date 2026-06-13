@@ -781,8 +781,12 @@ router.put(
       return res.status(403).json({ error: 'Sale not within your company scope' });
     }
 
-    // Block edits to sales under compliance review (except by compliance/superadmin)
-    if (existing.status === 'pending_review' && !isCompliance) {
+    // Block edits to sales under compliance review (except by compliance/superadmin).
+    // Exception: post-dated sales (post-date disposition) stay closer-editable —
+    // the closer owns the charge date and the "Charge → Sale" action until they
+    // charge it, at which point it enters review like a normal sale.
+    const isPostDateSale = /post[\s_-]?date|postdate/i.test(String(existing.closer_disposition || ''));
+    if (existing.status === 'pending_review' && !isCompliance && !isPostDateSale) {
       return res.status(403).json({ error: 'This sale is under compliance review and cannot be edited' });
     }
 
