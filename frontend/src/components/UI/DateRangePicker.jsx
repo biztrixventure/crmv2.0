@@ -99,7 +99,9 @@ function matchPreset(range) {
 }
 
 // value prop (optional): { date_from, date_to } — when set externally, syncs the picker label
-const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) => {
+// allowFuture: permit picking dates beyond today (e.g. the post-date "Charge date" filter,
+//   whose dates are intentionally in the future). Defaults false (sale/created-date filters).
+const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, allowFuture = false }) => {
   const [open, setOpen]             = useState(false);
   const [preset, setPreset]         = useState(defaultPreset);
   const [customFrom, setCustomFrom] = useState('');
@@ -206,7 +208,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   // day); second click commits [min,max] and fires onChange. Future days are
   // disabled so a range never reaches past today.
   const pickDay = (iso) => {
-    if (iso > todayIso) return;
+    if (!allowFuture && iso > todayIso) return;
     if (!pickStart) {
       setPickStart(iso);
       setCustomFrom(iso); setCustomTo('');
@@ -234,10 +236,11 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
   const selLo = pickStart ? (hoverDay && hoverDay < pickStart ? hoverDay : pickStart) : customFrom;
   const selHi = pickStart ? (hoverDay && hoverDay > pickStart ? hoverDay : (hoverDay && hoverDay < pickStart ? pickStart : null))
                           : customTo;
-  // Next-month arrow stops at the real current month (no navigating into the future).
+  // Next-month arrow stops at the real current month (no navigating into the
+  // future) — unless allowFuture lets the picker roam ahead (charge-date filter).
   const curY = parseInt(_t.slice(0, 4), 10);
   const curM = parseInt(_t.slice(5, 7), 10) - 1;
-  const viewIsCurrentOrFuture = calY > curY || (calY === curY && calM >= curM);
+  const viewIsCurrentOrFuture = !allowFuture && (calY > curY || (calY === curY && calM >= curM));
 
   const handleClear = () => {
     setIsCustom(false);
@@ -355,7 +358,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear }) 
               {buildMonthMatrix(calY, calM).map((d, i) => {
                 if (d === null) return <div key={i} />;
                 const iso        = isoOf(calY, calM, d);
-                const future     = iso > todayIso;
+                const future     = !allowFuture && iso > todayIso;
                 const isEndpoint = (selLo && iso === selLo) || (selHi && iso === selHi);
                 const inRange    = selLo && selHi && iso > selLo && iso < selHi;
                 const isToday    = iso === todayIso;

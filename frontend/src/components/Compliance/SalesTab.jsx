@@ -252,6 +252,7 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Charge:</span>
                 <DateRangePicker
+                  allowFuture
                   value={{ date_from: chargeFrom ? chargeFrom.slice(0, 10) : '', date_to: chargeTo ? chargeTo.slice(0, 10) : '' }}
                   defaultPreset="all"
                   onChange={(r) => {
