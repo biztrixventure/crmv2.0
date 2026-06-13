@@ -115,13 +115,25 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `021_per_company_feature_flags.sql`
+Current highest: `088_vin_active_policy.sql`
 
 Notable migrations:
 - `007_roles_transfers_compliance.sql` — compliance workflow
 - `015_callback_numbers.sql` — callback number tracking
 - `020_feature_flags.sql` — global feature catalog
 - `021_per_company_feature_flags.sql` — per-company flag overrides
+- `079_customer_uuid.sql` — deterministic UUIDv5(normalized_phone) customer identity on `sales`
+- `085_customer_uuid_on_transfers.sql` — same customer_uuid on `transfers` (joins leads → policies)
+- `086_transfer_assignments.sql` — append-only lead reassignment chain (trigger-fed)
+- `087_policy_events.sql` — typed immutable policy lifecycle timeline (trigger-fed)
+- `088_vin_active_policy.sql` — one active policy per VIN; `superseded_by` auto-retires the prior policy
+
+### Customer / policy data model (085–088)
+- **Customer identity** = `customer_uuid` (UUIDv5 of `normalized_phone`), present on both `sales` and `transfers`. No `customers` table — the uuid IS the canonical id. Join lead history to policies on `customer_uuid`.
+- **Transfer chain**: `transfer_assignments` logs every `assigned_closer_id` change. Current owner is still `transfers.assigned_closer_id`; the log gives the full A→B→C history.
+- **Policy lifecycle**: `policy_events` (sold/submitted/approved/returned/cancelled/superseded/…). Fed by `trg_log_policy_event` on `sales` — never written by route code. Logging triggers swallow errors so they can never block a sale/transfer write.
+- **One active policy per VIN**: active = `status='closed_won' AND superseded_by IS NULL`. A new `closed_won` on a VIN auto-stamps the prior policy's `superseded_by` (history kept). `pending_review` is intentionally NOT in the active set (compliance race allowed).
+- Post-apply check: `node backend/verify_migrations.js`.
 
 ## Environment Variables (backend)
 ```
