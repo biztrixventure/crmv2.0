@@ -103,21 +103,37 @@ router.get('/last-seen', asyncHandler(async (req, res) => {
 
 // ── GET /presence/admin/activity ─────────────────────────────────────────────
 // SuperAdmin (+ readonly_admin) roster with per-user activity + summary.
+//
+// The aggregates only move at heartbeat cadence (~2 min), so we share ONE
+// computation across every admin + every poll via a tiny in-memory cache. Live
+// online/idle status doesn't ride this payload (it's realtime on the websocket),
+// so a few seconds of staleness here is free. This is what makes the panel fast:
+// the heavy roster + 30-day scan runs at most once per CACHE_TTL.
+let _activityCache = null;          // { at, payload }
+const ACTIVITY_TTL = 15_000;
+
 router.get('/admin/activity', asyncHandler(async (req, res) => {
   if (!['superadmin', 'readonly_admin'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Superadmin access required' });
+  }
+
+  if (_activityCache && Date.now() - _activityCache.at < ACTIVITY_TTL) {
+    return res.json(_activityCache.payload);
   }
 
   const day = etToday();
   const since30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const since7  = new Date(Date.now() -  7 * 86400000).toISOString().slice(0, 10);
 
+  // Select only the columns we use — smaller payload off Postgres, faster scan.
   const [rolesRes, presenceRes, dailyRes] = await Promise.all([
     supabaseAdmin.from('user_company_roles')
       .select('user_id, company_id, custom_roles(level), companies(name)')
       .eq('is_active', true),
-    supabaseAdmin.from('user_presence').select('*'),
-    supabaseAdmin.from('user_activity_daily').select('*').gte('day', since30),
+    supabaseAdmin.from('user_presence').select('user_id, last_seen_at, last_page, device, ip'),
+    supabaseAdmin.from('user_activity_daily')
+      .select('user_id, day, first_seen_at, last_seen_at, active_minutes, login_count, module_minutes')
+      .gte('day', since30),
   ]);
 
   const roleRows = rolesRes.data || [];
@@ -190,7 +206,7 @@ router.get('/admin/activity', asyncHandler(async (req, res) => {
   const wauSet = new Set((dailyRes.data || []).filter(a => a.day >= since7).map(a => a.user_id));
   const mauSet = new Set((dailyRes.data || []).map(a => a.user_id));
 
-  res.json({
+  const payload = {
     users,
     summary: {
       total_users:     users.length,
@@ -201,8 +217,10 @@ router.get('/admin/activity', asyncHandler(async (req, res) => {
       total_active_min_today: totalMinToday,
     },
     generated_at: new Date().toISOString(),
-  });
-  logger.info('PRESENCE', `Activity snapshot served to ${req.user.id} (${users.length} users)`);
+  };
+  _activityCache = { at: Date.now(), payload };
+  res.json(payload);
+  logger.info('PRESENCE', `Activity snapshot computed for ${req.user.id} (${users.length} users)`);
 }));
 
 module.exports = router;

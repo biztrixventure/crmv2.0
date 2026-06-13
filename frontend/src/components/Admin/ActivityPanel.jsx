@@ -144,7 +144,9 @@ const ActivityPanel = () => {
   useEffect(() => {
     if (!open) return;
     load();
-    const t = setInterval(load, 60_000);
+    // 30s poll — cheap, the server caches the heavy computation for 15s so
+    // multiple admins / polls share it. Live status is realtime regardless.
+    const t = setInterval(load, 30_000);
     return () => clearInterval(t);
   }, [open, load]);
 

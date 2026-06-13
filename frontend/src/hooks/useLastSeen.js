@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import client from '../api/client';
 
-const TTL_MS = 60_000;
+const TTL_MS = 30_000;
 const _cache = new Map();   // key → { at, map }
 
 export function useLastSeen(ids = []) {
