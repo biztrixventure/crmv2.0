@@ -92,18 +92,30 @@ export const PresenceProvider = ({ children }) => {
     const beatTimer = setInterval(() => { if (!document.hidden) beat(); }, HEARTBEAT_MS);
 
     // Final beat when the tab hides/closes — fetch keepalive survives unload,
-    // so "last seen" is accurate to the second they left, not the last timer.
-    const onHide = () => {
-      if (!document.hidden) return;
-      idleRef.current = true; track();
+    // Last-seen keepalive when the tab hides (tab switch / minimize). Stays
+    // ONLINE (just idle) — switching tabs isn't leaving the CRM.
+    const sendLastSeen = (idle) => {
       const tok = token || localStorage.getItem('token');
       try {
         fetch(`${client.defaults.baseURL.replace(/\/$/, '')}/presence/heartbeat`, {
           method: 'POST', keepalive: true,
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-          body: JSON.stringify({ page: window.location.pathname, device: deviceLabel(), idle: true }),
+          body: JSON.stringify({ page: window.location.pathname, device: deviceLabel(), idle }),
         });
       } catch { /* best effort */ }
+    };
+
+    // Tab/page is actually GOING AWAY (close / navigate / refresh). Untrack now
+    // so Supabase fires 'leave' to every watcher IMMEDIATELY — offline shows
+    // instantly instead of waiting out the socket heartbeat timeout. Other tabs
+    // of the same user keep them online (presence is keyed per user, one meta
+    // per tab). Fires on pagehide + beforeunload for cross-browser coverage.
+    let unloaded = false;
+    const onUnload = () => {
+      if (unloaded) return;
+      unloaded = true;
+      try { ch.untrack(); } catch { /* socket may already be closing */ }
+      sendLastSeen(true);
     };
 
     // ── Idle detection: input activity + visibility ─────────────────────────
@@ -115,13 +127,17 @@ export const PresenceProvider = ({ children }) => {
       const shouldIdle = document.hidden || (Date.now() - lastInput.current > IDLE_AFTER_MS);
       if (shouldIdle !== idleRef.current) { idleRef.current = shouldIdle; track(); }
     }, 30_000);
-    const onVis = () => { if (document.hidden) onHide(); else { idleRef.current = false; track(); beat(); } };
+    const onVis = () => {
+      if (document.hidden) { idleRef.current = true; track(); sendLastSeen(true); }   // tab switch → idle, still online
+      else { idleRef.current = false; track(); beat(); }
+    };
 
     window.addEventListener('pointerdown', onActivity, { passive: true });
     window.addEventListener('keydown', onActivity);
     window.addEventListener('mousemove', onActivity, { passive: true });
     document.addEventListener('visibilitychange', onVis);
-    window.addEventListener('pagehide', onHide);
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
 
     return () => {
       clearInterval(beatTimer); clearInterval(idleTimer);
@@ -129,7 +145,8 @@ export const PresenceProvider = ({ children }) => {
       window.removeEventListener('keydown', onActivity);
       window.removeEventListener('mousemove', onActivity);
       document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
       ch.untrack().catch(() => {});
       supabase.removeChannel(ch);
       channelRef.current = null;
