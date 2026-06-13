@@ -6,6 +6,7 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
 import ResellModal from '../Closer/ResellModal';
+import CustomerTimeline from './CustomerTimeline';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
 const SALE_BADGE = {
@@ -412,6 +413,13 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 })}
               </div>
             </div>
+          )}
+
+          {/* Unified lead → policy lifetime timeline (mig 085–088). Self-
+              fetching by phone; role-scoped server-side. Renders nothing when
+              the customer has no cross-record history. */}
+          {sale.customer_phone && (
+            <CustomerTimeline phone={sale.customer_phone} currentRef={sale.reference_no} />
           )}
 
           {/* Audit trail — gated by layout config + readonly_admin flag */}

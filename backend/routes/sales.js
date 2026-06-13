@@ -709,6 +709,177 @@ router.get('/lifetime/by-phone/:phone', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /sales/timeline/by-phone/:phone — UNIFIED customer lifetime timeline.
+// Merges four sources into one chronologically-sorted feed, all keyed on the
+// deterministic customer_uuid (mig 079 on sales, mig 085 on transfers):
+//   • transfers            → lead_created
+//   • transfer_assignments → lead_assigned / lead_transferred  (mig 086)
+//   • policy_events        → sold/approved/cancelled/superseded/… (mig 087/088)
+// Role-scoped identically to /lifetime (sales side) and to the transfers list
+// route (lead side), so the response never leaks a row the caller couldn't
+// already reach. Additive endpoint — nothing else depends on it.
+// ============================================================================
+const TIMELINE_EVENT_TITLE = {
+  sold: 'Policy sold', submitted: 'Submitted for review', approved: 'Approved by compliance',
+  returned: 'Returned for revision', cancelled: 'Policy cancelled', reinstated: 'Policy reinstated',
+  renewed: 'Renewed', replaced: 'Replaced', resold: 'Resold', superseded: 'Superseded (retired)',
+  expired: 'Expired', lost: 'Lost', chargeback: 'Chargeback', charged: 'Post-date charged',
+  post_dated: 'Post-dated', dispute: 'Dispute', refunded: 'Refunded', note: 'Note',
+};
+
+router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
+  const role = req.user.role;
+  const userId = req.user.id;
+  const companyId = req.user.company_id;
+  const raw = String(req.params.phone || '').replace(/\D/g, '');
+  const norm = raw.length === 11 && raw.startsWith('1') ? raw.slice(1) : raw;
+  if (!norm || norm.length < 7) return res.status(400).json({ error: 'phone must be at least 7 digits' });
+
+  const FRONT_VIEW = ['fronter', 'fronter_manager'];
+  const ALL_VIEW   = ['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'];
+  if (!FRONT_VIEW.includes(role) && !ALL_VIEW.includes(role) && !['closer', 'closer_manager'].includes(role)) {
+    return res.status(403).json({ error: 'Not permitted' });
+  }
+
+  // Resolve customer_uuid from sales first, then transfers (both carry it now).
+  let customerUuid = null;
+  const { data: sAnchor } = await supabaseAdmin
+    .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+    .or(`customer_phone.eq.${norm},customer_phone.eq.+1${norm}`).limit(1).maybeSingle();
+  customerUuid = sAnchor?.customer_uuid || null;
+  if (!customerUuid) {
+    const { data: tAnchor } = await supabaseAdmin
+      .from('transfers').select('customer_uuid').not('customer_uuid', 'is', null)
+      .eq('normalized_phone', norm).limit(1).maybeSingle();
+    customerUuid = tAnchor?.customer_uuid || null;
+  }
+  if (!customerUuid) {
+    return res.json({ customer_uuid: null, timeline: [], summary: { leads: 0, sales: 0, active: 0, cancelled: 0, superseded: 0, companies: 0 } });
+  }
+
+  // ── Sales (policy side) — same scope as /lifetime ──
+  let salesQ = supabaseAdmin.from('sales')
+    .select('id, reference_no, status, sale_date, created_at, plan, client_name, company_id, is_resell, cancellation_date, superseded_by, transfer_id, car_year, car_make, car_model, car_vin')
+    .eq('customer_uuid', customerUuid);
+  if (role === 'fronter')              salesQ = salesQ.eq('fronter_id', userId).eq('is_resell', false);
+  else if (role === 'fronter_manager') salesQ = companyId ? salesQ.eq('company_id', companyId).eq('is_resell', false) : salesQ.eq('id', '00000000-0000-0000-0000-000000000000');
+  else if (role === 'closer')          salesQ = salesQ.eq('closer_id', userId);
+  else if (role === 'closer_manager')  salesQ = companyId ? salesQ.eq('company_id', companyId) : salesQ.eq('id', '00000000-0000-0000-0000-000000000000');
+  const { data: salesData } = await salesQ;
+  const saleRows = salesData || [];
+  const saleById = Object.fromEntries(saleRows.map(s => [s.id, s]));
+  const saleIds  = saleRows.map(s => s.id);
+
+  // ── Transfers (lead side) — same scope as the transfers list route ──
+  let transfers = [];
+  {
+    let tQ = supabaseAdmin.from('transfers')
+      .select('id, status, created_at, company_id, created_by, assigned_closer_id, form_data')
+      .eq('customer_uuid', customerUuid);
+    if (role === 'fronter')                tQ = tQ.eq('created_by', userId);
+    else if (role === 'fronter_manager')   tQ = companyId ? tQ.eq('company_id', companyId) : tQ.eq('id', '00000000-0000-0000-0000-000000000000');
+    else if (role === 'closer')            tQ = tQ.eq('assigned_closer_id', userId);
+    else if (role === 'closer_manager') {
+      const { data: coUsers } = await supabaseAdmin
+        .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+      const ids = (coUsers || []).map(u => u.user_id);
+      tQ = ids.length ? tQ.in('assigned_closer_id', ids) : tQ.eq('id', '00000000-0000-0000-0000-000000000000');
+    }
+    // ALL_VIEW roles: no extra filter — every lead for this customer.
+    const { data } = await tQ;
+    transfers = data || [];
+  }
+  const transferIds = transfers.map(t => t.id);
+
+  // ── transfer_assignments (chain hops) ──
+  let assignments = [];
+  if (transferIds.length) {
+    const { data } = await supabaseAdmin.from('transfer_assignments')
+      .select('transfer_id, from_closer_id, to_closer_id, assigned_by, assigned_at, source')
+      .in('transfer_id', transferIds);
+    assignments = data || [];
+  }
+
+  // ── policy_events (lifecycle) ──
+  let events = [];
+  if (saleIds.length) {
+    const { data } = await supabaseAdmin.from('policy_events')
+      .select('sale_id, event_type, at, actor_id, note, meta')
+      .in('sale_id', saleIds);
+    events = data || [];
+  }
+
+  // ── Resolve actor display names (best-effort) ──
+  const actorIds = [...new Set([
+    ...transfers.map(t => t.created_by),
+    ...assignments.flatMap(a => [a.from_closer_id, a.to_closer_id, a.assigned_by]),
+    ...events.map(e => e.actor_id),
+  ].filter(Boolean))];
+  const nameMap = {};
+  if (actorIds.length) {
+    const { data: profs } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', actorIds);
+    (profs || []).forEach(p => { nameMap[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || null; });
+  }
+  const nm = (id) => (id ? nameMap[id] || null : null);
+
+  // ── Merge ──
+  const items = [];
+  transfers.forEach(t => {
+    const who = t.form_data && (t.form_data.client_name || t.form_data.FirstName || t.form_data.customer_name);
+    items.push({ at: t.created_at, kind: 'lead_created', company_id: t.company_id,
+      title: 'Lead created', detail: who ? `for ${who}` : null, actor: nm(t.created_by), ref: t.id.slice(0, 8) });
+  });
+  assignments.forEach(a => {
+    if (a.source === 'backfill' && !a.from_closer_id) {
+      items.push({ at: a.assigned_at, kind: 'lead_assigned', title: 'Assigned to closer',
+        detail: nm(a.to_closer_id) ? `→ ${nm(a.to_closer_id)}` : null, actor: nm(a.assigned_by), ref: a.transfer_id.slice(0, 8) });
+    } else {
+      items.push({ at: a.assigned_at, kind: 'lead_transferred', title: 'Lead transferred',
+        detail: `${nm(a.from_closer_id) || 'unassigned'} → ${nm(a.to_closer_id) || 'unassigned'}`,
+        actor: nm(a.assigned_by), ref: a.transfer_id.slice(0, 8) });
+    }
+  });
+  events.forEach(e => {
+    const s = saleById[e.sale_id] || {};
+    const car = [s.car_year, s.car_make, s.car_model].filter(Boolean).join(' ');
+    items.push({ at: e.at, kind: e.event_type, company_id: s.company_id,
+      title: TIMELINE_EVENT_TITLE[e.event_type] || e.event_type,
+      detail: [s.plan, car].filter(Boolean).join(' · ') || e.note || null,
+      actor: nm(e.actor_id), ref: s.reference_no || e.sale_id.slice(0, 8), meta: e.meta || null });
+  });
+
+  // Sort by calendar day first, then by lifecycle order within a day. This
+  // keeps same-day lead→sold→approved reading logically even though backfilled
+  // 'sold' events carry a date-only sale_date (00:00) while leads carry a
+  // precise created_at timestamp.
+  const KIND_ORDER = {
+    lead_created: 0, lead_assigned: 1, lead_transferred: 1,
+    sold: 2, renewed: 2, replaced: 2, resold: 2,
+    submitted: 3, returned: 4, approved: 5,
+    post_dated: 6, charged: 7, reinstated: 7,
+    cancelled: 8, superseded: 8, expired: 8, lost: 8, dispute: 8, chargeback: 9, refunded: 9,
+  };
+  const dayOf = (x) => String(x.at || '').slice(0, 10);
+  items.sort((a, b) =>
+    dayOf(a).localeCompare(dayOf(b))
+    || (KIND_ORDER[a.kind] ?? 50) - (KIND_ORDER[b.kind] ?? 50)
+    || (new Date(a.at || 0) - new Date(b.at || 0))
+  );
+
+  const TERMINAL = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback']);
+  const summary = {
+    leads: transfers.length,
+    sales: saleRows.length,
+    active: saleRows.filter(s => s.status === 'closed_won' && !s.superseded_by).length,
+    cancelled: saleRows.filter(s => TERMINAL.has(s.status) || s.cancellation_date).length,
+    superseded: saleRows.filter(s => s.superseded_by).length,
+    companies: [...new Set(saleRows.map(s => s.company_id).filter(Boolean))].length,
+  };
+  res.json({ customer_uuid: customerUuid, timeline: items, summary });
+}));
+
+// ============================================================================
 // GET /sales/:id/chain — resell chain timeline for a sale
 // Returns every sale in the lineage: walk original_sale_id back to the root,
 // then forward from the root to every descendant. Ordered by sale_date asc
