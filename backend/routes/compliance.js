@@ -279,44 +279,53 @@ router.get('/sales', asyncHandler(async (req, res) => {
 router.get('/transfers', asyncHandler(async (req, res) => {
   const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
-  let query = applySort(
-    supabaseAdmin.from('transfers').select('*', { count: 'exact' }),
-    sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
-  );
-
-  if (company_id) query = query.eq('company_id', company_id);
-  if (user_ids) {
-    const ids = user_ids.split(',').filter(Boolean);
-    if (ids.length) query = query.in('created_by', ids);
-  }
-  if (closer_id)  query = query.eq('assigned_closer_id', closer_id);
-  if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
-  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
-
-  // Free-text search across the customer-identifying columns: typed
-  // normalized_phone + the JSONB form_data keys that hold the customer
-  // name / phone (same shape transfers.js POST /search uses, so parity with
-  // the closer-side phone search). Reference_no isn't on transfers — it
-  // lives on linked sales; the linked sale's reference is included via the
-  // enrichment step below, but searching there would require a join, so we
-  // keep the predicate scoped to transfers itself.
-  if (search) {
-    const s = escapeOrValue(search);
-    query = query.or(
-      `normalized_phone.ilike.%${s}%,` +
-      `form_data->>customer_name.ilike.%${s}%,` +
-      `form_data->>customer_phone.ilike.%${s}%,` +
-      `form_data->>Phone.ilike.%${s}%,` +
-      `form_data->>FirstName.ilike.%${s}%,` +
-      `form_data->>LastName.ilike.%${s}%`
-    );
-  }
-
+  // Compliance reconciliation: by default list from the view that also exposes
+  // invisible 'refresh' duplicate attempts (migration 089), so every VICIDIAL
+  // transfer attempt is a visible, countable, exportable record. Pass
+  // include_duplicates=false to read the bare transfers table instead.
+  const includeDuplicates = req.query.include_duplicates !== 'false';
   const offset = (parseInt(page) - 1) * parseInt(limit);
-  query = query.range(offset, offset + parseInt(limit) - 1);
 
-  const { data, error, count } = await query;
+  // Same filters either way — built against whichever relation we read from.
+  // Free-text search hits normalized_phone + the JSONB form_data keys that
+  // hold the customer name / phone (parity with the closer-side phone search).
+  const buildQuery = (from) => {
+    let q = applySort(
+      supabaseAdmin.from(from).select('*', { count: 'exact' }),
+      sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
+    );
+    if (company_id) q = q.eq('company_id', company_id);
+    if (user_ids) {
+      const ids = user_ids.split(',').filter(Boolean);
+      if (ids.length) q = q.in('created_by', ids);
+    }
+    if (closer_id) q = q.eq('assigned_closer_id', closer_id);
+    if (status)    q = q.eq('status', status);
+    if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
+    if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
+    if (search) {
+      const s = escapeOrValue(search);
+      q = q.or(
+        `normalized_phone.ilike.%${s}%,` +
+        `form_data->>customer_name.ilike.%${s}%,` +
+        `form_data->>customer_phone.ilike.%${s}%,` +
+        `form_data->>Phone.ilike.%${s}%,` +
+        `form_data->>FirstName.ilike.%${s}%,` +
+        `form_data->>LastName.ilike.%${s}%`
+      );
+    }
+    return q.range(offset, offset + parseInt(limit) - 1);
+  };
+
+  let data, error, count;
+  if (includeDuplicates) {
+    ({ data, error, count } = await buildQuery('v_compliance_transfer_records'));
+    // Deploy-safe: if the view is missing (089 not applied yet) fall back to
+    // the bare table so the compliance tab never breaks.
+    if (error) ({ data, error, count } = await buildQuery('transfers'));
+  } else {
+    ({ data, error, count } = await buildQuery('transfers'));
+  }
   if (error) return res.status(500).json({ error: error.message });
 
   // Fetch profiles for both creator and assigned closer in one query
@@ -410,9 +419,31 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     });
   }
 
+  // Synthetic 'refresh' duplicate rows (from the view) carry the id of the lead
+  // they refreshed in refreshed_transfer_id. Resolve those originals so the
+  // modal can show the same "original transfer" context as reengage/sale_overlap.
+  let refreshedMap = {};
+  const refreshedIds = [...new Set((data || [])
+    .filter(t => t.record_type === 'duplicate_refresh' && t.refreshed_transfer_id)
+    .map(t => t.refreshed_transfer_id))];
+  if (refreshedIds.length) {
+    const { data: rts } = await supabaseAdmin
+      .from('transfers').select('id, created_at, created_by, status').in('id', refreshedIds);
+    (rts || []).forEach(p => { refreshedMap[p.id] = p; });
+    const missing = [...new Set((rts || []).map(p => p.created_by).filter(id => id && !profileMap[id]))];
+    if (missing.length) {
+      const { data: mp } = await supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', missing);
+      (mp || []).forEach(p => { profileMap[p.user_id] = p; });
+    }
+  }
+
   const enriched = (data || []).map(t => {
     const sale = saleMap[t.id] || null;
     const dup  = dupMap[t.id] || null;
+    // A synthetic refresh row IS the duplicate record — flag it directly rather
+    // than via dupMap (which only covers reengage / sale_overlap real rows).
+    const isRefreshDup = t.record_type === 'duplicate_refresh';
+    const refreshed = isRefreshDup && t.refreshed_transfer_id ? refreshedMap[t.refreshed_transfer_id] : null;
     return {
       ...t,
       created_by_name:       profileName(profileMap, t.created_by),
@@ -423,10 +454,14 @@ router.get('/transfers', asyncHandler(async (req, res) => {
       sale_compliance_note:  sale?.compliance_note || null,
       sale_reference_no:     sale?.reference_no || null,
       latest_disposition:    latestDispoMap[t.id] || null,
-      is_duplicate:          !!dup,
-      duplicate_reason:      dup?.duplicate_reason || null,
-      duplicate_detected_at: dup?.duplicate_detected_at || null,
-      original_transfer:     dup?.original_transfer || null,
+      is_duplicate:          isRefreshDup ? true : !!dup,
+      duplicate_reason:      isRefreshDup ? 'refresh' : (dup?.duplicate_reason || null),
+      duplicate_detected_at: isRefreshDup ? t.created_at : (dup?.duplicate_detected_at || null),
+      original_transfer:     isRefreshDup
+        ? (refreshed
+            ? { id: refreshed.id, created_at: refreshed.created_at, created_by_name: profileName(profileMap, refreshed.created_by), status: refreshed.status }
+            : (t.refreshed_transfer_id ? { id: t.refreshed_transfer_id } : null))
+        : (dup?.original_transfer || null),
     };
   });
 

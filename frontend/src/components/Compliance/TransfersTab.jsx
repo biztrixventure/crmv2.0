@@ -5,6 +5,7 @@ import { todayET } from '../../utils/timezone';
 
 // Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
 const DUP_REASON_LABEL = {
+  refresh:      'Re-transferred within the dedup window — it updated the existing lead in place, so no separate transfer row was created. Shown here so the count reconciles with VICIDIAL.',
   reengage:     'Re-engaged after the dedup window (a fresh transfer was created)',
   sale_overlap: 'A completed sale already existed on the prior lead',
 };
@@ -261,10 +262,12 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                       </p>
                       {t.is_duplicate && (
                         <button onClick={e => { e.stopPropagation(); setDetail(t); }}
-                          title="Created as a duplicate — click to see its full history"
+                          title={t.duplicate_reason === 'refresh'
+                            ? 'Duplicate VICIDIAL transfer that refreshed an existing lead in place — click for history'
+                            : 'Created as a duplicate — click to see its full history'}
                           className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-colors"
                           style={{ backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' }}>
-                          <Copy size={10} /> Duplicate Transfer
+                          <Copy size={10} /> {t.duplicate_reason === 'refresh' ? 'Duplicate · in-place' : 'Duplicate Transfer'}
                         </button>
                       )}
                     </td>
@@ -370,7 +373,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                       </p>
                     )}
                     <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                      This entry stays in the transfers list so today’s count reflects every transfer created — real and duplicate.
+                      This entry stays in the transfers list so the count reflects every transfer attempt entered — real and duplicate — and reconciles 1:1 with VICIDIAL.
                     </p>
                   </div>
                 </section>
@@ -405,7 +408,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
               {/* Compliance + superadmin can edit form_data directly. Backend
                   records the supplied reason on the transfer's edit_history
                   audit blob so the review trail stays intact. */}
-              {canReject && (
+              {canReject && detail.record_type !== 'duplicate_refresh' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Compliance — edit transfer</p>
                   <button onClick={() => setEditOpen(true)} disabled={mgBusy || fieldsLoading}
@@ -418,7 +421,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
               {/* Compliance + superadmin can reject the transfer with a reason.
                   Backend route routes the notification through the same path
                   a closer-side reject uses, so the fronter sees one bell. */}
-              {canReject && detail.status !== 'rejected' && detail.status !== 'cancelled' && (
+              {canReject && detail.record_type !== 'duplicate_refresh' && detail.status !== 'rejected' && detail.status !== 'cancelled' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: '#fff5f5', border: '1px solid #fecaca' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#b91c1c' }}>Compliance — reject transfer</p>
                   {!rejectOpen ? (
@@ -448,7 +451,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
                   )}
                 </div>
               )}
-              {isSuper && (
+              {isSuper && detail.record_type !== 'duplicate_refresh' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
                   <div className="flex items-center gap-2 flex-wrap">

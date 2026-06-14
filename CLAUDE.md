@@ -115,7 +115,7 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `088_vin_active_policy.sql`
+Current highest: `089_compliance_transfer_records_view.sql`
 
 Notable migrations:
 - `007_roles_transfers_compliance.sql` — compliance workflow
@@ -127,6 +127,7 @@ Notable migrations:
 - `086_transfer_assignments.sql` — append-only lead reassignment chain (trigger-fed)
 - `087_policy_events.sql` — typed immutable policy lifecycle timeline (trigger-fed)
 - `088_vin_active_policy.sql` — one active policy per VIN; `superseded_by` auto-retires the prior policy
+- `089_compliance_transfer_records_view.sql` — `v_compliance_transfer_records` view: real transfers UNION invisible `refresh` dedup attempts as synthetic rows, so compliance counts/exports reconcile 1:1 with VICIDIAL. `GET /compliance/transfers` reads it by default (falls back to `transfers` if the view is missing)
 
 ### Customer / policy data model (085–088)
 - **Customer identity** = `customer_uuid` (UUIDv5 of `normalized_phone`), present on both `sales` and `transfers`. No `customers` table — the uuid IS the canonical id. Join lead history to policies on `customer_uuid`.
