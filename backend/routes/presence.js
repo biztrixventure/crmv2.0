@@ -110,7 +110,9 @@ router.get('/last-seen', asyncHandler(async (req, res) => {
 // so a few seconds of staleness here is free. This is what makes the panel fast:
 // the heavy roster + 30-day scan runs at most once per CACHE_TTL.
 let _activityCache = null;          // { at, payload }
-const ACTIVITY_TTL = 15_000;
+// 35s ≥ the panel's 30s poll, so steady polling is served from cache (no
+// Supabase egress). ?force=1 (Refresh button) still bypasses it for a fresh pull.
+const ACTIVITY_TTL = 35_000;
 
 router.get('/admin/activity', asyncHandler(async (req, res) => {
   if (!['superadmin', 'readonly_admin'].includes(req.user.role)) {

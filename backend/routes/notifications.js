@@ -10,13 +10,16 @@ const router = express.Router();
 // Cache entries hold the full JSON response for CACHE_TTL ms, so concurrent
 // requests for the same user share one DB round-trip instead of N.
 //
-// TTL (8 s) is safely below the client's ~30 s poll interval, so a user who
-// opens the bell in between still gets data at most 8 s stale — acceptable for
-// notifications. Mark-read / clear operations explicitly invalidate the entry.
+// TTL (35 s) now COVERS the steady poll instead of sitting under it: with the
+// client poll slowed to ~5 min and realtime as the primary path, an 8 s TTL
+// expired before nearly every poll → almost every request hit Postgres. 35 s
+// means repeat polls inside the window are served from memory (no egress).
+// New notifications still arrive instantly via realtime; mark-read / clear
+// invalidate the entry so the bell never shows stale unread state.
 
 const notifCache = new Map(); // userId → { response, expiresAt }
 const inFlight   = new Map(); // userId → Promise<response>  (request coalescing)
-const CACHE_TTL  = 8_000;    // ms
+const CACHE_TTL  = 35_000;   // ms
 
 // Prune expired entries once per minute so the map doesn't grow unbounded.
 setInterval(() => {

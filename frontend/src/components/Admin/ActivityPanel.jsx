@@ -145,9 +145,10 @@ const ActivityPanel = () => {
   useEffect(() => {
     if (!open) return;
     load();
-    // 30s poll — cheap, the server caches the heavy computation for 15s so
-    // multiple admins / polls share it. Live status is realtime regardless.
-    const t = setInterval(load, 30_000);
+    // 30s poll — only while the tab is visible (a backgrounded admin panel
+    // shouldn't keep pulling the roster + 30-day scan). Server caches the heavy
+    // computation, and live status rides the realtime channel regardless.
+    const t = setInterval(() => { if (!document.hidden) load(); }, 30_000);
     return () => clearInterval(t);
   }, [open, load]);
 
@@ -300,7 +301,7 @@ const ActivityPanel = () => {
           ) : (
             shown.map(u => (
               <UserRow key={u.user_id} u={u} status={statusOf(u)}
-                sessions={sessions[u.user_id] || 0} livePage={pages[u.user_id]} />
+                sessions={sessions[u.user_id] || 0} livePage={pages[u.user_id] || u.last_page} />
             ))
           )}
         </div>

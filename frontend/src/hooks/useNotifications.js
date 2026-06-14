@@ -75,8 +75,13 @@ export function playNotificationSound() {
   } catch { /* browsers that block audio */ }
 }
 
-const POLL_BASE   = 30_000;
-const POLL_JITTER = 12_000;
+// Realtime (postgres_changes INSERT) is the PRIMARY delivery path — new
+// notifications arrive instantly over the websocket, and a fetch fires on
+// tab-focus. This poll is only a safety net for a dropped socket, so it runs
+// slow (5 min) instead of every 30 s, which was re-downloading the whole list
+// on top of realtime and was a top egress source.
+const POLL_BASE   = 300_000;
+const POLL_JITTER = 30_000;
 
 export const useNotifications = () => {
   const { user, token } = useAuth();

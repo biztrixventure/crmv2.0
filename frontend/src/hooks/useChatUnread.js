@@ -10,8 +10,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
-const POLL_BASE = 25_000;
-const POLL_JITTER = 12_000;
+// Header unread badge — not latency-critical. 60s (was 25s) more than halves
+// these polls; opening the chat still loads live via useChat's realtime channel.
+const POLL_BASE = 60_000;
+const POLL_JITTER = 15_000;
 
 export const useChatUnread = (enabled = true) => {
   const { user } = useAuth();

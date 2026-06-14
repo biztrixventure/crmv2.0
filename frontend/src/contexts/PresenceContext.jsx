@@ -68,12 +68,12 @@ export const PresenceProvider = ({ children }) => {
       setState({ onlineIds, idleIds, sessions, pages });
     };
 
-    const track = () => ch.track({
-      user_id:   user.id,
-      online_at: new Date().toISOString(),
-      idle:      idleRef.current,
-      page:      window.location.pathname,
-    }).catch(() => {});
+    // Minimal presence meta — every track() fans out to ALL subscribers, so
+    // smaller payload = less egress at O(N) per event. user_id is already the
+    // presence KEY; online_at + page are redundant (the 2-min server heartbeat
+    // persists last_seen + last_page, which the admin panel reads). Only `idle`
+    // needs to ride the websocket.
+    const track = () => ch.track({ idle: idleRef.current }).catch(() => {});
 
     ch.on('presence', { event: 'sync' }, sync)
       .on('presence', { event: 'join' }, sync)
@@ -133,9 +133,18 @@ export const PresenceProvider = ({ children }) => {
       const shouldIdle = document.hidden || (Date.now() - lastInput.current > IDLE_AFTER_MS);
       if (shouldIdle !== idleRef.current) { idleRef.current = shouldIdle; track(); }
     }, 30_000);
+    // Tab switch must NOT broadcast presence — alt-tabbing fanned a diff to
+    // every user and was the dominant realtime egress driver. The 30s idleTimer
+    // marks a genuinely-hidden tab idle; onActivity re-marks active on first
+    // input. Here we only refresh the cheap server-side last-seen.
     const onVis = () => {
-      if (document.hidden) { idleRef.current = true; track(); sendLastSeen(true); }   // tab switch → idle, still online
-      else { idleRef.current = false; track(); beat(); }
+      if (document.hidden) {
+        sendLastSeen(true);                                          // server only, no fan-out
+      } else {
+        lastInput.current = Date.now();
+        if (idleRef.current) { idleRef.current = false; track(); }   // returned from idle → one diff
+        beat();
+      }
     };
 
     window.addEventListener('pointerdown', onActivity, { passive: true });

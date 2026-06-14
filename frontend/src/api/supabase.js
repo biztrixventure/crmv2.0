@@ -3,12 +3,13 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// heartbeatIntervalMs: 15s (default 30s). Presence leave on an UNCLEAN
-// disconnect (tab killed before the close frame flushes) is bounded by the
-// server noticing the missed heartbeat — halving it halves the worst-case
-// "stuck online" window. Clean closes (unsubscribe on unload) are still instant.
+// heartbeatIntervalMs: 30s (the library default). Each persistent websocket
+// exchanges a keepalive at this cadence; 15s doubled that egress for no real
+// gain. Clean closes (unsubscribe on unload) flip offline INSTANTLY regardless;
+// this interval only bounds how fast an UNCLEAN disconnect (tab killed mid-flush)
+// is noticed — ~30s worst case, which is imperceptible for "active now".
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  realtime: { heartbeatIntervalMs: 15000 },
+  realtime: { heartbeatIntervalMs: 30000 },
 });
 
 /**
