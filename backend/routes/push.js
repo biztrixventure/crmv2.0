@@ -91,6 +91,18 @@ router.post('/subscribe',
 
     if (error) return res.status(400).json({ error: error.message });
 
+    // One device = one current user. Purge any OTHER user's claim on this exact
+    // endpoint. Without this, a user who logged out (or just closed the tab)
+    // keeps a subscription on a browser a new user now controls, and the
+    // previous user's notifications get delivered to the new user. Re-subscribing
+    // (which the client does on login) now transfers sole ownership to the
+    // current user.
+    await supabaseAdmin
+      .from('push_subscriptions')
+      .delete()
+      .eq('endpoint', endpoint)
+      .neq('user_id', userId);
+
     res.json({ message: 'Push subscription saved' });
   })
 );

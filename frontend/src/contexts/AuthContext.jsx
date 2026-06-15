@@ -76,8 +76,21 @@ export const AuthProvider = ({ children }) => {
   }, [scheduleRefresh]);
 
   // ── public logout ─────────────────────────────────────────────────────────────
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    // Detach THIS device's push subscription from the user logging out, so the
+    // next user on this browser doesn't inherit their notifications. Done while
+    // the token is still in localStorage so the DELETE authenticates as them,
+    // and we tear down the browser subscription so the next login mints a fresh
+    // one. Best-effort — never block logout on it.
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration?.();
+      const sub = reg && await reg.pushManager?.getSubscription?.();
+      if (sub) {
+        await client.delete("push/unsubscribe", { data: { endpoint: sub.endpoint } }).catch(() => {});
+        await sub.unsubscribe().catch(() => {});
+      }
+    } catch { /* push unsupported / no service worker — ignore */ }
     setUser(null);
     setToken(null);
     setIsRefreshing(false);
