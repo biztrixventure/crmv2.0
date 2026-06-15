@@ -1074,8 +1074,12 @@ router.put(
     // field OR the plan name. Effective values = incoming OR existing
     // (so a row that was already ineligible isn't suddenly unblockable
     // by a no-op edit). Enforcement mode comes from business_config.
+    // Compliance/superadmin are the override authority — they correct records
+    // post-hoc and must never be hard-blocked by selling-eligibility (the edit
+    // payload always carries car/plan fields, so this would otherwise 400 every
+    // compliance edit of a sale whose vehicle/plan the catalog flags).
     const touchesEligibility = (plan !== undefined || car_year !== undefined || car_make !== undefined || car_miles !== undefined);
-    if (touchesEligibility) {
+    if (touchesEligibility && !isCompliance) {
       const { enforceOrAttach } = require('../utils/vehicleEligibility');
       const candidate = {
         plan:      plan      !== undefined ? plan      : existing.plan,

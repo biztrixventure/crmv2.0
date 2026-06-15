@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
+import { toast } from 'sonner';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
@@ -162,10 +163,14 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
     if (!editFieldsTarget) return;
     setEditFieldsSaving(true);
     try {
-      const res = await client.put(`sales/${editFieldsTarget.id}`, payload);
-      const updated = res?.data?.sale || res?.data?.data || res?.data;
-      if (updated) setSales(list => list.map(x => x.id === editFieldsTarget.id ? { ...x, ...updated } : x));
+      await client.put(`sales/${editFieldsTarget.id}`, payload);
       setEditFieldsTarget(null);
+      toast.success('Sale updated');
+      load();   // refetch from the server so the row reflects the saved values
+    } catch (err) {
+      // Previously this had no catch — a rejected save looked like "nothing
+      // happened". Surface the real reason so compliance knows what to fix.
+      toast.error(err.response?.data?.error || 'Failed to save changes');
     } finally { setEditFieldsSaving(false); }
   };
   const doEdit = async () => {
