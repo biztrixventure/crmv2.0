@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   LayoutTemplate, AlertTriangle, Eye, EyeOff, ChevronUp, ChevronDown,
-  Info, Sparkles, ChevronRight, Layers, Pencil, RotateCcw,
+  Info, Sparkles, ChevronRight, Layers, Pencil, RotateCcw, GripVertical, MoveRight,
 } from 'lucide-react';
 import { clearDrawerLayoutCache } from '../../../hooks/useDrawerLayout';
 
@@ -52,6 +52,7 @@ const SECTION_CATALOG = {
         { id: 'plan',               label: 'Plan',               desc: 'Plan name or tier' },
         { id: 'sale_date',          label: 'Sale Date',          desc: 'Business day the sale happened' },
         { id: 'status',             label: 'Status',             desc: 'Current lifecycle state' },
+        { id: 'cancellation_date',  label: 'Cancellation Date',  desc: 'Date a cancel-like status took effect' },
         { id: 'closer_disposition', label: 'Closer Disposition', desc: 'Closer-set outcome label' },
       ],
     },
@@ -111,16 +112,25 @@ const SECTION_CATALOG = {
 // ─────────────────────────────────────────────────────────────────────────────
 // Field row — tiny inner toggle for a single field within a section.
 // ─────────────────────────────────────────────────────────────────────────────
-const FieldRow = ({ field, idx, total, onToggle, onMove }) => {
+const FieldRow = ({ field, idx, total, onToggle, onMove, dnd }) => {
+  const beingDragged = dnd?.enabled && dnd?.dragging?.fieldId === field.id && dnd?.dragging?.sectionId === dnd?.sectionId;
   return (
     <div
+      draggable={!!dnd?.enabled}
+      onDragStart={dnd?.enabled ? (e) => { e.stopPropagation(); dnd.onFieldDragStart(field.id, field.label || field.id); } : undefined}
+      onDragEnd={dnd?.enabled ? () => dnd.onFieldDragEnd() : undefined}
       className="flex items-center gap-2 py-1.5 px-2 rounded-md ml-7 transition-all"
       style={{
         backgroundColor: field.visible ? 'var(--color-surface)' : 'var(--color-bg-secondary)',
         border: '1px solid var(--color-border)',
-        opacity: field.visible ? 1 : 0.55,
+        opacity: beingDragged ? 0.4 : (field.visible ? 1 : 0.55),
+        cursor: dnd?.enabled ? 'grab' : 'default',
       }}
     >
+      {dnd?.enabled && (
+        <GripVertical size={12} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}
+          title="Drag to move this field to another section" />
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-text">{field.label || field.id}</p>
         {field._desc && <p className="text-[10px] text-text-tertiary leading-snug mt-0.5">{field._desc}</p>}
@@ -157,18 +167,29 @@ const FieldRow = ({ field, idx, total, onToggle, onMove }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Section row — clickable header + expandable field list.
 // ─────────────────────────────────────────────────────────────────────────────
-const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggle, onToggle, onMove, onFieldToggle, onFieldMove, accent }) => {
-  const hasFields = Array.isArray(catalogEntry?.fields) && catalogEntry.fields.length > 0;
+const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggle, onToggle, onMove, onFieldToggle, onFieldMove, accent, dnd }) => {
+  const [over, setOver] = useState(false);
+  // Field-capable if the catalog defines fields OR the section currently holds
+  // dragged-in fields — so moved fields stay manageable (expandable) here.
+  const hasFields = (Array.isArray(catalogEntry?.fields) && catalogEntry.fields.length > 0) || (section.fields?.length || 0) > 0;
   const fieldCount = section.fields?.length || 0;
   const visibleFieldCount = (section.fields || []).filter(f => f.visible).length;
+  const dragActive  = dnd?.enabled && dnd?.dragging;
+  const isSource    = dragActive && dnd.dragging.sectionId === section.id;
+  const canDropHere = !!dnd?.canDrop && dragActive && !isSource;
 
   return (
     <div
+      onDragOver={canDropHere ? (e) => { e.preventDefault(); setOver(true); } : undefined}
+      onDragLeave={canDropHere ? () => setOver(false) : undefined}
+      onDrop={canDropHere ? (e) => { e.preventDefault(); setOver(false); dnd.onDropHere(); } : undefined}
       className="rounded-xl transition-all overflow-hidden"
       style={{
-        backgroundColor: section.visible ? 'var(--color-surface)' : 'var(--color-bg-secondary)',
+        backgroundColor: over && canDropHere ? `${accent}12` : (section.visible ? 'var(--color-surface)' : 'var(--color-bg-secondary)'),
         border: '1px solid var(--color-border)',
         borderLeft: `3px solid ${section.visible ? accent : 'var(--color-border)'}`,
+        outline: canDropHere ? `2px dashed ${over ? accent : 'var(--color-border)'}` : 'none',
+        outlineOffset: -2,
         opacity: section.visible ? 1 : 0.65,
       }}
     >
@@ -192,6 +213,12 @@ const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggl
               <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                 {visibleFieldCount}/{fieldCount} fields
+              </span>
+            )}
+            {canDropHere && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                style={{ backgroundColor: `${accent}1a`, color: accent }}>
+                <MoveRight size={10} /> drop field here
               </span>
             )}
           </div>
@@ -238,6 +265,7 @@ const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggl
             <FieldRow key={f.id} field={f} idx={fi} total={section.fields.length}
               onToggle={() => onFieldToggle(fi)}
               onMove={onFieldMove}
+              dnd={dnd}
             />
           ))}
           {(!section.fields || section.fields.length === 0) && (
@@ -258,10 +286,17 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
   const [drawerType, setDrawerType] = useState('sale');
   const [role,       setRole]       = useState('closer');
   const [expanded,   setExpanded]   = useState({});       // sectionId -> bool
+  const [dragField,  setDragField]  = useState(null);     // { sectionId, fieldId, label }
 
   const key      = `drawer.layout.${drawerType}.${role}`;
   const catalog  = SECTION_CATALOG[drawerType] || [];
   const accent   = ROLES.find(r => r.key === role)?.accent || '#6366f1';
+
+  // Cross-section field drag is wired for the Sale drawer (its renderer is fully
+  // field-id driven). audit / compliance_actions can't host individual fields,
+  // so they're never drop targets.
+  const dndEnabled = drawerType === 'sale';
+  const DROP_DENY  = ['audit', 'compliance_actions'];
 
   // Resolve current sections, merging with the catalog so new sections appear
   // at the bottom hidden + new fields appear at the bottom hidden too.
@@ -337,6 +372,25 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
     persist(next);
   };
 
+  // Move a field from one section to another (drag-and-drop). Removes it from
+  // the source section and appends it (visible) to the target.
+  const dropFieldOnSection = (toSectionId) => {
+    const drag = dragField;
+    setDragField(null);
+    if (!drag) return;
+    const { sectionId: fromId, fieldId } = drag;
+    if (fromId === toSectionId || DROP_DENY.includes(toSectionId)) return;
+    const next = sections.map(s => ({ ...s, fields: [...(s.fields || [])] }));
+    const from = next.find(s => s.id === fromId);
+    const to   = next.find(s => s.id === toSectionId);
+    if (!from || !to) return;
+    const fi = from.fields.findIndex(f => f.id === fieldId);
+    if (fi < 0) return;
+    const [moved] = from.fields.splice(fi, 1);
+    to.fields.push({ ...moved, visible: true });
+    persist(next);
+  };
+
   const resetToDefault = () => {
     if (!window.confirm('Reset this drawer + role to the default catalog (all sections + all fields visible)?')) return;
     persist(catalog.map((c, i) => ({
@@ -378,7 +432,7 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
           </span>
         </h2>
         <p className="text-sm text-text-secondary max-w-2xl leading-relaxed">
-          Tune what each role sees inside the Sale / Transfer / Callback drawers — at the section AND field level. Hiding a section here hides it everywhere; expanding a section lets you hide individual rows like Down Payment or VIN.
+          Tune what each role sees inside the Sale / Transfer / Callback drawers — at the section AND field level. Hiding a section here hides it everywhere; expanding a section lets you hide individual rows like Down Payment or VIN. On the <strong>Sale</strong> drawer you can also <strong>drag a field by its ⠿ handle and drop it into another section</strong> to re-home it.
         </p>
       </div>
 
@@ -484,6 +538,15 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
             onMove={move}
             onFieldToggle={(fi) => toggleField(i, fi)}
             onFieldMove={moveField(i)}
+            dnd={dndEnabled ? {
+              enabled: true,
+              sectionId: s.id,
+              dragging: dragField,
+              canDrop: !DROP_DENY.includes(s.id),
+              onDropHere: () => dropFieldOnSection(s.id),
+              onFieldDragStart: (fieldId, label) => setDragField({ sectionId: s.id, fieldId, label }),
+              onFieldDragEnd: () => setDragField(null),
+            } : undefined}
           />
         ))}
       </div>

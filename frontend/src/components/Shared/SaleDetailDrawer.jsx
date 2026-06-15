@@ -73,7 +73,7 @@ const Section = ({ title, children }) => (
 
 export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
-  const { sections, isFieldVisible } = useDrawerLayout('sale');
+  const { sections } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
   // Resell chain — fetched on open when this sale carries an
@@ -143,6 +143,61 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   );
 
   const hist = Array.isArray(sale.edit_history) ? sale.edit_history : [];
+
+  // ── Field renderers, keyed by the field ids the SuperAdmin sees in
+  // Business Rules → Drawer Layout. Rendering is keyed by field id (NOT by a
+  // hardcoded section), so a field appears in whatever section the SuperAdmin
+  // placed it — including after dragging it between sections. Each entry is a
+  // <Row> or null (null = empty value or not permitted). Financial fields keep
+  // their permission gate no matter which section they're moved into.
+  const canFinancial = hasPermission('view_financial_data') && roFlag('view_financial_data');
+  const FIELD = {
+    name:    <Row key="name"    label="Name"  value={sale.customer_name} />,
+    phone:   <Row key="phone"   label="Phone" value={sale.customer_phone} />,
+    phone_2: sale.customer_phone_2 ? <Row key="phone_2" label="Phone 2" value={sale.customer_phone_2} /> : null,
+    email:   sale.customer_email   ? <Row key="email"   label="Email"   value={sale.customer_email} /> : null,
+    address: sale.customer_address ? <Row key="address" label="Address" value={sale.customer_address} /> : null,
+    year:    sale.car_year  ? <Row key="year"  label="Year"  value={sale.car_year} /> : null,
+    make:    sale.car_make  ? <Row key="make"  label="Make"  value={sale.car_make} /> : null,
+    model:   sale.car_model ? <Row key="model" label="Model" value={sale.car_model} /> : null,
+    miles:   sale.car_miles ? <Row key="miles" label="Miles" value={Number(sale.car_miles).toLocaleString()} /> : null,
+    vin:     sale.car_vin   ? <Row key="vin"   label="VIN"   value={sale.car_vin} mono /> : null,
+    client:  sale.client_name ? <Row key="client" label="Client" value={sale.client_name} /> : null,
+    plan:    sale.plan        ? <Row key="plan"   label="Plan"   value={sale.plan} /> : null,
+    sale_date: sale.sale_date ? <Row key="sale_date" label="Sale Date" value={fmtSaleDate(sale.sale_date)} /> : null,
+    status:  <Row key="status" label="Status" value={SALE_LABEL[sale.status] || sale.status} />,
+    cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" /> : null,
+    closer_disposition: sale.closer_disposition ? <Row key="closer_disposition" label="Closer Disposition" value={sale.closer_disposition} highlight="var(--color-primary-600)" /> : null,
+    monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="#16a34a" /> : null,
+    down_payment:     (canFinancial && sale.down_payment)     ? <Row key="down_payment" label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} /> : null,
+    payment_due_note: (canFinancial && sale.payment_due_note) ? <Row key="payment_due_note" label="Due Note" value={sale.payment_due_note} /> : null,
+    closer:  sale.closer_name  ? <Row key="closer"  label="Closer"  value={sale.closer_name} /> : null,
+    fronter: sale.fronter_name ? <Row key="fronter" label="Fronter" value={sale.fronter_name} /> : null,
+    created: <Row key="created" label="Created" value={new Date(sale.created_at).toLocaleString()} />,
+    updated: (sale.updated_at && sale.updated_at !== sale.created_at) ? <Row key="updated" label="Updated" value={new Date(sale.updated_at).toLocaleString()} /> : null,
+    submitted_for_review: sale.submitted_for_review_at ? <Row key="submitted_for_review" label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} /> : null,
+    compliance_reviewed:  sale.compliance_reviewed_at  ? <Row key="compliance_reviewed"  label="Compliance Reviewed"  value={new Date(sale.compliance_reviewed_at).toLocaleString()} /> : null,
+  };
+
+  // Default field order per section (used when a section has no configured
+  // fields[] — i.e. older configs or untouched sections).
+  const DEFAULT_FIELDS = {
+    customer:  ['name', 'phone', 'phone_2', 'email', 'address'],
+    vehicle:   ['year', 'make', 'model', 'miles', 'vin'],
+    sale_info: ['client', 'plan', 'sale_date', 'status', 'cancellation_date', 'closer_disposition'],
+    financial: ['monthly_payment', 'down_payment', 'payment_due_note'],
+    people:    ['closer', 'fronter'],
+    timeline:  ['created', 'updated', 'submitted_for_review', 'compliance_reviewed'],
+  };
+
+  // The ordered, visible field ids for a section: the SuperAdmin's configured
+  // fields[] when present, else the catalog default.
+  const sectionFieldIds = (s) => {
+    if (Array.isArray(s.fields) && s.fields.length) {
+      return [...s.fields].filter(f => f.visible !== false).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(f => f.id);
+    }
+    return DEFAULT_FIELDS[s.id] || [];
+  };
 
   const complianceColor = {
     open: 'var(--color-info-600)',
@@ -232,104 +287,21 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
             tolerated; renderer map below decides what to render. */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {sections.filter(s => s.visible).map(s => {
-            switch (s.id) {
-              case 'customer':
-                return (
-                  <Section key="customer" title={s.label || 'Customer'}>
-                    {isFieldVisible('customer', 'name')    && <Row label="Name"  value={sale.customer_name} />}
-                    {isFieldVisible('customer', 'phone')   && <Row label="Phone" value={sale.customer_phone} />}
-                    {isFieldVisible('customer', 'phone_2') && sale.customer_phone_2 && <Row label="Phone 2" value={sale.customer_phone_2} />}
-                    {isFieldVisible('customer', 'email')   && sale.customer_email   && <Row label="Email"   value={sale.customer_email} />}
-                    {isFieldVisible('customer', 'address') && sale.customer_address && <Row label="Address" value={sale.customer_address} />}
-                  </Section>
-                );
-              case 'vehicle':
-                if (!(sale.car_year || sale.car_make || sale.car_model)) return null;
-                return (
-                  <Section key="vehicle" title={s.label || 'Vehicle'}>
-                    {isFieldVisible('vehicle', 'year')  && sale.car_year  && <Row label="Year"  value={sale.car_year} />}
-                    {isFieldVisible('vehicle', 'make')  && sale.car_make  && <Row label="Make"  value={sale.car_make} />}
-                    {isFieldVisible('vehicle', 'model') && sale.car_model && <Row label="Model" value={sale.car_model} />}
-                    {isFieldVisible('vehicle', 'miles') && sale.car_miles && <Row label="Miles" value={Number(sale.car_miles).toLocaleString()} />}
-                    {isFieldVisible('vehicle', 'vin')   && sale.car_vin   && <Row label="VIN"   value={sale.car_vin} mono />}
-                  </Section>
-                );
-              case 'sale_info':
-                return (
-                  <Section key="sale_info" title={s.label || 'Sale Info'}>
-                    {isFieldVisible('sale_info', 'client')             && sale.client_name && <Row label="Client"  value={sale.client_name} />}
-                    {isFieldVisible('sale_info', 'plan')               && sale.plan        && <Row label="Plan"    value={sale.plan} />}
-                    {isFieldVisible('sale_info', 'sale_date')          && sale.sale_date   && <Row label="Sale Date" value={fmtSaleDate(sale.sale_date)} />}
-                    {isFieldVisible('sale_info', 'status')             && <Row label="Status" value={SALE_LABEL[sale.status] || sale.status} />}
-                    {sale.cancellation_date && <Row label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" />}
-                    {isFieldVisible('sale_info', 'closer_disposition') && sale.closer_disposition && (
-                      <Row label="Closer Disposition" value={sale.closer_disposition}
-                        highlight="var(--color-primary-600)" />
-                    )}
-                  </Section>
-                );
-              case 'financial':
-                if (!hasPermission('view_financial_data') || !roFlag('view_financial_data')) return null;
-                return (
-                  <Section key="financial" title={s.label || 'Financial'}>
-                    {isFieldVisible('financial', 'monthly_payment') && sale.monthly_payment && (
-                      <Row label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`}
-                        highlight="#16a34a" />
-                    )}
-                    {isFieldVisible('financial', 'down_payment') && sale.down_payment && (
-                      <Row label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} />
-                    )}
-                    {isFieldVisible('financial', 'payment_due_note') && sale.payment_due_note && (
-                      <Row label="Due Note" value={sale.payment_due_note} />
-                    )}
-                  </Section>
-                );
-              case 'additional':
-                if (extraFields.length === 0) return null;
-                return (
-                  <Section key="additional" title={s.label || 'Additional Info'}>
-                    {extraFields.map(([k, v]) => (
-                      <Row key={k} label={k.replace(/_/g, ' ')} value={displayFieldValue(k, v)} />
-                    ))}
-                  </Section>
-                );
-              case 'people':
-                return (
-                  <Section key="people" title={s.label || 'People'}>
-                    {isFieldVisible('people', 'closer')  && sale.closer_name  && <Row label="Closer"  value={sale.closer_name} />}
-                    {isFieldVisible('people', 'fronter') && sale.fronter_name && <Row label="Fronter" value={sale.fronter_name} />}
-                  </Section>
-                );
-              case 'timeline':
-                return (
-                  <Section key="timeline" title={s.label || 'Timeline'}>
-                    {isFieldVisible('timeline', 'created') && (
-                      <Row label="Created" value={new Date(sale.created_at).toLocaleString()} />
-                    )}
-                    {isFieldVisible('timeline', 'updated') && sale.updated_at && sale.updated_at !== sale.created_at && (
-                      <Row label="Updated" value={new Date(sale.updated_at).toLocaleString()} />
-                    )}
-                    {isFieldVisible('timeline', 'submitted_for_review') && sale.submitted_for_review_at && (
-                      <Row label="Submitted for Review" value={new Date(sale.submitted_for_review_at).toLocaleString()} />
-                    )}
-                    {isFieldVisible('timeline', 'compliance_reviewed') && sale.compliance_reviewed_at && (
-                      <Row label="Compliance Reviewed" value={new Date(sale.compliance_reviewed_at).toLocaleString()} />
-                    )}
-                  </Section>
-                );
-              case 'compliance_actions':
-                // Reserved for an action toolbar inside the drawer — wired in a
-                // future commit where the compliance approve/return UI moves
-                // here. Render nothing for now so the section can be toggled
-                // without breaking the layout.
-                return null;
-              case 'audit':
-                // Audit trail is rendered after the switch (it has its own
-                // custom layout) — see below.
-                return null;
-              default:
-                return null;
+            // Audit has its own custom block (rendered below); compliance_actions
+            // is reserved. Everything else is field-driven.
+            if (s.id === 'audit' || s.id === 'compliance_actions') return null;
+            // Render this section's fields (config-placed or catalog default),
+            // each via the id-keyed FIELD registry — so a field shows up in
+            // whatever section the SuperAdmin dragged it into.
+            const rows = sectionFieldIds(s).map(fid => FIELD[fid]).filter(Boolean);
+            // 'additional' also lists extra form_data fields not in any section.
+            if (s.id === 'additional') {
+              extraFields.forEach(([k, v]) => rows.push(
+                <Row key={`extra:${k}`} label={k.replace(/_/g, ' ')} value={displayFieldValue(k, v)} />
+              ));
             }
+            if (rows.length === 0) return null;
+            return <Section key={s.id} title={s.label || s.id}>{rows}</Section>;
           })}
 
           {/* Lifetime customer banner (G17 / G27). Visible only when the
