@@ -115,7 +115,7 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `089_compliance_transfer_records_view.sql`
+Current highest: `090_revert_vin_active_enforcement.sql`
 
 Notable migrations:
 - `007_roles_transfers_compliance.sql` — compliance workflow
@@ -126,7 +126,8 @@ Notable migrations:
 - `085_customer_uuid_on_transfers.sql` — same customer_uuid on `transfers` (joins leads → policies)
 - `086_transfer_assignments.sql` — append-only lead reassignment chain (trigger-fed)
 - `087_policy_events.sql` — typed immutable policy lifecycle timeline (trigger-fed)
-- `088_vin_active_policy.sql` — one active policy per VIN; `superseded_by` auto-retires the prior policy
+- `088_vin_active_policy.sql` — one active policy per VIN; `superseded_by` auto-retires the prior policy. **Reverted by 090** (its BEFORE-insert trigger broke multi-row bulk inserts).
+- `090_revert_vin_active_enforcement.sql` — drops 088's VIN supersede trigger + `uq_sales_active_vin` index (they 500'd bulk uploads with same-VIN rows in one batch). Keeps the `superseded_by` columns. One-active-per-VIN to be re-added bulk-safely.
 - `089_compliance_transfer_records_view.sql` — `v_compliance_transfer_records` view: real transfers UNION invisible `refresh` dedup attempts as synthetic rows, so compliance counts/exports reconcile 1:1 with VICIDIAL. `GET /compliance/transfers` reads it by default (falls back to `transfers` if the view is missing)
 
 ### Customer / policy data model (085–088)
