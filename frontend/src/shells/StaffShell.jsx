@@ -284,6 +284,9 @@ const StaffShell = () => {
     window.crmAssistant?.setSection?.(sec);
   }, [activeNav, activeTab, closerSection]);
   const [transfersPage, setTransfersPage]   = useState(1);  // fronter My Leads + closer Assigned
+  // Status filter for the fronter My Leads list — set when a KPI card is clicked
+  // (e.g. "Completed" → only completed leads). '' = all. Drives fetchTransfers.
+  const [myLeadsStatus, setMyLeadsStatus]   = useState('');
   const [closerSalesPage, setCloserSalesPage] = useState(1);
   const [leadSearchQ, setLeadSearchQ]       = useState(''); // debounced server search for leads
   const [formData, setFormData]             = useState({});
@@ -337,7 +340,7 @@ const StaffShell = () => {
   }, []);
   // Debounce the fronter lead filter into a server-side search; reset to page 1.
   useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
-  useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ]);
+  useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ, myLeadsStatus]);
   useEffect(() => {
     if (!isCloser) return;
     const base = { date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE };
@@ -415,7 +418,7 @@ const StaffShell = () => {
         : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!'));
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
-      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) });
       fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
@@ -489,7 +492,7 @@ const StaffShell = () => {
       setRejectTarget(null);
       setRejectReason('');
       setRejectMsg('');
-      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) });
       fetchStats();
     } catch (err) {
       setRejectMsg(err.response?.data?.error || 'Failed to reject');
@@ -576,7 +579,7 @@ const StaffShell = () => {
       setDupCheck(null);
       lastPrefilledId.current = null;
       fetchStats();
-      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined });
+      fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) });
     } catch (err) {
       setTransferError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to submit');
     } finally {
@@ -668,7 +671,10 @@ const StaffShell = () => {
   // SuperAdmin builder picks which land in which card / slot; the drill-down
   // for each one is preserved here.
   const goCloser = (status, range) => () => { setCloserSection('sales'); setSalesStatus(status); setDateRange(getPresetRange(range)); };
-  const goLeads  = (status, range) => () => { setXferStatus(status); setXferPage(1); if (range) setDateRange(getPresetRange(range)); };
+  // Fronter leads KPIs → filter the fronter's own "My Leads" list (and jump to
+  // its tab). Previously this set xferStatus, which only drives the separate
+  // team_transfers tab — so the fronter's list never filtered and showed all.
+  const goLeads  = (status, range) => () => { setActiveTab('transfers'); setMyLeadsStatus(status || ''); setTransfersPage(1); if (range) setDateRange(getPresetRange(range)); };
   const staffMetrics = {
     sales_today:     { value: stats.todaySales || 0,     onClick: goCloser('', 'today') },
     sales_month:     { value: stats.monthSales || 0,     onClick: goCloser('', 'month') },
@@ -680,7 +686,7 @@ const StaffShell = () => {
     cancelled_month: { value: stats.monthCancelled || 0, onClick: goCloser('cancelled', 'month') },
     cancelled_total: { value: stats.cancelledSales || 0, onClick: goCloser('cancelled', 'all') },
     awaiting:        { value: stats.awaitingCompliance || 0, onClick: goCloser('pending_review', 'all'), title: 'Show all sales awaiting compliance review' },
-    awaiting_inflight: { value: stats.awaitingCompliance || 0, onClick: () => { setXferStatus('assigned'); setXferPage(1); }, title: 'Show leads in-flight with a closer' },
+    awaiting_inflight: { value: stats.awaitingCompliance || 0, onClick: goLeads('assigned'), title: 'Show leads in-flight with a closer' },
     returned:        { value: stats.needsRevision || 0, onClick: goCloser('needs_revision', 'all'), title: 'Sales compliance returned to you for revision' },
     resells_month:   { value: stats.resellsThisMonth || 0, onClick: goCloser('', 'month'), title: 'Resells this month' },
     resells_total:   { value: stats.resellsTotal || 0,     onClick: goCloser('', 'all'),   title: 'All resells' },
@@ -1573,6 +1579,14 @@ const StaffShell = () => {
                   <FileText size={20} /> My Leads
                   <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transferTotal}</span>
+                  {myLeadsStatus && (
+                    <button onClick={() => { setMyLeadsStatus(''); setTransfersPage(1); }}
+                      title="Clear filter — show all leads"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold capitalize"
+                      style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+                      {myLeadsStatus.replace(/_/g, ' ')} <XCircle size={12} />
+                    </button>
+                  )}
                 </h3>
                 <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end min-w-0">
                   <div className="relative flex-1 sm:flex-none sm:w-56">
@@ -1600,6 +1614,12 @@ const StaffShell = () => {
               ) : transfers.length === 0 ? (
                 leadSearchQ ? (
                   <p className="text-text-secondary text-center py-10 text-sm">No leads match “{leadSearch}”.</p>
+                ) : myLeadsStatus ? (
+                  <p className="text-text-secondary text-center py-10 text-sm">
+                    No leads match this filter.{' '}
+                    <button onClick={() => { setMyLeadsStatus(''); setTransfersPage(1); }}
+                      className="font-semibold underline" style={{ color: 'var(--color-primary-600)' }}>Show all leads</button>
+                  </p>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-14 text-center">
                     <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
