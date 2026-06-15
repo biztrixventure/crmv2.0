@@ -115,7 +115,7 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `090_revert_vin_active_enforcement.sql`
+Current highest: `091_vin_active_reconcile.sql`
 
 Notable migrations:
 - `007_roles_transfers_compliance.sql` — compliance workflow
@@ -127,7 +127,10 @@ Notable migrations:
 - `086_transfer_assignments.sql` — append-only lead reassignment chain (trigger-fed)
 - `087_policy_events.sql` — typed immutable policy lifecycle timeline (trigger-fed)
 - `088_vin_active_policy.sql` — one active policy per VIN; `superseded_by` auto-retires the prior policy. **Reverted by 090** (its BEFORE-insert trigger broke multi-row bulk inserts).
-- `090_revert_vin_active_enforcement.sql` — drops 088's VIN supersede trigger + `uq_sales_active_vin` index (they 500'd bulk uploads with same-VIN rows in one batch). Keeps the `superseded_by` columns. One-active-per-VIN to be re-added bulk-safely.
+- `090_revert_vin_active_enforcement.sql` — drops 088's VIN supersede trigger + `uq_sales_active_vin` index (they 500'd bulk uploads with same-VIN rows in one batch). Keeps the `superseded_by` columns.
+- `091_vin_active_reconcile.sql` — re-adds one-active-policy-per-VIN **bulk-safely**: a STATEMENT-level AFTER trigger (`fn_reconcile_vin_active`, transition table + `pg_trigger_depth` guard) that reconciles after each insert/update instead of a per-row BEFORE trigger, plus a NON-unique lookup index. Multi-row bulk inserts with duplicate VINs always succeed; only the newest `closed_won` per VIN stays active.
+
+> **VIN rule lesson:** never enforce one-active-per-VIN with a per-row BEFORE trigger that mutates sibling rows or a partial UNIQUE index — both break multi-row bulk inserts. Use the statement-level reconcile (091).
 - `089_compliance_transfer_records_view.sql` — `v_compliance_transfer_records` view: real transfers UNION invisible `refresh` dedup attempts as synthetic rows, so compliance counts/exports reconcile 1:1 with VICIDIAL. `GET /compliance/transfers` reads it by default (falls back to `transfers` if the view is missing)
 
 ### Customer / policy data model (085–088)
