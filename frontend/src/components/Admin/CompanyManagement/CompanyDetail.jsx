@@ -621,7 +621,15 @@ const MembersPanel = ({ companyId }) => {
   };
 
   const handleSaveUser = async (formData) => {
-    await client.put(`users/${editUser.id}`, formData);
+    // Password is NOT handled by PUT /users/:id (it only updates name/role) — it
+    // must go to the dedicated endpoint that calls Supabase auth.admin
+    // updateUserById. Sending it in the profile body silently dropped it, so the
+    // new password never took effect. Mirror the useUsers hook: split them.
+    const { password, ...profile } = formData;
+    await client.put(`users/${editUser.id}`, profile);
+    if (password && String(password).trim()) {
+      await client.put(`users/${editUser.id}/password`, { password: String(password).trim() });
+    }
     load();
   };
 
