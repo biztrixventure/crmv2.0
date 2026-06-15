@@ -945,7 +945,10 @@ router.put(
     const isCreator  = existing.created_by === userId || existing.closer_id === userId;
     const isManager  = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
-    if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+    // compliance_manager isn't in the isManager list above, so include the
+    // isCompliance flag here — otherwise a compliance user editing a sale they
+    // didn't create is wrongly 403'd before the compliance-specific paths below.
+    if (!isCreator && !isManager && !isCompliance) return res.status(403).json({ error: 'Permission denied' });
 
     // Company scope: managers can only edit sales in their own company (compliance sees all)
     if (isManager && !isCompliance && existing.company_id !== req.user.company_id) {
