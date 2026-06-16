@@ -1,9 +1,27 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   LayoutTemplate, AlertTriangle, Eye, EyeOff, ChevronUp, ChevronDown,
   Info, Sparkles, ChevronRight, Layers, Pencil, RotateCcw, GripVertical, MoveRight,
 } from 'lucide-react';
 import { clearDrawerLayoutCache } from '../../../hooks/useDrawerLayout';
+import { useFormFields } from '../../../hooks/useFormFields';
+
+// Form-data keys that map to core (column-backed) drawer fields, so they must NOT
+// be listed again as dynamic "additional" fields. Mirrors SaleDetailDrawer's
+// SKIP_KEYS + the special sale_* field types that map to columns.
+const SKIP_FORM_KEYS = new Set([
+  'customer_name', 'customer_phone', 'customer_email', 'customer_address',
+  'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
+  'CarYear', 'CarMake', 'CarModel', 'CarMiles', 'CarVin', 'SaleDisposition',
+  'manual_entry_by', 'cli_number', 'transfer_date', 'last_redial_at', 'state_abbr',
+]);
+const SPECIAL_FIELD_TYPES = new Set([
+  'sale_plan', 'sale_fronter', 'sale_date', 'sale_status', 'sale_disposition',
+  'sale_down_payment', 'sale_monthly_payment', 'sale_payment_due_note',
+  'sale_reference_no', 'sale_client',
+]);
+// The catch-all section per drawer where un-placed dynamic form fields live.
+const DYNAMIC_SECTION = { sale: 'additional', transfer: 'lead_info' };
 
 // ── Drawer types + roles the SuperAdmin can configure. ─────────────────────
 const DRAWER_TYPES = [
@@ -288,9 +306,39 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
   const [expanded,   setExpanded]   = useState({});       // sectionId -> bool
   const [dragField,  setDragField]  = useState(null);     // { sectionId, fieldId, label }
 
+  // Live form-builder fields → drive the dynamic section's catalog, so a field
+  // removed in Form Builder disappears from the drawer setting too.
+  const { fields: formFields, fetchFields } = useFormFields();
+  useEffect(() => { fetchFields(); }, [fetchFields]);
+
   const key      = `drawer.layout.${drawerType}.${role}`;
-  const catalog  = SECTION_CATALOG[drawerType] || [];
   const accent   = ROLES.find(r => r.key === role)?.accent || '#6366f1';
+
+  // Dynamic (form-builder) fields that aren't core/column-mapped — these belong
+  // to the catch-all section by default and can be dragged into any section.
+  const dynamicFieldDefs = useMemo(() => (formFields || [])
+    .filter(f => f && f.name && !SKIP_FORM_KEYS.has(f.name) && !SPECIAL_FIELD_TYPES.has(f.field_type))
+    .map(f => ({ id: f.name, label: f.label || f.name, desc: 'Form-builder field' })),
+    [formFields]);
+
+  // Catalog with the dynamic section's (additional / lead_info) fields filled
+  // live from the form config.
+  const catalog = useMemo(() => {
+    const base  = SECTION_CATALOG[drawerType] || [];
+    const dynId = DYNAMIC_SECTION[drawerType];
+    if (!dynId) return base;
+    return base.map(sec => sec.id === dynId ? { ...sec, fields: dynamicFieldDefs } : sec);
+  }, [drawerType, dynamicFieldDefs]);
+
+  // All valid field ids (core + current dynamic). Stored fields referencing a
+  // now-deleted form field get pruned. Empty until form fields load — we guard
+  // pruning on that so nothing is dropped prematurely.
+  const allValidFieldIds = useMemo(() => {
+    const s = new Set();
+    (SECTION_CATALOG[drawerType] || []).forEach(sec => (sec.fields || []).forEach(f => s.add(f.id)));
+    dynamicFieldDefs.forEach(d => s.add(d.id));
+    return s;
+  }, [drawerType, dynamicFieldDefs]);
 
   // Cross-section field drag is wired for the Sale drawer (its renderer is fully
   // field-id driven). audit / compliance_actions can't host individual fields,
@@ -310,15 +358,22 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
           fields: (c.fields || []).map((f, j) => ({ id: f.id, label: f.label, visible: true, order: j + 1 })),
         }));
       const merged = [...stored, ...extraSections];
-      // Merge fields per section the same way
+      // A field may have been dragged to a different section — so a catalog field
+      // is auto-added to its default section ONLY when it isn't already placed in
+      // ANY section. (Without this, moving a field re-adds a duplicate to its
+      // original section on the next render.)
+      const placedEverywhere = new Set(merged.flatMap(s => (s.fields || []).map(f => f.id)));
+      const fieldsLoaded = !!(formFields && formFields.length);
       return merged.map(s => {
         const cat = catalog.find(c => c.id === s.id);
         const catFields = cat?.fields || [];
-        if (catFields.length === 0) return { ...s, fields: s.fields || [] };
-        const knownF = new Set((s.fields || []).map(x => x.id));
-        const extraFields = catFields.filter(c => !knownF.has(c.id))
-          .map((c, i) => ({ id: c.id, label: c.label, visible: true, order: (s.fields?.length || 0) + i + 1 }));
-        return { ...s, fields: [...(s.fields || []), ...extraFields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) };
+        // Prune fields whose form-builder source was deleted (only once form
+        // fields have loaded, so nothing is dropped prematurely).
+        let curFields = s.fields || [];
+        if (fieldsLoaded) curFields = curFields.filter(f => allValidFieldIds.has(f.id));
+        const extraFields = catFields.filter(c => !placedEverywhere.has(c.id))
+          .map((c, i) => ({ id: c.id, label: c.label, visible: true, order: (curFields.length || 0) + i + 1 }));
+        return { ...s, fields: [...curFields, ...extraFields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) };
       }).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     }
     // No config yet — build from catalog (all visible).
@@ -326,7 +381,7 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
       id: c.id, label: c.label, visible: true, order: i + 1,
       fields: (c.fields || []).map((f, j) => ({ id: f.id, label: f.label, visible: true, order: j + 1 })),
     }));
-  }, [config, key, catalog]);
+  }, [config, key, catalog, formFields, allValidFieldIds]);
 
   const persist = (next) => {
     const renumbered = next.map((s, i) => ({

@@ -286,23 +286,33 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
             Unknown sections (e.g. 'compliance_actions' for compliance role) are
             tolerated; renderer map below decides what to render. */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {sections.filter(s => s.visible).map(s => {
-            // Audit has its own custom block (rendered below); compliance_actions
-            // is reserved. Everything else is field-driven.
-            if (s.id === 'audit' || s.id === 'compliance_actions') return null;
-            // Render this section's fields (config-placed or catalog default),
-            // each via the id-keyed FIELD registry — so a field shows up in
-            // whatever section the SuperAdmin dragged it into.
-            const rows = sectionFieldIds(s).map(fid => FIELD[fid]).filter(Boolean);
-            // 'additional' also lists extra form_data fields not in any section.
-            if (s.id === 'additional') {
-              extraFields.forEach(([k, v]) => rows.push(
-                <Row key={`extra:${k}`} label={k.replace(/_/g, ' ')} value={displayFieldValue(k, v)} />
-              ));
-            }
-            if (rows.length === 0) return null;
-            return <Section key={s.id} title={s.label || s.id}>{rows}</Section>;
-          })}
+          {(() => {
+            // Every field id explicitly placed in some section (core + dynamic).
+            const placed = new Set(sections.flatMap(sec => (sec.fields || []).map(f => f.id)));
+            // Render any field id: a core field via the FIELD registry, or a
+            // dynamic form-config field by reading its form_data value — so a
+            // SuperAdmin can drag a form-builder field into any drawer section.
+            const renderField = (fid) => {
+              if (FIELD[fid] !== undefined) return FIELD[fid];        // core (Row or null)
+              const v = fd[fid];
+              return (v != null && String(v).trim() !== '' && typeof v !== 'object')
+                ? <Row key={fid} label={fid.replace(/_/g, ' ')} value={displayFieldValue(fid, v)} /> : null;
+            };
+            return sections.filter(s => s.visible).map(s => {
+              // Audit has its own custom block (below); compliance_actions reserved.
+              if (s.id === 'audit' || s.id === 'compliance_actions') return null;
+              const rows = sectionFieldIds(s).map(renderField).filter(Boolean);
+              // 'additional' also catches any form-config field not placed elsewhere
+              // (so newly-added form fields surface automatically).
+              if (s.id === 'additional') {
+                extraFields.filter(([k]) => !placed.has(k)).forEach(([k, v]) => rows.push(
+                  <Row key={`extra:${k}`} label={k.replace(/_/g, ' ')} value={displayFieldValue(k, v)} />
+                ));
+              }
+              if (rows.length === 0) return null;
+              return <Section key={s.id} title={s.label || s.id}>{rows}</Section>;
+            });
+          })()}
 
           {/* Lifetime customer banner (G17 / G27). Visible only when the
               customer touched more than one company across the system —
