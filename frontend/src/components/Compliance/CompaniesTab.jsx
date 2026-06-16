@@ -87,33 +87,42 @@ const CompanyCard = ({ company: c, onNavigate }) => (
       </div>
     </div>
 
-    {/* Operational counts — Users / Transfers / Pending. */}
+    {/* Operational counts — Users / Transfers / Pending. Click a number to
+        drill into the matching records. */}
     <div className="grid grid-cols-3 gap-2 mb-2.5">
       {[
         { label: 'Users',     val: c.user_count },
-        { label: 'Transfers', val: c.transfer_count ?? 0 },
-        { label: 'Pending',   val: c.pending_review_count, color: c.pending_review_count > 0 ? '#d97706' : undefined },
-      ].map(s => (
-        <div key={s.label} className="rounded-lg px-2 py-1.5 text-center"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <p className="text-base font-bold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
-          <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
-        </div>
-      ))}
+        { label: 'Transfers', val: c.transfer_count ?? 0,   nav: ['transfers', { company: c.id }] },
+        { label: 'Pending',   val: c.pending_review_count,  color: c.pending_review_count > 0 ? '#d97706' : undefined, nav: ['sales', { company: c.id, status: 'pending_review' }] },
+      ].map(s => {
+        const Tag = s.nav ? 'button' : 'div';
+        return (
+          <Tag key={s.label} type={s.nav ? 'button' : undefined}
+            onClick={s.nav ? () => onNavigate(s.nav[0], s.nav[1]) : undefined}
+            title={s.nav ? `View ${s.label.toLowerCase()}` : undefined}
+            className={`rounded-lg px-2 py-1.5 text-center w-full transition-colors ${s.nav ? 'cursor-pointer hover:shadow-sm' : ''}`}
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: `1px solid ${s.nav ? 'var(--color-border)' : 'var(--color-border)'}` }}>
+            <p className="text-base font-bold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
+          </Tag>
+        );
+      })}
     </div>
 
     {/* Sales status capsules — Total / Approved / Cancelled, accurate filtered
         counts (no gross), styled like the other status capsules. */}
     <div className="flex items-center gap-1.5 flex-wrap mb-4">
       {[
-        { label: 'Total Sales',     val: c.sale_count ?? 0,      bg: '#dbeafe', fg: '#1e40af' },
-        { label: 'Approved Sales',  val: c.completed_count ?? 0, bg: '#dcfce7', fg: '#166534' },
-        { label: 'Cancelled Sales', val: c.cancelled_count ?? 0, bg: '#fee2e2', fg: '#991b1b' },
+        { label: 'Total Sales',     val: c.sale_count ?? 0,      bg: '#dbeafe', fg: '#1e40af', nav: ['sales', { company: c.id }] },
+        { label: 'Approved Sales',  val: c.completed_count ?? 0, bg: '#dcfce7', fg: '#166534', nav: ['sales', { company: c.id, status: 'closed_won' }] },
+        { label: 'Cancelled Sales', val: c.cancelled_count ?? 0, bg: '#fee2e2', fg: '#991b1b', nav: ['sales', { company: c.id, status: 'cancelled' }] },
       ].map(s => (
-        <span key={s.label} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+        <button key={s.label} type="button" onClick={() => onNavigate(s.nav[0], s.nav[1])}
+          title={`View ${s.label.toLowerCase()}`}
+          className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full cursor-pointer transition-transform hover:scale-105"
           style={{ backgroundColor: s.bg, color: s.fg }}>
           {s.label} <span className="font-bold">{s.val}</span>
-        </span>
+        </button>
       ))}
     </div>
 

@@ -192,9 +192,10 @@ const ComplianceShell = () => {
         )}
         {activeTab === 'sales' && (
           <SalesTab
-            key={tabInit.company || 'all'}
+            key={`${tabInit.company || 'all'}:${tabInit.status || ''}`}
             companyList={companyList}
             initCompany={tabInit.company || ''}
+            initStatus={tabInit.status || ''}
           />
         )}
         {/* Disposition tab content — same SalesTab, scoped to one disposition. */}
@@ -209,9 +210,10 @@ const ComplianceShell = () => {
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab
-            key={tabInit.company || 'all'}
+            key={`${tabInit.company || 'all'}:${tabInit.status || ''}`}
             companyList={companyList}
             initCompany={tabInit.company || ''}
+            initStatus={tabInit.status || ''}
           />
         )}
         {activeTab === 'callbacks' && (

@@ -95,15 +95,31 @@ router.get('/companies', asyncHandler(async (req, res) => {
   // One sales scan carries every per-company sales metric the Overview card
   // shows — total, pending, completed (approved), cancelled, and gross value
   // (sum of down payments). Cheaper than separate count round-trips.
-  const [usersRes, salesRes, transfersRes] = await Promise.all([
-    supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids),
-    bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids)),
-    byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids)),
+  // PostgREST caps a single select at 1000 rows. These KPIs count rows in JS, so
+  // a naive select silently truncated to the first 1000 — for "All Time" (10k+
+  // transfers) that made high-volume companies undercount or show 0. Page through
+  // every row instead.
+  const fetchAll = async (build) => {
+    const PAGE = 1000;
+    let all = [], from = 0;
+    for (;;) {
+      const { data, error } = await build().range(from, from + PAGE - 1);
+      if (error || !data) break;
+      all = all.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  };
+  const [usersData, salesData, transfersData] = await Promise.all([
+    fetchAll(() => supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids)),
+    fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids))),
+    fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids))),
   ]);
 
   const userCount = {}, saleCount = {}, pendingCount = {}, completedCount = {}, cancelledCount = {}, grossValue = {}, transferCount = {};
-  (usersRes.data || []).forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
-  (salesRes.data || []).forEach(s => {
+  usersData.forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
+  salesData.forEach(s => {
     const c = s.company_id;
     saleCount[c] = (saleCount[c] || 0) + 1;
     if (s.status === 'pending_review')                          pendingCount[c]   = (pendingCount[c]   || 0) + 1;
@@ -111,7 +127,7 @@ router.get('/companies', asyncHandler(async (req, res) => {
     if (s.status === 'cancelled' || s.status === 'compliance_cancelled') cancelledCount[c] = (cancelledCount[c] || 0) + 1;
     grossValue[c] = (grossValue[c] || 0) + (Number(s.down_payment) || 0);
   });
-  (transfersRes.data || []).forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
+  transfersData.forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
 
   const enriched = (companies || []).map(c => ({
     ...c,

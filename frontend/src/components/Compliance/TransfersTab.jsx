@@ -28,7 +28,7 @@ import {
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from './shared';
 
-const TransfersTab = ({ companyList, initCompany = '' }) => {
+const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   const { user } = useAuth();
   const isSuper      = user?.role === 'superadmin';
   const isCompliance = user?.role === 'compliance_manager';
@@ -49,7 +49,7 @@ const TransfersTab = ({ companyList, initCompany = '' }) => {
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(false);
   const [page, setPage]           = useState(1);
-  const [status, setStatus]       = useState('');
+  const [status, setStatus]       = useState(initStatus);
   const [company, setCompany]     = useState(initCompany);
   // Free-text search box (parity with SalesTab + CallbacksTab). Server-side
   // search hits customer name + phone + reference fields inside form_data,

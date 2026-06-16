@@ -22,7 +22,7 @@ import {
   Overlay, ModalBox, ModalHeader,
 } from './shared';
 
-const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate = false }) => {
+const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
   const { user, isReadOnly } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
   // Workflow drives the dropdowns, labels, and badge colors. labelOf/badgeOf
@@ -42,7 +42,7 @@ const SalesTab = ({ companyList, initCompany = '', disposition = '', isPostDate 
   const [loading, setLoading]   = useState(false);
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
-  const [status, setStatus]     = useState('');
+  const [status, setStatus]     = useState(initStatus);
   const [company, setCompany]   = useState(initCompany);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
