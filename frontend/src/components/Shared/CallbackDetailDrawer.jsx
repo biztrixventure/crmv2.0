@@ -1,5 +1,6 @@
 import { X, Phone, Clock, Globe, StickyNote, Bell, User, AlertCircle } from 'lucide-react';
 import { Badge } from '../UI';
+import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
 const STATUS_BADGE = {
   pending:           'warning',
@@ -13,6 +14,11 @@ const PRIORITY_CONFIG = {
   High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
   Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: '#d97706' },
   Low:    { dot: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb' },
+};
+
+// Section id → icon, so a config-driven section still gets its glyph.
+const SECTION_ICON = {
+  schedule: Clock, customer: User, agent: User, notes: StickyNote, meta: Globe,
 };
 
 const PriorityBadge = ({ priority }) => {
@@ -38,7 +44,7 @@ const Row = ({ label, value }) =>
 const Section = ({ icon: Icon, title, children }) => (
   <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
     <div className="flex items-center gap-2 mb-3">
-      <Icon size={14} style={{ color: 'var(--color-primary-500)' }} />
+      {Icon && <Icon size={14} style={{ color: 'var(--color-primary-500)' }} />}
       <h3 className="text-xs font-bold text-text-secondary uppercase tracking-widest">{title}</h3>
     </div>
     {children}
@@ -46,7 +52,10 @@ const Section = ({ icon: Icon, title, children }) => (
 );
 
 export default function CallbackDetailDrawer({ callback, onClose }) {
+  const { sections } = useDrawerLayout('callback');
   if (!callback) return null;
+
+  const fd = callback.form_data || {};
 
   const scheduledTime = callback.callback_at
     ? new Date(callback.callback_at).toLocaleString(undefined, {
@@ -61,6 +70,50 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
 
   const isOverdue = callback.callback_at && callback.status === 'pending'
     && new Date(callback.callback_at) < new Date();
+
+  // ── Field renderers, keyed by the field ids the SuperAdmin sees in Business
+  // Rules → Drawer Layout. Field-id driven so a dragged field appears in its
+  // new section.
+  const FIELD = {
+    scheduled: <Row key="scheduled" label="Scheduled" value={scheduledTime} />,
+    timezone:  <Row key="timezone"  label="Timezone"  value={callback.user_timezone} />,
+    name:      <Row key="name"      label="Name"      value={callback.customer_name} />,
+    phone:     <Row key="phone"     label="Phone"     value={callback.customer_phone} />,
+    agent:     <Row key="agent"     label="Agent"     value={callback.user_name} />,
+    company:   <Row key="company"   label="Company"   value={callback.company_name} />,
+    created:   <Row key="created"   label="Created"   value={createdTime} />,
+    source:    <Row key="source"    label="Source"    value={callback.source} />,
+    record_id: <Row key="record_id" label="Record ID" value={callback.id} />,
+  };
+
+  const DEFAULT_FIELDS = {
+    schedule: ['scheduled', 'timezone'],
+    customer: ['name', 'phone'],
+    agent:    ['agent', 'company'],
+    meta:     ['created', 'source', 'record_id'],
+  };
+
+  const sectionFields = (s) => {
+    if (Array.isArray(s.fields) && s.fields.length) {
+      return [...s.fields].filter(f => f.visible !== false)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(f => ({ id: f.id, label: f.label }));
+    }
+    return (DEFAULT_FIELDS[s.id] || []).map(id => ({ id }));
+  };
+  const renderField = ({ id, label }) => {
+    if (FIELD[id] !== undefined) return FIELD[id];        // core (Row or null)
+    const v = fd[id];                                     // dynamic form_data field
+    return (v != null && String(v).trim() !== '' && typeof v !== 'object')
+      ? <Row key={id} label={label || id.replace(/_/g, ' ')} value={String(v)} /> : null;
+  };
+
+  const notesBlock = () => (
+    callback.notes ? (
+      <Section key="notes" icon={StickyNote} title="Notes">
+        <p className="text-sm text-text leading-relaxed">{callback.notes}</p>
+      </Section>
+    ) : null
+  );
 
   return (
     <>
@@ -114,39 +167,15 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           )}
         </div>
 
-        {/* Schedule */}
-        <Section icon={Clock} title="Schedule">
-          <Row label="Scheduled"  value={scheduledTime} />
-          <Row label="Timezone"   value={callback.user_timezone} />
-        </Section>
-
-        {/* Customer */}
-        <Section icon={User} title="Customer">
-          <Row label="Name"  value={callback.customer_name} />
-          <Row label="Phone" value={callback.customer_phone} />
-        </Section>
-
-        {/* Agent */}
-        {(callback.user_name || callback.company_name) && (
-          <Section icon={User} title="Agent">
-            <Row label="Agent"   value={callback.user_name} />
-            <Row label="Company" value={callback.company_name} />
-          </Section>
-        )}
-
-        {/* Notes */}
-        {callback.notes && (
-          <Section icon={StickyNote} title="Notes">
-            <p className="text-sm text-text leading-relaxed">{callback.notes}</p>
-          </Section>
-        )}
-
-        {/* Meta */}
-        <Section icon={Globe} title="Meta">
-          <Row label="Created"   value={createdTime} />
-          <Row label="Source"    value={callback.source} />
-          <Row label="Record ID" value={callback.id} />
-        </Section>
+        {/* Body — section order + visibility + field placement from
+            useDrawerLayout (SuperAdmin configures per role). Field-id driven so
+            a dragged field appears in its new section. */}
+        {sections.filter(s => s.visible).map(s => {
+          if (s.id === 'notes') return notesBlock();
+          const rows = sectionFields(s).map(renderField).filter(Boolean);
+          if (rows.length === 0) return null;
+          return <Section key={s.id} icon={SECTION_ICON[s.id]} title={s.label || s.id}>{rows}</Section>;
+        })}
       </div>
     </>
   );

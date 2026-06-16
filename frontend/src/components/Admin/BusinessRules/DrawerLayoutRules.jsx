@@ -120,10 +120,24 @@ const SECTION_CATALOG = {
     { id: 'audit',        label: 'Audit Trail',  desc: 'Edit history + audit log' },
   ],
   callback: [
-    { id: 'schedule', label: 'Schedule', desc: 'Callback time + priority + customer timezone' },
-    { id: 'customer', label: 'Customer', desc: 'Customer name + phone' },
-    { id: 'notes',    label: 'Notes',    desc: 'Closer notes' },
-    { id: 'history',  label: 'History',  desc: 'Reschedule + status-change audit log' },
+    { id: 'schedule', label: 'Schedule', desc: 'Callback time + customer timezone', fields: [
+      { id: 'scheduled', label: 'Scheduled', desc: 'Scheduled callback time' },
+      { id: 'timezone',  label: 'Timezone',  desc: 'Customer timezone' },
+    ]},
+    { id: 'customer', label: 'Customer', desc: 'Customer name + phone', fields: [
+      { id: 'name',  label: 'Name',  desc: 'Customer name' },
+      { id: 'phone', label: 'Phone', desc: 'Customer phone' },
+    ]},
+    { id: 'agent',    label: 'Agent',    desc: 'Assigned agent + company', fields: [
+      { id: 'agent',   label: 'Agent',   desc: 'Agent who owns the callback' },
+      { id: 'company', label: 'Company', desc: 'Agent company' },
+    ]},
+    { id: 'notes',    label: 'Notes',    desc: 'Closer notes. Section-level toggle.' },
+    { id: 'meta',     label: 'Meta',     desc: 'Created / source / record id', fields: [
+      { id: 'created',   label: 'Created',   desc: 'Row insertion time' },
+      { id: 'source',    label: 'Source',    desc: 'Origin of the callback' },
+      { id: 'record_id', label: 'Record ID', desc: 'Internal id' },
+    ]},
   ],
 };
 
@@ -340,11 +354,17 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
     return s;
   }, [drawerType, dynamicFieldDefs]);
 
-  // Cross-section field drag is wired for the Sale drawer (its renderer is fully
-  // field-id driven). audit / compliance_actions can't host individual fields,
-  // so they're never drop targets.
-  const dndEnabled = drawerType === 'sale';
-  const DROP_DENY  = ['audit', 'compliance_actions'];
+  // Cross-section field drag is wired for every drawer — each renderer is fully
+  // field-id driven (Sale / Transfer / Callback). Special blocks (audit, the
+  // disposition timeline, the notes paragraph, compliance buttons) can't host
+  // individual fields, so they're never drop targets.
+  const dndEnabled = true;
+  const DROP_DENY_BY_TYPE = {
+    sale:     ['audit', 'compliance_actions'],
+    transfer: ['audit', 'dispositions'],
+    callback: ['notes'],
+  };
+  const DROP_DENY = DROP_DENY_BY_TYPE[drawerType] || [];
 
   // Resolve current sections, merging with the catalog so new sections appear
   // at the bottom hidden + new fields appear at the bottom hidden too.
@@ -487,7 +507,7 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
           </span>
         </h2>
         <p className="text-sm text-text-secondary max-w-2xl leading-relaxed">
-          Tune what each role sees inside the Sale / Transfer / Callback drawers — at the section AND field level. Hiding a section here hides it everywhere; expanding a section lets you hide individual rows like Down Payment or VIN. On the <strong>Sale</strong> drawer you can also <strong>drag a field by its ⠿ handle and drop it into another section</strong> to re-home it.
+          Tune what each role sees inside the Sale / Transfer / Callback drawers — at the section AND field level. Hiding a section here hides it everywhere; expanding a section lets you hide individual rows like Down Payment or VIN. On <strong>any</strong> drawer you can also <strong>drag a field by its ⠿ handle and drop it into another section</strong> to re-home it.
         </p>
       </div>
 

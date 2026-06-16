@@ -21,18 +21,20 @@ const FALLBACK = {
     { id: 'compliance_actions', label: 'Compliance Actions', visible: false, order: 9 },
   ],
   transfer: [
-    { id: 'customer',     label: 'Customer',     visible: true, order: 1 },
-    { id: 'vehicle',      label: 'Vehicle',      visible: true, order: 2 },
-    { id: 'lead_info',    label: 'Lead Info',    visible: true, order: 3 },
-    { id: 'people',       label: 'People',       visible: true, order: 4 },
-    { id: 'dispositions', label: 'Dispositions', visible: true, order: 5 },
-    { id: 'timeline',     label: 'Timeline',     visible: true, order: 6 },
+    { id: 'customer',     label: 'Customer',        visible: true, order: 1 },
+    { id: 'vehicle',      label: 'Vehicle',         visible: true, order: 2 },
+    { id: 'lead_info',    label: 'Additional Info', visible: true, order: 3 },
+    { id: 'people',       label: 'People',          visible: true, order: 4 },
+    { id: 'dispositions', label: 'Dispositions',    visible: true, order: 5 },
+    { id: 'timeline',     label: 'Timeline',        visible: true, order: 6 },
+    { id: 'audit',        label: 'Audit Trail',     visible: true, order: 7 },
   ],
   callback: [
     { id: 'schedule', label: 'Schedule', visible: true, order: 1 },
     { id: 'customer', label: 'Customer', visible: true, order: 2 },
-    { id: 'notes',    label: 'Notes',    visible: true, order: 3 },
-    { id: 'history',  label: 'History',  visible: true, order: 4 },
+    { id: 'agent',    label: 'Agent',    visible: true, order: 3 },
+    { id: 'notes',    label: 'Notes',    visible: true, order: 4 },
+    { id: 'meta',     label: 'Meta',     visible: true, order: 5 },
   ],
 };
 

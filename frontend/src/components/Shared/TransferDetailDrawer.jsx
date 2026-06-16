@@ -3,6 +3,7 @@ import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, Messag
 import { Badge } from '../UI';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
+import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 import client from '../../api/client';
 
 const SALE_STATUS_CONFIG = {
@@ -73,6 +74,7 @@ const ROLE_LABELS = {
 
 export default function TransferDetailDrawer({ transfer, onClose }) {
   const { hasPermission } = useAuth();
+  const { sections } = useDrawerLayout('transfer');
   const [dispoHistory, setDispoHistory] = useState([]);
   const [histLoading,  setHistLoading]  = useState(false);
 
@@ -111,6 +113,160 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
     ? fd.manual_entry_by : null;
 
   const hist = Array.isArray(transfer.edit_history) ? transfer.edit_history : [];
+
+  const closerVal = transfer.closer
+    ? `${transfer.closer.first_name || ''} ${transfer.closer.last_name || ''}`.trim()
+    : transfer.assigned_closer_name || (transfer.assigned_to ? '(assigned)' : 'Unassigned');
+
+  // ── Field renderers, keyed by the field ids the SuperAdmin sees in Business
+  // Rules → Drawer Layout. Rendering is keyed by field id (NOT a hardcoded
+  // section), so a field appears in whatever section it was placed/dragged into.
+  const FIELD = {
+    name:     <Row key="name"    label="Name"    value={name} />,
+    phone:    <Row key="phone"   label="Phone"   value={phone} />,
+    phone_2:  phone2 ? <Row key="phone_2" label="Phone 2" value={phone2} /> : null,
+    email:    email   ? <Row key="email"   label="Email"   value={email} /> : null,
+    address:  address ? <Row key="address" label="Address" value={address} /> : null,
+    year:     fd.CarYear  ? <Row key="year"  label="Year"  value={fd.CarYear} /> : null,
+    make:     fd.CarMake  ? <Row key="make"  label="Make"  value={fd.CarMake} /> : null,
+    model:    fd.CarModel ? <Row key="model" label="Model" value={fd.CarModel} /> : null,
+    miles:    fd.CarMiles ? <Row key="miles" label="Miles" value={Number(fd.CarMiles).toLocaleString()} /> : null,
+    vin:      fd.CarVin   ? <Row key="vin"   label="VIN"   value={fd.CarVin} mono /> : null,
+    fronter:  transfer.fronter_name ? <Row key="fronter" label="Fronter" value={transfer.fronter_name} /> : null,
+    closer:   <Row key="closer" label="Closer" value={closerVal} />,
+    rejections: transfer.rejection_count > 0 ? <Row key="rejections" label="Rejections" value={String(transfer.rejection_count)} /> : null,
+    created:  <Row key="created" label="Created" value={new Date(transfer.created_at).toLocaleString()} />,
+    updated:  (transfer.updated_at && transfer.updated_at !== transfer.created_at) ? <Row key="updated" label="Updated" value={new Date(transfer.updated_at).toLocaleString()} /> : null,
+    rejected: transfer.rejected_at ? <Row key="rejected" label="Rejected at" value={new Date(transfer.rejected_at).toLocaleString()} /> : null,
+  };
+
+  const DEFAULT_FIELDS = {
+    customer: ['name', 'phone', 'phone_2', 'email', 'address'],
+    vehicle:  ['year', 'make', 'model', 'miles', 'vin'],
+    people:   ['fronter', 'closer', 'rejections'],
+    timeline: ['created', 'updated', 'rejected'],
+  };
+
+  // Ordered, visible {id,label} for a section: configured fields[] or catalog default.
+  const sectionFields = (s) => {
+    if (Array.isArray(s.fields) && s.fields.length) {
+      return [...s.fields].filter(f => f.visible !== false)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(f => ({ id: f.id, label: f.label }));
+    }
+    return (DEFAULT_FIELDS[s.id] || []).map(id => ({ id }));
+  };
+  const renderField = ({ id, label }) => {
+    if (FIELD[id] !== undefined) return FIELD[id];        // core (Row or null)
+    const v = fd[id];                                     // dynamic form_data field
+    return (v != null && String(v).trim() !== '' && typeof v !== 'object')
+      ? <Row key={id} label={label || id.replace(/_/g, ' ')} value={renderVal(v)} /> : null;
+  };
+  const placed = new Set(sections.flatMap(sec => (sec.fields || []).map(f => f.id)));
+
+  // ── Special (non-field) blocks, rendered by section id. Their visibility is
+  // still controlled by the layout config.
+  const saleBlock = () => {
+    const cfg = SALE_STATUS_CONFIG[transfer.sale_status] || { label: transfer.sale_status, color: '#6b7280', bg: '#f3f4f6', icon: Clock };
+    const Icon = cfg.icon;
+    return (
+      <div className="mb-5" key="sale">
+        <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-primary-600)' }}>
+          <DollarSign size={11} className="inline mr-1" />Sale
+        </p>
+        <div className="rounded-xl px-4 py-3" style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.color}40` }}>
+          <div className="flex items-center gap-2 mb-1">
+            <Icon size={14} style={{ color: cfg.color }} />
+            <span className="text-sm font-bold" style={{ color: cfg.color }}>{cfg.label}</span>
+            {transfer.sale_reference_no && (
+              <span className="text-xs font-mono ml-auto" style={{ color: cfg.color }}>{transfer.sale_reference_no}</span>
+            )}
+          </div>
+          {transfer.sale_status === 'needs_revision' && transfer.sale_compliance_note && (
+            <div className="mt-2 flex items-start gap-1.5">
+              <AlertTriangle size={12} style={{ color: '#dc2626', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-xs" style={{ color: '#dc2626' }}>{transfer.sale_compliance_note}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const dispositionsBlock = () => (
+    <div className="mb-5" key="dispositions">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Activity size={11} style={{ color: 'var(--color-primary-600)' }} />
+        <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary-600)' }}>Disposition History</p>
+      </div>
+      {histLoading ? (
+        <div className="space-y-2">
+          {[1, 2].map(i => (
+            <div key={i} className="h-12 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-bg-secondary)' }} />
+          ))}
+        </div>
+      ) : dispoHistory.length === 0 ? (
+        <div className="px-4 py-3 rounded-xl flex items-center gap-2"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#9ca3af' }} />
+          <span className="text-xs font-semibold" style={{ color: '#6b7280' }}>In Progress</span>
+          <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
+        </div>
+      ) : (
+        <div className="relative">
+          <div className="absolute left-[7px] top-3 bottom-3 w-px" style={{ backgroundColor: 'var(--color-border)' }} />
+          <div className="space-y-2">
+            {dispoHistory.map((d, i) => (
+              <div key={d.id || i} className="flex gap-3">
+                <div className="w-3.5 h-3.5 rounded-full flex-shrink-0 mt-1 relative z-10 ring-2"
+                  style={{ backgroundColor: d.color || '#6b7280', ringColor: 'var(--color-surface)' }} />
+                <div className="flex-1 pb-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{d.disposition_name}</span>
+                    {d.setter_role && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                        {ROLE_LABELS[d.setter_role] || d.setter_role}
+                      </span>
+                    )}
+                    <span className="text-[10px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  {d.setter_name && (
+                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>By {d.setter_name}</p>
+                  )}
+                  {d.note && (
+                    <p className="text-[10px] mt-1 px-2 py-1 rounded-lg italic"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                      "{d.note}"
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const auditBlock = () => (
+    <div className="mb-5" key="audit">
+      <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-primary-600)' }}>Edit History</p>
+      <div className="space-y-2">
+        {hist.map((h, i) => (
+          <div key={i} className="p-3 rounded-xl text-xs"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <div className="flex justify-between text-text-tertiary mb-1">
+              <span className="font-semibold capitalize">{h.action || 'Edit'}</span>
+              <span>{new Date(h.edited_at).toLocaleString()}</span>
+            </div>
+            {h.reason && <p className="text-text italic">"{h.reason}"</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -190,182 +346,30 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           </div>
         )}
 
-        {/* Scrollable body */}
+        {/* Scrollable body — section order + visibility + field placement come
+            from useDrawerLayout (SuperAdmin configures per role in Business
+            Rules → Drawer Layout). Rendering is field-id driven, so a field
+            dragged into another section appears there. */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          {sections.filter(s => s.visible).map(s => {
+            // Special (non-field) blocks render by section id.
+            if (s.id === 'dispositions') return dispositionsBlock();
+            if (s.id === 'audit')        return hist.length > 0 ? auditBlock() : null;
 
-          {/* Customer */}
-          <Section title="Customer">
-            <Row label="Name"    value={name} />
-            <Row label="Phone"   value={phone} />
-            {phone2  && <Row label="Phone 2" value={phone2} />}
-            {email   && <Row label="Email"   value={email} />}
-            {address && <Row label="Address" value={address} />}
-            {fd.BirthDate && <Row label="Birth Date" value={fd.BirthDate} />}
-            {fd.Gender    && <Row label="Gender"     value={fd.Gender} />}
-          </Section>
+            const rows = sectionFields(s).map(renderField).filter(Boolean);
+            // 'lead_info' is the catch-all for any form_data field not placed
+            // elsewhere (so newly-added form fields surface automatically).
+            if (s.id === 'lead_info') {
+              extraFields.filter(([k]) => !placed.has(k)).forEach(([k, v]) => rows.push(
+                <Row key={`extra:${k}`} label={k.replace(/_/g, ' ')} value={renderVal(v)} />
+              ));
+            }
+            if (rows.length === 0) return null;
+            return <Section key={s.id} title={s.label || s.id}>{rows}</Section>;
+          })}
 
-          {/* Vehicle (if present) */}
-          {(fd.CarYear || fd.CarMake || fd.CarModel) && (
-            <Section title="Vehicle">
-              {fd.CarYear  && <Row label="Year"  value={fd.CarYear} />}
-              {fd.CarMake  && <Row label="Make"  value={fd.CarMake} />}
-              {fd.CarModel && <Row label="Model" value={fd.CarModel} />}
-              {fd.CarMiles && <Row label="Miles" value={Number(fd.CarMiles).toLocaleString()} />}
-              {fd.CarVin   && <Row label="VIN"   value={fd.CarVin} mono />}
-            </Section>
-          )}
-
-          {/* Extra form fields — only primitive values land here, objects
-              are excluded by the filter above so no [object Object]. */}
-          {extraFields.length > 0 && (
-            <Section title="Additional Info">
-              {extraFields.map(([k, v]) => (
-                <Row key={k} label={k.replace(/_/g, ' ')} value={renderVal(v)} />
-              ))}
-            </Section>
-          )}
-
-          {/* Sale Status — shown when a sale is linked to this transfer */}
-          {transfer.sale_status && (() => {
-            const cfg = SALE_STATUS_CONFIG[transfer.sale_status] || { label: transfer.sale_status, color: '#6b7280', bg: '#f3f4f6', icon: Clock };
-            const Icon = cfg.icon;
-            return (
-              <div className="mb-5">
-                <p className="text-xs font-bold uppercase tracking-widest mb-2"
-                  style={{ color: 'var(--color-primary-600)' }}>
-                  <DollarSign size={11} className="inline mr-1" />Sale
-                </p>
-                <div className="rounded-xl px-4 py-3"
-                  style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.color}40` }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon size={14} style={{ color: cfg.color }} />
-                    <span className="text-sm font-bold" style={{ color: cfg.color }}>{cfg.label}</span>
-                    {transfer.sale_reference_no && (
-                      <span className="text-xs font-mono ml-auto" style={{ color: cfg.color }}>
-                        {transfer.sale_reference_no}
-                      </span>
-                    )}
-                  </div>
-                  {transfer.sale_status === 'needs_revision' && transfer.sale_compliance_note && (
-                    <div className="mt-2 flex items-start gap-1.5">
-                      <AlertTriangle size={12} style={{ color: '#dc2626', marginTop: 1, flexShrink: 0 }} />
-                      <p className="text-xs" style={{ color: '#dc2626' }}>{transfer.sale_compliance_note}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* People */}
-          <Section title="People">
-            <Row label="Closer" value={
-              transfer.closer
-                ? `${transfer.closer.first_name || ''} ${transfer.closer.last_name || ''}`.trim()
-                : transfer.assigned_closer_name
-                  || (transfer.assigned_to ? '(assigned)' : 'Unassigned')
-            } />
-            {transfer.fronter_name && <Row label="Fronter" value={transfer.fronter_name} />}
-            {transfer.rejection_count > 0 && (
-              <Row label="Rejections" value={String(transfer.rejection_count)} />
-            )}
-          </Section>
-
-          {/* Timeline */}
-          <Section title="Timeline">
-            <Row label="Created"  value={new Date(transfer.created_at).toLocaleString()} />
-            {transfer.updated_at && transfer.updated_at !== transfer.created_at && (
-              <Row label="Updated" value={new Date(transfer.updated_at).toLocaleString()} />
-            )}
-            {transfer.rejected_at && (
-              <Row label="Rejected at" value={new Date(transfer.rejected_at).toLocaleString()} />
-            )}
-          </Section>
-
-          {/* Disposition History */}
-          <div className="mb-5">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Activity size={11} style={{ color: 'var(--color-primary-600)' }} />
-              <p className="text-xs font-bold uppercase tracking-widest"
-                style={{ color: 'var(--color-primary-600)' }}>Disposition History</p>
-            </div>
-            {histLoading ? (
-              <div className="space-y-2">
-                {[1,2].map(i => (
-                  <div key={i} className="h-12 rounded-xl animate-pulse"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)' }} />
-                ))}
-              </div>
-            ) : dispoHistory.length === 0 ? (
-              <div className="px-4 py-3 rounded-xl flex items-center gap-2"
-                style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#9ca3af' }} />
-                <span className="text-xs font-semibold" style={{ color: '#6b7280' }}>In Progress</span>
-                <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
-              </div>
-            ) : (
-              <div className="relative">
-                {/* Vertical timeline line */}
-                <div className="absolute left-[7px] top-3 bottom-3 w-px"
-                  style={{ backgroundColor: 'var(--color-border)' }} />
-                <div className="space-y-2">
-                  {dispoHistory.map((d, i) => (
-                    <div key={d.id || i} className="flex gap-3">
-                      <div className="w-3.5 h-3.5 rounded-full flex-shrink-0 mt-1 relative z-10 ring-2"
-                        style={{ backgroundColor: d.color || '#6b7280', ringColor: 'var(--color-surface)' }} />
-                      <div className="flex-1 pb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                            {d.disposition_name}
-                          </span>
-                          {d.setter_role && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                              style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
-                              {ROLE_LABELS[d.setter_role] || d.setter_role}
-                            </span>
-                          )}
-                          <span className="text-[10px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
-                            {new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        {d.setter_name && (
-                          <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                            By {d.setter_name}
-                          </p>
-                        )}
-                        {d.note && (
-                          <p className="text-[10px] mt-1 px-2 py-1 rounded-lg italic"
-                            style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-                            "{d.note}"
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Edit history */}
-          {hist.length > 0 && (
-            <div className="mb-5">
-              <p className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: 'var(--color-primary-600)' }}>Edit History</p>
-              <div className="space-y-2">
-                {hist.map((h, i) => (
-                  <div key={i} className="p-3 rounded-xl text-xs"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                    <div className="flex justify-between text-text-tertiary mb-1">
-                      <span className="font-semibold capitalize">{h.action || 'Edit'}</span>
-                      <span>{new Date(h.edited_at).toLocaleString()}</span>
-                    </div>
-                    {h.reason && <p className="text-text italic">"{h.reason}"</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Sale status — not layout-configurable; shown when a sale is linked. */}
+          {transfer.sale_status && saleBlock()}
         </div>
       </div>
     </>

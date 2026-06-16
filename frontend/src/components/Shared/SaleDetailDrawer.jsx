@@ -190,13 +190,15 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
     timeline:  ['created', 'updated', 'submitted_for_review', 'compliance_reviewed'],
   };
 
-  // The ordered, visible field ids for a section: the SuperAdmin's configured
-  // fields[] when present, else the catalog default.
-  const sectionFieldIds = (s) => {
+  // The ordered, visible {id,label} for a section: the SuperAdmin's configured
+  // fields[] when present, else the catalog default. label drives the row title
+  // for dragged-in dynamic (form-builder) fields.
+  const sectionFields = (s) => {
     if (Array.isArray(s.fields) && s.fields.length) {
-      return [...s.fields].filter(f => f.visible !== false).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(f => f.id);
+      return [...s.fields].filter(f => f.visible !== false)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(f => ({ id: f.id, label: f.label }));
     }
-    return DEFAULT_FIELDS[s.id] || [];
+    return (DEFAULT_FIELDS[s.id] || []).map(id => ({ id }));
   };
 
   const complianceColor = {
@@ -292,16 +294,16 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
             // Render any field id: a core field via the FIELD registry, or a
             // dynamic form-config field by reading its form_data value — so a
             // SuperAdmin can drag a form-builder field into any drawer section.
-            const renderField = (fid) => {
-              if (FIELD[fid] !== undefined) return FIELD[fid];        // core (Row or null)
-              const v = fd[fid];
+            const renderField = ({ id, label }) => {
+              if (FIELD[id] !== undefined) return FIELD[id];        // core (Row or null)
+              const v = fd[id];
               return (v != null && String(v).trim() !== '' && typeof v !== 'object')
-                ? <Row key={fid} label={fid.replace(/_/g, ' ')} value={displayFieldValue(fid, v)} /> : null;
+                ? <Row key={id} label={label || id.replace(/_/g, ' ')} value={displayFieldValue(id, v)} /> : null;
             };
             return sections.filter(s => s.visible).map(s => {
               // Audit has its own custom block (below); compliance_actions reserved.
               if (s.id === 'audit' || s.id === 'compliance_actions') return null;
-              const rows = sectionFieldIds(s).map(renderField).filter(Boolean);
+              const rows = sectionFields(s).map(renderField).filter(Boolean);
               // 'additional' also catches any form-config field not placed elsewhere
               // (so newly-added form fields surface automatically).
               if (s.id === 'additional') {
