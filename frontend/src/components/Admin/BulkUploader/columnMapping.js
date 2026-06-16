@@ -96,6 +96,29 @@ export function applyMapping(rows, mapping, formFields, phoneKey) {
 
 export const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 
+// ── Batch export ─────────────────────────────────────────────────────────────
+// One resolved transfer (the export endpoint adds fronter_name + company_name)
+// → a value for one export column. Columns are { key, control } where control
+// fields map to top-level transfer attributes and the rest read from form_data.
+export function transferToValue(transfer, col) {
+  const fd = transfer.form_data || {};
+  if (col.control) {
+    switch (col.key) {
+      case 'fronter_name':  return transfer.fronter_name || '';
+      case 'company_name':  return transfer.company_name || '';
+      case 'transfer_date': return fd.transfer_date || '';
+      case 'status':        return transfer.status || '';
+      case 'created_at':    return transfer.created_at || '';
+      default:              return '';
+    }
+  }
+  return fd[col.key] != null ? fd[col.key] : '';
+}
+
+export function transferToRow(transfer, columns) {
+  return columns.map(col => transferToValue(transfer, col));
+}
+
 // Sample CSV built from the CURRENT form config so the template always matches.
 export function sampleTemplateCsv(formFields, phoneKey) {
   const fields = buildFields(formFields, phoneKey);

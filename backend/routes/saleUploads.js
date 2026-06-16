@@ -81,6 +81,46 @@ router.get('/batches', asyncHandler(async (req, res) => {
   res.json({ batches: (data || []).map(b => ({ ...b, uploaded_by_name: names[b.uploaded_by] || '—' })) });
 }));
 
+// GET /sale-uploads/batches/:id/export — reconstruct the batch's sales in the
+// re-uploadable column shape so the operator can re-upload after deleting.
+router.get('/batches/:id/export', asyncHandler(async (req, res) => {
+  const batchId = req.params.id;
+  const { data: batch } = await supabaseAdmin
+    .from('upload_batches').select('id, file_name, kind').eq('id', batchId).maybeSingle();
+  if (!batch || batch.kind !== 'sale') return res.status(404).json({ error: 'Sale batch not found.' });
+
+  const sales = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('sales').select('*').eq('upload_batch_id', batchId)
+      .order('created_at', { ascending: true }).range(from, from + 999);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data || !data.length) break;
+    sales.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  const coIds = [...new Set(sales.map(s => s.company_id).filter(Boolean))];
+  const uIds  = [...new Set(sales.flatMap(s => [s.fronter_id, s.closer_id]).filter(Boolean))];
+  const [{ data: cos }, { data: profs }] = await Promise.all([
+    coIds.length ? supabaseAdmin.from('companies').select('id, name').in('id', coIds) : Promise.resolve({ data: [] }),
+    uIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uIds) : Promise.resolve({ data: [] }),
+  ]);
+  const coName = {}; (cos || []).forEach(c => { coName[c.id] = c.name; });
+  const nm = {}; (profs || []).forEach(p => { nm[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
+
+  res.json({
+    file_name: batch.file_name,
+    count: sales.length,
+    sales: sales.map(s => ({
+      ...s,
+      company_name: coName[s.company_id] || '',
+      fronter_name: nm[s.fronter_id] || '',
+      closer_name:  nm[s.closer_id] || '',
+    })),
+  });
+}));
+
 // DELETE /sale-uploads/batches/:id — delete a sale batch (inserted sales cascade)
 router.delete('/batches/:id', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('upload_batches').delete().eq('id', req.params.id).eq('kind', 'sale');

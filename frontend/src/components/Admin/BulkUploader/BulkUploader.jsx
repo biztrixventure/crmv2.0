@@ -110,7 +110,7 @@ const BulkUploader = () => {
 
       {/* Batch management / test cleanup (always available) */}
       <BatchManager batches={u.batches} loadBatches={u.loadBatches}
-        deleteBatch={u.deleteBatch} deleteAllBatches={u.deleteAllBatches} />
+        deleteBatch={u.deleteBatch} deleteAllBatches={u.deleteAllBatches} downloadBatch={u.downloadBatch} />
     </div>
   );
 };

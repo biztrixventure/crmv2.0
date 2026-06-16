@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Trash2, Database, AlertTriangle } from 'lucide-react';
+import { Trash2, Database, AlertTriangle, Download } from 'lucide-react';
 import { Button } from '../../UI';
 
 const fmt = (d) => { try { return new Date(d).toLocaleString(); } catch { return '—'; } };
@@ -36,9 +36,16 @@ const ConfirmModal = ({ target, onClose, onConfirm }) => {
   );
 };
 
-const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches }) => {
+const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches, downloadBatch }) => {
   const [target, setTarget] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
   useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  const handleDownload = async (b) => {
+    if (!downloadBatch) return;
+    setDownloadingId(b.id);
+    try { await downloadBatch(b); } finally { setDownloadingId(null); }
+  };
 
   return (
     <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -67,10 +74,19 @@ const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches }) =
                   {b.inserted_count} inserted · {fmt(b.created_at)} · by {b.uploaded_by_name}
                 </p>
               </div>
-              <button onClick={() => setTarget({ type: 'batch', batch: b })} title="Delete this batch"
-                className="p-1.5 rounded-lg hover:bg-error-50 transition-colors flex-shrink-0">
-                <Trash2 size={15} style={{ color: 'var(--color-error-500)' }} />
-              </button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {downloadBatch && (
+                  <button onClick={() => handleDownload(b)} disabled={downloadingId === b.id}
+                    title="Download this batch as a re-uploadable CSV"
+                    className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors disabled:opacity-50">
+                    <Download size={15} style={{ color: 'var(--color-primary-600)' }} />
+                  </button>
+                )}
+                <button onClick={() => setTarget({ type: 'batch', batch: b })} title="Delete this batch"
+                  className="p-1.5 rounded-lg hover:bg-error-50 transition-colors">
+                  <Trash2 size={15} style={{ color: 'var(--color-error-500)' }} />
+                </button>
+              </div>
             </div>
           ))}
         </div>

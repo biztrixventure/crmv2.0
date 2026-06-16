@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { parseFile, isAcceptedFile, MAX_FILE_BYTES, headerWarnings } from '../BulkUploader/fileParser';
-import { applyMapping, autoMap, buildFields, detectPhoneKey } from './saleColumnMapping';
+import { applyMapping, autoMap, buildFields, detectPhoneKey, saleExportColumns, saleToRow } from './saleColumnMapping';
+import { toCsv, downloadCsv, exportFileName } from '../BulkUploader/csvExport';
 
 // Turn an axios/network error into a short, actionable sentence.
 const apiErr = (e, fallback) =>
@@ -222,9 +223,22 @@ export function useBulkSaleUpload() {
 
   const deleteBatch = useCallback(async (id) => { await client.delete(`sale-uploads/batches/${id}`); loadBatches(); }, [loadBatches]);
 
+  // Export a sale batch back to a re-uploadable CSV in the canonical sale shape.
+  const downloadBatch = useCallback(async (batch) => {
+    try {
+      const { data } = await client.get(`sale-uploads/batches/${batch.id}/export`);
+      const cols    = saleExportColumns(formFields);
+      const headers = cols.map(c => c.key);
+      const rows    = (data.sales || []).map(s => saleToRow(s, cols));
+      if (!rows.length) { toast.warning('This batch has no sales to export.'); return; }
+      downloadCsv(toCsv(headers, rows), exportFileName(batch.file_name || data.file_name));
+      toast.success(`Exported ${rows.length} sale${rows.length !== 1 ? 's' : ''}.`);
+    } catch (e) { toast.error(apiErr(e, 'Could not export this batch.')); }
+  }, [formFields]);
+
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, formFields, fields, phoneKey, batches,
-    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, confirmInsert, reset, deleteBatch, setStep,
+    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, confirmInsert, reset, deleteBatch, downloadBatch, setStep,
     setNewSaleTransfer, createTransferForRow,
   };
 }

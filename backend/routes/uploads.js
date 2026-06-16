@@ -145,6 +145,52 @@ router.get('/batches', asyncHandler(async (req, res) => {
   res.json({ batches: (data || []).map(b => ({ ...b, uploaded_by_name: names[b.uploaded_by] || '—' })) });
 }));
 
+// GET /uploads/batches/:id/export — reconstruct the batch's transfers in the
+// original upload column shape so the operator can re-upload after deleting.
+// Returns resolved rows; the frontend renders the CSV from the live form config.
+router.get('/batches/:id/export', asyncHandler(async (req, res) => {
+  const batchId = req.params.id;
+  const { data: batch } = await supabaseAdmin
+    .from('upload_batches').select('id, file_name, kind').eq('id', batchId).maybeSingle();
+  if (!batch || batch.kind !== 'transfer') return res.status(404).json({ error: 'Transfer batch not found.' });
+
+  const transfers = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('transfers')
+      .select('company_id, created_by, status, created_at, form_data')
+      .eq('upload_batch_id', batchId)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data || !data.length) break;
+    transfers.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  // Resolve company + fronter names back to the strings the file used.
+  const coIds = [...new Set(transfers.map(t => t.company_id).filter(Boolean))];
+  const uIds  = [...new Set(transfers.map(t => t.created_by).filter(Boolean))];
+  const [{ data: cos }, { data: profs }] = await Promise.all([
+    coIds.length ? supabaseAdmin.from('companies').select('id, name').in('id', coIds) : Promise.resolve({ data: [] }),
+    uIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uIds) : Promise.resolve({ data: [] }),
+  ]);
+  const coName = {}; (cos || []).forEach(c => { coName[c.id] = c.name; });
+  const frName = {}; (profs || []).forEach(p => { frName[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
+
+  res.json({
+    file_name: batch.file_name,
+    count: transfers.length,
+    transfers: transfers.map(t => ({
+      company_name: coName[t.company_id] || '',
+      fronter_name: frName[t.created_by] || '',
+      status:       t.status,
+      created_at:   t.created_at,
+      form_data:    t.form_data || {},
+    })),
+  });
+}));
+
 // DELETE /uploads/batches/:id — delete one batch (transfers cascade)
 router.delete('/batches/:id', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('upload_batches').delete().eq('id', req.params.id);

@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { parseFile, isAcceptedFile, MAX_FILE_BYTES, headerWarnings } from './fileParser';
-import { applyMapping, autoMap, buildFields, detectPhoneKey, normPhone } from './columnMapping';
+import { applyMapping, autoMap, buildFields, detectPhoneKey, normPhone, transferToRow } from './columnMapping';
+import { toCsv, downloadCsv, exportFileName } from './csvExport';
 
 // Turn an axios/network error into a short, actionable sentence.
 const apiErr = (e, fallback) =>
@@ -62,6 +63,7 @@ export function useBulkUpload() {
     if (!isAcceptedFile(file)) { setError('Unsupported file type. Use a .csv or .xlsx file exported from your spreadsheet.'); return; }
     if (file.size > MAX_FILE_BYTES) { setError(`This file is ${(file.size / 1048576).toFixed(1)} MB — the limit is 10 MB. Split it into smaller files.`); return; }
     setBusy(true);
+    setProgress({ phase: 'parse', indeterminate: true });   // immediate feedback while the file is read
     try {
       let parsed;
       try { parsed = await parseFile(file); }
@@ -91,7 +93,7 @@ export function useBulkUpload() {
       setStep('mapping');
     } catch (e) {
       setError(e.message || 'Failed to parse file.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setProgress(null); }
   }, [fields]);
 
   const setMap = useCallback((field, header) => {
@@ -177,12 +179,16 @@ export function useBulkUpload() {
     const unmapped = fields.filter(f => f.required && !mapping[f.key]);
     if (unmapped.length) { setError(`Map the required field(s): ${unmapped.map(f => f.label).join(', ')}`); return; }
     setBusy(true);
+    // Indeterminate feedback for the prep gap (save mapping + transform rows)
+    // before the determinate per-chunk validation bar takes over — otherwise the
+    // UI looks frozen on big files while rows are mapped in memory.
+    setProgress({ phase: 'prepare', indeterminate: true });
     try {
       await client.post('uploads/mapping', { mapping });
       await runValidation(applyMapping(rawRows, mapping, formFields, phoneKey));
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Validation failed.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setProgress(null); }
   }, [mapping, rawRows, runValidation, formFields, phoneKey, fields]);
 
   const toggleConflict = useCallback((i) => setDecisions(d => ({ ...d, [i]: !d[i] })), []);
@@ -225,7 +231,9 @@ export function useBulkUpload() {
     // is fine — the route handles either side missing.
     const insertChunks = Math.max(1, Math.ceil(rows.length / CHUNK));
     const total = rows.length + updateRows.length;
-    setProgress({ phase: 'confirm', done: 0, total });
+    // Updates-only batches ship in one request (no per-chunk ticks), so show an
+    // indeterminate bar instead of a frozen 0% while the server applies them.
+    setProgress({ phase: 'confirm', done: 0, total, indeterminate: rows.length === 0 });
 
     for (let i = 0; i < Math.max(1, rows.length); i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
@@ -296,6 +304,33 @@ export function useBulkUpload() {
     return data;
   }, [loadDuplicates, loadBatches]);
 
+  // Export a batch back to a re-uploadable CSV in the original column shape.
+  // Columns: control fields first, then EVERY form_data key present across the
+  // batch (so nothing the file carried is lost — incl. unmapped extras). The
+  // derived cli_number is dropped and transfer_date is emitted as a control col.
+  const downloadBatch = useCallback(async (batch) => {
+    try {
+      const { data } = await client.get(`uploads/batches/${batch.id}/export`);
+      const transfers = data.transfers || [];
+      if (!transfers.length) { toast.warning('This batch has no transfers to export.'); return; }
+
+      const SKIP = new Set(['cli_number', 'transfer_date']);
+      const fdKeys = [], seen = new Set();
+      transfers.forEach(t => Object.keys(t.form_data || {}).forEach(k => {
+        if (!SKIP.has(k) && !seen.has(k)) { seen.add(k); fdKeys.push(k); }
+      }));
+      const cols = [
+        { key: 'fronter_name', control: true }, { key: 'company_name', control: true },
+        { key: 'transfer_date', control: true }, { key: 'status', control: true }, { key: 'created_at', control: true },
+        ...fdKeys.map(k => ({ key: k, control: false })),
+      ];
+      const headers = cols.map(c => c.key);
+      const rows    = transfers.map(t => transferToRow(t, cols));
+      downloadCsv(toCsv(headers, rows), exportFileName(batch.file_name || data.file_name));
+      toast.success(`Exported ${rows.length} transfer${rows.length !== 1 ? 's' : ''}.`);
+    } catch (e) { toast.error(apiErr(e, 'Could not export this batch.')); }
+  }, []);
+
   const deleteBatch = useCallback(async (id) => {
     await client.delete(`uploads/batches/${id}`); loadBatches();
   }, [loadBatches]);
@@ -308,6 +343,6 @@ export function useBulkUpload() {
     formFields, fields, phoneKey, duplicates,
     updateDecisions, allowUpdates, setAllowUpdates, toggleUpdate, setAllUpdates,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleConflict, setAllConflicts,
-    confirmInsert, reset, deleteBatch, deleteAllBatches, setStep, loadDuplicates, mergeDuplicates,
+    confirmInsert, reset, deleteBatch, deleteAllBatches, downloadBatch, setStep, loadDuplicates, mergeDuplicates,
   };
 }
