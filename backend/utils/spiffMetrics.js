@@ -17,10 +17,11 @@ const { supabaseAdmin } = require('../config/database');
 const TTL = 60_000;
 const cache = new Map();   // campaign_id -> { at, data }
 
-// "Closed" = a sale that counts toward a "sales" target. We deliberately count
-// pending_review too — closers should get credit at submission time, not only
-// after compliance signs off, otherwise the leaderboard lags reality.
-const CLOSED_LIKE  = ['closed_won', 'sold', 'pending_review'];
+// "Closed" = a sale that counts toward a "sales" target. Credit is gated on a
+// COMPLETED compliance review (closed_won / sold) so the counter increments the
+// moment compliance approves a sale — pending_review is intentionally excluded,
+// otherwise the number wouldn't move on approval (it already counted at submit).
+const CLOSED_LIKE  = ['closed_won', 'sold'];
 const REVENUE_LIKE = ['closed_won', 'sold'];
 
 // Resolve the participant pool for a campaign from its targeting fields.
@@ -88,23 +89,32 @@ async function computeValues(campaign, userIds) {
     return out;
   }
 
-  if (metric_source === 'sales') {
+  // Sales / revenue credit. Real-world facts that shaped this:
+  //   1. A sale is credited to BOTH its closer and its fronter — whichever side
+  //      the campaign targets is the one in the participant pool. Counting only
+  //      closer_id (the old behaviour) meant a fronter-audience campaign never
+  //      scored, because a fronter is never a sale's closer_id.
+  //   2. The fronter = `fronter_id`, OR (when that wasn't denormalized onto the
+  //      sale — common on imported/older rows) the linked transfer's creator
+  //      (transfers.created_by), the fronter who actually fronted the lead.
+  //   3. We window by `sale_date` (the business day the deal happened), NOT
+  //      created_at (the row-insert / bulk-upload day), so a deal counts on its
+  //      real date and a compliance approval moves the right day's counter.
+  if (metric_source === 'sales' || metric_source === 'revenue') {
+    const pool      = new Set(userIds);
+    const statuses  = metric_source === 'revenue' ? REVENUE_LIKE : CLOSED_LIKE;
+    const startDate = String(starts_at).slice(0, 10);
+    const endDate   = String(ends_at).slice(0, 10);
     const rows = await fetchAllRows(supabaseAdmin
-      .from('sales').select('closer_id')
-      .in('status', CLOSED_LIKE)
-      .gte('created_at', starts_at).lte('created_at', ends_at)
-      .in('closer_id', userIds));
-    rows.forEach(r => { if (out[r.closer_id] != null) out[r.closer_id] += 1; });
-    return out;
-  }
-
-  if (metric_source === 'revenue') {
-    const rows = await fetchAllRows(supabaseAdmin
-      .from('sales').select('closer_id, monthly_payment')
-      .in('status', REVENUE_LIKE)
-      .gte('created_at', starts_at).lte('created_at', ends_at)
-      .in('closer_id', userIds));
-    rows.forEach(r => { if (out[r.closer_id] != null) out[r.closer_id] += Number(r.monthly_payment) || 0; });
+      .from('sales').select('closer_id, fronter_id, monthly_payment, transfers(created_by)')
+      .in('status', statuses)
+      .gte('sale_date', startDate).lte('sale_date', endDate));
+    rows.forEach(r => {
+      const inc     = metric_source === 'revenue' ? (Number(r.monthly_payment) || 0) : 1;
+      const fronter = r.fronter_id || r.transfers?.created_by || null;
+      if (r.closer_id && pool.has(r.closer_id)) out[r.closer_id] += inc;
+      if (fronter && fronter !== r.closer_id && pool.has(fronter)) out[fronter] += inc;
+    });
     return out;
   }
 
