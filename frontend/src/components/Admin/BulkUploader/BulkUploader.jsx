@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { UploadCloud, CheckCircle2, RotateCcw } from 'lucide-react';
+import { UploadCloud, CheckCircle2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { Alert, Button } from '../../UI';
 import { useBulkUpload } from './useBulkUpload';
 import FileRequirementsGuide from './FileRequirementsGuide';
@@ -72,6 +72,33 @@ const BulkUploader = () => {
             {u.summary.skipped > 0 && <> · {u.summary.skipped} skipped</>}.
             They now appear in each fronter’s dashboard.
           </p>
+
+          {/* Rejected rows — the DB refused these; show the exact reason so the
+              cause is fixable (server masks it as a generic 500 otherwise). */}
+          {Array.isArray(u.summary.failed) && u.summary.failed.length > 0 && (
+            <div className="mt-5 text-left rounded-xl p-4"
+              style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', border: '1px solid var(--color-error-200, #fecaca)' }}>
+              <p className="text-sm font-bold flex items-center gap-1.5" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+                <AlertTriangle size={15} /> {u.summary.failed.length} row(s) rejected by the database
+              </p>
+              <div className="mt-2 max-h-48 overflow-y-auto space-y-1.5">
+                {u.summary.failed.slice(0, 50).map((f, i) => (
+                  <div key={i} className="text-xs" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+                    <span className="font-semibold">
+                      {[f.company_name, f.fronter_name, f.cli_number].filter(Boolean).join(' · ') || `Row ${i + 1}`}
+                    </span>
+                    {' — '}{f.reason}
+                  </div>
+                ))}
+                {u.summary.failed.length > 50 && (
+                  <p className="text-xs italic" style={{ color: 'var(--color-error-600, #dc2626)' }}>
+                    …and {u.summary.failed.length - 50} more with similar errors.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           <Button variant="primary" onClick={u.reset} className="mt-4 inline-flex items-center gap-1.5">
             <RotateCcw size={15} /> Upload another file
           </Button>

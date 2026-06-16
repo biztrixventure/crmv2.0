@@ -93,7 +93,16 @@ router.post('/confirm', asyncHandler(async (req, res) => {
   }
   if (!valid.length && !updates.length) return res.status(400).json({ error: 'No rows resolved to a valid fronter + company' });
 
-  const result = await insertApproved(valid, batch, req.user.id, updates);
+  // Surface the real DB reason to the superadmin — the global error handler
+  // masks Supabase messages as a generic 500 in production, which makes a bulk
+  // upload failure undiagnosable. This route is superadmin-only, so returning
+  // the underlying message here is safe and necessary.
+  let result;
+  try {
+    result = await insertApproved(valid, batch, req.user.id, updates);
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || 'Bulk insert failed' });
+  }
   res.json(result);
 }));
 

@@ -218,6 +218,7 @@ export function useBulkUpload() {
 
     setBusy(true);
     let inserted = 0, updated = 0, unchanged = unchangedCount, errMsg = '', stopped = false;
+    const failedRows = [];   // rows the DB rejected (per-row reason from server)
 
     // Inserts batched in CHUNK; updates ship together in one POST so the diff
     // arrays travel with the row context. Sending the empty rows array w/ updates
@@ -244,6 +245,7 @@ export function useBulkUpload() {
         inserted  += data.inserted  || 0;
         updated   += data.updated   || 0;
         unchanged += data.unchanged || 0;
+        if (Array.isArray(data.failed) && data.failed.length) failedRows.push(...data.failed);
         setProgress({ phase: 'confirm', done: Math.min(i + CHUNK, rows.length) + (isLast ? updateRows.length : 0), total });
       } catch (e) {
         errMsg = apiErr(e, 'Insert/update failed.');
@@ -260,13 +262,20 @@ export function useBulkUpload() {
       if (inserted || updated) loadBatches();
       return;
     }
-    setSummary({ inserted, updated, unchanged });
+    setSummary({ inserted, updated, unchanged, failed: failedRows });
     setStep('done');
     loadBatches();
     const parts = [`${inserted} inserted`];
     if (updated)   parts.push(`${updated} updated`);
     if (unchanged) parts.push(`${unchanged} unchanged`);
-    toast.success(`Upload complete — ${parts.join(', ')}.`);
+    if (failedRows.length) parts.push(`${failedRows.length} rejected`);
+    if (failedRows.length) {
+      // Good rows still landed; surface the DB reason for the rejected ones so
+      // the cause is visible (the server otherwise masks it as a generic 500).
+      toast.error(`${failedRows.length} row(s) rejected: ${failedRows[0].reason}`);
+    } else {
+      toast.success(`Upload complete — ${parts.join(', ')}.`);
+    }
   }, [results, decisions, updateDecisions, allowUpdates, fileName, loadBatches]);
 
   const reset = useCallback(() => {

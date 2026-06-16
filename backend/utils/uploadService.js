@@ -356,20 +356,40 @@ async function insertApproved(rows, batchMeta, uploaderId, updates = []) {
   if (bErr) throw new Error(bErr.message);
 
   let inserted = 0;
+  const failed = [];   // [{ reason, cli_number, fronter_name, company_name }]
   for (let i = 0; i < rows.length; i += 100) {
-    const built = rows.slice(i, i + 100).map(r => buildTransferRow(r, batch.id));
+    const chunkRows = rows.slice(i, i + 100);
+    const built = chunkRows.map(r => buildTransferRow(r, batch.id));
     const slice = await Promise.all(built.map(r => stampActor('transfers', r, r.created_by)));
     const { data, error } = await supabaseAdmin.from('transfers').insert(slice).select('id');
-    if (error) throw new Error(error.message);
-    inserted += (data || []).length;
+    if (!error) { inserted += (data || []).length; continue; }
+
+    // The slice insert is atomic — a single rejected row aborts the whole
+    // batch. Retry row-by-row so good rows still land and each failure carries
+    // its real DB reason (instead of an opaque 500 that loses the entire file).
+    for (let j = 0; j < slice.length; j++) {
+      const { data: d1, error: e1 } = await supabaseAdmin.from('transfers').insert(slice[j]).select('id');
+      if (!e1) { inserted += (d1 || []).length; continue; }
+      const src = chunkRows[j] || {};
+      failed.push({
+        reason:       e1.message || 'Insert rejected by database',
+        cli_number:   src.cli_number || null,
+        fronter_name: src.fronter_name || null,
+        company_name: src.company_name || null,
+      });
+    }
   }
 
   const updateResult = await applyUpdates(updates, batch.id, uploaderId);
 
   await supabaseAdmin.from('upload_batches')
-    .update({ inserted_count: inserted, conflict_count: (batchMeta.conflict_count || 0) + updateResult.updated })
+    .update({
+      inserted_count: inserted,
+      skipped_count:  (batchMeta.skipped_count || 0) + failed.length,
+      conflict_count: (batchMeta.conflict_count || 0) + updateResult.updated,
+    })
     .eq('id', batch.id);
-  return { batch_id: batch.id, inserted, updated: updateResult.updated, unchanged: updateResult.unchanged, skipped: 0 };
+  return { batch_id: batch.id, inserted, updated: updateResult.updated, unchanged: updateResult.unchanged, skipped: 0, failed };
 }
 
 // ============================================================================
