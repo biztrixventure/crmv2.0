@@ -7,6 +7,8 @@ import {
 import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
 import client from '../../../api/client';
+import { useAuth } from '../../../contexts/AuthContext';
+import Composer from '../../Chat/Composer';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -343,24 +345,38 @@ const UsersTab = () => {
 
 // ── Broadcast ───────────────────────────────────────────────────────────────
 const BroadcastTab = () => {
+  const { user } = useAuth();
   const [reference, setReference] = useState({ roles: [], companies: [] });
-  const [form, setForm] = useState({ title: '', message: '', target_type: 'all', target_company_ids: [], target_roles: [] });
-  const [sending, setSending] = useState(false);
+  const [form, setForm] = useState({ title: '', target_type: 'all', target_company_ids: [], target_roles: [] });
   const [msg, setMsg] = useState(null);
   useEffect(() => { client.get('announcements/reference').then(r => setReference(r.data)).catch(() => {}); }, []);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleArr = (k, id) => setForm(f => ({ ...f, [k]: f[k].includes(id) ? f[k].filter(x => x !== id) : [...f[k], id] }));
 
-  const send = async () => {
-    if (!form.message.trim()) { setMsg({ type: 'error', text: 'Message is required' }); return; }
-    setSending(true); setMsg(null);
+  // The Composer's Send button drives the broadcast — its payload carries the
+  // rich body_html + storage-URL image/file attachments (no base64 bloat).
+  const send = async (payload) => {
+    setMsg(null);
+    if (form.target_type === 'company' && !form.target_company_ids.length) { toast.error('Pick at least one company'); throw new Error('no target'); }
+    if (form.target_type === 'role' && !form.target_roles.length) { toast.error('Pick at least one role'); throw new Error('no target'); }
     try {
-      const r = await client.post('chat/admin/broadcast', form);
+      const r = await client.post('chat/admin/broadcast', {
+        title: form.title,
+        target_type: form.target_type,
+        target_company_ids: form.target_company_ids,
+        target_roles: form.target_roles,
+        message: payload.body,
+        body_html: payload.body_html,
+        attachments: payload.attachments,
+      });
       setMsg({ type: 'success', text: `Broadcast sent to ${r.data.recipients} user(s).` });
       toast.success(`Broadcast sent to ${r.data.recipients} user(s)`);
-      setForm(f => ({ ...f, title: '', message: '' }));
-    } catch (e) { setMsg({ type: 'error', text: e.response?.data?.error || 'Failed to send' }); }
-    finally { setSending(false); }
+      setForm(f => ({ ...f, title: '' }));
+    } catch (e) {
+      const text = e.response?.data?.error || 'Failed to send';
+      setMsg({ type: 'error', text }); toast.error(text);
+      throw e;   // keep the composer content so the admin can retry
+    }
   };
 
   return (
@@ -370,10 +386,6 @@ const BroadcastTab = () => {
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Title</label>
           <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Announcement" className="input" />
-        </div>
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Message *</label>
-          <textarea value={form.message} onChange={e => set('message', e.target.value)} rows={4} className="input" placeholder="Type your announcement…" style={{ resize: 'vertical' }} />
         </div>
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Audience</label>
@@ -400,7 +412,16 @@ const BroadcastTab = () => {
           </div>
         )}
         <p className="text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}><Mail size={13} /> One-way — recipients can read but cannot reply, so the thread stays clean. Also fires Web Push.</p>
-        <Button variant="primary" onClick={send} disabled={sending} className="flex items-center gap-1.5"><Send size={15} />{sending ? 'Sending…' : 'Send broadcast'}</Button>
+
+        {/* Rich message — format text, drop in images/files (stored as URLs, not
+            base64), then hit send. Recipients see it tagged as an official broadcast. */}
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Message *</label>
+          <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+            <Composer onSend={send} meId={user?.id} members={[]} />
+          </div>
+          <p className="text-[11px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Bold/italic, lists, links, and inline images supported. Press Send to broadcast.</p>
+        </div>
       </div>
     </div>
   );

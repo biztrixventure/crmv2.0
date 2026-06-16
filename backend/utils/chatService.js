@@ -183,24 +183,47 @@ async function getUserCards(userIds) {
 
 /**
  * Searchable global user directory for the new-chat picker.
- * Returns up to `limit` cards, optionally filtered by a name query.
+ * Filters (all optional, combinable): `q` (name), `companyId`, `role` (level).
+ * When companyId/role is set we resolve through user_company_roles so the list
+ * reflects company membership + role; otherwise we scan profiles by name.
+ * Returns up to `limit` user cards.
  */
-async function searchDirectory({ q, limit = 50, excludeId } = {}) {
+async function searchDirectory({ q, limit = 50, excludeId, companyId, role } = {}) {
+  const nameFilter = (list) => {
+    const s = (q || '').trim().toLowerCase();
+    return s ? list.filter(c => (c.name || '').toLowerCase().includes(s)) : list;
+  };
+
+  // Company and/or role filter → start from active role assignments.
+  if (companyId || role) {
+    let rq = supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, company_id, custom_roles(level)')
+      .eq('is_active', true);
+    if (companyId) rq = rq.eq('company_id', companyId);
+    const { data: rows } = await rq;
+    let filtered = rows || [];
+    if (role) filtered = filtered.filter(r => r.custom_roles?.level === role);
+    const ids = [...new Set(filtered.map(r => r.user_id))].filter(id => id !== excludeId);
+    if (!ids.length) return [];
+    const cards = await getUserCards(ids);
+    const list = nameFilter(ids.map(id => cards.get(id)).filter(Boolean));
+    return list.sort((a, b) => (a.name || '').localeCompare(b.name || '')).slice(0, limit);
+  }
+
+  // Default: name scan over profiles.
   let query = supabaseAdmin
     .from('user_profiles')
     .select('user_id, first_name, last_name')
     .order('first_name', { ascending: true })
     .limit(limit);
-
   if (q && q.trim()) {
     const s = q.trim().replace(/[%,]/g, '');
     query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%`);
   }
-
   const { data: profiles } = await query;
-  let ids = (profiles || []).map(p => p.user_id).filter(id => id !== excludeId);
+  const ids = (profiles || []).map(p => p.user_id).filter(id => id !== excludeId);
   if (!ids.length) return [];
-
   const cards = await getUserCards(ids);
   return ids.map(id => cards.get(id)).filter(Boolean);
 }

@@ -13,6 +13,7 @@ const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
 const { getConfig } = require('../utils/businessConfig');
+const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 
 const router = express.Router();
 
@@ -1491,6 +1492,9 @@ router.post('/:id/compliance', [
   }
 
   if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+  // Status changed → bust SPIFF auto-metric cache + ping live counters.
+  if (status && status !== existing.status) { try { await spiffOnSalesChanged(); } catch { /* non-critical */ } }
 
   // Notify managers
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);

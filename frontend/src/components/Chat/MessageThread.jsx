@@ -230,6 +230,10 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
           <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
             {isBroadcast && <Megaphone size={13} style={{ color: 'var(--color-primary-600)' }} />}
             {conversation.title}{conversation.is_locked && <Lock size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
+            {isBroadcast && (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>Official</span>
+            )}
           </p>
           {typingNames.length ? <TypingDots names={typingNames} /> : <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{subtitle}</p>}
         </div>
@@ -241,6 +245,14 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
           </button>
         )}
       </div>
+
+      {/* Official-communication banner — makes a broadcast unmistakable. */}
+      {isBroadcast && (
+        <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0 text-xs font-semibold"
+          style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700)', borderBottom: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+          <Megaphone size={13} /> Official announcement from administration
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-3 space-y-1" style={{ backgroundColor: 'var(--color-bg)' }}>

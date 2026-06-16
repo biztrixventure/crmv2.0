@@ -23,6 +23,33 @@ router.use(asyncHandler(async (req, res, next) => {
 
 const startOfTodayUtc = () => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.toISOString(); };
 
+// Rich-content sanitizers — mirror the user-send path in routes/chat.js so a
+// broadcast carries the same safe HTML + storage-URL attachments a normal
+// message can. The client also renders through DOMPurify (defence in depth).
+const MAX_HTML = 40000;
+function scrubHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  return html
+    .replace(/<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi, '')
+    .replace(/<\s*\/?(iframe|object|embed|link|meta|style|form)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+    .replace(/javascript:/gi, '')
+    .slice(0, MAX_HTML);
+}
+function cleanAttachments(input) {
+  if (!Array.isArray(input)) return null;
+  const out = input.slice(0, 10).map(a => ({
+    url:  String(a?.url || '').slice(0, 2000),
+    name: String(a?.name || 'file').slice(0, 255),
+    type: String(a?.type || '').slice(0, 120),
+    size: Number(a?.size) || 0,
+    kind: a?.kind === 'image' ? 'image' : 'file',
+  })).filter(a => /^https?:\/\//i.test(a.url));
+  return out.length ? out : null;
+}
+
 // ── GET /overview — global stats + leaderboards ───────────────────────────────
 router.get('/overview', asyncHandler(async (req, res) => {
   const todayStart = startOfTodayUtc();
@@ -422,12 +449,20 @@ async function resolveBroadcastTargets({ target_type, target_company_ids, target
 }
 
 // ── POST /broadcast — message ALL / by company / by role ──────────────────────
+// Accepts plain `message`, rich `body_html`, and `attachments[]` (storage URLs)
+// so an official announcement can carry formatting + inline images, exactly like
+// a normal chat message.
 router.post('/broadcast', [
-  body('message').isString().trim().notEmpty().isLength({ max: 4000 }),
+  body('message').optional({ nullable: true }).isString().isLength({ max: 4000 }),
   body('target_type').optional().isIn(['all', 'company', 'role']),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
+
+  const text        = (req.body.message || '').trim();
+  const html        = scrubHtml(req.body.body_html);
+  const attachments = cleanAttachments(req.body.attachments);
+  if (!text && !html && !attachments) return res.status(400).json({ error: 'Broadcast is empty' });
 
   const targetType = req.body.target_type || 'all';
   const targets = await resolveBroadcastTargets({
@@ -447,10 +482,11 @@ router.post('/broadcast', [
   await ensureMembers(conv.id, recipients, 'member');
 
   const { data: msg } = await supabaseAdmin
-    .from('messages').insert({ conversation_id: conv.id, sender_id: req.user.id, body: req.body.message.trim() }).select().single();
+    .from('messages').insert({ conversation_id: conv.id, sender_id: req.user.id, body: text || null, body_html: html, attachments }).select().single();
 
+  const preview = text || (attachments ? `📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : 'New announcement');
   const cards = await getUserCards([req.user.id]);
-  pushNewMessage({ conversationId: conv.id, senderId: req.user.id, senderName: cards.get(req.user.id)?.name || 'Announcement', body: req.body.message, memberIds: [req.user.id, ...recipients] });
+  pushNewMessage({ conversationId: conv.id, senderId: req.user.id, senderName: cards.get(req.user.id)?.name || 'Announcement', body: preview, memberIds: [req.user.id, ...recipients] });
 
   await logModeration({ actorId: req.user.id, action: 'broadcast', targetConversationId: conv.id, detail: { target_type: targetType, recipients: recipients.length } });
   res.status(201).json({ conversation_id: conv.id, message_id: msg?.id, recipients: recipients.length });

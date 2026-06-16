@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 
 const router = express.Router();
 
@@ -1176,6 +1177,11 @@ router.post('/sales/bulk-status', asyncHandler(async (req, res) => {
     }
   }
 
+  // Sale statuses just changed → bust the SPIFF auto-metric cache so live
+  // progress (e.g. revenue / approved-sale counters) reflects this immediately
+  // when the SpiffWidget refetches on its sales-realtime tick.
+  if (results.length) { try { await spiffOnSalesChanged(); } catch { /* non-critical */ } }
+
   logger.success('COMPLIANCE_BULK_STATUS', `User ${userId} → ${new_status} on ${results.length} sale(s) · batch ${batchId || '(skipped)'}`);
   res.json({ updated: results.length, results, skipped, batch_id: batchId });
   } catch (e) {
@@ -1282,6 +1288,8 @@ router.delete('/bulk-status/batches/:id', asyncHandler(async (req, res) => {
   await supabaseAdmin.from('compliance_status_batches')
     .update({ reverted_at: now, reverted_by: userId })
     .eq('id', batch.id);
+
+  if (restored.length) { try { await spiffOnSalesChanged(); } catch { /* non-critical */ } }
 
   logger.success('COMPLIANCE_BULK_STATUS_REVERT', `User ${userId} reverted batch ${batch.id} — ${restored.length} restored, ${skipped.length} skipped`);
   res.json({ batch_id: batch.id, restored: restored.length, skipped });

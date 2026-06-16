@@ -8,6 +8,9 @@ import Avatar from './Avatar';
 // `groupOnly` locks it to group creation (DM starts now live in the conversation-list search).
 const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
   const [q, setQ] = useState('');
+  const [companyId, setCompanyId] = useState('');   // '' = all companies
+  const [role, setRole] = useState('');             // '' = all roles
+  const [meta, setMeta] = useState({ companies: [], roles: [] });
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState([]);   // [{id,name,role,company}]
@@ -18,16 +21,26 @@ const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
   const debRef = useRef(null);
   const { colorFor } = useUserColors();
 
+  // Company + role options for the filters (available to all chat users).
+  useEffect(() => {
+    client.get('chat/directory-meta')
+      .then(r => setMeta({ companies: r.data.companies || [], roles: r.data.roles || [] }))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     clearTimeout(debRef.current);
     debRef.current = setTimeout(async () => {
       setLoading(true);
-      try { const r = await client.get('chat/users', { params: { q } }); setResults(r.data.users || []); }
+      try {
+        const r = await client.get('chat/users', { params: { q, company_id: companyId || undefined, role: role || undefined } });
+        setResults(r.data.users || []);
+      }
       catch { setResults([]); }
       finally { setLoading(false); }
     }, 250);
     return () => clearTimeout(debRef.current);
-  }, [q]);
+  }, [q, companyId, role]);
 
   const isSel = (id) => selected.some(s => s.id === id);
   const toggle = (u) => {
@@ -90,10 +103,21 @@ const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
       )}
 
       {/* Search */}
-      <div className="px-4 py-3 flex-shrink-0">
+      <div className="px-4 py-3 flex-shrink-0 space-y-2">
         <div className="relative">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people…" className="input" style={{ paddingLeft: 34 }} autoFocus />
+        </div>
+        {/* Company + role filters — work for everyone, not just superadmins. */}
+        <div className="grid grid-cols-2 gap-2">
+          <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-2" title="Filter by company">
+            <option value="">All companies</option>
+            {meta.companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={role} onChange={e => setRole(e.target.value)} className="input text-sm py-2 capitalize" title="Filter by role">
+            <option value="">All roles</option>
+            {meta.roles.map(r => <option key={r.level} value={r.level}>{(r.label || r.level).replace(/_/g, ' ')}</option>)}
+          </select>
         </div>
       </div>
 

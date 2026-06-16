@@ -24,6 +24,10 @@ const SpiffWidget = () => {
     let alive = true;
     const load = () => client.get('spiff').then(r => { if (alive) setCampaigns(r.data.campaigns || []); }).catch(() => {});
     load();
+    // Auto (sales/revenue) campaigns derive progress from the sales table, which
+    // is NOT in the realtime publication — so the backend pings spiff_campaigns
+    // (a no-op write) whenever a sale's status changes (e.g. compliance approval),
+    // which lands here as a spiff_campaigns event → we refetch fresh progress.
     const ch = supabase
       .channel('spiff-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'spiff_entries' }, load)

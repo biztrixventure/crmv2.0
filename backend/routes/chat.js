@@ -88,9 +88,33 @@ router.get('/me', asyncHandler(async (req, res) => {
 }));
 
 // ── GET /chat/users — global directory for the new-chat picker ────────────────
+// Filters: q (name), company_id, role (custom-role level). Available to ALL chat
+// users so anyone can find people by company or role, not just superadmins.
 router.get('/users', asyncHandler(async (req, res) => {
-  const users = await searchDirectory({ q: req.query.q, excludeId: req.user.id, limit: 50 });
+  const users = await searchDirectory({
+    q: req.query.q,
+    excludeId: req.user.id,
+    limit: 50,
+    companyId: req.query.company_id || null,
+    role: req.query.role || null,
+  });
   res.json({ users });
+}));
+
+// ── GET /chat/directory-meta — companies + role levels for the picker filters ──
+// Any chat user may read this (names of companies/roles aren't sensitive) so the
+// company dropdown + role filter work for everyone.
+router.get('/directory-meta', asyncHandler(async (req, res) => {
+  const [{ data: companies }, { data: roles }] = await Promise.all([
+    supabaseAdmin.from('companies').select('id, name').eq('is_active', true).order('name'),
+    supabaseAdmin.from('custom_roles').select('level, name'),
+  ]);
+  const seen = new Set();
+  const roleList = [];
+  (roles || []).forEach(r => {
+    if (r.level && !seen.has(r.level)) { seen.add(r.level); roleList.push({ level: r.level, label: (r.name || r.level) }); }
+  });
+  res.json({ companies: companies || [], roles: roleList });
 }));
 
 // ── GET /chat/styles — per-user font colors (read-only, all roles) ────────────
