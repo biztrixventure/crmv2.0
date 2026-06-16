@@ -7,6 +7,9 @@ const ET_ZONE = 'America/New_York';
 function getEtOffsetMs(dateStr) {
   // Use noon UTC on that date as a DST-safe reference point.
   const ref = new Date(`${dateStr}T12:00:00Z`);
+  // Never throw on a malformed date — a bad uploaded value must fall back, not
+  // crash the whole bulk insert. Intl.format() raises RangeError on Invalid Date.
+  if (isNaN(ref.getTime())) return 0;
   const etHour = parseInt(
     new Intl.DateTimeFormat('en-US', {
       timeZone: ET_ZONE, hour: '2-digit', hourCycle: 'h23',
@@ -50,15 +53,25 @@ function etDateToUtcEnd(dateStr) {
 // server's offset.
 const pad2 = (n) => String(n).padStart(2, '0');
 
+// Reject impossible calendar parts so a misread format falls back instead of
+// producing an Invalid Date (which used to crash the bulk insert downstream).
+function validParts(p) {
+  return p && p.mo >= 1 && p.mo <= 12 && p.d >= 1 && p.d <= 31
+    && p.h >= 0 && p.h <= 23 && p.mi >= 0 && p.mi <= 59 && p.s >= 0 && p.s <= 59;
+}
+
 // Tolerant parse of common spreadsheet formats → { y, mo, d, h, mi, s }.
 function parseDateParts(input) {
   const s = String(input).trim();
   // ISO-ish: 2026-05-01 [ or T] 11:48[:30]
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (m) {
-    return { y: +m[1], mo: +m[2], d: +m[3], h: +(m[4] || 0), mi: +(m[5] || 0), s: +(m[6] || 0) };
+    const p = { y: +m[1], mo: +m[2], d: +m[3], h: +(m[4] || 0), mi: +(m[5] || 0), s: +(m[6] || 0) };
+    return validParts(p) ? p : null;
   }
-  // US: 5/1/2026 [11:48[:30]] [AM|PM]
+  // Slash format: 5/1/2026 or 21/05/2026 [11:48[:30]] [AM|PM]. Excel exports are
+  // locale-dependent — the same file can mix US (M/D) and intl (D/M). Disambiguate
+  // by value: if the first number can't be a month (>12), it's the day (D/M/Y).
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
   if (m) {
     let h = +(m[4] || 0);
@@ -66,7 +79,12 @@ function parseDateParts(input) {
     if (ap === 'PM' && h < 12) h += 12;
     if (ap === 'AM' && h === 12) h = 0;
     const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
-    return { y, mo: +m[1], d: +m[2], h, mi: +(m[5] || 0), s: +(m[6] || 0) };
+    const a = +m[1], b = +m[2];
+    // a>12 → D/M/Y; else default to US M/D/Y (matches prior behavior).
+    const mo = (a > 12 && b <= 12) ? b : a;
+    const d  = (a > 12 && b <= 12) ? a : b;
+    const p = { y, mo, d, h, mi: +(m[5] || 0), s: +(m[6] || 0) };
+    return validParts(p) ? p : null;
   }
   return null;
 }
@@ -86,8 +104,10 @@ function etWallClockToUtc(input) {
   }
   const dateStr = `${p.y}-${pad2(p.mo)}-${pad2(p.d)}`;
   const base = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s);
+  if (isNaN(base)) return null;
   // ET wall-clock = UTC(base) shifted forward by ET's offset (4h EDT / 5h EST).
-  return new Date(base + getEtOffsetMs(dateStr)).toISOString();
+  const out = new Date(base + getEtOffsetMs(dateStr));
+  return isNaN(out.getTime()) ? null : out.toISOString();
 }
 
 // Current ET calendar day as 'YYYY-MM-DD'. Default zone is America/New_York
