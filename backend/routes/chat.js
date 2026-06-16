@@ -135,21 +135,46 @@ router.get('/conversations', asyncHandler(async (req, res) => {
   });
   const cards = await getUserCards([...allUserIds]);
 
-  // Last message + unread count per conversation (parallel; few rows each).
-  const enriched = await Promise.all((convs || []).map(async (conv) => {
-    const myMem = myMap[conv.id] || {};
-    const memberCards = (membersByConv[conv.id] || []).map(id => cards.get(id)).filter(Boolean);
+  // Last message + unread count per conversation in ONE round-trip via the
+  // get_conversation_previews() function (migration 092). Falls back to the
+  // legacy per-conversation N+1 if the function isn't applied yet, so this is
+  // safe to deploy before/after the migration.
+  const preview = new Map();   // conversation_id -> { last_message, unread }
+  let previewsOk = false;
+  {
+    const { data: rows, error } = await supabaseAdmin.rpc('get_conversation_previews', { p_user_id: uid });
+    if (!error && Array.isArray(rows)) {
+      previewsOk = true;
+      rows.forEach(r => preview.set(r.conversation_id, {
+        unread: r.unread_count || 0,
+        last_message: r.last_message_id
+          ? { body: r.last_deleted ? null : r.last_body, created_at: r.last_created_at, sender_id: r.last_sender_id, deleted: !!r.last_deleted }
+          : null,
+      }));
+    }
+  }
 
+  const buildLegacyPreview = async (conv, myMem) => {
     const lastMsgQ = supabaseAdmin
       .from('messages').select('id, body, created_at, sender_id, deleted_at')
       .eq('conversation_id', conv.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
-
     let unreadQ = supabaseAdmin
       .from('messages').select('id', { count: 'exact', head: true })
       .eq('conversation_id', conv.id).is('deleted_at', null).neq('sender_id', uid);
     if (myMem.last_read_at) unreadQ = unreadQ.gt('created_at', myMem.last_read_at);
-
     const [{ data: lastMsg }, { count: unread }] = await Promise.all([lastMsgQ, unreadQ]);
+    return {
+      unread: unread || 0,
+      last_message: lastMsg
+        ? { body: lastMsg.deleted_at ? null : lastMsg.body, created_at: lastMsg.created_at, sender_id: lastMsg.sender_id, deleted: !!lastMsg.deleted_at }
+        : null,
+    };
+  };
+
+  const enriched = await Promise.all((convs || []).map(async (conv) => {
+    const myMem = myMap[conv.id] || {};
+    const memberCards = (membersByConv[conv.id] || []).map(id => cards.get(id)).filter(Boolean);
+    const p = previewsOk ? (preview.get(conv.id) || { unread: 0, last_message: null }) : await buildLegacyPreview(conv, myMem);
 
     return {
       id: conv.id,
@@ -162,12 +187,10 @@ router.get('/conversations', asyncHandler(async (req, res) => {
       is_muted: myMem.is_muted || false,
       my_role: myMem.member_role || 'member',
       last_message_at: conv.last_message_at,
-      unread: unread || 0,
+      unread: p.unread,
       members: memberCards,
       other: conv.type === 'dm' ? memberCards.find(c => c.id !== uid) || null : null,
-      last_message: lastMsg
-        ? { body: lastMsg.deleted_at ? null : lastMsg.body, created_at: lastMsg.created_at, sender_id: lastMsg.sender_id, deleted: !!lastMsg.deleted_at }
-        : null,
+      last_message: p.last_message,
     };
   }));
 

@@ -116,8 +116,12 @@ router.get(
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
+    // NOTE: the nested transfer's form_data is intentionally NOT selected — it's
+    // a large JSONB the list view never reads (the drawer uses the sale's own
+    // form_data), so shipping it per row was pure egress waste. Keep the cheap
+    // id/status/created_by in case a caller needs the linkage.
     let query = applySort(
-      supabaseAdmin.from('sales').select(`*, transfers(id, form_data, status, created_by)`, { count: 'exact' }),
+      supabaseAdmin.from('sales').select(`*, transfers(id, status, created_by)`, { count: 'exact' }),
       sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false },
     );
 
