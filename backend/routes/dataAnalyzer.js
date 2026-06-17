@@ -148,11 +148,16 @@ function pickDataset(name) {
 // Pull ALL filtered rows up to a hard cap. Used by /export and /breakdown so
 // stats are computed against the entire match, not just the page the user
 // happens to be looking at.
-async function fetchAll(dataset, filters, cap = 10000) {
+// Pull EVERY filtered row by paging in 1000-row chunks until a short page ends
+// it — no artificial cap, so aggregates / export / breakdown reflect the whole
+// dataset. `columns` lets callers fetch only what they need (aggregates pull a
+// few numeric columns instead of full rows, keeping a 20k-row scan cheap). A
+// high safety ceiling guards against a runaway, not real data.
+async function fetchAll(dataset, filters, { columns = '*', cap = 1_000_000 } = {}) {
   const cfg = pickDataset(dataset);
   const all = [];
   for (let from = 0; from < cap; from += 1000) {
-    let q = supabaseAdmin.from(cfg.table).select('*').order('created_at', { ascending: false });
+    let q = supabaseAdmin.from(cfg.table).select(columns).order('created_at', { ascending: false });
     for (const f of filters) q = applyFilter(q, f, cfg);
     const { data, error } = await q.range(from, from + 999);
     if (error) throw new Error(error.message);
@@ -162,6 +167,13 @@ async function fetchAll(dataset, filters, cap = 10000) {
   }
   return all;
 }
+
+// Minimal column sets for the aggregate banner (avoids hauling full rows +
+// form_data just to sum a couple of numbers across the whole dataset).
+const AGG_COLUMNS = {
+  sales:     'status,down_payment,monthly_payment,closer_id',
+  transfers: 'status,created_by,assigned_closer_id',
+};
 
 // Resolve closer/fronter/company names for a result set (sales has all three;
 // transfers carries created_by + assigned_closer_id, no fronter/closer split).
@@ -273,9 +285,9 @@ router.post('/query', asyncHandler(async (req, res) => {
 
   const enriched = await enrichNames(data || [], dataset);
 
-  // Aggregates run against the FULL filtered set so the banner stays honest
-  // even when the user is paging through page 5 of 20.
-  const all = await fetchAll(dataset, filters);
+  // Aggregates run against the FULL filtered set (every row, light columns) so
+  // the banner stays honest even when paging through page 5 of 20.
+  const all = await fetchAll(dataset, filters, { columns: AGG_COLUMNS[dataset] });
   const aggregates = dataset === 'sales' ? aggregateSales(all) : aggregateTransfers(all);
 
   res.json({ rows: enriched, total: count || 0, page, limit, dataset, aggregates });
@@ -378,7 +390,8 @@ router.post('/breakdown', asyncHandler(async (req, res) => {
   const top     = Math.min(50, Math.max(1, parseInt(req.body?.top || 20)));
 
   const cfg = pickDataset(dataset);
-  const all = await fetchAll(dataset, filters);
+  // Breakdown only needs the grouped column (typed) or form_data (JSONB key).
+  const all = await fetchAll(dataset, filters, { columns: cfg.typed.has(group) ? group : 'form_data' });
 
   // Resolve the field's raw value off each row, picking from the typed column
   // when it exists and falling back to form_data.

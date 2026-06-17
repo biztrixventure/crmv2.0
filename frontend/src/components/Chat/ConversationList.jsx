@@ -80,25 +80,37 @@ const PersonRow = ({ u, onStartDM, colorFor }) => (
 // "Start a new chat".
 const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSelect, onStartDM, onNewGroup, loading }) => {
   const [q, setQ] = useState('');
+  const [companyId, setCompanyId] = useState('');   // '' = all companies
+  const [companies, setCompanies] = useState([]);
   const [people, setPeople] = useState([]);
   const [searching, setSearching] = useState(false);
   const debRef = useRef(null);
   const { colorFor } = useUserColors();
 
   const query = q.trim();
+  // Browsing = a text search OR a company filter is active → show directory.
+  const browsing = !!query || !!companyId;
 
-  // Directory search (debounced) only while the field has text.
+  // Company options for the filter (available to everyone).
+  useEffect(() => {
+    client.get('chat/directory-meta').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+  }, []);
+
+  // Directory search (debounced) while the field has text OR a company is picked.
   useEffect(() => {
     clearTimeout(debRef.current);
-    if (!query) { setPeople([]); setSearching(false); return; }
+    if (!browsing) { setPeople([]); setSearching(false); return; }
     setSearching(true);
     debRef.current = setTimeout(async () => {
-      try { const r = await client.get('chat/users', { params: { q: query } }); setPeople(r.data.users || []); }
+      try {
+        const r = await client.get('chat/users', { params: { q: query || undefined, company_id: companyId || undefined } });
+        setPeople(r.data.users || []);
+      }
       catch { setPeople([]); }
       finally { setSearching(false); }
     }, 250);
     return () => clearTimeout(debRef.current);
-  }, [query]);
+  }, [query, companyId, browsing]);
 
   const filteredConvos = query
     ? conversations.filter(c => (c.title || '').toLowerCase().includes(query.toLowerCase()))
@@ -119,20 +131,25 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
         </button>
       </div>
 
-      {/* One search field — finds chats and people to message */}
-      <div className="px-3 py-2.5 flex-shrink-0">
+      {/* One search field — finds chats and people to message — plus a company
+          filter so anyone can browse people by company. */}
+      <div className="px-3 py-2.5 flex-shrink-0 space-y-2">
         <div className="relative">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search chats or people to message…" className="input" style={{ paddingLeft: 34, height: 38 }} />
           {searching && <Loader2 size={14} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />}
         </div>
+        <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm" style={{ height: 36 }} title="Filter people by company">
+          <option value="">All companies</option>
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
       </div>
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {loading && !conversations.length && !query ? (
+        {loading && !conversations.length && !browsing ? (
           <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
-        ) : !query ? (
+        ) : !browsing ? (
           conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-14 px-6 text-center gap-3">
               <MessageSquarePlus size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
@@ -151,7 +168,7 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
             {!searching && filteredConvos.length === 0 && newPeople.length === 0 && (
               <div className="flex flex-col items-center justify-center py-14 px-6 text-center gap-3">
                 <MessageSquarePlus size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
-                <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No chats or people match “{query}”.</p>
+                <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No chats or people match{query ? ` “${query}”` : ' this company'}.</p>
               </div>
             )}
           </>

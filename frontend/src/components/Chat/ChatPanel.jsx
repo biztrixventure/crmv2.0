@@ -26,7 +26,18 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('chat/conversations'); const list = r.data.conversations || []; setConversations(list); return list; }
+    try {
+      const r = await client.get('chat/conversations'); const list = r.data.conversations || [];
+      setConversations(list);
+      // Keep the OPEN thread's read receipt fresh without resetting it — merge
+      // only read_at/unread (id stays the same, so useChat doesn't reload).
+      setActive(a => {
+        if (!a) return a;
+        const fresh = list.find(c => c.id === a.id);
+        return fresh ? { ...a, read_at: fresh.read_at, unread: fresh.unread } : a;
+      });
+      return list;
+    }
     catch { return null; }
     finally { setLoading(false); }
   }, []);

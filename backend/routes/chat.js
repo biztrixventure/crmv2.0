@@ -148,14 +148,20 @@ router.get('/conversations', asyncHandler(async (req, res) => {
   const [{ data: convs }, { data: allMembers }] = await Promise.all([
     supabaseAdmin.from('conversations').select('*').in('id', convIds)
       .order('last_message_at', { ascending: false }).limit(100),
-    supabaseAdmin.from('conversation_members').select('conversation_id, user_id').in('conversation_id', convIds),
+    supabaseAdmin.from('conversation_members').select('conversation_id, user_id, last_read_at').in('conversation_id', convIds),
   ]);
 
   const membersByConv = {};
+  const readByConv = {};          // conversation_id -> newest last_read_at among OTHER members
   const allUserIds = new Set();
   (allMembers || []).forEach(m => {
     (membersByConv[m.conversation_id] = membersByConv[m.conversation_id] || []).push(m.user_id);
     allUserIds.add(m.user_id);
+    // Read receipt: the latest time another member read this conversation.
+    if (m.user_id !== uid && m.last_read_at) {
+      const cur = readByConv[m.conversation_id];
+      if (!cur || m.last_read_at > cur) readByConv[m.conversation_id] = m.last_read_at;
+    }
   });
   const cards = await getUserCards([...allUserIds]);
 
@@ -211,6 +217,7 @@ router.get('/conversations', asyncHandler(async (req, res) => {
       is_muted: myMem.is_muted || false,
       my_role: myMem.member_role || 'member',
       last_message_at: conv.last_message_at,
+      read_at: readByConv[conv.id] || null,
       unread: p.unread,
       members: memberCards,
       other: conv.type === 'dm' ? memberCards.find(c => c.id !== uid) || null : null,

@@ -51,6 +51,11 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
 
   useEffect(() => { setHighlight(0); }, [sug?.kind, sug?.query, matches.length]);
 
+  // Auto-focus the input on mount so opening a conversation drops the cursor
+  // straight into the message box — no extra click. (MessageThread keys the
+  // Composer by conversation id, so it remounts + refocuses on each open.)
+  useEffect(() => { if (!disabled) requestAnimationFrame(() => edRef.current?.focus()); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const emit = () => setHtmlEmpty(isHtmlEmpty(edRef.current?.innerHTML || ''));
   const focusEd = () => edRef.current?.focus();
   const exec = (cmd, arg = null) => { document.execCommand(cmd, false, arg); focusEd(); emit(); };

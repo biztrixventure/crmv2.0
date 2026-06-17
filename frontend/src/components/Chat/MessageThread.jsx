@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, CheckCheck, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useLastSeen } from '../../hooks/useLastSeen';
 import { formatLastSeen } from '../../utils/lastSeen';
@@ -50,7 +50,7 @@ const Attachment = ({ a, mine }) => {
   );
 };
 
-const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => {
+const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact }) => {
   const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
   const mentioned = !mine && Array.isArray(m.mentions) && m.mentions.includes(meId);
@@ -104,7 +104,12 @@ const Bubble = memo(({ m, mine, meId, showName, onEdit, onDelete, onReact }) => 
               )}
               <span className="block text-right mt-0.5" style={{ fontSize: 10, opacity: 0.75, color: mine && !m.deleted ? 'rgba(255,255,255,0.85)' : 'var(--color-text-tertiary)' }}>
                 {clockTime(m.created_at)}{m.edited && !m.deleted ? ' · edited' : ''}
-                {mine && m.error ? <AlertCircle size={11} className="inline ml-1" /> : mine && !m.pending && !m.deleted ? <Check size={11} className="inline ml-1" /> : null}
+                {mine && m.error ? <AlertCircle size={11} className="inline ml-1" />
+                  : mine && !m.pending && !m.deleted
+                    ? (read
+                        ? <CheckCheck size={12} className="inline ml-1" style={{ color: 'rgba(255,255,255,0.95)' }} />   /* read */
+                        : <Check size={11} className="inline ml-1" />)                                                  /* delivered */
+                    : null}
               </span>
             </div>
 
@@ -188,6 +193,10 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   }, [sendMessage, onSent]);
 
   const isBroadcast = conversation.type === 'broadcast';
+  // The newest "read by recipients" timestamp (max last_read_at among the other
+  // members). My messages at/under it show a double check. Updated on the
+  // conversation-list poll, so it appears within a few seconds of being read.
+  const readThrough = conversation.read_at ? new Date(conversation.read_at) : null;
   const online = conversation.other && onlineIds?.has(conversation.other.id);
   // Last-seen timestamp for the DM partner — shown instead of a bare "Offline".
   const lastSeenMap = useLastSeen(conversation.type === 'dm' && conversation.other && !online ? [conversation.other.id] : []);
@@ -275,13 +284,15 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
                   <span className="text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{dayLabel(m.created_at)}</span>
                 </div>
               )}
-              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName} onEdit={onEdit} onDelete={onDelete} onReact={addReaction} />
+              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName}
+                read={m.sender_id === meId && !m.pending && !m.deleted && readThrough != null && new Date(m.created_at) <= readThrough}
+                onEdit={onEdit} onDelete={onDelete} onReact={addReaction} />
             </div>
           );
         })}
       </div>
 
-      <Composer onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members} />
+      <Composer key={conversation.id} onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members} />
     </div>
   );
 };
