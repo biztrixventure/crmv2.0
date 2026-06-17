@@ -107,8 +107,8 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact 
                 {mine && m.error ? <AlertCircle size={11} className="inline ml-1" />
                   : mine && !m.pending && !m.deleted
                     ? (read
-                        ? <CheckCheck size={12} className="inline ml-1" style={{ color: 'rgba(255,255,255,0.95)' }} />   /* read */
-                        : <Check size={11} className="inline ml-1" />)                                                  /* delivered */
+                        ? <CheckCheck size={13} className="inline ml-1" style={{ color: '#38bdf8' }} />                  /* read — WhatsApp-blue double tick */
+                        : <CheckCheck size={13} className="inline ml-1" style={{ color: 'rgba(255,255,255,0.6)' }} />)    /* delivered — grey double tick */
                     : null}
               </span>
             </div>
@@ -155,7 +155,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   }, [conversation.members, meId]);
   const resolveName = useMemo(() => (id) => nameMap[id] || (id === meId ? 'You' : 'User'), [nameMap, meId]);
 
-  const { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping } =
+  const { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping } =
     useChat(conversation.id, { meId, resolveName });
 
   const scrollRef = useRef(null);
@@ -193,10 +193,16 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   }, [sendMessage, onSent]);
 
   const isBroadcast = conversation.type === 'broadcast';
-  // The newest "read by recipients" timestamp (max last_read_at among the other
-  // members). My messages at/under it show a double check. Updated on the
-  // conversation-list poll, so it appears within a few seconds of being read.
-  const readThrough = conversation.read_at ? new Date(conversation.read_at) : null;
+  // The newest "read by recipients" timestamp. Two sources, take the latest:
+  //  - conversation.read_at: persisted last_read_at from the list (covers
+  //    history + when the thread was opened cold).
+  //  - peerReadAt: a live broadcast the recipient fires the instant they read,
+  //    so the blue double tick flips immediately (WhatsApp-style), no DB wait.
+  const readThrough = useMemo(() => {
+    const a = conversation.read_at ? new Date(conversation.read_at) : null;
+    const b = peerReadAt ? new Date(peerReadAt) : null;
+    return (a && b) ? (a > b ? a : b) : (a || b);
+  }, [conversation.read_at, peerReadAt]);
   const online = conversation.other && onlineIds?.has(conversation.other.id);
   // Last-seen timestamp for the DM partner — shown instead of a bare "Offline".
   const lastSeenMap = useLastSeen(conversation.type === 'dm' && conversation.other && !online ? [conversation.other.id] : []);

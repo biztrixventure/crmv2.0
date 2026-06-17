@@ -63,6 +63,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [typingNames, setTypingNames] = useState([]);
+  const [peerReadAt, setPeerReadAt] = useState(null);   // newest "a peer read" time (instant, via broadcast)
 
   const channelRef = useRef(null);
   const pollRef = useRef(null);
@@ -80,9 +81,16 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const nameOf = useCallback((id) => (resolveRef.current?.(id)) || 'User', []);
 
   const markRead = useCallback(() => {
-    if (conversationId) client.patch(`chat/conversations/${conversationId}/read`).catch(() => {});
-  }, [conversationId]);
+    if (!conversationId) return;
+    client.patch(`chat/conversations/${conversationId}/read`).catch(() => {});
+    // Tell peers instantly that I've read — drives the sender's blue double tick
+    // immediately (WhatsApp-style), without waiting on a DB poll.
+    channelRef.current?.send({ type: 'broadcast', event: 'read', payload: { user_id: meId, at: new Date().toISOString() } });
+  }, [conversationId, meId]);
   const markReadRef = useRef(markRead); useEffect(() => { markReadRef.current = markRead; }, [markRead]);
+
+  // Reset the live peer-read marker when switching conversations.
+  useEffect(() => { setPeerReadAt(null); }, [conversationId]);
 
   const mapRow = useCallback((row) => ({
     id: row.id, conversation_id: row.conversation_id, sender_id: row.sender_id,
@@ -250,6 +258,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
           if (!payload || payload.user_id === meId) return;
           setMessages(prev => applyReaction(prev, payload));
         })
+        .on('broadcast', { event: 'read' }, ({ payload }) => {
+          if (!payload || payload.user_id === meId || !payload.at) return;
+          setPeerReadAt(prev => (!prev || payload.at > prev) ? payload.at : prev);
+        })
         .subscribe((status) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             retryRef.current = setTimeout(setupChannel, 3000 + Math.random() * 2000);
@@ -280,5 +292,5 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     };
   }, [conversationId, meId, nameOf, fetchLatest, schedulePoll]);
 
-  return { messages, loading, loadingOlder, hasMore, typingNames, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping };
+  return { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping };
 };
