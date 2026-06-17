@@ -109,11 +109,31 @@ router.get('/conversations', asyncHandler(async (req, res) => {
   const q     = (req.query.q || '').trim();
   const type  = ['dm', 'group', 'broadcast'].includes(req.query.type) ? req.query.type : null;
   const lockedOnly = req.query.locked === 'true';
+  const companyId = (req.query.company_id || '').trim() || null;
+  const userId    = /^[0-9a-f-]{36}$/i.test(req.query.user_id || '') ? req.query.user_id : null;
   const applyFilters = (query) => {
     if (type) query = query.eq('type', type);
     if (lockedOnly) query = query.eq('is_locked', true);
     return query;
   };
+
+  // Scope to the conversations a specific user — or ANY user of a company — is in.
+  let scopeIds = null;
+  if (userId || companyId) {
+    let memberUserIds = userId ? [userId] : [];
+    if (!userId && companyId) {
+      const { data: roles } = await supabaseAdmin
+        .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+      memberUserIds = [...new Set((roles || []).map(r => r.user_id))];
+    }
+    scopeIds = new Set();
+    for (let i = 0; i < memberUserIds.length; i += 200) {
+      const { data: mc } = await supabaseAdmin
+        .from('conversation_members').select('conversation_id').in('user_id', memberUserIds.slice(i, i + 200));
+      (mc || []).forEach(m => scopeIds.add(m.conversation_id));
+    }
+    if (!scopeIds.size) return res.json({ conversations: [], page, has_more: false });
+  }
 
   let convs = [];
   if (q) {
@@ -129,12 +149,17 @@ router.get('/conversations', asyncHandler(async (req, res) => {
         .from('conversation_members').select('conversation_id').in('user_id', matchUserIds);
       memberConvIds = [...new Set((mc || []).map(m => m.conversation_id))];
     }
-    const idSet = new Set([...(titleRes.data || []).map(c => c.id), ...memberConvIds]);
-    if (idSet.size) {
-      const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*').in('id', [...idSet]))
+    let ids = [...new Set([...(titleRes.data || []).map(c => c.id), ...memberConvIds])];
+    if (scopeIds) ids = ids.filter(id => scopeIds.has(id));   // intersect with company/user scope
+    if (ids.length) {
+      const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*').in('id', ids))
         .order('last_message_at', { ascending: false }).range(from, from + limit);
       convs = data || [];
     }
+  } else if (scopeIds) {
+    const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*').in('id', [...scopeIds]))
+      .order('last_message_at', { ascending: false }).range(from, from + limit);
+    convs = data || [];
   } else {
     const { data } = await applyFilters(supabaseAdmin.from('conversations').select('*'))
       .order('last_message_at', { ascending: false }).range(from, from + limit);
@@ -268,6 +293,24 @@ router.get('/messages/search', asyncHandler(async (req, res) => {
       conversation_type: titles[m.conversation_id]?.type || null,
     })),
   });
+}));
+
+// ── PATCH /messages/:id — edit ANY message body (superadmin) ──────────────────
+router.patch('/messages/:id', [body('body').isString().trim().notEmpty().isLength({ max: 4000 })], asyncHandler(async (req, res) => {
+  if (!validationResult(req).isEmpty()) return res.status(400).json({ error: 'Message body required (max 4000 chars)' });
+  const { data: msg } = await supabaseAdmin.from('messages').select('id, conversation_id').eq('id', req.params.id).maybeSingle();
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+  // Overwrite as plain text (drop rich body_html so the new text is what renders)
+  // and stamp edited_at — the messages-table realtime UPDATE pushes it live to
+  // everyone in the room.
+  const { error } = await supabaseAdmin.from('messages')
+    .update({ body: req.body.body.trim(), body_html: null, edited_at: new Date().toISOString() })
+    .eq('id', req.params.id).is('deleted_at', null);
+  if (error) return res.status(500).json({ error: error.message });
+
+  await logModeration({ actorId: req.user.id, action: 'edit_message', targetMessageId: msg.id, targetConversationId: msg.conversation_id });
+  res.json({ message: 'edited' });
 }));
 
 // ── DELETE /messages/:id — remove any message ─────────────────────────────────

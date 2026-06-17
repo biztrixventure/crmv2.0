@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  MessageSquare, Activity, Users, Lock, Unlock, Trash2, Send, Shield, Search, X,
+  MessageSquare, Activity, Users, Lock, Unlock, Trash2, Pencil, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
   UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw, Palette,
 } from 'lucide-react';
@@ -118,6 +118,12 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
   const title = conv ? (conv.title || members.map(m => m.name).slice(0, 2).join(' ↔ ') || 'Conversation') : 'Loading…';
 
   const delMsg = async (id) => { if (!window.confirm('Delete this message for everyone?')) return; await client.delete(`chat/admin/messages/${id}`); toast.success('Message deleted'); loadMessages(); };
+  const editMsg = async (m) => {
+    const next = window.prompt('Edit message (applies for everyone):', m.body || '');
+    if (next == null || !next.trim() || next.trim() === (m.body || '').trim()) return;
+    try { await client.patch(`chat/admin/messages/${m.id}`, { body: next.trim() }); toast.success('Message edited'); loadMessages(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Edit failed'); }
+  };
   const toggleLock = async () => { const r = await client.patch(`chat/admin/conversations/${conversationId}/lock`, { is_locked: !conv.is_locked }); setDetail(d => ({ ...d, conversation: { ...d.conversation, is_locked: r.data.conversation.is_locked } })); toast.success(r.data.conversation.is_locked ? 'Room locked' : 'Room unlocked'); onChanged?.(); };
   const delRoom = async () => { if (!window.confirm('Delete this entire room and all its messages?')) return; await client.delete(`chat/admin/conversations/${conversationId}`); toast.success('Room deleted'); onChanged?.(); onClose(); };
   const muteMember = async (m) => { const r = await client.patch(`chat/admin/conversations/${conversationId}/members/${m.id}/mute`, { is_muted: !m.is_muted }); setDetail(d => ({ ...d, members: d.members.map(x => x.id === m.id ? { ...x, is_muted: r.data.is_muted } : x) })); toast.success(r.data.is_muted ? `Muted ${m.name}` : `Unmuted ${m.name}`); };
@@ -168,7 +174,12 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
                         {m.body}{m.deleted && <span className="ml-1 text-xs">(deleted{m.deleted_by_name ? ` by ${m.deleted_by_name}` : ''})</span>}
                       </p>
                     </div>
-                    {!m.deleted && <button onClick={() => delMsg(m.id)} title="Delete message" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error-50"><Trash2 size={13} style={{ color: '#ef4444' }} /></button>}
+                    {!m.deleted && (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                        <button onClick={() => editMsg(m)} title="Edit message" className="p-1 rounded hover:bg-bg-secondary"><Pencil size={13} style={{ color: 'var(--color-primary-600)' }} /></button>
+                        <button onClick={() => delMsg(m.id)} title="Delete message" className="p-1 rounded hover:bg-error-50"><Trash2 size={13} style={{ color: '#ef4444' }} /></button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -206,16 +217,68 @@ const ConversationsTab = ({ openId, setOpenId }) => {
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
   const [locked, setLocked] = useState(false);
+  const [companyId, setCompanyId] = useState('');
+  const [companies, setCompanies] = useState([]);
+  const [userQuery, setUserQuery] = useState('');
+  const [userResults, setUserResults] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);   // { id, name, company }
+
+  useEffect(() => { client.get('chat/directory-meta').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
+
+  // Specific-user picker (scoped to the chosen company when set).
+  useEffect(() => {
+    if (selectedUser) return;
+    const t = setTimeout(async () => {
+      if (!userQuery.trim() && !companyId) { setUserResults([]); return; }
+      try { const r = await client.get('chat/users', { params: { q: userQuery || undefined, company_id: companyId || undefined } }); setUserResults(r.data.users || []); }
+      catch { setUserResults([]); }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [userQuery, companyId, selectedUser]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('chat/admin/conversations', { params: { q, type, locked: locked ? 'true' : undefined } }); setConvs(r.data.conversations || []); }
+    try {
+      const r = await client.get('chat/admin/conversations', { params: {
+        q, type, locked: locked ? 'true' : undefined,
+        company_id: selectedUser ? undefined : (companyId || undefined),
+        user_id: selectedUser?.id || undefined,
+      } });
+      setConvs(r.data.conversations || []);
+    }
     catch { /* ignore */ } finally { setLoading(false); }
-  }, [q, type, locked]);
+  }, [q, type, locked, companyId, selectedUser]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   return (
     <div>
+      {/* Company / specific-user scope */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <select value={companyId} onChange={e => { setCompanyId(e.target.value); setSelectedUser(null); }} className="input" style={{ maxWidth: 240 }}>
+          <option value="">All companies</option>
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {selectedUser ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-2 rounded-lg" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+            {selectedUser.name}<button onClick={() => setSelectedUser(null)} title="Clear user"><X size={13} /></button>
+          </span>
+        ) : (
+          <div className="relative flex-1 min-w-[220px]">
+            <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="…or filter by a specific user" className="input" />
+            {userResults.length > 0 && (
+              <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                {userResults.map(u => (
+                  <button key={u.id} onClick={() => { setSelectedUser(u); setUserResults([]); setUserQuery(''); }} className="w-full text-left px-3 py-2 hover:bg-bg-secondary">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{u.name}</span>
+                    <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{[u.role, u.company].filter(Boolean).join(' · ')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <div className="relative flex-1 min-w-[220px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
