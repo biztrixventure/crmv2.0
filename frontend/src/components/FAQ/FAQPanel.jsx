@@ -3,6 +3,7 @@ import {
   HelpCircle, Search, ChevronDown, X, Tag, LayoutGrid, BookOpen,
 } from 'lucide-react';
 import { useFaqs } from '../../hooks/useFaqs';
+import { useCategories } from '../Admin/shared/CategorySystem';
 import { useSearchTools } from '../../hooks/useSearchTools';
 import { rankItems } from '../../utils/smartSearch';
 
@@ -94,7 +95,9 @@ const FAQPanel = () => {
   const [query, setQuery]       = useState('');
   const [audience, setAudience] = useState('');
   const [topic, setTopic]       = useState('');     // selected keyword/topic
+  const [categoryId, setCategoryId] = useState(''); // selected category
   const [expanded, setExpanded] = useState(null);
+  const { categories } = useCategories('faqs');
   const { synMap, logSearch }   = useSearchTools('faq');
 
   useEffect(() => { fetchFaqs(); }, [fetchFaqs]);
@@ -120,10 +123,14 @@ const FAQPanel = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [audienceScoped]);
 
-  // Topic filter first, then intelligent ranked search (synonym-aware).
+  // Category filter, then topic, then ranked search.
+  const categoryScoped = useMemo(
+    () => (categoryId ? audienceScoped.filter(f => (f.category_ids || []).includes(categoryId)) : audienceScoped),
+    [audienceScoped, categoryId],
+  );
   const topicScoped = useMemo(
-    () => (topic ? audienceScoped.filter(f => splitKeywords(f.keywords).some(k => k.toLowerCase() === topic)) : audienceScoped),
-    [audienceScoped, topic],
+    () => (topic ? categoryScoped.filter(f => splitKeywords(f.keywords).some(k => k.toLowerCase() === topic)) : categoryScoped),
+    [categoryScoped, topic],
   );
   const filtered = useMemo(() => rankItems(query, topicScoped, [
     { get: f => f.question, weight: 5 },
@@ -134,8 +141,8 @@ const FAQPanel = () => {
   // Track searches for the superadmin analytics (debounced inside the hook).
   useEffect(() => { logSearch(query, filtered.length); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const clearFilters = () => { setQuery(''); setTopic(''); };
-  const hasFilters = query || topic;
+  const clearFilters = () => { setQuery(''); setTopic(''); setCategoryId(''); };
+  const hasFilters = query || topic || categoryId;
 
   return (
     <div className="animate-fade-in">
@@ -200,6 +207,20 @@ const FAQPanel = () => {
                   {audiences.map(a => (
                     <TopicButton key={a} active={audience === a} label={AUDIENCE_LABEL[a] || a}
                       count={faqs.filter(f => f.audience === a).length} onClick={() => { setAudience(a); setTopic(''); }} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {categories.length > 0 && (
+              <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
+                <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
+                  <TopicButton active={categoryId === ''} label="All categories" count={audienceScoped.length} icon={LayoutGrid} onClick={() => setCategoryId('')} />
+                  {categories.map(c => (
+                    <TopicButton key={c.id} active={categoryId === c.id} label={c.name}
+                      count={audienceScoped.filter(f => (f.category_ids || []).includes(c.id)).length} icon={Tag}
+                      onClick={() => setCategoryId(categoryId === c.id ? '' : c.id)} />
                   ))}
                 </div>
               </div>

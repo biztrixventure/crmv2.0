@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
+const { makeCategoryRouter, cleanCategoryIds } = require('../utils/categoryRoutes');
 
 const router = express.Router();
 
@@ -21,11 +22,14 @@ async function canManage(req) {
     || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
 }
 
+// Category CRUD (mounted before /:id so "categories" isn't read as an id).
+router.use('/categories', makeCategoryRouter('faq_categories', canManage));
+
 // ============================================================================
 // GET /faqs — role-scoped, searchable Q&A
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
-  const { q, audience, include_inactive } = req.query;
+  const { q, audience, include_inactive, category_id } = req.query;
   const allowed = viewerAudiences(req.user.role);
   const manage  = await canManage(req);
 
@@ -36,6 +40,9 @@ router.get('/', asyncHandler(async (req, res) => {
   }
   if (audience && allowed.includes(audience)) query = query.eq('audience', audience);
   else query = query.in('audience', allowed);
+
+  // Category filter (uuid[] contains the selected category).
+  if (category_id && /^[0-9a-f-]{36}$/i.test(category_id)) query = query.contains('category_ids', [category_id]);
 
   if (q && q.trim()) {
     const s = escapeOrValue(q.trim());
@@ -62,6 +69,7 @@ router.post('/', [
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
   const { question, answer, keywords, audience } = req.body;
+  const categoryIds = cleanCategoryIds(req.body.category_ids);
   const { data, error } = await supabaseAdmin
     .from('faqs')
     .insert({
@@ -69,6 +77,7 @@ router.post('/', [
       answer:     answer.trim(),
       keywords:   keywords?.trim() || null,
       audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
+      category_ids: categoryIds || [],
       created_by: req.user.id,
     })
     .select().single();
@@ -98,6 +107,8 @@ router.put('/:id', [
   if (req.body.keywords  !== undefined) updates.keywords  = req.body.keywords?.trim() || null;
   if (req.body.audience  !== undefined) updates.audience  = req.body.audience;
   if (req.body.is_active !== undefined) updates.is_active = req.body.is_active;
+  const catIds = cleanCategoryIds(req.body.category_ids);
+  if (catIds !== undefined) updates.category_ids = catIds;
 
   const { data, error } = await supabaseAdmin
     .from('faqs').update(updates).eq('id', req.params.id).select().single();

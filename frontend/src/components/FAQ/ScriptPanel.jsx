@@ -3,6 +3,7 @@ import {
   FileText, Search, ChevronDown, X, Tag, LayoutGrid, Copy, Check, MessageSquareText,
 } from 'lucide-react';
 import { useScripts } from '../../hooks/useScripts';
+import { useCategories } from '../Admin/shared/CategorySystem';
 import { useSearchTools } from '../../hooks/useSearchTools';
 import { rankItems } from '../../utils/smartSearch';
 import RichView from '../UI/RichView';
@@ -163,8 +164,10 @@ const ScriptPanel = () => {
   const { scripts, loading, error, fetchScripts } = useScripts();
   const [query, setQuery]     = useState('');
   const [topic, setTopic]     = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [expanded, setExpanded] = useState(null);
   const { synMap, logSearch } = useSearchTools('script');
+  const { categories } = useCategories('scripts');
 
   useEffect(() => { fetchScripts(); }, [fetchScripts]);
 
@@ -174,9 +177,13 @@ const ScriptPanel = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [scripts]);
 
+  const categoryScoped = useMemo(
+    () => (categoryId ? scripts.filter(s => (s.category_ids || []).includes(categoryId)) : scripts),
+    [scripts, categoryId],
+  );
   const topicScoped = useMemo(
-    () => (topic ? scripts.filter(s => splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) : scripts),
-    [scripts, topic],
+    () => (topic ? categoryScoped.filter(s => splitKeywords(s.keywords).some(k => k.toLowerCase() === topic)) : categoryScoped),
+    [categoryScoped, topic],
   );
   const secText = (s, part) => (Array.isArray(s.sections) ? s.sections.map(x => part === 'content' ? stripHtml(x.content) : (x[part] || '')).join('  ') : '');
   const filtered = useMemo(() => rankItems(query, topicScoped, [
@@ -189,8 +196,8 @@ const ScriptPanel = () => {
 
   useEffect(() => { logSearch(query, filtered.length); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const clearFilters = () => { setQuery(''); setTopic(''); };
-  const hasFilters = query || topic;
+  const clearFilters = () => { setQuery(''); setTopic(''); setCategoryId(''); };
+  const hasFilters = query || topic || categoryId;
 
   return (
     <div className="animate-fade-in">
@@ -227,12 +234,27 @@ const ScriptPanel = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-5">
         <aside className="hidden lg:block">
-          <div className="sticky top-4 rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="sticky top-4 space-y-4">
+          {categories.length > 0 && (
+            <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
+              <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
+                <TopicButton active={categoryId === ''} label="All categories" count={scripts.length} icon={LayoutGrid} onClick={() => setCategoryId('')} />
+                {categories.map(c => (
+                  <TopicButton key={c.id} active={categoryId === c.id} label={c.name}
+                    count={scripts.filter(s => (s.category_ids || []).includes(c.id)).length} icon={Tag}
+                    onClick={() => setCategoryId(categoryId === c.id ? '' : c.id)} />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
             <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
               <TopicButton active={topic === ''} label="All Scripts" count={scripts.length} icon={LayoutGrid} onClick={() => setTopic('')} />
               {topics.map(([t, c]) => <TopicButton key={t} active={topic === t} label={t} count={c} icon={Tag} onClick={() => setTopic(topic === t ? '' : t)} />)}
             </div>
+          </div>
           </div>
         </aside>
 

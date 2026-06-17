@@ -6,6 +6,7 @@ import {
 import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useFaqs } from '../../../hooks/useFaqs';
 import SearchSettings from '../SearchSettings';
+import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -27,13 +28,14 @@ const AudienceBadge = ({ audience }) => {
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
 // ── Create / edit modal ─────────────────────────────────────────────────────
-const FAQModal = ({ faq, onClose, onSave }) => {
+const FAQModal = ({ faq, categories, onClose, onSave }) => {
   const [form, setForm] = useState({
     question: faq?.question || '',
     answer:   faq?.answer   || '',
     keywords: faq?.keywords || '',
     audience: faq?.audience || 'both',
     is_active: faq?.is_active ?? true,
+    category_ids: faq?.category_ids || [],
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState('');
@@ -86,6 +88,10 @@ const FAQModal = ({ faq, onClose, onSave }) => {
               </select>
             </div>
           </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>Categories</label>
+            <CategoryPicker categories={categories} selected={form.category_ids} onChange={v => set('category_ids', v)} />
+          </div>
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Visible to agents</span>
@@ -111,15 +117,18 @@ const StatTile = ({ label, value, color, active, onClick }) => (
 // ── Main manager (FAQs only) ─────────────────────────────────────────────────
 const FAQManager = () => {
   const { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq } = useFaqs();
+  const catHook = useCategories('faqs');
   const [search, setSearch]     = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [audience, setAudience] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [catModal, setCatModal] = useState(false);
   const [modal, setModal]       = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [confirm, setConfirm]   = useState(null);
 
-  const load = () => fetchFaqs({ include_inactive: true, audience: audience || undefined, q: search.trim() || undefined });
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience]);
+  const load = () => fetchFaqs({ include_inactive: true, audience: audience || undefined, category_id: categoryId || undefined, q: search.trim() || undefined });
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience, categoryId]);
   const onSearch = (e) => { e.preventDefault(); load(); };
 
   const counts = {
@@ -157,6 +166,9 @@ const FAQManager = () => {
         <StatTile label="Fronters" value={counts.fronter} color={AUDIENCE_META.fronter.color} active={audience === 'fronter'} onClick={() => setAudience('fronter')} />
         <StatTile label="Both"     value={counts.both}    color={AUDIENCE_META.both.color}    active={audience === 'both'}    onClick={() => setAudience('both')} />
       </div>
+
+      {/* Category filter + management */}
+      <CategoryFilterBar categories={catHook.categories} value={categoryId} onChange={setCategoryId} onManage={() => setCatModal(true)} />
 
       <form onSubmit={onSearch} className="relative">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -200,11 +212,10 @@ const FAQManager = () => {
                       {!faq.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
                     </div>
                     {!open && <p className="text-xs mt-1 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{faq.answer}</p>}
-                    {splitKeywords(faq.keywords).length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {splitKeywords(faq.keywords).map(k => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1 mt-2">
+                      <CategoryChips ids={faq.category_ids} categories={catHook.categories} />
+                      {splitKeywords(faq.keywords).map(k => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                     <button onClick={() => updateFaq(faq.id, { is_active: !faq.is_active })} title={faq.is_active ? 'Hide from agents' : 'Show to agents'} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">{faq.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
@@ -224,7 +235,9 @@ const FAQManager = () => {
         </div>
       )}
 
-      {modal && <FAQModal faq={modal.faq} onClose={() => setModal(null)} onSave={(payload) => modal.faq ? updateFaq(modal.faq.id, payload) : createFaq(payload)} />}
+      {modal && <FAQModal faq={modal.faq} categories={catHook.categories} onClose={() => setModal(null)} onSave={(payload) => modal.faq ? updateFaq(modal.faq.id, payload) : createFaq(payload)} />}
+
+      {catModal && <CategoryManagerModal title="FAQ categories" hook={catHook} onClose={() => setCatModal(false)} />}
 
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>

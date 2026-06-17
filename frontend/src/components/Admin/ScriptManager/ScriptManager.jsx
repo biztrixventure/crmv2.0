@@ -8,6 +8,7 @@ import { useScripts } from '../../../hooks/useScripts';
 import SearchSettings from '../SearchSettings';
 import SectionsEditor from './SectionsEditor';
 import RichView from '../../UI/RichView';
+import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -29,7 +30,7 @@ const AudienceBadge = ({ audience }) => {
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
 // ── Create / edit modal ─────────────────────────────────────────────────────
-const ScriptModal = ({ script, onClose, onSave }) => {
+const ScriptModal = ({ script, categories, onClose, onSave }) => {
   const [form, setForm] = useState({
     title:    script?.title    || '',
     content:  script?.content  || '',
@@ -37,6 +38,7 @@ const ScriptModal = ({ script, onClose, onSave }) => {
     audience: script?.audience || 'both',
     is_active: script?.is_active ?? true,
     sections: Array.isArray(script?.sections) ? script.sections : [],
+    category_ids: script?.category_ids || [],
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState('');
@@ -91,6 +93,11 @@ const ScriptModal = ({ script, onClose, onSave }) => {
           </div>
           <SectionsEditor sections={form.sections} onChange={v => set('sections', v)} />
 
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>Categories</label>
+            <CategoryPicker categories={categories} selected={form.category_ids} onChange={v => set('category_ids', v)} />
+          </div>
+
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Visible to agents</span>
@@ -116,6 +123,9 @@ const StatTile = ({ label, value, color, active, onClick }) => (
 // ── Main manager (standalone scripts) ────────────────────────────────────────
 const ScriptManager = () => {
   const { scripts, loading, error, fetchScripts, createScript, updateScript, deleteScript } = useScripts();
+  const catHook = useCategories('scripts');
+  const [categoryId, setCategoryId] = useState('');
+  const [catModal, setCatModal] = useState(false);
   const [search, setSearch]     = useState('');
   const [audience, setAudience] = useState('');
   const [modal, setModal]       = useState(null);
@@ -123,8 +133,8 @@ const ScriptManager = () => {
   const [confirm, setConfirm]   = useState(null);
   const [showSearch, setShowSearch] = useState(false);
 
-  const load = () => fetchScripts({ include_inactive: true, audience: audience || undefined, q: search.trim() || undefined });
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience]);
+  const load = () => fetchScripts({ include_inactive: true, audience: audience || undefined, category_id: categoryId || undefined, q: search.trim() || undefined });
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [audience, categoryId]);
   const onSearch = (e) => { e.preventDefault(); load(); };
 
   const counts = {
@@ -162,6 +172,8 @@ const ScriptManager = () => {
         <StatTile label="Fronters" value={counts.fronter} color={AUDIENCE_META.fronter.color} active={audience === 'fronter'} onClick={() => setAudience('fronter')} />
         <StatTile label="Both"     value={counts.both}    color={AUDIENCE_META.both.color}    active={audience === 'both'}    onClick={() => setAudience('both')} />
       </div>
+
+      <CategoryFilterBar categories={catHook.categories} value={categoryId} onChange={setCategoryId} onManage={() => setCatModal(true)} />
 
       <form onSubmit={onSearch} className="relative">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -205,6 +217,7 @@ const ScriptManager = () => {
                       {!s.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
                     </div>
                     {!open && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{s.content}</p>}
+                    {(s.category_ids?.length > 0) && <div className="mt-2"><CategoryChips ids={s.category_ids} categories={catHook.categories} /></div>}
                     {splitKeywords(s.keywords).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {splitKeywords(s.keywords).map(k => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
@@ -239,7 +252,9 @@ const ScriptManager = () => {
         </div>
       )}
 
-      {modal && <ScriptModal script={modal.script} onClose={() => setModal(null)} onSave={(payload) => modal.script ? updateScript(modal.script.id, payload) : createScript(payload)} />}
+      {modal && <ScriptModal script={modal.script} categories={catHook.categories} onClose={() => setModal(null)} onSave={(payload) => modal.script ? updateScript(modal.script.id, payload) : createScript(payload)} />}
+
+      {catModal && <CategoryManagerModal title="Script categories" hook={catHook} onClose={() => setCatModal(false)} />}
 
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
