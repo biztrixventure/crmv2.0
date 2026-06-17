@@ -23,6 +23,7 @@ import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
 import SpiffManager from "../components/Admin/Engagement/SpiffManager";
 import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
+import DataCleanup from "../components/Admin/DataCleanup/DataCleanup";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
@@ -97,6 +98,8 @@ const AdminPanel = () => {
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "numbers",        label: "Numbers Intelligence" }] : []),
     ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
+    // Data Cleanup is a destructive batch tool — superadmin only (never RO).
+    ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "faqs",           label: "FAQs"                 }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "scripts",        label: "Scripts"              }] : []),
     ...(isSAorRO                                       ? [{ id: "bulk-upload",    label: "Bulk Upload"          }] : []),
@@ -162,6 +165,7 @@ const AdminPanel = () => {
                   {activeTab === "sale-search" && <LeadIntelligence />}
                   {activeTab === "numbers"     && <NumbersIntelligence />}
                   {activeTab === "data-analyzer" && <DataAnalyzer />}
+                  {activeTab === "data-cleanup" && <DataCleanup />}
                   {activeTab === "vehicles"     && <VehicleManager />}
                   {activeTab === "clients-plans" && <ClientPlanManager />}
                   {activeTab === "faqs"        && <FAQManager />}
