@@ -144,13 +144,47 @@ const DataCleanup = () => {
         </div>
 
         {preview && (
-          <div className="rounded-xl p-3 space-y-1.5" style={{ border: '1px solid var(--color-border)' }}>
+          <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)' }}>
             <p className="text-sm font-bold" style={{ color: preview.total ? 'var(--color-primary-700)' : 'var(--color-text-tertiary)' }}>
               {preview.total} record{preview.total === 1 ? '' : 's'} match {fromLabel} in {field?.label || fieldName}
             </p>
             <Count label="Transfers (form data)" n={preview.counts.transfers_form_data} />
             <Count label="Sales (form data)" n={preview.counts.sales_form_data} />
             {preview.column && <Count label={`Sales · ${preview.column} column`} n={preview.counts.sales_column} />}
+
+            {/* Phone numbers of the matching records — verify before running. */}
+            {preview.samples?.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Phone numbers {preview.sample_truncated ? `· showing first ${preview.samples.length} of ${preview.total}` : `· ${preview.samples.length}`}
+                </p>
+                <div className="max-h-60 overflow-y-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      <tr style={{ color: 'var(--color-text-tertiary)' }}>
+                        <th className="text-left font-bold px-3 py-1.5">Phone</th>
+                        <th className="text-left font-bold px-3 py-1.5">Name</th>
+                        <th className="text-left font-bold px-3 py-1.5">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.samples.map((s, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--color-border)' }}>
+                          <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--color-text)' }}>{s.phone || '—'}</td>
+                          <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{s.name || '—'}</td>
+                          <td className="px-3 py-1.5">
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: s.source === 'sale' ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', color: s.source === 'sale' ? 'var(--color-primary-700)' : 'var(--color-text-secondary)' }}>
+                              {s.source}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

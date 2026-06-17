@@ -51,6 +51,25 @@ async function countColumn(table, col, value, blank) {
   return count || 0;
 }
 
+// ── phone/name extraction for the preview sample ─────────────────────────────
+const TRANSFER_PHONE_KEYS = ['cli_number', 'customer_phone', 'Phone', 'phone', 'Mobile', 'PhoneNumber', 'phone_number', 'CellPhone'];
+const fdPhone = (fd) => { if (!fd) return ''; for (const k of TRANSFER_PHONE_KEYS) if (fd[k]) return String(fd[k]); return ''; };
+const fdName  = (fd) => { if (!fd) return ''; const n = [fd.FirstName, fd.LastName].filter(Boolean).join(' ').trim(); return n || fd.customer_name || ''; };
+
+// Sample matching rows (capped) so the operator can eyeball the phone numbers.
+async function sampleJsonb(table, field, value, blank, sel, limit) {
+  let q = supabaseAdmin.from(table).select(sel).limit(limit);
+  q = blank ? q.or(`form_data->>${field}.is.null,form_data->>${field}.eq.`) : q.filter(`form_data->>${field}`, 'eq', value);
+  const { data } = await q;
+  return data || [];
+}
+async function sampleColumn(table, col, value, blank, sel, limit) {
+  let q = supabaseAdmin.from(table).select(sel).limit(limit);
+  q = blank ? q.or(`${col}.is.null,${col}.eq.`) : q.eq(col, value);
+  const { data } = await q;
+  return data || [];
+}
+
 const parseBody = (b) => ({
   field:      String(b.field || '').trim(),
   fieldType:  String(b.field_type || '').trim(),
@@ -66,15 +85,36 @@ router.post('/preview', asyncHandler(async (req, res) => {
   if (!matchBlank && oldValue === '') return res.status(400).json({ error: 'old_value is required (or enable blank matching)' });
 
   const col = saleColumnFor(field, fieldType);
-  const [transfers_form_data, sales_form_data, sales_column] = await Promise.all([
+  const SAMPLE = 200;
+  const [transfers_form_data, sales_form_data, sales_column, tRows, sRows, cRows] = await Promise.all([
     countJsonb('transfers', field, oldValue, matchBlank),
     countJsonb('sales', field, oldValue, matchBlank),
     col ? countColumn('sales', col, oldValue, matchBlank) : Promise.resolve(0),
+    sampleJsonb('transfers', field, oldValue, matchBlank, 'id, normalized_phone, form_data', SAMPLE),
+    sampleJsonb('sales', field, oldValue, matchBlank, 'id, customer_phone, customer_name', SAMPLE),
+    col ? sampleColumn('sales', col, oldValue, matchBlank, 'id, customer_phone, customer_name', SAMPLE) : Promise.resolve([]),
   ]);
+
+  // Build a de-duplicated sample (per source+id) of phone + name so the operator
+  // can verify exactly which records will change before running it.
+  const seen = new Set();
+  const samples = [];
+  const push = (source, id, phone, name) => {
+    const key = `${source}:${id}`;
+    if (seen.has(key)) return; seen.add(key);
+    if (phone || name) samples.push({ source, phone: phone || '', name: name || '' });
+  };
+  tRows.forEach(r => push('transfer', r.id, r.normalized_phone || fdPhone(r.form_data), fdName(r.form_data)));
+  sRows.forEach(r => push('sale', r.id, r.customer_phone, r.customer_name));
+  cRows.forEach(r => push('sale', r.id, r.customer_phone, r.customer_name));
+
+  const total = transfers_form_data + sales_form_data + sales_column;
   res.json({
     field, old_value: oldValue, match_blank: matchBlank, column: col,
     counts: { transfers_form_data, sales_form_data, sales_column },
-    total: transfers_form_data + sales_form_data + sales_column,
+    total,
+    samples: samples.slice(0, SAMPLE),
+    sample_truncated: total > Math.min(samples.length, SAMPLE),
   });
 }));
 
