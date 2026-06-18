@@ -89,6 +89,11 @@ router.get('/', asyncHandler(async (req, res) => {
     sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
   );
 
+  // VICIdial "pending from dialer" rows are not real transfers yet — they only
+  // hold lead_id + phone and live in the PendingFromDialer banner (GET /pending).
+  // Hide them from every normal list + count until the fronter confirms.
+  query = query.neq('vicidial_pending', true);
+
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.
   if (['superadmin', 'readonly_admin'].includes(userRole) && req.query.company_id) {

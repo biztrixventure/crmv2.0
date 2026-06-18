@@ -37,6 +37,8 @@ router.get(
       //    1000-row fetch limit (the old code counted statuses inside a fetched
       //    array, so "Pending" only reflected the first 1000 transfers). ──────────
       const scopeTransfers = (q) => {
+        // VICIdial pending-from-dialer rows aren't real transfers yet — never count them.
+        q = q.neq('vicidial_pending', true);
         if (isCloserSide && companyId) {
           if (userRole === 'closer') return q.eq('assigned_closer_id', userId);
           if (coUserIds.length) return q.in('assigned_closer_id', coUserIds);
