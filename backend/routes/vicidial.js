@@ -101,23 +101,60 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   if (!code) return res.status(400).json({ ok: false, error: 'code required' });
 
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id').eq('vicidial_vendor_code', code).maybeSingle();
+    .from('transfers').select('id, company_id').eq('vicidial_vendor_code', code).maybeSingle();
   if (!tr) {
     logger.warn('VICIDIAL_DISPO', `No transfer for code ${code} (dispo ${dispo})`);
     return res.json({ ok: false, reason: 'no matching transfer', code });   // 200 → no dialer retry
   }
 
+  const now = new Date().toISOString();
   const talk = parseInt(p.talk_time, 10);
-  const { error } = await supabaseAdmin.from('transfers').update({
+  const rawCode = dispo.toUpperCase();
+
+  // Resolve raw dialer code → CRM disposition via the per-company map. Record the
+  // code either way: an unmapped code is auto-inserted (disposition_name NULL) so
+  // it shows in the superadmin's "unmapped" inbox — nothing is ever lost.
+  let mapped = null;
+  if (rawCode) {
+    const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
+      .select('id, disposition_name, category, hits')
+      .eq('company_id', tr.company_id).eq('vici_code', rawCode).maybeSingle();
+    if (m) {
+      mapped = m;
+      await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (m.hits || 0) + 1, last_seen_at: now }).eq('id', m.id);
+    } else {
+      await supabaseAdmin.from('vicidial_dispo_map')
+        .insert({ company_id: tr.company_id, vici_code: rawCode, hits: 1, last_seen_at: now })
+        .then(() => {}, () => {});   // ignore unique race
+    }
+  }
+
+  const updates = {
     vicidial_dispo:     dispo || null,
-    vicidial_dispo_at:  new Date().toISOString(),
+    vicidial_dispo_at:  now,
     vicidial_talk_time: Number.isFinite(talk) ? talk : null,
     vicidial_agent:     String(p.agent || '').trim() || undefined,
-  }).eq('id', tr.id);
+  };
+  // Apply the mapped CRM disposition (text snapshot, like disposition_actions).
+  // Unmapped → closer_disposition left untouched; the closer picks it manually.
+  if (mapped?.disposition_name) updates.closer_disposition = mapped.disposition_name;
+
+  const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
-  logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← dispo "${dispo}" (code ${code})`);
-  res.json({ ok: true, transfer_id: tr.id });
+  // Mapped dispos also land on the lead's disposition timeline (best-effort).
+  if (mapped?.disposition_name) {
+    try {
+      await supabaseAdmin.from('disposition_actions').insert({
+        transfer_id: tr.id, company_id: tr.company_id,
+        disposition_name: mapped.disposition_name,
+        note: `From dialer (${rawCode})`, setter_role: 'closer',
+      });
+    } catch { /* non-critical */ }
+  }
+
+  logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← "${dispo}" → ${mapped?.disposition_name || '(unmapped)'}`);
+  res.json({ ok: true, transfer_id: tr.id, mapped: mapped?.disposition_name || null });
 }));
 
 // ── API: my pending-from-dialer transfers ────────────────────────────────────
@@ -221,6 +258,59 @@ api.post('/agents', superOnly, asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('user_profiles').update({ vicidial_agent_id: agent }).eq('user_id', req.body.user_id);
   if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'That agent id is already mapped to another user' : error.message });
   res.json({ ok: true });
+}));
+
+// ── superadmin: disposition map (raw dialer code → CRM disposition) ──────────
+// CRM dispositions for the dropdown (a company's active disposition_configs).
+api.get('/dispositions', superOnly, asyncHandler(async (req, res) => {
+  let q = supabaseAdmin.from('disposition_configs').select('id, name, company_id').eq('is_active', true).order('name');
+  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  // distinct names
+  const seen = new Set(); const names = [];
+  (data || []).forEach(d => { if (d.name && !seen.has(d.name)) { seen.add(d.name); names.push(d.name); } });
+  res.json({ dispositions: names });
+}));
+
+api.get('/dispo-map', superOnly, asyncHandler(async (req, res) => {
+  let q = supabaseAdmin.from('vicidial_dispo_map').select('*');
+  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  // Unmapped (pending) first, then by most-seen.
+  const { data, error } = await q.order('disposition_name', { ascending: true, nullsFirst: true }).order('hits', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ map: data || [] });
+}));
+
+api.post('/dispo-map', superOnly, asyncHandler(async (req, res) => {
+  const company_id = req.body.company_id || null;
+  const vici_code  = String(req.body.vici_code || '').trim().toUpperCase();
+  if (!company_id || !vici_code) return res.status(400).json({ error: 'company_id and vici_code are required' });
+  const row = {
+    company_id, vici_code,
+    disposition_name: req.body.disposition_name ? String(req.body.disposition_name).trim() : null,
+    category: req.body.category ? String(req.body.category).trim() : null,
+  };
+  const { data, error } = await supabaseAdmin.from('vicidial_dispo_map')
+    .upsert(row, { onConflict: 'company_id,vici_code' }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ entry: data });
+}));
+
+api.put('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
+  const upd = {};
+  if (req.body.disposition_name !== undefined) upd.disposition_name = req.body.disposition_name ? String(req.body.disposition_name).trim() : null;
+  if (req.body.category !== undefined)         upd.category = req.body.category ? String(req.body.category).trim() : null;
+  const { data, error } = await supabaseAdmin.from('vicidial_dispo_map').update(upd).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Not found' });
+  res.json({ entry: data });
+}));
+
+api.delete('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('vicidial_dispo_map').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'deleted' });
 }));
 
 module.exports = { ingest, api };

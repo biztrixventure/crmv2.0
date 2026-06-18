@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -8,9 +8,10 @@ import client from '../../../api/client';
 // registry (makes the correlation code globally unique) and the VICIdial-agent
 // → CRM-user map (routes pending transfers + dispositions to the right person).
 const TABS = [
-  { k: 'prefixes', label: 'Prefix registry', icon: Hash },
-  { k: 'agents',   label: 'Agent mapping',   icon: Users },
-  { k: 'setup',    label: 'Setup URLs',      icon: PhoneCall },
+  { k: 'prefixes', label: 'Prefix registry',  icon: Hash },
+  { k: 'agents',   label: 'Agent mapping',    icon: Users },
+  { k: 'dispo',    label: 'Disposition map',  icon: ListChecks },
+  { k: 'setup',    label: 'Setup URLs',       icon: PhoneCall },
 ];
 
 // ── Prefix registry ──────────────────────────────────────────────────────────
@@ -141,6 +142,93 @@ const Agents = () => {
   );
 };
 
+// ── Disposition map (raw dialer code → CRM disposition) ──────────────────────
+const DispoMap = () => {
+  const [companies, setCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState('');
+  const [rows, setRows] = useState([]);
+  const [dispositions, setDispositions] = useState([]);
+  const [newCode, setNewCode] = useState('');
+  const [newDisp, setNewDisp] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    if (!companyId) { setRows([]); setDispositions([]); return; }
+    client.get('vicidial/dispo-map', { params: { company_id: companyId } }).then(r => setRows(r.data.map || [])).catch(() => {});
+    client.get('vicidial/dispositions', { params: { company_id: companyId } }).then(r => setDispositions(r.data.dispositions || [])).catch(() => {});
+  }, [companyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const setMap = async (row, name) => { try { await client.put(`vicidial/dispo-map/${row.id}`, { disposition_name: name || null }); load(); } catch { toast.error('Failed'); } };
+  const del = async (row) => { if (!window.confirm(`Delete mapping for "${row.vici_code}"?`)) return; try { await client.delete(`vicidial/dispo-map/${row.id}`); load(); } catch { toast.error('Failed'); } };
+  const add = async () => {
+    if (!companyId || !newCode.trim()) { toast.error('Company + code required'); return; }
+    setBusy(true);
+    try { await client.post('vicidial/dispo-map', { company_id: companyId, vici_code: newCode.trim(), disposition_name: newDisp || null }); setNewCode(''); setNewDisp(''); load(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+  };
+
+  const unmapped = rows.filter(r => !r.disposition_name).length;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Map each raw VICIdial closer code (NI, CB, SALE…) to a CRM disposition. A code the dialer sends that isn't mapped is auto-recorded here (with a hit count) and left for you to map or add — nothing is lost, and the closer can still pick it manually.
+      </p>
+      <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input" style={{ maxWidth: 300 }}>
+        <option value="">Select a company…</option>
+        {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+
+      {companyId && (
+        <>
+          {dispositions.length === 0 && <Alert type="warning" message="This company has no configured dispositions yet — add them under Dispositions/Form config first, then map here." />}
+          {unmapped > 0 && <p className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}><AlertTriangle size={13} /> {unmapped} unmapped code(s) the dialer sent — resolve below.</p>}
+
+          {/* Add row */}
+          <div className="flex items-end gap-2 flex-wrap rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div><label className="block text-[11px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>Dialer code</label>
+              <input value={newCode} onChange={e => setNewCode(e.target.value.toUpperCase())} placeholder="NI" className="input" style={{ maxWidth: 130, fontFamily: 'monospace' }} /></div>
+            <div className="flex-1 min-w-[180px]"><label className="block text-[11px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>CRM disposition</label>
+              <select value={newDisp} onChange={e => setNewDisp(e.target.value)} className="input">
+                <option value="">— leave unmapped —</option>
+                {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
+              </select></div>
+            <Button variant="primary" onClick={add} disabled={busy} className="flex items-center gap-1.5"><Plus size={15} /> Add</Button>
+          </div>
+
+          {rows.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No codes yet.</p> : (
+            <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <table className="w-full text-sm">
+                <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                  {['Dialer code', 'CRM disposition', 'Hits', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: r.disposition_name ? undefined : 'var(--color-warning-50, #fffbeb)' }}>
+                      <td className="px-4 py-2.5 font-mono font-bold" style={{ color: 'var(--color-text)' }}>{r.vici_code}</td>
+                      <td className="px-4 py-2.5">
+                        <select value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">
+                          <option value="">— unmapped —</option>
+                          {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
+                          {r.disposition_name && !dispositions.includes(r.disposition_name) && <option value={r.disposition_name}>{r.disposition_name}</option>}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.hits}</td>
+                      <td className="px-4 py-2.5"><button onClick={() => del(r)} className="p-1.5 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: '#ef4444' }} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 // ── Setup URLs help ──────────────────────────────────────────────────────────
 const Setup = () => {
   const base = window.location.origin.replace(/\/$/, '');
@@ -182,6 +270,7 @@ const VicidialAdmin = () => {
 
       {tab === 'prefixes' && <Prefixes />}
       {tab === 'agents'   && <Agents />}
+      {tab === 'dispo'    && <DispoMap />}
       {tab === 'setup'    && <Setup />}
     </div>
   );
