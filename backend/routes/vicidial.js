@@ -77,6 +77,21 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     return res.json({ ok: false, reason: 'agent not mapped', code });
   }
 
+  // The fronter campaign's Dispo Call URL fires on EVERY disposition. Only the
+  // configured transfer dispositions (config.field_map.xfer_dispos) create a
+  // pending transfer — otherwise NI/DNC/no-answer calls would spam the CRM.
+  // No list configured → accept any (back-compat).
+  const dispo = String(p.dispo || '').trim().toUpperCase();
+  if (dispo) {
+    const { data: cfg } = await supabaseAdmin
+      .from('vicidial_config').select('field_map').eq('company_id', companyId).maybeSingle();
+    const xferDispos = Array.isArray(cfg?.field_map?.xfer_dispos)
+      ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
+    if (xferDispos.length && !xferDispos.includes(dispo)) {
+      return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
+    }
+  }
+
   const { data, error } = await supabaseAdmin.from('transfers').insert({
     company_id: companyId,
     created_by: userId,

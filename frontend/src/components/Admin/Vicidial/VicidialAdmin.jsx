@@ -58,13 +58,14 @@ const Prefixes = () => {
         <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-              {['Prefix', 'Company', 'Active', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+              {['Prefix', 'Company', 'Transfer dispos', 'Active', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {rows.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                   <td className="px-4 py-3 font-mono font-bold" style={{ color: 'var(--color-text)' }}>{c.prefix}</td>
                   <td className="px-4 py-3" style={{ color: 'var(--color-text-secondary)' }}>{c.company_name || '—'}</td>
+                  <td className="px-4 py-3"><XferDispoCell c={c} onSaved={load} /></td>
                   <td className="px-4 py-3">
                     <button onClick={() => toggle(c)} className="text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: c.is_active ? 'var(--color-success-100, #d1fae5)' : 'var(--color-bg-secondary)', color: c.is_active ? 'var(--color-success-700, #047857)' : 'var(--color-text-tertiary)' }}>{c.is_active ? 'Active' : 'Off'}</button>
                   </td>
@@ -75,6 +76,31 @@ const Prefixes = () => {
           </table>
         </div>
       )}
+    </div>
+  );
+};
+
+// Per-company transfer dispositions → field_map.xfer_dispos. Blank = any dispo
+// creates a transfer (the fronter Dispo Call URL fires on every disposition).
+const XferDispoCell = ({ c, onSaved }) => {
+  const init = Array.isArray(c.field_map?.xfer_dispos) ? c.field_map.xfer_dispos.join(', ') : '';
+  const [val, setVal] = useState(init);
+  const [busy, setBusy] = useState(false);
+  const dirty = val.trim() !== init;
+  const save = async () => {
+    setBusy(true);
+    const list = val.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    try { await client.put(`vicidial/config/${c.id}`, { field_map: { ...(c.field_map || {}), xfer_dispos: list } }); toast.success('Saved'); onSaved(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="flex items-center gap-1.5">
+      <input value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && dirty) save(); }}
+        placeholder="any" title="Comma-separated transfer dispositions (e.g. XFER, XFERA). Only these create a pending transfer. Blank = any disposition does."
+        className="input py-1 text-xs" style={{ maxWidth: 160, fontFamily: 'monospace' }} />
+      <button onClick={save} disabled={!dirty || busy} className="text-[11px] font-bold px-2 py-1 rounded inline-flex items-center gap-1 text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}>
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+      </button>
     </div>
   );
 };
@@ -234,11 +260,27 @@ const Setup = () => {
   const base = window.location.origin.replace(/\/$/, '');
   const block = (s) => <pre className="text-[11px] whitespace-pre-wrap rounded-lg p-3 overflow-x-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{s}</pre>;
   return (
-    <div className="space-y-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in the URLs below. Replace <code>{'{PREFIX}'}</code> with the company's prefix.</p>
-      <div><p className="font-bold mb-1" style={{ color: 'var(--color-text)' }}>Fronter webform (add_lead) — add one parameter:</p>{block('&vendor_lead_code={PREFIX}--A--lead_id--B--')}</div>
-      <div><p className="font-bold mb-1" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL (ALT → XFER only):</p>{block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--`)}</div>
-      <div><p className="font-bold mb-1" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL (all dispositions):</p>{block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}</div>
+    <div className="space-y-5 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in the URLs below. Replace <code>{'{PREFIX}'}</code> with the company's prefix (Prefix registry tab). The fronter Dispo Call URL fires on <strong>every</strong> disposition — set <strong>Transfer dispos</strong> on the Prefix registry tab so only real transfers (e.g. <code>XFER</code>) create a pending transfer.</p>
+
+      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>A · Fronter &amp; closer on the SAME VICIdial box</p>
+        <p className="mb-2 text-xs">The call transfer keeps the same <code>lead_id</code>, so both sides match on it. <strong>No webform needed.</strong></p>
+        <p className="font-semibold mb-1" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL:</p>
+        {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
+        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL:</p>
+        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
+      </div>
+
+      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>B · Fronter &amp; closer on DIFFERENT VICIdial boxes</p>
+        <p className="mb-2 text-xs">The closer box assigns its own <code>lead_id</code>, so the fronter's id must ride across in <code>vendor_lead_code</code>. Add this param to the fronter <strong>webform (add_lead)</strong>, pointed at the closer box:</p>
+        {block('&vendor_lead_code={PREFIX}--A--lead_id--B--')}
+        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL:</p>
+        {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
+        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL (note: <code>vendor_lead_code</code>, already holds the prefix):</p>
+        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
+      </div>
     </div>
   );
 };
