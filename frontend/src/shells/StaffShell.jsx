@@ -75,6 +75,7 @@ import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
+import PendingFromDialer from "../components/Vicidial/PendingFromDialer";
 import SpiffWidget from "../components/Engagement/SpiffWidget";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
@@ -737,6 +738,9 @@ const StaffShell = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <SpiffWidget />
+
+        {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm. */}
+        <PendingFromDialer onConfirmed={() => fetchTransfers && fetchTransfers()} />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">

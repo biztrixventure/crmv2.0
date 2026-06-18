@@ -24,6 +24,7 @@ const logger = require('../utils/logger');
 const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
+const { isSuperAdmin } = require('../models/helpers');
 
 const ingest = express.Router();
 const api = express.Router();
@@ -151,6 +152,75 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   }).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ transfer: data });
+}));
+
+// ── superadmin: prefix registry + agent mapping (config UI) ──────────────────
+const superOnly = asyncHandler(async (req, res, next) => {
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin access required' });
+  next();
+});
+
+api.get('/config', superOnly, asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin.from('vicidial_config').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  const ids = [...new Set((data || []).map(c => c.company_id).filter(Boolean))];
+  let names = {};
+  if (ids.length) { const { data: co } = await supabaseAdmin.from('companies').select('id, name').in('id', ids); (co || []).forEach(c => { names[c.id] = c.name; }); }
+  res.json({ configs: (data || []).map(c => ({ ...c, company_name: names[c.company_id] || null })) });
+}));
+
+api.post('/config', superOnly, asyncHandler(async (req, res) => {
+  const prefix = String(req.body.prefix || '').trim();
+  if (!prefix) return res.status(400).json({ error: 'Prefix is required' });
+  const { data, error } = await supabaseAdmin.from('vicidial_config')
+    .insert({ prefix, company_id: req.body.company_id || null, field_map: req.body.field_map || {} }).select().single();
+  if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'That prefix is already in use' : error.message });
+  res.status(201).json({ config: data });
+}));
+
+api.put('/config/:id', superOnly, asyncHandler(async (req, res) => {
+  const upd = {};
+  if (req.body.prefix !== undefined)     upd.prefix = String(req.body.prefix).trim();
+  if (req.body.company_id !== undefined) upd.company_id = req.body.company_id || null;
+  if (req.body.is_active !== undefined)  upd.is_active = !!req.body.is_active;
+  if (req.body.field_map !== undefined)  upd.field_map = req.body.field_map;
+  const { data, error } = await supabaseAdmin.from('vicidial_config').update(upd).eq('id', req.params.id).select().single();
+  if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'That prefix is already in use' : error.message });
+  if (!data) return res.status(404).json({ error: 'Config not found' });
+  res.json({ config: data });
+}));
+
+api.delete('/config/:id', superOnly, asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('vicidial_config').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'deleted' });
+}));
+
+// Agent-id map — list users (search) with their current mapping.
+api.get('/agents', superOnly, asyncHandler(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  let query = supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_id').order('first_name').limit(100);
+  if (q) { const s = q.replace(/[%,]/g, ''); query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,vicidial_agent_id.ilike.%${s}%`); }
+  const { data: profs } = await query;
+  const ids = (profs || []).map(p => p.user_id);
+  let meta = {};
+  if (ids.length) {
+    const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, companies(name), custom_roles(level)').in('user_id', ids).eq('is_active', true);
+    (ucr || []).forEach(r => { if (!meta[r.user_id]) meta[r.user_id] = { company: r.companies?.name || '', role: r.custom_roles?.level || '' }; });
+  }
+  res.json({ agents: (profs || []).map(p => ({
+    user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User',
+    vicidial_agent_id: p.vicidial_agent_id || '', company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
+  })) });
+}));
+
+api.post('/agents', superOnly, asyncHandler(async (req, res) => {
+  if (!req.body.user_id) return res.status(400).json({ error: 'user_id required' });
+  const agent = String(req.body.agent_id || '').trim() || null;
+  const { error } = await supabaseAdmin.from('user_profiles').update({ vicidial_agent_id: agent }).eq('user_id', req.body.user_id);
+  if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'That agent id is already mapped to another user' : error.message });
+  res.json({ ok: true });
 }));
 
 module.exports = { ingest, api };

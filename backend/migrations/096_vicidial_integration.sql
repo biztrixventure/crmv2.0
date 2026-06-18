@@ -28,8 +28,10 @@ CREATE INDEX IF NOT EXISTS idx_transfers_vicidial_pending
   ON transfers (created_by) WHERE vicidial_pending;
 
 -- ── user_profiles: VICIdial agent id -> this CRM user ───────────────────────
+-- One agent id maps to exactly one CRM user (unique) so inbound routing is
+-- unambiguous.
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS vicidial_agent_id text;
-CREATE INDEX IF NOT EXISTS idx_user_profiles_vici_agent
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_profiles_vici_agent
   ON user_profiles (vicidial_agent_id) WHERE vicidial_agent_id IS NOT NULL;
 
 -- ── per-company VICIdial config (prefix registry + field map) ───────────────
