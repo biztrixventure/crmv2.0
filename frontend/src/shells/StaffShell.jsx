@@ -258,6 +258,10 @@ const StaffShell = () => {
 
   // Create transfer form (fronter)
   const [showCreateForm, setShowCreateForm] = useState(false);
+  // When set, the create form is confirming a VICIdial pending transfer (fills
+  // the existing pending row) instead of creating a brand-new transfer.
+  const [pendingDialer, setPendingDialer] = useState(null);
+  const [dialerRefresh, setDialerRefresh] = useState(0);
   const [dupOpen, setDupOpen] = useState(false);
   const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
 
@@ -558,6 +562,24 @@ const StaffShell = () => {
     }
   };
 
+  // VICIdial "pending from dialer" → open the SAME create-transfer form, prefill
+  // the captured phone, and flag it so submit confirms the pending row.
+  const openDialerPending = (item) => {
+    const fd0 = item.form_data || {};
+    const phone = fd0.customer_phone || fd0.Phone || item.normalized_phone || '';
+    const next = {};
+    (fields || []).filter(f => f.show_to_fronter !== false).forEach(f => {
+      if (/phone|cli|mobile/i.test(f.name)) next[f.name] = phone;
+    });
+    next.Phone = phone; next.customer_phone = phone;
+    setFormData(next);
+    setDupCheck(null);
+    setZipFronterInfo(null);
+    lastPrefilledId.current = null;
+    setPendingDialer(item);
+    setShowCreateForm(true);
+  };
+
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
     setTransferError('');
@@ -566,15 +588,23 @@ const StaffShell = () => {
     if (vIssue) { setTransferError(vIssue); return; }
     setTransferSubmitting(true);
     try {
-      const res = await createTransfer({ ...formData });
-      const action = res?.action;
-      toast.success(
-        action === 'updated' ? 'Existing transfer refreshed — no new transfer counted.'
-          : action === 'created_reengaged' ? 'New transfer created — this number was last contacted over 30 days ago.'
-          : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
-          : 'Transfer created.');
+      if (pendingDialer) {
+        // Fill the existing VICIdial pending row instead of creating a duplicate.
+        await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: formData });
+        toast.success('Transfer confirmed — sent to closer.');
+        setDialerRefresh(x => x + 1);
+      } else {
+        const res = await createTransfer({ ...formData });
+        const action = res?.action;
+        toast.success(
+          action === 'updated' ? 'Existing transfer refreshed — no new transfer counted.'
+            : action === 'created_reengaged' ? 'New transfer created — this number was last contacted over 30 days ago.'
+            : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
+            : 'Transfer created.');
+      }
       rememberValues((fields || []).filter(f => f.show_to_fronter !== false), formData);
       setShowCreateForm(false);
+      setPendingDialer(null);
       setFormData({});
       setZipFronterInfo(null);
       setDupCheck(null);
@@ -740,7 +770,7 @@ const StaffShell = () => {
         <SpiffWidget />
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm. */}
-        <PendingFromDialer onConfirmed={() => fetchTransfers && fetchTransfers()} />
+        <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
@@ -1389,7 +1419,7 @@ const StaffShell = () => {
             {showCreateForm && hasPermission('create_transfer') && (
               <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
                 style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
-                onClick={e => { if (e.target === e.currentTarget) { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; } }}>
+                onClick={e => { if (e.target === e.currentTarget) { setShowCreateForm(false); setPendingDialer(null); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; } }}>
                 <div className="relative w-full max-w-5xl my-6 rounded-2xl animate-scale-in"
                   style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
                   <div className="flex items-center justify-between px-6 py-5 rounded-t-2xl" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -1400,7 +1430,7 @@ const StaffShell = () => {
                         <p className="text-xs text-white/70">Route a call to a closer</p>
                       </div>
                     </div>
-                    <button onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
+                    <button onClick={() => { setShowCreateForm(false); setPendingDialer(null); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
                       className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
                       <XCircle size={18} className="text-white" />
                     </button>
@@ -1563,7 +1593,7 @@ const StaffShell = () => {
 
                       <div className="flex gap-3 pt-5 mt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
                         <button type="button"
-                          onClick={() => { setShowCreateForm(false); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
+                          onClick={() => { setShowCreateForm(false); setPendingDialer(null); setFormData({}); setZipFronterInfo(null); setDupCheck(null); lastPrefilledId.current = null; }}
                           className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors hover:bg-bg-secondary"
                           style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
                           Cancel
@@ -1610,7 +1640,7 @@ const StaffShell = () => {
                     <Copy size={14} /> Duplicates
                   </button>
                   {hasPermission('create_transfer') && (
-                    <button onClick={() => { setShowCreateForm(true); setFormData({}); setDupCheck(null); lastPrefilledId.current = null; }}
+                    <button onClick={() => { setShowCreateForm(true); setPendingDialer(null); setFormData({}); setDupCheck(null); lastPrefilledId.current = null; }}
                       className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] flex-shrink-0"
                       style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
                       <Plus size={14} /> Create Transfer
