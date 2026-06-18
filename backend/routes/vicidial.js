@@ -111,15 +111,22 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
 // ── INGEST: closer disposition → map onto the transfer ───────────────────────
 ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
-  const code  = String(p.code || '').trim();
   const dispo = String(p.dispo || '').trim();
-  if (!code) return res.status(400).json({ ok: false, error: 'code required' });
+  // One closer URL works for both topologies: it sends vendor_lead_code (set on
+  // different-box leads) AND lead_id as a fallback (matches same-box leads).
+  // Try each in order; first hit wins.
+  const candidates = [String(p.code || '').trim(), String(p.alt_code || '').trim()].filter(Boolean);
+  if (!candidates.length) return res.status(400).json({ ok: false, error: 'code required' });
 
-  const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id').eq('vicidial_vendor_code', code).maybeSingle();
+  let tr = null, code = candidates[0];
+  for (const c of candidates) {
+    const { data } = await supabaseAdmin
+      .from('transfers').select('id, company_id').eq('vicidial_vendor_code', c).maybeSingle();
+    if (data) { tr = data; code = c; break; }
+  }
   if (!tr) {
-    logger.warn('VICIDIAL_DISPO', `No transfer for code ${code} (dispo ${dispo})`);
-    return res.json({ ok: false, reason: 'no matching transfer', code });   // 200 → no dialer retry
+    logger.warn('VICIDIAL_DISPO', `No transfer for code ${candidates.join('/')} (dispo ${dispo})`);
+    return res.json({ ok: false, reason: 'no matching transfer', code: candidates });   // 200 → no dialer retry
   }
 
   const now = new Date().toISOString();

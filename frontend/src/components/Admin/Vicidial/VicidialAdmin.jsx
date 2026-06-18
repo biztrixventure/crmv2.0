@@ -265,22 +265,23 @@ const Setup = () => {
       <p className="text-xs">The <code>{'{PREFIX}'}</code> only keeps the correlation code unique across dialers — the backend doesn't parse it. The hard rule: the fronter and closer URLs must send the <strong>identical</strong> code. Keep a prefix if more than one fronter dialer feeds this CRM.</p>
 
       <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>A · Fronter &amp; closer on the SAME VICIdial box</p>
-        <p className="mb-2 text-xs">The call transfer keeps the same <code>lead_id</code>, so both sides match on it. <strong>No webform needed</strong>, and <strong>no prefix needed</strong> (a single dialer can't collide with itself). Add <code>{'{PREFIX}'}</code> before <code>--A--lead_id--B--</code> on both URLs only if multiple dialers feed this CRM.</p>
-        <p className="font-semibold mb-1" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL:</p>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>1 · Fronter Dispo Call URL — SAME VICIdial box</p>
+        <p className="mb-2 text-xs">The transfer keeps the same <code>lead_id</code>. <strong>No webform, no prefix</strong> needed (add <code>{'{PREFIX}'}</code> before <code>--A--lead_id--B--</code> only if multiple dialers feed this CRM).</p>
         {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code=--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
-        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL:</p>
-        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
       </div>
 
       <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>B · Fronter &amp; closer on DIFFERENT VICIdial boxes</p>
-        <p className="mb-2 text-xs">The closer box assigns its own <code>lead_id</code>, so the fronter's id must ride across in <code>vendor_lead_code</code>. Add this param to the fronter <strong>webform (add_lead)</strong>, pointed at the closer box:</p>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>2 · Fronter Dispo Call URL — DIFFERENT VICIdial box</p>
+        <p className="mb-2 text-xs">The closer box assigns its own <code>lead_id</code>, so the fronter's id rides across in <code>vendor_lead_code</code>. First add this param to the fronter <strong>webform (add_lead)</strong>, pointed at the closer box:</p>
         {block('&vendor_lead_code={PREFIX}--A--lead_id--B--')}
-        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL:</p>
+        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Then the fronter Dispo Call URL:</p>
         {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
-        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL (note: <code>vendor_lead_code</code>, already holds the prefix):</p>
-        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
+      </div>
+
+      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>3 · Closer Dispo Call URL — works for BOTH</p>
+        <p className="mb-2 text-xs">One URL for every closer campaign. It sends <code>vendor_lead_code</code> (matches different-box leads) and <code>lead_id</code> as a fallback (matches same-box leads) — the CRM uses whichever hits.</p>
+        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&alt_code=--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
       </div>
     </div>
   );
