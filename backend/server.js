@@ -44,6 +44,7 @@ const marqueeRoutes             = require('./routes/marquee');
 const spiffRoutes               = require('./routes/spiff');
 const dataAnalyzerRoutes        = require('./routes/dataAnalyzer');
 const dataCleanupRoutes         = require('./routes/dataCleanup');
+const { ingest: vicidialIngest, api: vicidialApi } = require('./routes/vicidial');
 const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
@@ -220,6 +221,9 @@ app.get('/health', (req, res) => {
 // ============================================================================
 
 app.use('/api/auth', authRoutes);
+// VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
+// shared token in the URL. Mounted before the authed groups so it isn't gated.
+app.use('/api/vicidial', vicidialIngest);
 
 // ============================================================================
 // PROTECTED ROUTES (auth required)
@@ -234,6 +238,8 @@ app.use('/api/companies', authMiddleware, readonlyGuard, companiesRoutes);
 app.use('/api/roles', authMiddleware, readonlyGuard, rolesRoutes);
 app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
 app.use('/api/transfers', authMiddleware, readonlyGuard, transfersRoutes);
+// VICIdial fronter app routes (pending-from-dialer list + confirm) — authed.
+app.use('/api/vicidial', authMiddleware, vicidialApi);
 app.use('/api/sales', authMiddleware, readonlyGuard, salesRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
 app.use('/api/callbacks',   authMiddleware, readonlyGuard, callbacksRoutes);
