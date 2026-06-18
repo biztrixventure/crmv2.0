@@ -1084,6 +1084,12 @@ const StaffShell = () => {
                             <p className="text-xs text-text-secondary mt-0.5">
                               <CopyableNumber value={t.form_data?.Phone || t.form_data?.customer_phone || ''} size={10} />
                             </p>
+                            {t.vicidial_vendor_code && (
+                              <span className="text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
+                                title="Dialer lead ID" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                                <Hash size={8} />{t.vicidial_vendor_code}
+                              </span>
+                            )}
                           </div>
                           <div className="flex flex-col items-end gap-1 flex-shrink-0">
                             <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm" title={si.desc}>{si.label}</Badge>
@@ -1656,6 +1662,12 @@ const StaffShell = () => {
                               <div className="min-w-0">
                                 <p className="font-semibold text-text truncate">{name}</p>
                                 {phone && <p className="text-xs text-text-secondary truncate"><CopyableNumber value={phone} size={10} /></p>}
+                                {t.vicidial_vendor_code && (
+                                  <span className="text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
+                                    title="Dialer lead ID" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                                    <Hash size={8} />{t.vicidial_vendor_code}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <Badge variant={ds.variant} size="sm">{ds.label}</Badge>

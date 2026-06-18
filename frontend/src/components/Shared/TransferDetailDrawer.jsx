@@ -138,12 +138,14 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
     created:  <Row key="created" label="Created" value={new Date(transfer.created_at).toLocaleString()} />,
     updated:  (transfer.updated_at && transfer.updated_at !== transfer.created_at) ? <Row key="updated" label="Updated" value={new Date(transfer.updated_at).toLocaleString()} /> : null,
     rejected: transfer.rejected_at ? <Row key="rejected" label="Rejected at" value={new Date(transfer.rejected_at).toLocaleString()} /> : null,
+    dialer_code:  transfer.vicidial_vendor_code ? <Row key="dialer_code"  label="Dialer lead ID"      value={transfer.vicidial_vendor_code} mono /> : null,
+    dialer_dispo: transfer.vicidial_dispo       ? <Row key="dialer_dispo" label="Dialer disposition"   value={transfer.vicidial_dispo} /> : null,
   };
 
   const DEFAULT_FIELDS = {
     customer: ['name', 'phone', 'phone_2', 'email', 'address'],
     vehicle:  ['year', 'make', 'model', 'miles', 'vin'],
-    people:   ['fronter', 'closer', 'rejections'],
+    people:   ['fronter', 'closer', 'dialer_code', 'dialer_dispo', 'rejections'],
     timeline: ['created', 'updated', 'rejected'],
   };
 
