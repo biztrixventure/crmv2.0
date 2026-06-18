@@ -261,15 +261,16 @@ const Setup = () => {
   const block = (s) => <pre className="text-[11px] whitespace-pre-wrap rounded-lg p-3 overflow-x-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{s}</pre>;
   return (
     <div className="space-y-5 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in the URLs below. Replace <code>{'{PREFIX}'}</code> with the company's prefix (Prefix registry tab). The fronter Dispo Call URL fires on <strong>every</strong> disposition — set <strong>Transfer dispos</strong> on the Prefix registry tab so only real transfers (e.g. <code>XFER</code>) create a pending transfer.</p>
+      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in the URLs below. The fronter Dispo Call URL fires on <strong>every</strong> disposition — set <strong>Transfer dispos</strong> on the Prefix registry tab so only real transfers (e.g. <code>XFER</code>) create a pending transfer.</p>
+      <p className="text-xs">The <code>{'{PREFIX}'}</code> only keeps the correlation code unique across dialers — the backend doesn't parse it. The hard rule: the fronter and closer URLs must send the <strong>identical</strong> code. Keep a prefix if more than one fronter dialer feeds this CRM.</p>
 
       <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>A · Fronter &amp; closer on the SAME VICIdial box</p>
-        <p className="mb-2 text-xs">The call transfer keeps the same <code>lead_id</code>, so both sides match on it. <strong>No webform needed.</strong></p>
+        <p className="mb-2 text-xs">The call transfer keeps the same <code>lead_id</code>, so both sides match on it. <strong>No webform needed</strong>, and <strong>no prefix needed</strong> (a single dialer can't collide with itself). Add <code>{'{PREFIX}'}</code> before <code>--A--lead_id--B--</code> on both URLs only if multiple dialers feed this CRM.</p>
         <p className="font-semibold mb-1" style={{ color: 'var(--color-text)' }}>Fronter Dispo Call URL:</p>
-        {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
+        {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code=--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
         <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Closer Dispo Call URL:</p>
-        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
+        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
       </div>
 
       <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
