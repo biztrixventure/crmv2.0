@@ -3,10 +3,14 @@
 // values come from a small enumerated set. Responsive columns: cramped on
 // narrow screens collapses from `cols` to a smaller count via CSS clamp so
 // the cells stay tappable on phones.
-const ChipGrid = ({ value = [], onChange, options = [], cols = 7 }) => {
+// `options` is what gets rendered (may be a search-filtered / display-capped
+// subset). `allOptions` is the FULL list — "all" always selects every option,
+// not just the visible chips. Falls back to options when not provided.
+const ChipGrid = ({ value = [], onChange, options = [], allOptions, cols = 7 }) => {
+  const all = allOptions || options;
   const sel = new Set(value);
   const toggle = (s) => onChange(sel.has(s) ? value.filter(v => v !== s) : [...value, s]);
-  const selectAll = () => onChange([...options]);
+  const selectAll = () => onChange([...all]);
   const clear     = () => onChange([]);
 
   // Responsive column count: phones get half the columns so chips stay legible.
@@ -19,7 +23,7 @@ const ChipGrid = ({ value = [], onChange, options = [], cols = 7 }) => {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-        <span>{value.length} of {options.length} selected</span>
+        <span>{value.length} of {all.length} selected</span>
         <div className="flex gap-2">
           <button type="button" onClick={selectAll} className="font-bold underline">all</button>
           <button type="button" onClick={clear} className="font-bold underline">none</button>
@@ -72,18 +76,20 @@ const CollapsibleChipGrid = ({ value = [], onChange, options = [], cols = 5, col
   const [q, setQ]       = useState('');
 
   // Prefix-first filter so typing "ca" surfaces "Camry" before "Maxima Camry".
-  // Empty query shows everything (capped at 200 visible rows so an enormous
-  // registry doesn't blow up the DOM in one shot).
+  // Show the full list (no search) — a 500+ model registry renders fine as tiny
+  // chips. A generous safety cap only guards a pathologically huge catalog; the
+  // "Showing X of Y" note + search cover that rare case.
+  const DISPLAY_CAP = 1500;
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return options.slice(0, 200);
+    if (!needle) return options.slice(0, DISPLAY_CAP);
     const prefix = [], rest = [];
     options.forEach(o => {
       const lc = String(o).toLowerCase();
       if (lc.startsWith(needle)) prefix.push(o);
       else if (lc.includes(needle)) rest.push(o);
     });
-    return [...prefix, ...rest].slice(0, 200);
+    return [...prefix, ...rest].slice(0, DISPLAY_CAP);
   }, [q, options]);
 
   const selected = (value || []).length;
@@ -113,7 +119,7 @@ const CollapsibleChipGrid = ({ value = [], onChange, options = [], cols = 5, col
                 placeholder="Search…" className="input text-xs pl-6 py-1 h-7" />
             </div>
           )}
-          <ChipGrid value={value} onChange={onChange} options={filtered} cols={cols} />
+          <ChipGrid value={value} onChange={onChange} options={filtered} allOptions={options} cols={cols} />
           {options.length > filtered.length && (
             <p className="text-[10px] italic text-center"
               style={{ color: 'var(--color-text-tertiary)' }}>
