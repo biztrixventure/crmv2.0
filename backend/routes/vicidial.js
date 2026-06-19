@@ -125,8 +125,18 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     if (data) { tr = data; code = c; break; }
   }
   if (!tr) {
-    logger.warn('VICIDIAL_DISPO', `No transfer for code ${candidates.join('/')} (dispo ${dispo})`);
-    return res.json({ ok: false, reason: 'no matching transfer', code: candidates });   // 200 → no dialer retry
+    // Diagnostic: is there a near-match? Catches the common "fronter URL carries a
+    // prefix but the closer URL doesn't (or vice-versa)" mistake.
+    let hint = null;
+    const probe = candidates[candidates.length - 1];
+    if (probe) {
+      const { data: near } = await supabaseAdmin
+        .from('transfers').select('vicidial_vendor_code')
+        .ilike('vicidial_vendor_code', `%${probe}%`).not('vicidial_vendor_code', 'is', null).limit(3);
+      if (near?.length) hint = `prefix mismatch? stored codes containing "${probe}": ${near.map(n => n.vicidial_vendor_code).join(', ')}`;
+    }
+    logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} (dispo ${dispo})${hint ? ' — ' + hint : ''}`);
+    return res.json({ ok: false, reason: 'no matching transfer', sent: candidates, hint });   // 200 → no dialer retry
   }
 
   const now = new Date().toISOString();
