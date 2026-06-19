@@ -283,10 +283,12 @@ api.post('/agents', superOnly, asyncHandler(async (req, res) => {
 }));
 
 // ── superadmin: disposition map (raw dialer code → CRM disposition) ──────────
-// CRM dispositions for the dropdown (a company's active disposition_configs).
+// CRM dispositions for the dropdown. Mirror the closer's actual dropdown: GLOBAL
+// configs (company_id IS NULL) PLUS the selected company's own — many CRMs keep
+// all dispositions global, so a strict company filter would show nothing.
 api.get('/dispositions', superOnly, asyncHandler(async (req, res) => {
   let q = supabaseAdmin.from('disposition_configs').select('id, name, company_id').eq('is_active', true).order('name');
-  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  if (req.query.company_id) q = q.or(`company_id.is.null,company_id.eq.${req.query.company_id}`);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
   // distinct names
