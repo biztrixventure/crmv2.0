@@ -143,6 +143,16 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const talk = parseInt(p.talk_time, 10);
   const rawCode = dispo.toUpperCase();
 
+  // The disposition comes from the CLOSER, so the dispo map + logged action are
+  // scoped to the closer's company (resolved from the dialing agent). Fall back
+  // to the transfer's (fronter) company when the agent isn't mapped.
+  const closerAgent = String(p.agent || '').trim();
+  let dispoCompanyId = tr.company_id;
+  if (closerAgent) {
+    const { companyId: cc } = await resolveAgent(closerAgent);
+    if (cc) dispoCompanyId = cc;
+  }
+
   // Resolve raw dialer code → CRM disposition via the per-company map. Record the
   // code either way: an unmapped code is auto-inserted (disposition_name NULL) so
   // it shows in the superadmin's "unmapped" inbox — nothing is ever lost.
@@ -150,13 +160,13 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   if (rawCode) {
     const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
       .select('id, disposition_name, category, hits')
-      .eq('company_id', tr.company_id).eq('vici_code', rawCode).maybeSingle();
+      .eq('company_id', dispoCompanyId).eq('vici_code', rawCode).maybeSingle();
     if (m) {
       mapped = m;
       await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (m.hits || 0) + 1, last_seen_at: now }).eq('id', m.id);
     } else {
       await supabaseAdmin.from('vicidial_dispo_map')
-        .insert({ company_id: tr.company_id, vici_code: rawCode, hits: 1, last_seen_at: now })
+        .insert({ company_id: dispoCompanyId, vici_code: rawCode, hits: 1, last_seen_at: now })
         .then(() => {}, () => {});   // ignore unique race
     }
   }
@@ -178,7 +188,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   if (mapped?.disposition_name) {
     try {
       await supabaseAdmin.from('disposition_actions').insert({
-        transfer_id: tr.id, company_id: tr.company_id,
+        transfer_id: tr.id, company_id: dispoCompanyId,
         disposition_name: mapped.disposition_name,
         note: `From dialer (${rawCode})`, setter_role: 'closer',
       });
