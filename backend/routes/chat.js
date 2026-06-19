@@ -524,7 +524,7 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 50);
   let q = supabaseAdmin
     .from('messages')
-    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, created_at, edited_at, deleted_at')
+    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at')
     .eq('conversation_id', req.params.id)
     .order('created_at', { ascending: false })
     .limit(limit + 1);
@@ -535,7 +535,27 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
 
   const hasMore = (data || []).length > limit;
   const page = (data || []).slice(0, limit);
-  const cards = await getUserCards(page.map(m => m.sender_id));
+
+  // Quoted-message previews: fetch the parents this page replies to (one query),
+  // so each reply renders its little "replying to …" block even if the parent
+  // isn't on the same page.
+  const parentIds = [...new Set(page.map(m => m.reply_to).filter(Boolean))];
+  const parentById = {};
+  if (parentIds.length) {
+    const { data: parents } = await supabaseAdmin
+      .from('messages').select('id, sender_id, body, attachments, deleted_at').in('id', parentIds);
+    (parents || []).forEach(pp => { parentById[pp.id] = pp; });
+  }
+  const cards = await getUserCards([...page.map(m => m.sender_id), ...Object.values(parentById).map(p => p.sender_id)]);
+  const replyPreviewFor = (id) => {
+    const pp = parentById[id];
+    if (!pp) return null;
+    return {
+      id: pp.id, sender_id: pp.sender_id, sender_name: cards.get(pp.sender_id)?.name || 'User',
+      body: pp.deleted_at ? null : (pp.body || (pp.attachments?.length ? `📎 ${pp.attachments.length} attachment${pp.attachments.length > 1 ? 's' : ''}` : null)),
+      deleted: !!pp.deleted_at,
+    };
+  };
   // Per-sender chat font color (mig 082). Single query for every distinct
   // sender on the page. Missing rows → no override (frontend renders default).
   const senderIds = [...new Set(page.map(m => m.sender_id).filter(Boolean))];
@@ -569,6 +589,8 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
     body_html: m.deleted_at ? null : (m.body_html || null),
     attachments: m.deleted_at ? null : (m.attachments || null),
     mentions: m.mentions || null,
+    reply_to: m.reply_to || null,
+    reply_preview: m.reply_to ? replyPreviewFor(m.reply_to) : null,
     deleted: !!m.deleted_at,
     edited: !!m.edited_at,
     created_at: m.created_at,
@@ -627,6 +649,15 @@ router.post('/conversations/:id/messages', [
 
   if (!text && !attachments) return res.status(400).json({ error: 'Message is empty' });
 
+  // Reply target: must be an existing message in THIS conversation.
+  let replyTo = null, replyParent = null;
+  if (req.body.reply_to) {
+    const { data: parent } = await supabaseAdmin
+      .from('messages').select('id, conversation_id, sender_id, body, attachments, deleted_at')
+      .eq('id', req.body.reply_to).maybeSingle();
+    if (parent && parent.conversation_id === convId) { replyTo = parent.id; replyParent = parent; }
+  }
+
   const [membership, { data: conv }, banned] = await Promise.all([
     getMembership(convId, uid),
     supabaseAdmin.from('conversations').select('id, is_locked, type, title, only_admins_post').eq('id', convId).maybeSingle(),
@@ -648,8 +679,8 @@ router.post('/conversations/:id/messages', [
 
   const { data: msg, error } = await supabaseAdmin
     .from('messages')
-    .insert({ conversation_id: convId, sender_id: uid, body: text || null, body_html: html, attachments, mentions })
-    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, created_at, edited_at, deleted_at').single();
+    .insert({ conversation_id: convId, sender_id: uid, body: text || null, body_html: html, attachments, mentions, reply_to: replyTo })
+    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at').single();
   if (error) return res.status(500).json({ error: error.message });
 
   // Sender card + member ids for push (fire-and-forget).
@@ -665,11 +696,22 @@ router.post('/conversations/:id/messages', [
     pushMentions({ conversationId: convId, senderId: uid, senderName, convTitle: conv.title, mentionIds: mentions, body: preview });
   }
 
+  let replyPreview = null;
+  if (replyParent) {
+    const pcards = await getUserCards([replyParent.sender_id]);
+    replyPreview = {
+      id: replyParent.id, sender_id: replyParent.sender_id, sender_name: pcards.get(replyParent.sender_id)?.name || 'User',
+      body: replyParent.deleted_at ? null : (replyParent.body || (replyParent.attachments?.length ? `📎 ${replyParent.attachments.length} attachment${replyParent.attachments.length > 1 ? 's' : ''}` : null)),
+      deleted: !!replyParent.deleted_at,
+    };
+  }
+
   res.status(201).json({
     message: {
       id: msg.id, conversation_id: msg.conversation_id, sender_id: msg.sender_id,
       sender_name: senderName, body: msg.body, body_html: msg.body_html, attachments: msg.attachments,
-      mentions: msg.mentions, deleted: false, edited: false, created_at: msg.created_at,
+      mentions: msg.mentions, reply_to: msg.reply_to || null, reply_preview: replyPreview,
+      deleted: false, edited: false, created_at: msg.created_at,
     },
   });
 }));

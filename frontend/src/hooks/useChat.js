@@ -22,6 +22,13 @@ const POLL_BASE = 25_000;
 const POLL_JITTER = 10_000;
 const TYPING_TTL = 3_500;
 
+// Build the little "replying to" preview from a parent message already in state.
+const previewFromParent = (parent) => parent ? {
+  id: parent.id, sender_id: parent.sender_id, sender_name: parent.sender_name,
+  body: parent.deleted ? null : (parent.body || (parent.attachments?.length ? `📎 ${parent.attachments.length} attachment${parent.attachments.length > 1 ? 's' : ''}` : null)),
+  deleted: !!parent.deleted,
+} : null;
+
 const sortByTime = (a, b) => new Date(a.created_at) - new Date(b.created_at);
 const dedupe = (list) => {
   const seen = new Map();
@@ -155,15 +162,18 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
     const bodyText = (p.body || '').trim();
     const hasAttachments = Array.isArray(p.attachments) && p.attachments.length > 0;
     if ((!bodyText && !p.body_html && !hasAttachments) || !conversationId) return;
+    const replyTo = p.reply_to || null;
+    const replyPreview = replyTo ? previewFromParent(messagesRef.current.find(x => x.id === replyTo)) : null;
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setMessages(prev => dedupe([...prev, {
       id: tempId, conversation_id: conversationId, sender_id: meId, sender_name: 'You',
       body: bodyText || null, body_html: p.body_html || null, attachments: p.attachments || null, mentions: p.mentions || null,
+      reply_to: replyTo, reply_preview: replyPreview,
       deleted: false, edited: false, created_at: new Date().toISOString(), reactions: [], pending: true,
     }]));
     try {
       const res = await client.post(`chat/conversations/${conversationId}/messages`, {
-        body: bodyText, body_html: p.body_html || null, attachments: p.attachments || null, mentions: p.mentions || null,
+        body: bodyText, body_html: p.body_html || null, attachments: p.attachments || null, mentions: p.mentions || null, reply_to: replyTo,
       });
       setMessages(prev => dedupe(prev.filter(m => m.id !== tempId).concat({ ...res.data.message, reactions: [] })));
     } catch (err) {
@@ -234,6 +244,8 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
               body_html: payload.new.deleted_at ? null : (payload.new.body_html || null),
               attachments: payload.new.deleted_at ? null : (payload.new.attachments || null),
               mentions: payload.new.mentions || null,
+              reply_to: payload.new.reply_to || null,
+              reply_preview: payload.new.reply_to ? previewFromParent(messagesRef.current.find(x => x.id === payload.new.reply_to)) : null,
               deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at, created_at: payload.new.created_at, reactions: [] };
             setMessages(prev => dedupe([...prev, msg]));
             dropTyping(msg.sender_id);

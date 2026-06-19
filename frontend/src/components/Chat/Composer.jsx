@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Send, Lock, Command, Slash, Bold, Italic, Underline, List, ListOrdered,
-  Link2, Image as ImageIcon, Paperclip, X, Loader2, FileText,
+  Link2, Image as ImageIcon, Paperclip, X, Loader2, FileText, Reply,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useMessageTemplates } from '../../hooks/useMessageTemplates';
@@ -19,7 +19,9 @@ const ToolBtn = ({ title, onClick, children, active }) => (
 
 // Rich chat composer: contentEditable with formatting toolbar, @mentions, file/
 // image attachments (≤10MB), paste-preserves-formatting, and "/" templates.
-const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = [] }) => {
+const replySnippet = (msg) => (msg?.body || (msg?.attachments?.length ? `📎 ${msg.attachments.length} attachment${msg.attachments.length > 1 ? 's' : ''}` : '')) || 'Message';
+
+const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = [], replyTo = null, onClearReply }) => {
   const edRef = useRef(null);
   const imgRef = useRef(null);
   const fileRef = useRef(null);
@@ -55,6 +57,8 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
   // straight into the message box — no extra click. (MessageThread keys the
   // Composer by conversation id, so it remounts + refocuses on each open.)
   useEffect(() => { if (!disabled) requestAnimationFrame(() => edRef.current?.focus()); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop the cursor into the box when a reply is started.
+  useEffect(() => { if (replyTo) requestAnimationFrame(() => edRef.current?.focus()); }, [replyTo]);
 
   const emit = () => setHtmlEmpty(isHtmlEmpty(edRef.current?.innerHTML || ''));
   const focusEd = () => edRef.current?.focus();
@@ -160,12 +164,14 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
       body_html: hasText ? html : null,
       attachments: attachments.length ? attachments : null,
       mentions: extractMentions(html),
+      reply_to: replyTo?.id || null,
     };
     setSending(true);
     try {
       await onSend(payload);
       edRef.current.innerHTML = '';
       setAttachments([]); setSug(null); emit();
+      onClearReply?.();
     } catch { /* surfaced as failed bubble */ }
     finally { setSending(false); focusEd(); }
   };
@@ -177,6 +183,7 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(highlight); return; }
       if (e.key === 'Escape')    { e.preventDefault(); setSug(null); return; }
     }
+    if (e.key === 'Escape' && replyTo) { e.preventDefault(); onClearReply?.(); return; }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   };
 
@@ -229,6 +236,19 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
               )}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Replying-to bar (WhatsApp-style) */}
+      {replyTo && (
+        <div className="flex items-stretch gap-2 px-3 pt-2.5">
+          <div className="flex-1 min-w-0 rounded-lg pl-2.5 pr-3 py-1.5" style={{ borderLeft: '3px solid var(--color-primary-500)', backgroundColor: 'var(--color-bg-secondary)' }}>
+            <p className="text-[11px] font-bold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
+              <Reply size={11} /> Replying to {replyTo.sender_id === meId ? 'yourself' : replyTo.sender_name}
+            </p>
+            <p className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{replySnippet(replyTo)}</p>
+          </div>
+          <button onClick={onClearReply} title="Cancel reply" className="p-1.5 rounded-lg self-center hover:bg-bg-secondary" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>
         </div>
       )}
 

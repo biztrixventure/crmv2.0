@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, CheckCheck, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, CheckCheck, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings, Reply } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useLastSeen } from '../../hooks/useLastSeen';
 import { formatLastSeen } from '../../utils/lastSeen';
@@ -50,7 +50,7 @@ const Attachment = ({ a, mine }) => {
   );
 };
 
-const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact }) => {
+const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact, onReply, onJumpTo }) => {
   const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
   const mentioned = !mine && Array.isArray(m.mentions) && m.mentions.includes(meId);
@@ -66,14 +66,15 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact 
           </p>
         )}
         <div className="relative flex items-end gap-1">
-          {/* hover actions (own messages) */}
-          {mine && !m.deleted && (
-            <div className="relative self-center">
+          {/* hover actions — Reply for everyone, Edit/Delete for own messages */}
+          {!m.deleted && (
+            <div className={`relative self-center ${mine ? 'order-first' : 'order-last'}`}>
               <button onClick={() => setMenu(v => !v)} className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity" style={{ color: 'var(--color-text-tertiary)' }}><MoreVertical size={14} /></button>
               {menu && (
-                <div className="absolute bottom-7 right-0 z-20 rounded-xl py-1 w-28" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
-                  <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={12} /> Edit</button>
-                  <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={12} /> Delete</button>
+                <div className={`absolute bottom-7 ${mine ? 'right-0' : 'left-0'} z-20 rounded-xl py-1 w-28`} style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                  <button onClick={() => { setMenu(false); onReply(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Reply size={12} /> Reply</button>
+                  {mine && <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={12} /> Edit</button>}
+                  {mine && <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={12} /> Delete</button>}
                 </div>
               )}
             </div>
@@ -88,6 +89,20 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact 
               opacity: m.pending ? 0.6 : 1,
               boxShadow: m.deleted ? 'none' : mentioned ? '0 0 0 2px var(--color-primary-400)' : 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.06))',
             }}>
+              {/* Quoted message (WhatsApp-style) — click to jump to the original. */}
+              {!m.deleted && m.reply_preview && (
+                <button onClick={() => onJumpTo?.(m.reply_preview.id)}
+                  className="block w-full text-left mb-1.5 rounded-lg pl-2 pr-2.5 py-1 transition-opacity hover:opacity-90"
+                  style={{ borderLeft: `3px solid ${mine ? 'rgba(255,255,255,0.7)' : 'var(--color-primary-500)'}`,
+                    backgroundColor: mine ? 'rgba(255,255,255,0.15)' : 'var(--color-bg-secondary)' }}>
+                  <span className="block text-[11px] font-bold truncate" style={{ color: mine ? 'rgba(255,255,255,0.95)' : 'var(--color-primary-600)' }}>
+                    {m.reply_preview.sender_id === meId ? 'You' : m.reply_preview.sender_name}
+                  </span>
+                  <span className="block text-xs truncate" style={{ maxWidth: 240, color: mine ? 'rgba(255,255,255,0.85)' : 'var(--color-text-secondary)', fontStyle: m.reply_preview.deleted ? 'italic' : 'normal' }}>
+                    {m.reply_preview.deleted ? 'message deleted' : (m.reply_preview.body || 'Attachment')}
+                  </span>
+                </button>
+              )}
               {m.deleted ? (
                 <span className="text-sm italic">message deleted</span>
               ) : (
@@ -163,6 +178,14 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   const prevHeightRef = useRef(0);
   const prependingRef = useRef(false);
 
+  const [replyTo, setReplyTo] = useState(null);
+  useEffect(() => { setReplyTo(null); }, [conversation.id]);
+  // Click a quoted message → scroll to the original + flash it.
+  const jumpTo = useCallback((id) => {
+    const el = scrollRef.current?.querySelector(`[data-mid="${id}"]`);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('bsx-flash'); setTimeout(() => el.classList.remove('bsx-flash'), 1300); }
+  }, []);
+
   useEffect(() => { markRead(); }, [conversation.id, markRead]);
 
   useLayoutEffect(() => {
@@ -229,6 +252,8 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
         .bsx-msg ol{list-style:decimal;padding-left:1.15rem;margin:2px 0}
         .bsx-msg p{margin:2px 0}
         .bsx-msg .bsx-mention{background:var(--color-primary-100);color:var(--color-primary-700);border-radius:5px;padding:0 3px;font-weight:600}
+        @keyframes bsxFlash{0%,100%{background:transparent}30%{background:var(--color-primary-100,#ede9fe)}}
+        .bsx-flash{animation:bsxFlash 1.3s ease-in-out}
       `}</style>
 
       {/* Header */}
@@ -284,7 +309,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
           const showDay = !prev || !sameDay(prev.created_at, m.created_at);
           const showName = conversation.type !== 'dm' && (!prev || prev.sender_id !== m.sender_id);
           return (
-            <div key={m.id}>
+            <div key={m.id} data-mid={m.id} className="rounded-2xl transition-colors">
               {showDay && (
                 <div className="flex justify-center my-3">
                   <span className="text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{dayLabel(m.created_at)}</span>
@@ -292,13 +317,14 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
               )}
               <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName}
                 read={m.sender_id === meId && !m.pending && !m.deleted && readThrough != null && new Date(m.created_at) <= readThrough}
-                onEdit={onEdit} onDelete={onDelete} onReact={addReaction} />
+                onEdit={onEdit} onDelete={onDelete} onReact={addReaction} onReply={setReplyTo} onJumpTo={jumpTo} />
             </div>
           );
         })}
       </div>
 
-      <Composer key={conversation.id} onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members} />
+      <Composer key={conversation.id} onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members}
+        replyTo={replyTo} onClearReply={() => setReplyTo(null)} />
     </div>
   );
 };
