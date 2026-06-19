@@ -769,8 +769,10 @@ const StaffShell = () => {
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <SpiffWidget />
 
-        {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm. */}
-        <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />
+        {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.
+            Fronter-only — confirming a pending transfer is a fronter action; the
+            closer never confirms (they just work the transfer once it's sent). */}
+        {isFronter && <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />}
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
