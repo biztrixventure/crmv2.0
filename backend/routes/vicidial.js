@@ -121,7 +121,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   let tr = null, code = candidates[0];
   for (const c of candidates) {
     const { data } = await supabaseAdmin
-      .from('transfers').select('id, company_id').eq('vicidial_vendor_code', c).maybeSingle();
+      .from('transfers').select('id, company_id, assigned_closer_id').eq('vicidial_vendor_code', c).maybeSingle();
     if (data) { tr = data; code = c; break; }
   }
   if (!tr) {
@@ -147,9 +147,10 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // scoped to the closer's company (resolved from the dialing agent). Fall back
   // to the transfer's (fronter) company when the agent isn't mapped.
   const closerAgent = String(p.agent || '').trim();
-  let dispoCompanyId = tr.company_id;
+  let dispoCompanyId = tr.company_id, closerUserId = null;
   if (closerAgent) {
-    const { companyId: cc } = await resolveAgent(closerAgent);
+    const { userId: cu, companyId: cc } = await resolveAgent(closerAgent);
+    if (cu) closerUserId = cu;
     if (cc) dispoCompanyId = cc;
   }
 
@@ -180,17 +181,29 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // Apply the mapped CRM disposition (text snapshot, like disposition_actions).
   // Unmapped → closer_disposition left untouched; the closer picks it manually.
   if (mapped?.disposition_name) updates.closer_disposition = mapped.disposition_name;
+  // Claim the lead for the closer who dispositioned it (same as a manual
+  // disposition / sale), so the fronter sees the closer name, not "Unassigned".
+  if (closerUserId && !tr.assigned_closer_id) {
+    updates.assigned_closer_id = closerUserId;
+    updates.assigned_to = closerUserId;
+  }
 
   const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
-  // Mapped dispos also land on the lead's disposition timeline (best-effort).
+  // Mapped dispos also land on the lead's disposition timeline (best-effort) —
+  // same shape as a manual disposition so the fronter's record shows the closer
+  // name + colored chip. Link the config (for color/id) when one matches.
   if (mapped?.disposition_name) {
     try {
+      const { data: cfg } = await supabaseAdmin.from('disposition_configs')
+        .select('id, color').eq('name', mapped.disposition_name).eq('is_active', true)
+        .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
+        .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
       await supabaseAdmin.from('disposition_actions').insert({
-        transfer_id: tr.id, company_id: dispoCompanyId,
-        disposition_name: mapped.disposition_name,
-        note: `From dialer (${rawCode})`, setter_role: 'closer',
+        transfer_id: tr.id, company_id: dispoCompanyId, user_id: closerUserId || null,
+        disposition_config_id: cfg?.id || null, disposition_name: mapped.disposition_name,
+        color: cfg?.color || null, note: `From dialer (${rawCode})`, setter_role: 'closer',
       });
     } catch { /* non-critical */ }
   }
