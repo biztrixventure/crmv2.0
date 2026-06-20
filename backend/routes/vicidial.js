@@ -49,6 +49,63 @@ async function resolveAgent(agentId) {
   return { userId: prof.user_id, companyId: ucr?.company_id || null };
 }
 
+// Resolve a raw dialer code → mapped CRM disposition for a company, bumping the
+// per-company dispo map's hit counter (auto-records unmapped codes too).
+async function bumpDispoMap(companyId, rawCode) {
+  if (!companyId || !rawCode) return null;
+  const now = new Date().toISOString();
+  const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
+    .select('id, disposition_name, hits').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
+  if (m) {
+    await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (m.hits || 0) + 1, last_seen_at: now }).eq('id', m.id);
+    return m;
+  }
+  await supabaseAdmin.from('vicidial_dispo_map')
+    .insert({ company_id: companyId, vici_code: rawCode, hits: 1, last_seen_at: now }).then(() => {}, () => {});
+  return null;
+}
+
+// Read-only mapped-name lookup (no hit bump) — used when assigning a queued dispo.
+async function lookupDispoName(companyId, rawCode) {
+  if (!companyId || !rawCode) return null;
+  const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
+    .select('disposition_name').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
+  return m?.disposition_name || null;
+}
+
+// Apply a closer disposition onto a transfer: stamp vicidial fields, claim the
+// closer (so the fronter sees the name), and log a disposition_action with the
+// matching config's colour/id (mirrors a manual CRM disposition).
+async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoName, rawDispo, talk }) {
+  const now = new Date().toISOString();
+  const updates = {
+    vicidial_dispo: rawDispo || null,
+    vicidial_dispo_at: now,
+    vicidial_talk_time: Number.isFinite(talk) ? talk : null,
+    vicidial_agent: undefined,
+  };
+  if (closerUserId && !transfer.assigned_closer_id) {
+    updates.assigned_closer_id = closerUserId;
+    updates.assigned_to = closerUserId;
+  }
+  const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', transfer.id);
+  if (error) throw new Error(error.message);
+
+  if (dispoName) {
+    try {
+      const { data: cfg } = await supabaseAdmin.from('disposition_configs')
+        .select('id, color').eq('name', dispoName).eq('is_active', true)
+        .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
+        .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
+      await supabaseAdmin.from('disposition_actions').insert({
+        transfer_id: transfer.id, company_id: dispoCompanyId, user_id: closerUserId || null,
+        disposition_config_id: cfg?.id || null, disposition_name: dispoName,
+        color: cfg?.color || null, note: `From dialer (${rawDispo})`, setter_role: 'closer',
+      });
+    } catch { /* non-critical */ }
+  }
+}
+
 // ── INGEST: fronter XFER → pending transfer (code + phone only) ──────────────
 ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
@@ -126,6 +183,14 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
   if (!candidates.length) { dbg.outcome = 'no code/alt_code received'; return res.status(400).json({ ok: false, error: 'code required' }); }
 
+  // Closer identity from the dialing agent — drives company scoping + the queue.
+  const closerAgent = String(p.agent || '').trim();
+  let closerUserId = null, closerCompanyId = null;
+  if (closerAgent) {
+    const { userId, companyId } = await resolveAgent(closerAgent);
+    closerUserId = userId; closerCompanyId = companyId;
+  }
+
   let tr = null, code = candidates[0];
   for (const c of candidates) {
     const { data } = await supabaseAdmin
@@ -134,7 +199,6 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   }
   // Phone fallback — the customer phone is identical on both sides even when the
   // closer's lead_id differs (same-box transfers that spawn a fresh closer lead).
-  // Match the most recent transfer on the normalized phone.
   if (!tr) {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
@@ -144,94 +208,123 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
   }
-  if (!tr) {
-    // Diagnostic: is there a near-match? Catches the common "fronter URL carries a
-    // prefix but the closer URL doesn't (or vice-versa)" mistake.
-    let hint = null;
-    const probe = candidates[candidates.length - 1];
-    if (probe) {
-      const { data: near } = await supabaseAdmin
-        .from('transfers').select('vicidial_vendor_code')
-        .ilike('vicidial_vendor_code', `%${probe}%`).not('vicidial_vendor_code', 'is', null).limit(3);
-      if (near?.length) hint = `prefix mismatch? stored codes containing "${probe}": ${near.map(n => n.vicidial_vendor_code).join(', ')}`;
-    }
-    dbg.outcome = `NO MATCH for [${candidates.join(', ')}]${hint ? ' — ' + hint : ''}`;
-    logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} (dispo ${dispo})${hint ? ' — ' + hint : ''}`);
-    return res.json({ ok: false, reason: 'no matching transfer', sent: candidates, hint });   // 200 → no dialer retry
-  }
-  dbg.outcome = `matched transfer ${tr.id} on "${code}"`;
 
-  const now = new Date().toISOString();
   const talk = parseInt(p.talk_time, 10);
   const rawCode = dispo.toUpperCase();
 
-  // The disposition comes from the CLOSER, so the dispo map + logged action are
-  // scoped to the closer's company (resolved from the dialing agent). Fall back
-  // to the transfer's (fronter) company when the agent isn't mapped.
-  const closerAgent = String(p.agent || '').trim();
-  let dispoCompanyId = tr.company_id, closerUserId = null;
-  if (closerAgent) {
-    const { userId: cu, companyId: cc } = await resolveAgent(closerAgent);
-    if (cu) closerUserId = cu;
-    if (cc) dispoCompanyId = cc;
+  // ── matched a lead → apply straight away (scoped to the closer's company) ──
+  if (tr) {
+    const dispoCompanyId = closerCompanyId || tr.company_id;
+    const mapped = await bumpDispoMap(dispoCompanyId, rawCode);
+    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId, dispoName: mapped?.disposition_name || null, rawDispo: dispo, talk });
+    dbg.outcome = `matched transfer ${tr.id} on "${code}"`;
+    logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← "${dispo}" → ${mapped?.disposition_name || '(unmapped)'}`);
+    return res.json({ ok: true, transfer_id: tr.id, mapped: mapped?.disposition_name || null });
   }
 
-  // Resolve raw dialer code → CRM disposition via the per-company map. Record the
-  // code either way: an unmapped code is auto-inserted (disposition_name NULL) so
-  // it shows in the superadmin's "unmapped" inbox — nothing is ever lost.
-  let mapped = null;
-  if (rawCode) {
-    const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
-      .select('id, disposition_name, category, hits')
-      .eq('company_id', dispoCompanyId).eq('vici_code', rawCode).maybeSingle();
-    if (m) {
-      mapped = m;
-      await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (m.hits || 0) + 1, last_seen_at: now }).eq('id', m.id);
-    } else {
-      await supabaseAdmin.from('vicidial_dispo_map')
-        .insert({ company_id: dispoCompanyId, vici_code: rawCode, hits: 1, last_seen_at: now })
-        .then(() => {}, () => {});   // ignore unique race
-    }
+  // ── no lead match → queue it for the closer to assign in the CRM ──
+  // VICIdial's closer Dispo URL can't tell us which lead, so the closer picks it
+  // from their CRM (mirrors the fronter's pending-transfer confirm). Works for
+  // both same-box and different-box without any lead/phone token.
+  if (closerUserId) {
+    const mapped = await bumpDispoMap(closerCompanyId, rawCode);
+    const { data: q } = await supabaseAdmin.from('vicidial_closer_dispo_queue').insert({
+      closer_user_id: closerUserId, company_id: closerCompanyId,
+      vici_code: rawCode, disposition_name: mapped?.disposition_name || null, raw_dispo: dispo,
+    }).select('id').single();
+    dbg.outcome = `queued for closer ${closerUserId} (no lead match)`;
+    logger.success('VICIDIAL_DISPO', `Queued "${dispo}" for closer ${closerUserId} (no lead match)`);
+    return res.json({ ok: true, queued: true, id: q?.id, mapped: mapped?.disposition_name || null });
   }
 
-  const updates = {
-    vicidial_dispo:     dispo || null,
-    vicidial_dispo_at:  now,
-    vicidial_talk_time: Number.isFinite(talk) ? talk : null,
-    vicidial_agent:     String(p.agent || '').trim() || undefined,
-  };
-  // The mapped CRM disposition is recorded as a disposition_action below (the
-  // fronter's record reads latest_disposition from there) — transfers has no
-  // closer_disposition column, so don't write one here.
-  // Claim the lead for the closer who dispositioned it (same as a manual
-  // disposition / sale), so the fronter sees the closer name, not "Unassigned".
-  if (closerUserId && !tr.assigned_closer_id) {
-    updates.assigned_closer_id = closerUserId;
-    updates.assigned_to = closerUserId;
+  dbg.outcome = `NO MATCH and agent "${closerAgent}" not mapped`;
+  logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} and agent "${closerAgent}" not mapped`);
+  return res.json({ ok: false, reason: 'no matching transfer and agent not mapped', sent: candidates });
+}));
+
+// ── API: closer's pending dialer dispositions (awaiting a lead) ───────────────
+api.get('/closer-dispos', asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('vicidial_closer_dispo_queue')
+    .select('id, vici_code, disposition_name, raw_dispo, created_at')
+    .eq('closer_user_id', req.user.id).eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ dispos: data || [] });
+}));
+
+// Recent transfers the closer can attach a queued disposition to — assigned to
+// them OR recent leads from their linked fronter companies.
+api.get('/closer-assignable', asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const since = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+  // Fronter companies linked to the closer's companies.
+  const { data: myCos } = await supabaseAdmin
+    .from('user_company_roles').select('company_id').eq('user_id', req.user.id).eq('is_active', true);
+  const closerCoIds = (myCos || []).map(c => c.company_id).filter(Boolean);
+  let fronterCoIds = [];
+  if (closerCoIds.length) {
+    const { data: links } = await supabaseAdmin
+      .from('company_links').select('fronter_company_id').in('closer_company_id', closerCoIds);
+    fronterCoIds = [...new Set((links || []).map(l => l.fronter_company_id).filter(Boolean))];
   }
 
-  const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
-  if (error) return res.status(500).json({ ok: false, error: error.message });
-
-  // Mapped dispos also land on the lead's disposition timeline (best-effort) —
-  // same shape as a manual disposition so the fronter's record shows the closer
-  // name + colored chip. Link the config (for color/id) when one matches.
-  if (mapped?.disposition_name) {
-    try {
-      const { data: cfg } = await supabaseAdmin.from('disposition_configs')
-        .select('id, color').eq('name', mapped.disposition_name).eq('is_active', true)
-        .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
-        .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
-      await supabaseAdmin.from('disposition_actions').insert({
-        transfer_id: tr.id, company_id: dispoCompanyId, user_id: closerUserId || null,
-        disposition_config_id: cfg?.id || null, disposition_name: mapped.disposition_name,
-        color: cfg?.color || null, note: `From dialer (${rawCode})`, setter_role: 'closer',
-      });
-    } catch { /* non-critical */ }
+  let query = supabaseAdmin.from('transfers')
+    .select('id, form_data, normalized_phone, created_at, assigned_closer_id, company_id, vicidial_vendor_code')
+    .eq('vicidial_pending', false)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false }).limit(40);
+  // scope: mine OR from a linked fronter company
+  if (fronterCoIds.length) query = query.or(`assigned_closer_id.eq.${req.user.id},company_id.in.(${fronterCoIds.join(',')})`);
+  else query = query.eq('assigned_closer_id', req.user.id);
+  if (q) {
+    const s = q.replace(/[%,]/g, '');
+    query = query.or(`normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,form_data->>FirstName.ilike.%${s}%,form_data->>Phone.ilike.%${s}%`);
   }
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  const rows = (data || []).map(t => {
+    const fd = t.form_data || {};
+    const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : 'Lead');
+    const phone = fd.Phone || fd.customer_phone || t.normalized_phone || '';
+    return { id: t.id, name, phone, created_at: t.created_at, code: t.vicidial_vendor_code || null };
+  });
+  res.json({ transfers: rows });
+}));
 
-  logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← "${dispo}" → ${mapped?.disposition_name || '(unmapped)'}`);
-  res.json({ ok: true, transfer_id: tr.id, mapped: mapped?.disposition_name || null });
+// Attach a queued disposition to a chosen transfer.
+api.post('/closer-dispos/:id/assign', asyncHandler(async (req, res) => {
+  const transferId = req.body.transfer_id;
+  if (!transferId) return res.status(400).json({ error: 'transfer_id required' });
+  const { data: qrow } = await supabaseAdmin
+    .from('vicidial_closer_dispo_queue').select('*').eq('id', req.params.id).maybeSingle();
+  if (!qrow || qrow.closer_user_id !== req.user.id || qrow.status !== 'pending') {
+    return res.status(404).json({ error: 'Pending disposition not found' });
+  }
+  const { data: tr } = await supabaseAdmin
+    .from('transfers').select('id, company_id, assigned_closer_id').eq('id', transferId).maybeSingle();
+  if (!tr) return res.status(404).json({ error: 'Transfer not found' });
+
+  const dispoCompanyId = qrow.company_id || tr.company_id;
+  // Re-resolve the name in case the superadmin mapped the code after it was queued.
+  const dispoName = qrow.disposition_name || await lookupDispoName(dispoCompanyId, qrow.vici_code);
+  try {
+    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId: req.user.id, dispoName, rawDispo: qrow.raw_dispo, talk: NaN });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+  await supabaseAdmin.from('vicidial_closer_dispo_queue')
+    .update({ status: 'assigned', transfer_id: transferId, disposition_name: dispoName || null }).eq('id', qrow.id);
+  res.json({ ok: true, transfer_id: transferId, disposition_name: dispoName || null });
+}));
+
+// Dismiss a queued disposition.
+api.delete('/closer-dispos/:id', asyncHandler(async (req, res) => {
+  const { data: qrow } = await supabaseAdmin
+    .from('vicidial_closer_dispo_queue').select('id, closer_user_id').eq('id', req.params.id).maybeSingle();
+  if (!qrow || qrow.closer_user_id !== req.user.id) return res.status(404).json({ error: 'Not found' });
+  await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ status: 'dismissed' }).eq('id', req.params.id);
+  res.json({ ok: true });
 }));
 
 // ── API: my pending-from-dialer transfers ────────────────────────────────────

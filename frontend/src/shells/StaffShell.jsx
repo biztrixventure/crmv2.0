@@ -76,6 +76,7 @@ import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PendingFromDialer from "../components/Vicidial/PendingFromDialer";
+import CloserPendingDispos from "../components/Vicidial/CloserPendingDispos";
 import SpiffWidget from "../components/Engagement/SpiffWidget";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
@@ -774,6 +775,10 @@ const StaffShell = () => {
             user created (the fronter who XFERd). A closer who never XFERd has
             none, so the banner self-hides; no fragile role gate needed. */}
         <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />
+
+        {/* VICIdial: closer's dialer dispositions awaiting a lead (the closer
+            assigns each to a lead). Self-hides when the closer has none. */}
+        <CloserPendingDispos onChanged={() => fetchTransfers && fetchTransfers()} />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
