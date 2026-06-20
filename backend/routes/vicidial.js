@@ -108,16 +108,23 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   res.json({ ok: true, transfer_id: data.id });
 }));
 
+// Ring buffer of the last 20 closer-dispo hits — lets the superadmin SEE exactly
+// what the dialer sent (token substitution + match outcome) without server logs.
+const recentDispo = [];
+ingest.get('/dispo-debug', requireToken, (req, res) => res.json({ recent: recentDispo }));
+
 // ── INGEST: closer disposition → map onto the transfer ───────────────────────
 ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const dispo = String(p.dispo || '').trim();
+  const dbg = { at: new Date().toISOString(), code: String(p.code || ''), alt_code: String(p.alt_code || ''), dispo, agent: String(p.agent || ''), outcome: 'pending' };
+  recentDispo.unshift(dbg); if (recentDispo.length > 20) recentDispo.pop();
   // One closer URL works for both topologies: it sends vendor_lead_code (set on
   // different-box leads) AND lead_id as a fallback (matches same-box leads).
   // Try each in order; first hit wins.
   const candidates = [String(p.code || '').trim(), String(p.alt_code || '').trim()].filter(Boolean);
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
-  if (!candidates.length) return res.status(400).json({ ok: false, error: 'code required' });
+  if (!candidates.length) { dbg.outcome = 'no code/alt_code received'; return res.status(400).json({ ok: false, error: 'code required' }); }
 
   let tr = null, code = candidates[0];
   for (const c of candidates) {
@@ -136,9 +143,11 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
         .ilike('vicidial_vendor_code', `%${probe}%`).not('vicidial_vendor_code', 'is', null).limit(3);
       if (near?.length) hint = `prefix mismatch? stored codes containing "${probe}": ${near.map(n => n.vicidial_vendor_code).join(', ')}`;
     }
+    dbg.outcome = `NO MATCH for [${candidates.join(', ')}]${hint ? ' — ' + hint : ''}`;
     logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} (dispo ${dispo})${hint ? ' — ' + hint : ''}`);
     return res.json({ ok: false, reason: 'no matching transfer', sent: candidates, hint });   // 200 → no dialer retry
   }
+  dbg.outcome = `matched transfer ${tr.id} on "${code}"`;
 
   const now = new Date().toISOString();
   const talk = parseInt(p.talk_time, 10);
