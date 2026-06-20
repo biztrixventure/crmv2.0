@@ -269,9 +269,10 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
     fronterCoIds = [...new Set((links || []).map(l => l.fronter_company_id).filter(Boolean))];
   }
 
+  // Include BOTH confirmed and still-pending (unconfirmed) leads — the closer may
+  // disposition before the fronter confirms the transfer.
   let query = supabaseAdmin.from('transfers')
-    .select('id, form_data, normalized_phone, created_at, assigned_closer_id, company_id, vicidial_vendor_code')
-    .eq('vicidial_pending', false)
+    .select('id, form_data, normalized_phone, created_at, assigned_closer_id, company_id, vicidial_vendor_code, vicidial_pending')
     .gte('created_at', since)
     .order('created_at', { ascending: false }).limit(40);
   // scope: mine OR from a linked fronter company
@@ -279,7 +280,7 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
   else query = query.eq('assigned_closer_id', req.user.id);
   if (q) {
     const s = q.replace(/[%,]/g, '');
-    query = query.or(`normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,form_data->>FirstName.ilike.%${s}%,form_data->>Phone.ilike.%${s}%`);
+    query = query.or(`normalized_phone.ilike.%${s}%,vicidial_vendor_code.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,form_data->>FirstName.ilike.%${s}%,form_data->>Phone.ilike.%${s}%`);
   }
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
@@ -287,7 +288,7 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
     const fd = t.form_data || {};
     const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : 'Lead');
     const phone = fd.Phone || fd.customer_phone || t.normalized_phone || '';
-    return { id: t.id, name, phone, created_at: t.created_at, code: t.vicidial_vendor_code || null };
+    return { id: t.id, name, phone, created_at: t.created_at, code: t.vicidial_vendor_code || null, pending: !!t.vicidial_pending };
   });
   res.json({ transfers: rows });
 }));

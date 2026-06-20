@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ClipboardCheck, Phone, X, Loader2, Search, Check } from 'lucide-react';
+import { ClipboardCheck, Phone, X, Loader2, Search, Check, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 
@@ -104,8 +104,14 @@ function AssignModal({ item, onClose, onDone }) {
                 className="w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors disabled:opacity-50 hover:bg-bg-secondary"
                 style={{ border: '1px solid var(--color-border)' }}>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{tr.name}</p>
-                  <p className="text-xs flex items-center gap-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}><Phone size={11} /> {tr.phone || '—'}</p>
+                  <p className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    {tr.name}
+                    {tr.pending && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>not confirmed</span>}
+                  </p>
+                  <p className="text-xs flex items-center gap-2 truncate" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <span className="flex items-center gap-1"><Phone size={11} /> {tr.phone || '—'}</span>
+                    {tr.code && <span className="flex items-center gap-0.5 font-mono"><Hash size={9} />{tr.code}</span>}
+                  </p>
                 </div>
                 {busy === tr.id ? <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
                   : <Check size={16} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />}
