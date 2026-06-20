@@ -179,9 +179,10 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // One closer URL works for both topologies: it sends vendor_lead_code (set on
   // different-box leads) AND lead_id as a fallback (matches same-box leads).
   // Try each in order; first hit wins.
+  // No code/alt_code is normal for the closer URL (dispo+agent only) — VICIdial
+  // can't send lead tokens for the closer's calls. We fall through to the queue.
   const candidates = [String(p.code || '').trim(), String(p.alt_code || '').trim()].filter(Boolean);
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
-  if (!candidates.length) { dbg.outcome = 'no code/alt_code received'; return res.status(400).json({ ok: false, error: 'code required' }); }
 
   // Closer identity from the dialing agent — drives company scoping + the queue.
   const closerAgent = String(p.agent || '').trim();
