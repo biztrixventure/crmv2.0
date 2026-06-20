@@ -116,6 +116,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // different-box leads) AND lead_id as a fallback (matches same-box leads).
   // Try each in order; first hit wins.
   const candidates = [String(p.code || '').trim(), String(p.alt_code || '').trim()].filter(Boolean);
+  logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
   if (!candidates.length) return res.status(400).json({ ok: false, error: 'code required' });
 
   let tr = null, code = candidates[0];
