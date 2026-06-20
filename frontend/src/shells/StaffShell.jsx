@@ -770,9 +770,10 @@ const StaffShell = () => {
         <SpiffWidget />
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.
-            Fronter-only — confirming a pending transfer is a fronter action; the
-            closer never confirms (they just work the transfer once it's sent). */}
-        {isFronter && <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />}
+            Shown by ownership, not role — /pending only returns transfers THIS
+            user created (the fronter who XFERd). A closer who never XFERd has
+            none, so the banner self-hides; no fragile role gate needed. */}
+        <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
