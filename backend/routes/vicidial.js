@@ -117,7 +117,7 @@ ingest.get('/dispo-debug', requireToken, (req, res) => res.json({ recent: recent
 ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const dispo = String(p.dispo || '').trim();
-  const dbg = { at: new Date().toISOString(), code: String(p.code || ''), alt_code: String(p.alt_code || ''), dispo, agent: String(p.agent || ''), outcome: 'pending' };
+  const dbg = { at: new Date().toISOString(), code: String(p.code || ''), alt_code: String(p.alt_code || ''), phone: String(p.phone || ''), dispo, agent: String(p.agent || ''), outcome: 'pending' };
   recentDispo.unshift(dbg); if (recentDispo.length > 20) recentDispo.pop();
   // One closer URL works for both topologies: it sends vendor_lead_code (set on
   // different-box leads) AND lead_id as a fallback (matches same-box leads).
@@ -131,6 +131,18 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const { data } = await supabaseAdmin
       .from('transfers').select('id, company_id, assigned_closer_id').eq('vicidial_vendor_code', c).maybeSingle();
     if (data) { tr = data; code = c; break; }
+  }
+  // Phone fallback — the customer phone is identical on both sides even when the
+  // closer's lead_id differs (same-box transfers that spawn a fresh closer lead).
+  // Match the most recent transfer on the normalized phone.
+  if (!tr) {
+    const ph = normPhone(String(p.phone || ''));
+    if (ph) {
+      const { data: byPhone } = await supabaseAdmin
+        .from('transfers').select('id, company_id, assigned_closer_id')
+        .eq('normalized_phone', ph).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
+    }
   }
   if (!tr) {
     // Diagnostic: is there a near-match? Catches the common "fronter URL carries a
