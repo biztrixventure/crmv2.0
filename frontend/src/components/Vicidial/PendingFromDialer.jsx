@@ -32,7 +32,12 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
                   <Phone size={13} /> {phone || '—'}
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> {it.vicidial_vendor_code}</span>
                 </p>
-                {it.vicidial_dispo && <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Closer disposition: <strong style={{ color: 'var(--color-text)' }}>{it.vicidial_dispo}</strong></p>}
+                {it.closer_disposition ? (
+                  <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ backgroundColor: (it.closer_disposition_color || '#6b7280') + '22', color: it.closer_disposition_color || '#6b7280', border: `1px solid ${(it.closer_disposition_color || '#6b7280')}44` }}>{it.closer_disposition}</span>
+                    {it.closer_name && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>by {it.closer_name}</span>}
+                  </p>
+                ) : it.vicidial_dispo && <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Closer disposition: <strong style={{ color: 'var(--color-text)' }}>{it.vicidial_dispo}</strong></p>}
               </div>
               <button onClick={() => onPick?.(it)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>Confirm</button>
             </div>

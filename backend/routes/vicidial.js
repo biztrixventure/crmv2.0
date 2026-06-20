@@ -353,11 +353,37 @@ api.delete('/closer-dispos/:id', asyncHandler(async (req, res) => {
 api.get('/pending', asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('transfers')
-    .select('id, vicidial_vendor_code, normalized_phone, form_data, vicidial_dispo, vicidial_dispo_at, vicidial_agent, created_at')
+    .select('id, vicidial_vendor_code, normalized_phone, form_data, vicidial_dispo, vicidial_dispo_at, vicidial_agent, assigned_closer_id, created_at')
     .eq('created_by', req.user.id).eq('vicidial_pending', true)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ pending: data || [] });
+  const rows = data || [];
+
+  // Surface the closer's mapped CRM disposition + closer name on the pending card
+  // (the closer can disposition before the fronter confirms — show it now).
+  const ids = rows.map(r => r.id);
+  const dispoByT = {};
+  const closerIds = new Set();
+  if (ids.length) {
+    const { data: acts } = await supabaseAdmin
+      .from('disposition_actions').select('transfer_id, disposition_name, color, user_id, created_at')
+      .in('transfer_id', ids).order('created_at', { ascending: false });
+    (acts || []).forEach(a => { if (!dispoByT[a.transfer_id]) dispoByT[a.transfer_id] = a; });
+    rows.forEach(r => { if (r.assigned_closer_id) closerIds.add(r.assigned_closer_id); });
+  }
+  let nameById = {};
+  if (closerIds.size) {
+    const { data: profs } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', [...closerIds]);
+    (profs || []).forEach(p => { nameById[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null; });
+  }
+  const pending = rows.map(r => ({
+    ...r,
+    closer_disposition: dispoByT[r.id]?.disposition_name || null,
+    closer_disposition_color: dispoByT[r.id]?.color || null,
+    closer_name: r.assigned_closer_id ? (nameById[r.assigned_closer_id] || null) : null,
+  }));
+  res.json({ pending });
 }));
 
 // ── API: fill remaining fields + confirm → becomes a normal transfer ─────────
