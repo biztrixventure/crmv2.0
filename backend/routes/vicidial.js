@@ -49,28 +49,48 @@ async function resolveAgent(agentId) {
   return { userId: prof.user_id, companyId: ucr?.company_id || null };
 }
 
-// Resolve a raw dialer code → mapped CRM disposition for a company, bumping the
-// per-company dispo map's hit counter (auto-records unmapped codes too).
-async function bumpDispoMap(companyId, rawCode) {
-  if (!companyId || !rawCode) return null;
-  const now = new Date().toISOString();
-  const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
-    .select('id, disposition_name, hits').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
-  if (m) {
-    await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (m.hits || 0) + 1, last_seen_at: now }).eq('id', m.id);
-    return m;
-  }
-  await supabaseAdmin.from('vicidial_dispo_map')
-    .insert({ company_id: companyId, vici_code: rawCode, hits: 1, last_seen_at: now }).then(() => {}, () => {});
-  return null;
+// A GLOBAL dispo-map row (company_id IS NULL) applies to every company — map a
+// dialer code once and it resolves regardless of which company the closer's
+// agent lands in. Company-specific rows still win when present.
+async function globalDispoName(rawCode) {
+  if (!rawCode) return null;
+  const { data } = await supabaseAdmin.from('vicidial_dispo_map')
+    .select('disposition_name').is('company_id', null).eq('vici_code', rawCode).not('disposition_name', 'is', null).maybeSingle();
+  return data?.disposition_name || null;
 }
 
-// Read-only mapped-name lookup (no hit bump) — used when assigning a queued dispo.
+// Resolve a raw dialer code → mapped CRM disposition, bumping the per-company hit
+// counter (auto-records unmapped codes for the inbox). Falls back to a global
+// mapping when the company has none. Returns { disposition_name } or null.
+async function bumpDispoMap(companyId, rawCode) {
+  if (!rawCode) return null;
+  const now = new Date().toISOString();
+  let companyRow = null;
+  if (companyId) {
+    const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
+      .select('id, disposition_name, hits').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
+    companyRow = m || null;
+    if (companyRow) {
+      await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (companyRow.hits || 0) + 1, last_seen_at: now }).eq('id', companyRow.id);
+    } else {
+      await supabaseAdmin.from('vicidial_dispo_map')
+        .insert({ company_id: companyId, vici_code: rawCode, hits: 1, last_seen_at: now }).then(() => {}, () => {});
+    }
+  }
+  if (companyRow?.disposition_name) return { disposition_name: companyRow.disposition_name };
+  const g = await globalDispoName(rawCode);
+  return g ? { disposition_name: g } : null;
+}
+
+// Read-only mapped-name lookup (no hit bump) — company-specific then global.
 async function lookupDispoName(companyId, rawCode) {
-  if (!companyId || !rawCode) return null;
-  const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
-    .select('disposition_name').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
-  return m?.disposition_name || null;
+  if (!rawCode) return null;
+  if (companyId) {
+    const { data: m } = await supabaseAdmin.from('vicidial_dispo_map')
+      .select('disposition_name').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
+    if (m?.disposition_name) return m.disposition_name;
+  }
+  return await globalDispoName(rawCode);
 }
 
 // Apply a closer disposition onto a transfer: stamp vicidial fields, claim the
@@ -438,7 +458,8 @@ api.post('/agents', superOnly, asyncHandler(async (req, res) => {
 // all dispositions global, so a strict company filter would show nothing.
 api.get('/dispositions', superOnly, asyncHandler(async (req, res) => {
   let q = supabaseAdmin.from('disposition_configs').select('id, name, company_id').eq('is_active', true).order('name');
-  if (req.query.company_id) q = q.or(`company_id.is.null,company_id.eq.${req.query.company_id}`);
+  const cid = req.query.company_id;
+  if (cid && cid !== '__global__') q = q.or(`company_id.is.null,company_id.eq.${cid}`);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
   // distinct names
@@ -448,8 +469,10 @@ api.get('/dispositions', superOnly, asyncHandler(async (req, res) => {
 }));
 
 api.get('/dispo-map', superOnly, asyncHandler(async (req, res) => {
+  const cid = req.query.company_id;
   let q = supabaseAdmin.from('vicidial_dispo_map').select('*');
-  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  if (cid === '__global__') q = q.is('company_id', null);
+  else if (cid) q = q.or(`company_id.is.null,company_id.eq.${cid}`);   // company rows + global
   // Unmapped (pending) first, then by most-seen.
   const { data, error } = await q.order('disposition_name', { ascending: true, nullsFirst: true }).order('hits', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
@@ -457,16 +480,32 @@ api.get('/dispo-map', superOnly, asyncHandler(async (req, res) => {
 }));
 
 api.post('/dispo-map', superOnly, asyncHandler(async (req, res) => {
-  const company_id = req.body.company_id || null;
+  const isGlobal = req.body.company_id === '__global__' || req.body.global === true;
+  const company_id = isGlobal ? null : (req.body.company_id || null);
   const vici_code  = String(req.body.vici_code || '').trim().toUpperCase();
-  if (!company_id || !vici_code) return res.status(400).json({ error: 'company_id and vici_code are required' });
-  const row = {
-    company_id, vici_code,
+  if (!vici_code) return res.status(400).json({ error: 'vici_code is required' });
+  if (!company_id && !isGlobal) return res.status(400).json({ error: 'Pick a company or Global' });
+  const fields = {
     disposition_name: req.body.disposition_name ? String(req.body.disposition_name).trim() : null,
     category: req.body.category ? String(req.body.category).trim() : null,
   };
+  // The UNIQUE(company_id, vici_code) index doesn't dedupe NULL company_id, so
+  // handle global rows with an explicit find-then-write.
+  if (isGlobal) {
+    const { data: existing } = await supabaseAdmin.from('vicidial_dispo_map')
+      .select('id').is('company_id', null).eq('vici_code', vici_code).maybeSingle();
+    if (existing) {
+      const { data, error } = await supabaseAdmin.from('vicidial_dispo_map').update(fields).eq('id', existing.id).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(201).json({ entry: data });
+    }
+    const { data, error } = await supabaseAdmin.from('vicidial_dispo_map')
+      .insert({ company_id: null, vici_code, ...fields }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(201).json({ entry: data });
+  }
   const { data, error } = await supabaseAdmin.from('vicidial_dispo_map')
-    .upsert(row, { onConflict: 'company_id,vici_code' }).select().single();
+    .upsert({ company_id, vici_code, ...fields }, { onConflict: 'company_id,vici_code' }).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json({ entry: data });
 }));

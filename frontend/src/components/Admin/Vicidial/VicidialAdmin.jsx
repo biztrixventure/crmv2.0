@@ -189,7 +189,7 @@ const DispoMap = () => {
   const setMap = async (row, name) => { try { await client.put(`vicidial/dispo-map/${row.id}`, { disposition_name: name || null }); load(); } catch { toast.error('Failed'); } };
   const del = async (row) => { if (!window.confirm(`Delete mapping for "${row.vici_code}"?`)) return; try { await client.delete(`vicidial/dispo-map/${row.id}`); load(); } catch { toast.error('Failed'); } };
   const add = async () => {
-    if (!companyId || !newCode.trim()) { toast.error('Company + code required'); return; }
+    if (!companyId || !newCode.trim()) { toast.error('Scope + code required'); return; }
     setBusy(true);
     try { await client.post('vicidial/dispo-map', { company_id: companyId, vici_code: newCode.trim(), disposition_name: newDisp || null }); setNewCode(''); setNewDisp(''); load(); }
     catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
@@ -200,10 +200,11 @@ const DispoMap = () => {
   return (
     <div className="space-y-4">
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        Map each raw VICIdial closer code (NI, CB, SALE…) to a CRM disposition. A code the dialer sends that isn't mapped is auto-recorded here (with a hit count) and left for you to map or add — nothing is lost, and the closer can still pick it manually.
+        Map each raw VICIdial closer code (NI, CB, SALE…) to a CRM disposition. Pick <strong>🌐 Global</strong> to map a code once for <strong>every</strong> company (recommended — dialer codes are the same everywhere); a company-specific row overrides the global. Unmapped codes are auto-recorded (with a hit count) for you to resolve — nothing is lost.
       </p>
-      <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input" style={{ maxWidth: 300 }}>
-        <option value="">Select a company…</option>
+      <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input" style={{ maxWidth: 320 }}>
+        <option value="">Select scope…</option>
+        <option value="__global__">🌐 Global (all companies)</option>
         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
 
@@ -233,7 +234,10 @@ const DispoMap = () => {
                 <tbody>
                   {rows.map(r => (
                     <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: r.disposition_name ? undefined : 'var(--color-warning-50, #fffbeb)' }}>
-                      <td className="px-4 py-2.5 font-mono font-bold" style={{ color: 'var(--color-text)' }}>{r.vici_code}</td>
+                      <td className="px-4 py-2.5 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
+                        {r.vici_code}
+                        {!r.company_id && <span className="ml-2 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>🌐 global</span>}
+                      </td>
                       <td className="px-4 py-2.5">
                         <select value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">
                           <option value="">— unmapped —</option>
