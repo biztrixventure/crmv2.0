@@ -179,9 +179,9 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     vicidial_talk_time: Number.isFinite(talk) ? talk : null,
     vicidial_agent:     String(p.agent || '').trim() || undefined,
   };
-  // Apply the mapped CRM disposition (text snapshot, like disposition_actions).
-  // Unmapped → closer_disposition left untouched; the closer picks it manually.
-  if (mapped?.disposition_name) updates.closer_disposition = mapped.disposition_name;
+  // The mapped CRM disposition is recorded as a disposition_action below (the
+  // fronter's record reads latest_disposition from there) — transfers has no
+  // closer_disposition column, so don't write one here.
   // Claim the lead for the closer who dispositioned it (same as a manual
   // disposition / sale), so the fronter sees the closer name, not "Unassigned".
   if (closerUserId && !tr.assigned_closer_id) {
