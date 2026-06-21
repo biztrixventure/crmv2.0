@@ -1,7 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2 } from 'lucide-react';
+import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2, Building2, CalendarRange } from 'lucide-react';
 import client from '../../../api/client';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
+
+// Date columns offered by the global date-range filter, per dataset.
+const DATE_FIELDS = {
+  sales:     [{ v: 'created_at', l: 'Created' }, { v: 'sale_date', l: 'Sale date' }],
+  transfers: [{ v: 'created_at', l: 'Created' }, { v: 'updated_at', l: 'Updated' }],
+};
+const ymd = (d) => d.toISOString().slice(0, 10);
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -46,8 +53,9 @@ const kindFor = (f) => {
   // future renames safe).
   if (/\bmodel\b/.test(name) || /\bmodel\b/.test(label)) return 'car_model';
   if (/make/.test(name)    || /make/.test(label))    return 'make';
-  // sale_plan is the canonical Client → Plan child. Field_type-based detection
+  // sale_client → Plan parent; sale_plan → its child. Field_type-based detection
   // covers admin-named variants like SalePlan / CustomPlan.
+  if (f.field_type === 'sale_client') return 'sale_client';
   if (f.field_type === 'sale_plan') return 'sale_plan';
   switch (f.field_type) {
     case 'select':                 return 'multi';
@@ -299,6 +307,16 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     const scoped = scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
     return <CollapsibleChipGrid value={value || []} onChange={set} options={scoped} cols={5} />;
   }
+  if (kind === 'sale_client') {
+    // Parent of `sale_plan`. Client names live on the sale_plan field's
+    // { client, plans } mapping (the sale_client field itself often has no
+    // string options), so derive them from there; fall back to its own options.
+    const planField = fields.find(f => f.field_type === 'sale_plan');
+    const mapping = Array.isArray(planField?.options) ? planField.options : [];
+    const clients = [...new Set(mapping.filter(o => o && typeof o === 'object' && o.client).map(o => String(o.client)))];
+    const opts = clients.length ? clients : (Array.isArray(field.options) ? field.options.filter(o => typeof o === 'string') : []);
+    return <ChipGrid value={value || []} onChange={set} options={opts} cols={4} />;
+  }
   if (kind === 'sale_plan') {
     // Child of `sale_client`: options narrow to plans for the selected clients,
     // mirroring the cascading dropdown in SaleForm. Multi-select chip layout.
@@ -382,7 +400,7 @@ const buildPayload = (fields, filters) => fields
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return null;
     if (
       kind === 'state' || kind === 'make' || kind === 'car_model' ||
-      kind === 'sale_plan' || kind === 'multi' || kind === 'multi_enum'
+      kind === 'sale_client' || kind === 'sale_plan' || kind === 'multi' || kind === 'multi_enum'
     ) {
       return Array.isArray(v) && v.length ? { field: f.name, op: 'in', value: v } : null;
     }
@@ -487,6 +505,13 @@ const DataAnalyzer = () => {
   const [exporting, setExporting] = useState(false);
   const [err, setErr]         = useState('');
 
+  // Global scope filters (apply on top of the per-field filters, and to export).
+  const [companies, setCompanies]   = useState([]);
+  const [companyIds, setCompanyIds] = useState([]);
+  const [dateField, setDateField]   = useState('created_at');
+  const [dateFrom, setDateFrom]     = useState('');
+  const [dateTo, setDateTo]         = useState('');
+
   const cfg = DATASETS[dataset];
 
   // Group-by + breakdown
@@ -504,6 +529,7 @@ const DataAnalyzer = () => {
   useEffect(() => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
     client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
+    client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
   }, []);
 
   // Reset group-by + aggregates when dataset changes (filters stay — they're
@@ -516,13 +542,34 @@ const DataAnalyzer = () => {
     setAgg(null);
     setRows([]);
     setTotal(0);
+    setDateField('created_at');   // sale_date/updated_at differ per dataset
   }, [dataset]);
 
   // Status filter is always present (dataset-specific enum); rendered before the form_fields.
   const allFilterFields = useMemo(() => [cfg.statusField, ...fields], [cfg, fields]);
 
-  const payload = useMemo(() => buildPayload(allFilterFields, filters), [allFilterFields, filters]);
+  const payload = useMemo(() => {
+    const base = buildPayload(allFilterFields, filters);
+    if (companyIds.length) base.push({ field: 'company_id', op: 'in', value: companyIds });
+    if (dateFrom || dateTo) {
+      // End bound → end-of-day so a timestamp column includes the whole `to` day.
+      base.push({ field: dateField, op: 'between', value: [dateFrom || '', dateTo ? `${dateTo}T23:59:59.999` : ''] });
+    }
+    return base;
+  }, [allFilterFields, filters, companyIds, dateField, dateFrom, dateTo]);
   const activeCount = payload.length;
+
+  const applyQuickRange = (key) => {
+    const today = new Date();
+    const start = new Date(today);
+    if (key === 'today')      { setDateFrom(ymd(today)); setDateTo(ymd(today)); }
+    else if (key === 'yest')  { start.setDate(today.getDate() - 1); setDateFrom(ymd(start)); setDateTo(ymd(start)); }
+    else if (key === '7d')    { start.setDate(today.getDate() - 6); setDateFrom(ymd(start)); setDateTo(ymd(today)); }
+    else if (key === '30d')   { start.setDate(today.getDate() - 29); setDateFrom(ymd(start)); setDateTo(ymd(today)); }
+    else if (key === 'month') { setDateFrom(ymd(new Date(today.getFullYear(), today.getMonth(), 1))); setDateTo(ymd(today)); }
+    else if (key === 'year')  { setDateFrom(ymd(new Date(today.getFullYear(), 0, 1))); setDateTo(ymd(today)); }
+    else                      { setDateFrom(''); setDateTo(''); }
+  };
 
   const run = useCallback(async (p = 1) => {
     setLoading(true); setErr('');
@@ -539,7 +586,7 @@ const DataAnalyzer = () => {
   // Auto-run once when fields first load AND when dataset changes.
   useEffect(() => { if (fields.length) run(1); /* eslint-disable-next-line */ }, [fields.length, dataset]);
 
-  const reset = () => { setFilters({}); setPage(1); setBreakdown(null); };
+  const reset = () => { setFilters({}); setCompanyIds([]); setDateFrom(''); setDateTo(''); setPage(1); setBreakdown(null); };
 
   const exportCsv = async () => {
     setExporting(true);
@@ -616,6 +663,72 @@ const DataAnalyzer = () => {
 
       {/* Aggregate stats banner */}
       <StatsBanner dataset={dataset} agg={agg} />
+
+      {/* Global scope: company multi-select + date range. Applies to query AND export. */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <Label><span className="flex items-center gap-1.5"><Building2 size={13} /> Companies {companyIds.length > 0 && <span className="opacity-60">({companyIds.length} selected)</span>}</span></Label>
+            {companyIds.length > 0 && (
+              <button type="button" onClick={() => setCompanyIds([])} className="text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}><X size={11} /> all companies</button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {companies.length === 0
+              ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No companies.</p>
+              : companies.map(c => {
+                const on = companyIds.includes(c.id);
+                return (
+                  <button key={c.id} type="button"
+                    onClick={() => setCompanyIds(on ? companyIds.filter(x => x !== c.id) : [...companyIds, c.id])}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-md transition-colors"
+                    style={{
+                      backgroundColor: on ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+                      color:           on ? 'white' : 'var(--color-text-secondary)',
+                      border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+                    }}>
+                    {c.name}{c.company_type ? <span className="opacity-60"> · {c.company_type}</span> : null}
+                  </button>
+                );
+              })}
+          </div>
+          <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>None selected = all companies. Pick one or more to scope the data + export.</p>
+        </div>
+
+        <div className="h-px" style={{ backgroundColor: 'var(--color-border)' }} />
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <Label><span className="flex items-center gap-1.5"><CalendarRange size={13} /> Date filter</span></Label>
+            <select value={dateField} onChange={e => setDateField(e.target.value)} className="input text-sm py-1.5" style={{ minWidth: 130 }}>
+              {(DATE_FIELDS[dataset] || DATE_FIELDS.sales).map(d => <option key={d.v} value={d.v}>{d.l}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>From</Label>
+            <input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="input text-sm py-1.5" />
+          </div>
+          <div>
+            <Label>To</Label>
+            <input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="input text-sm py-1.5" />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {[['today', 'Today'], ['yest', 'Yesterday'], ['7d', '7d'], ['30d', '30d'], ['month', 'This month'], ['year', 'This year'], ['all', 'All']].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => applyQuickRange(k)}
+                className="text-[11px] font-bold px-2 py-1.5 rounded-md transition-colors"
+                style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {(dateFrom || dateTo) && (
+            <span className="text-[11px] font-semibold px-2 py-1 rounded-md self-center" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-700)' }}>
+              {dateFrom || '…'} → {dateTo || '…'}
+            </span>
+          )}
+        </div>
+        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a start and end date (or a quick range). Click <strong>Run query</strong> to apply with the other filters.</p>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5">
         {/* Filters + Presets */}
