@@ -540,6 +540,12 @@ const DataAnalyzer = () => {
   const [fieldOrder, setFieldOrder] = useState(readOrder);
   const dragName = useRef(null);
 
+  // Per-field expand/collapse. Default: collapsed, but an active filter shows
+  // expanded so you can see what's set. An explicit toggle overrides that.
+  const [openMap, setOpenMap] = useState({});
+  const isFieldOpen = (name, active) => (openMap[name] !== undefined ? openMap[name] : active);
+  const toggleField = (name, active) => setOpenMap(m => ({ ...m, [name]: !(m[name] !== undefined ? m[name] : active) }));
+
   // Vehicle registry powers the Car Make chip grid AND the Car Model child
   // filter — keeping the full tree (not just make names) lets the Model
   // filter scope its options to the currently-selected makes.
@@ -612,6 +618,9 @@ const DataAnalyzer = () => {
     names.splice(toIdx, 0, names.splice(fromIdx, 1)[0]);
     setFieldOrder(names); writeOrder(names);
   };
+
+  const expandAllFields   = () => setOpenMap(Object.fromEntries(orderedFields.map(f => [f.name, true])));
+  const collapseAllFields = () => setOpenMap(Object.fromEntries(orderedFields.map(f => [f.name, false])));
 
   const payload = useMemo(() => {
     const base = buildPayload(allFilterFields, filters);
@@ -817,38 +826,60 @@ const DataAnalyzer = () => {
 
           <Section title={<span className="flex items-center gap-1.5"><Filter size={14} /> Filters</span>}
             open={open.filters} onToggle={() => setOpen(o => ({ ...o, filters: !o.filters }))} count={activeCount}>
-            <p className="text-[10px] -mt-1 mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Drag the ⠿ handle to reorder filters — your layout is remembered.</p>
+            <div className="flex items-center justify-between -mt-1 mb-1">
+              <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Drag the ⠿ handle to reorder · click a row to expand/collapse.</p>
+              <div className="flex gap-1.5">
+                <button type="button" onClick={expandAllFields} className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Expand all</button>
+                <span style={{ color: 'var(--color-border)' }}>·</span>
+                <button type="button" onClick={collapseAllFields} className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Collapse all</button>
+              </div>
+            </div>
             {orderedFields.map(f => {
               const v = filters[f.name];
               const active = v != null && v !== '' && !(Array.isArray(v) && v.length === 0);
+              const fopen = isFieldOpen(f.name, active);
+              const selCount = Array.isArray(v) ? v.length : (active ? 1 : 0);
               return (
                 <div key={f.id || f.name} className="rounded-lg p-2.5"
                   onDragOver={e => e.preventDefault()} onDrop={() => onFilterDrop(f.name)}
                   style={{ border: `1px solid ${active ? 'var(--color-primary-300)' : 'var(--color-border)'}`, backgroundColor: active ? 'var(--color-primary-50)' : 'transparent' }}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="flex items-center gap-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 min-w-0 flex-1">
                       <span draggable onDragStart={() => { dragName.current = f.name; }} onDragEnd={() => { dragName.current = null; }}
                         title="Drag to reorder" className="cursor-grab active:cursor-grabbing flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
                         <GripVertical size={13} />
                       </span>
-                      <Label sub={`(${f.field_type})`}>{f.label || f.name}</Label>
+                      <button type="button" onClick={() => toggleField(f.name, active)} className="flex items-center gap-1 min-w-0 flex-1 text-left">
+                        {fopen ? <ChevronUp size={13} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronDown size={13} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />}
+                        <span className="text-[11px] font-bold uppercase tracking-wide truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                          {f.label || f.name}
+                          <span className="ml-1 font-medium normal-case opacity-60">({f.field_type})</span>
+                        </span>
+                        {!fopen && selCount > 0 && (
+                          <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{selCount}</span>
+                        )}
+                      </button>
                     </span>
                     {active && (
                       <button type="button" onClick={() => setFilters(s => { const n = { ...s }; delete n[f.name]; return n; })}
-                        className="text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                        className="text-[10px] font-bold flex items-center gap-0.5 flex-shrink-0 ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
                         <X size={11} /> clear
                       </button>
                     )}
                   </div>
-                  <FieldControl
-                    field={f}
-                    value={v}
-                    vehicleMakes={vehicleMakes}
-                    vehicleTree={vehicleTree}
-                    fields={allFilterFields}
-                    filters={filters}
-                    onChange={(nv) => setFilters(s => onParentOrChildChange(s, f, nv, allFilterFields, vehicleTree))}
-                  />
+                  {fopen && (
+                    <div className="mt-1.5">
+                      <FieldControl
+                        field={f}
+                        value={v}
+                        vehicleMakes={vehicleMakes}
+                        vehicleTree={vehicleTree}
+                        fields={allFilterFields}
+                        filters={filters}
+                        onChange={(nv) => setFilters(s => onParentOrChildChange(s, f, nv, allFilterFields, vehicleTree))}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
