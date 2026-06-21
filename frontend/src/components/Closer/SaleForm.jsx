@@ -5,6 +5,8 @@ import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
+import ComboInput from '../UI/ComboInput';
+import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, classify as classifyField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
 import CalendarDateInput from '../Form/CalendarDateInput';
@@ -318,12 +320,14 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     e.preventDefault();
     if (!validate()) return;
 
-    const mapped = mapToSaleColumns(formData);
-    const dynVal = (type) => { const f = fields.find(x => x.field_type === type); return f ? (formData[f.name] || '') : ''; };
+    // Snap option values to their canonical spelling (covers Enter-to-submit).
+    const clean = canonicalizeFormData(formData, fields);
+    const mapped = mapToSaleColumns(clean);
+    const dynVal = (type) => { const f = fields.find(x => x.field_type === type); return f ? (clean[f.name] || '') : ''; };
 
     onSubmit({
       ...mapped,
-      form_data:        formData,
+      form_data:        clean,
       transfer_id:      transfer?.id || undefined,
       company_id:       user?.company_id,
       plan:             dynVal('sale_plan')             || null,
@@ -423,12 +427,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     }
     if (field.field_type === 'select') {
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
-          className={`input ${errClass}`}>
-          <option value="">Select {field.label}</option>
-          <StaleOption value={val} present={(field.options || []).includes(val)} />
-          {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        <ComboInput value={val} options={field.options} required={field.is_required}
+          onChange={v => setValue(field.name, v)} className={`input ${errClass}`}
+          placeholder={ph || `Select or type ${field.label}`} />
       );
     }
     if (field.field_type === 'sale_client') {
@@ -539,12 +540,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     if (field.field_type === 'sale_call_review') {
       const opts = (field.options && field.options.length > 0) ? field.options : ['Excellent', 'Good', 'Average', 'Poor', 'Bad'];
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
-          className={`input ${errClass}`}>
-          <option value="">Rate the call…</option>
-          <StaleOption value={val} present={opts.includes(val)} label={String(val).replace(/_/g, ' ')} />
-          {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
-        </select>
+        <ComboInput value={val} options={opts} required={field.is_required}
+          onChange={v => setValue(field.name, v)} className={`input ${errClass}`}
+          placeholder="Rate the call…" />
       );
     }
     if (field.field_type === 'zip' || classifyField(field) === 'zip') {

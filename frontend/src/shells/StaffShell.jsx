@@ -77,6 +77,8 @@ import ScriptPanel from "../components/FAQ/ScriptPanel";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PendingFromDialer from "../components/Vicidial/PendingFromDialer";
 import CloserPendingDispos from "../components/Vicidial/CloserPendingDispos";
+import ComboInput from "../components/UI/ComboInput";
+import { canonicalizeFormData } from "../utils/canonicalizeOption";
 import SpiffWidget from "../components/Engagement/SpiffWidget";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
@@ -587,15 +589,17 @@ const StaffShell = () => {
     // Vehicle sanity guard — block obviously shifted columns (bad year / numeric make).
     const vIssue = Object.values(vehicleFieldIssues((fields || []).filter(f => f.show_to_fronter !== false), formData))[0];
     if (vIssue) { setTransferError(vIssue); return; }
+    // Snap option values to their canonical spelling (covers Enter-to-submit).
+    const clean = canonicalizeFormData(formData, fields);
     setTransferSubmitting(true);
     try {
       if (pendingDialer) {
         // Fill the existing VICIdial pending row instead of creating a duplicate.
-        await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: formData });
+        await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: clean });
         toast.success('Transfer confirmed — sent to closer.');
         setDialerRefresh(x => x + 1);
       } else {
-        const res = await createTransfer({ ...formData });
+        const res = await createTransfer({ ...clean });
         const action = res?.action;
         toast.success(
           action === 'updated' ? 'Existing transfer refreshed — no new transfer counted.'
@@ -603,7 +607,7 @@ const StaffShell = () => {
             : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
             : 'Transfer created.');
       }
-      rememberValues((fields || []).filter(f => f.show_to_fronter !== false), formData);
+      rememberValues((fields || []).filter(f => f.show_to_fronter !== false), clean);
       setShowCreateForm(false);
       setPendingDialer(null);
       setFormData({});
@@ -1532,11 +1536,9 @@ const StaffShell = () => {
                                 <textarea value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   onBlur={fmtBlur} className="input resize-none" rows="3" required={field.is_required} placeholder={field.placeholder || ''} />
                               ) : field.field_type === 'select' ? (
-                                <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                                  className="input" required={field.is_required}>
-                                  <option value="">Select {field.label}</option>
-                                  {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                </select>
+                                <ComboInput value={formData[field.name] || ''} options={field.options}
+                                  onChange={v => setFormData(prev => ({ ...prev, [field.name]: v }))}
+                                  required={field.is_required} placeholder={field.placeholder || `Select or type ${field.label}`} />
                               ) : field.field_type === 'sale_client' ? (
                                 <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>

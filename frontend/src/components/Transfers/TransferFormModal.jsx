@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, FileText } from 'lucide-react';
 import { Button } from '../UI';
+import ComboInput from '../UI/ComboInput';
+import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import client from '../../api/client';
 import { normalize as normalizeField, maxLengthFor, inputModeFor, classify as classifyField, isCarMake, isCarModel, isCarYear, isDateField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
@@ -101,10 +103,12 @@ const TransferFormModal = ({
     // assignment; reassignment is a separate manager workflow.
     if (!isEdit && !selectedCloser) { setError('Please select a closer.'); return; }
     if (reasonRequired && !editReason.trim()) { setError('A reason is required for this edit.'); return; }
+    // Snap option values to their canonical spelling (covers Enter-to-submit).
+    const clean = canonicalizeFormData(formData, fields);
     try {
       const payload = isEdit
-        ? { form_data: formData, ...(editReason.trim() ? { reason: editReason.trim() } : {}) }
-        : { ...formData, assigned_closer_id: selectedCloser };
+        ? { form_data: clean, ...(editReason.trim() ? { reason: editReason.trim() } : {}) }
+        : { ...clean, assigned_closer_id: selectedCloser };
       await onSubmit(payload);
       setFormData({});
       setSelectedCloser('');
@@ -199,10 +203,8 @@ const TransferFormModal = ({
                             placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input resize-none" />;
                         } else if (field.field_type === 'select') {
                           input = (
-                            <select value={val} onChange={onChange} required={field.is_required} className="input">
-                              <option value="">Select {field.label}</option>
-                              {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-                            </select>
+                            <ComboInput value={val} options={field.options} required={field.is_required}
+                              onChange={v => setField(field.name, v)} placeholder={field.placeholder || `Select or type ${field.label}`} />
                           );
                         } else if (field.field_type === 'sale_client') {
                           input = (
