@@ -238,10 +238,14 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const { data: links } = await supabaseAdmin
       .from('company_links').select('fronter_company_id').eq('closer_company_id', closerCompanyId);
     const fronterCos = [...new Set((links || []).map(l => l.fronter_company_id).filter(Boolean))];
-    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const now = new Date();
+    const since = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
     let rq = supabaseAdmin.from('transfers')
       .select('id, company_id, assigned_closer_id')
-      .is('vicidial_dispo', null).gte('created_at', since)
+      .is('vicidial_dispo', null)
+      .not('vicidial_vendor_code', 'is', null)   // only real dialer transfers (skip seeds)
+      .gte('created_at', since)
+      .lte('created_at', now.toISOString())       // exclude future-dated junk rows
       .order('created_at', { ascending: false }).limit(1);
     rq = fronterCos.length
       ? rq.or(`assigned_closer_id.eq.${closerUserId},company_id.in.(${fronterCos.join(',')})`)
