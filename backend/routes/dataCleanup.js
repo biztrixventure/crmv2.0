@@ -70,7 +70,7 @@ async function countColumn(table, col, value, blank, mode) {
 
 // Distinct field values among matching rows (so a "contains" search surfaces
 // every junk variant — 60k, 150K, "60k mi" — with how many rows each has).
-async function distinctValues(field, value, blank, mode, cap = 5000) {
+async function distinctValues(field, value, blank, mode, cap = 2000) {
   const counts = new Map();
   for (const table of ['transfers', 'sales']) {
     let q = supabaseAdmin.from(table).select('form_data').limit(cap);
@@ -114,16 +114,22 @@ const parseBody = (b) => ({
   newValue:   b.new_value == null ? '' : String(b.new_value),
   matchBlank: !!b.match_blank,
   mode:       b.mode === 'contains' ? 'contains' : 'exact',
+  // Multi-field search: [{ name, field_type }] (or bare names).
+  fields: Array.isArray(b.fields)
+    ? b.fields.map(f => (typeof f === 'string'
+        ? { name: String(f).trim(), field_type: '' }
+        : { name: String(f?.name || '').trim(), field_type: String(f?.field_type || '').trim() }))
+        .filter(f => f.name)
+    : null,
 });
 
-// ── POST /preview ─────────────────────────────────────────────────────────────
-router.post('/preview', asyncHandler(async (req, res) => {
-  const { field, fieldType, oldValue, matchBlank, mode } = parseBody(req.body);
-  if (!field) return res.status(400).json({ error: 'field is required' });
-  if (!matchBlank && oldValue === '') return res.status(400).json({ error: 'a search value is required (or enable blank matching)' });
+const MAX_FIELDS = 12;
 
+// One field's preview: counts across transfers/sales (+ sale column) + the
+// distinct matching values + a small phone/name sample.
+async function previewField(field, fieldType, oldValue, matchBlank, mode) {
   const col = saleColumnFor(field, fieldType);
-  const SAMPLE = 200;
+  const SAMPLE = 60;
   const [transfers_form_data, sales_form_data, sales_column, tRows, sRows, cRows, values] = await Promise.all([
     countJsonb('transfers', field, oldValue, matchBlank, mode),
     countJsonb('sales', field, oldValue, matchBlank, mode),
@@ -131,12 +137,9 @@ router.post('/preview', asyncHandler(async (req, res) => {
     sampleJsonb('transfers', field, oldValue, matchBlank, mode, 'id, normalized_phone, form_data', SAMPLE),
     sampleJsonb('sales', field, oldValue, matchBlank, mode, 'id, customer_phone, customer_name', SAMPLE),
     col ? sampleColumn('sales', col, oldValue, matchBlank, mode, 'id, customer_phone, customer_name', SAMPLE) : Promise.resolve([]),
-    // Distinct matching values — the heart of a "contains" search (and handy for exact too).
     distinctValues(field, oldValue, matchBlank, mode),
   ]);
 
-  // Build a de-duplicated sample (per source+id) of phone + name so the operator
-  // can verify exactly which records will change before running it.
   const seen = new Set();
   const samples = [];
   const push = (source, id, phone, name) => {
@@ -149,13 +152,34 @@ router.post('/preview', asyncHandler(async (req, res) => {
   cRows.forEach(r => push('sale', r.id, r.customer_phone, r.customer_name));
 
   const total = transfers_form_data + sales_form_data + sales_column;
-  res.json({
-    field, old_value: oldValue, match_blank: matchBlank, mode, column: col,
+  return {
+    field, field_type: fieldType, column: col,
     counts: { transfers_form_data, sales_form_data, sales_column },
-    total,
-    values,                 // [{ value, count }] distinct matching values
+    total, values,
     samples: samples.slice(0, SAMPLE),
     sample_truncated: total > Math.min(samples.length, SAMPLE),
+  };
+}
+
+// ── POST /preview ─────────────────────────────────────────────────────────────
+// Body: { field?, field_type?, fields?:[{name,field_type}], old_value, match_blank, mode }
+// Searches ONE or MANY fields; returns a per-field result so dirty data can be
+// found across many fields at once. (Replace/execute stays single-field.)
+router.post('/preview', asyncHandler(async (req, res) => {
+  const { field, fieldType, oldValue, matchBlank, mode, fields } = parseBody(req.body);
+  const list = (fields && fields.length ? fields : (field ? [{ name: field, field_type: fieldType }] : [])).slice(0, MAX_FIELDS);
+  if (!list.length) return res.status(400).json({ error: 'select at least one field' });
+  if (!matchBlank && oldValue === '') return res.status(400).json({ error: 'a search value is required (or enable blank matching)' });
+
+  const results = await Promise.all(list.map(f => previewField(f.name, f.field_type, oldValue, matchBlank, mode)));
+  const grand_total = results.reduce((s, r) => s + r.total, 0);
+
+  res.json({
+    old_value: oldValue, match_blank: matchBlank, mode,
+    results,                // [{ field, field_type, column, counts, total, values, samples, sample_truncated }]
+    grand_total,
+    // Back-compat single-field shape (first result) so nothing old breaks.
+    ...(results[0] ? { field: results[0].field, column: results[0].column, counts: results[0].counts, total: results[0].total, values: results[0].values, samples: results[0].samples, sample_truncated: results[0].sample_truncated } : {}),
   });
 }));
 
