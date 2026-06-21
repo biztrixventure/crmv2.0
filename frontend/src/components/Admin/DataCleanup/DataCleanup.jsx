@@ -79,6 +79,10 @@ const DataCleanup = () => {
 
   const canRun = target && newValue.trim() !== '' && (target.matchBlank || target.value !== newValue);
 
+  // Type the value → Enter opens the confirm with the ack already checked → Enter
+  // again runs it. Keyboard-only, no mouse needed.
+  const openConfirm = () => { if (!canRun) return; setAck(true); setConfirm(true); };
+
   const execute = async () => {
     if (!target) return;
     setBusy(true);
@@ -95,6 +99,17 @@ const DataCleanup = () => {
     } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); }
     finally { setBusy(false); }
   };
+
+  // While the confirm modal is open: Enter runs it (ack pre-checked), Esc cancels.
+  useEffect(() => {
+    if (!confirm) return;
+    const onKey = (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); if (ack && !busy) execute(); }
+      if (e.key === 'Escape') { e.preventDefault(); setConfirm(false); setAck(false); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }); // re-bind each render so `execute` + `ack` + `busy` stay fresh
 
   const revert = async (op) => {
     if (!window.confirm(`Revert this change? "${op.new_value}" will be set back to ${op.match_blank ? 'blank' : `"${op.old_value}"`} on the ${op.counts?.total} record(s) it changed.`)) return;
@@ -244,10 +259,12 @@ const DataCleanup = () => {
             </p>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{target.matchBlank ? 'Fill with' : 'Correct value'}</label>
-              <input value={newValue} onChange={e => { setNewValue(e.target.value); setResult(null); }} className="input" placeholder="Honda" autoFocus />
+              <input value={newValue} onChange={e => { setNewValue(e.target.value); setResult(null); }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); openConfirm(); } }}
+                className="input" placeholder="Honda  (Enter to apply)" autoFocus />
             </div>
             <div className="flex gap-2">
-              <Button variant="primary" onClick={() => { setAck(false); setConfirm(true); }} disabled={!canRun || busy} className="flex items-center gap-1.5">
+              <Button variant="primary" onClick={openConfirm} disabled={!canRun || busy} className="flex items-center gap-1.5">
                 <Eraser size={15} /> {target.matchBlank ? 'Fill all' : 'Replace all'}
               </Button>
               <Button variant="secondary" onClick={() => { setTarget(null); setNewValue(''); }} disabled={busy}>Cancel</Button>
@@ -309,10 +326,11 @@ const DataCleanup = () => {
               {target.matchBlank ? <>Fill blank record(s)</> : <>Replace <strong>{fromLabel}</strong> with <strong>“{newValue}”</strong></>}
               {' '}in <strong>{target.label}</strong>. You can revert this from the history.
             </p>
-            <label className="flex items-center gap-2 mb-5 cursor-pointer select-none">
+            <label className="flex items-center gap-2 mb-1.5 cursor-pointer select-none">
               <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
               <span className="text-sm" style={{ color: 'var(--color-text)' }}>I understand this changes the data.</span>
             </label>
+            <p className="text-[11px] mb-4" style={{ color: 'var(--color-text-tertiary)' }}>Press <strong>Enter</strong> to confirm · <strong>Esc</strong> to cancel.</p>
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => { setConfirm(false); setAck(false); }} className="flex-1" disabled={busy}>Cancel</Button>
               <Button variant="danger" onClick={execute} disabled={!ack || busy} className="flex-1 flex items-center justify-center gap-1.5">
