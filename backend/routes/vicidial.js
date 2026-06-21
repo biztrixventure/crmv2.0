@@ -229,6 +229,26 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
   }
+  // Recency fallback — the closer's Dispo URL reliably sends only dispo+agent
+  // (lead tokens abort the fire on this dialer). Attach to the closer's most
+  // recent in-flight lead: a transfer to one of their linked fronter companies,
+  // created in the last 30 min, not yet auto-dispositioned. Accurate for the
+  // normal one-call-at-a-time flow.
+  if (!tr && closerUserId && closerCompanyId) {
+    const { data: links } = await supabaseAdmin
+      .from('company_links').select('fronter_company_id').eq('closer_company_id', closerCompanyId);
+    const fronterCos = [...new Set((links || []).map(l => l.fronter_company_id).filter(Boolean))];
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    let rq = supabaseAdmin.from('transfers')
+      .select('id, company_id, assigned_closer_id')
+      .is('vicidial_dispo', null).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(1);
+    rq = fronterCos.length
+      ? rq.or(`assigned_closer_id.eq.${closerUserId},company_id.in.(${fronterCos.join(',')})`)
+      : rq.eq('assigned_closer_id', closerUserId);
+    const { data: recent } = await rq.maybeSingle();
+    if (recent) { tr = recent; code = 'recency'; }
+  }
 
   const talk = parseInt(p.talk_time, 10);
   const rawCode = dispo.toUpperCase();
