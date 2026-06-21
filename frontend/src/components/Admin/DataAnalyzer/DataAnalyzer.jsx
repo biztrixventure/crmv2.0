@@ -95,12 +95,14 @@ const DATASETS = {
       { key: 'down_payment',  label: 'Down',  render: r => r.down_payment ? `$${Number(r.down_payment).toLocaleString()}` : '—' },
       { key: 'monthly_payment', label: '/mo', render: r => r.monthly_payment ? `$${Number(r.monthly_payment).toLocaleString()}` : '—' },
       { key: 'status',        label: 'Status' },
+      { key: 'closer_disposition', label: 'Disposition' },
       { key: 'company_name',  label: 'Company' },
       { key: 'closer_name',   label: 'Closer' },
       { key: 'sale_date',     label: 'Sale Date' },
     ],
     groupOptions: [
-      { value: 'status',     label: 'Status' },
+      { value: 'status',             label: 'Status' },
+      { value: 'closer_disposition', label: 'Disposition' },
       { value: 'plan',       label: 'Plan' },
       { value: 'car_make',   label: 'Car Make' },
       { value: 'car_year',   label: 'Car Year' },
@@ -116,6 +118,7 @@ const DATASETS = {
       { key: '_customer', label: 'Customer', render: r => r.form_data?.customer_name || r.form_data?.FirstName || '—' },
       { key: 'normalized_phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
+      { key: 'latest_disposition', label: 'Disposition' },
       { key: 'company_name', label: 'Company' },
       { key: 'created_by_name', label: 'Fronter' },
       { key: 'assigned_closer_name', label: 'Closer' },
@@ -125,6 +128,7 @@ const DATASETS = {
     ],
     groupOptions: [
       { value: 'status',             label: 'Status' },
+      { value: 'latest_disposition', label: 'Disposition' },
       { value: 'company_id',         label: 'Company' },
       { value: 'created_by',         label: 'Fronter' },
       { value: 'assigned_closer_id', label: 'Closer' },
@@ -505,6 +509,10 @@ const DataAnalyzer = () => {
   const [exporting, setExporting] = useState(false);
   const [err, setErr]         = useState('');
 
+  // Disposition names from the Dispositions tab (disposition_configs) — drive the
+  // disposition filter dynamically so new dispositions show up without code.
+  const [dispositions, setDispositions] = useState([]);
+
   // Global scope filters (apply on top of the per-field filters, and to export).
   const [companies, setCompanies]   = useState([]);
   const [companyIds, setCompanyIds] = useState([]);
@@ -530,6 +538,10 @@ const DataAnalyzer = () => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
     client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
     client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    client.get('disposition-configs/all').then(r => {
+      const names = [...new Set((r.data.configs || []).filter(c => c.is_active !== false && c.name).map(c => c.name))];
+      setDispositions(names);
+    }).catch(() => {});
   }, []);
 
   // Reset group-by + aggregates when dataset changes (filters stay — they're
@@ -545,8 +557,31 @@ const DataAnalyzer = () => {
     setDateField('created_at');   // sale_date/updated_at differ per dataset
   }, [dataset]);
 
-  // Status filter is always present (dataset-specific enum); rendered before the form_fields.
-  const allFilterFields = useMemo(() => [cfg.statusField, ...fields], [cfg, fields]);
+  // Disposition filter — dynamic options from disposition_configs. Filters the
+  // dataset's real disposition column (sales: closer_disposition; transfers:
+  // latest_disposition, kept in sync by a trigger), so it scales to any volume.
+  const dispositionField = useMemo(() => {
+    // Offer both the Dispositions-tab names AND the sale form's disposition
+    // field options, so the filter matches whatever the column actually stores
+    // (transfers use disposition_configs names; sales use the sale_disposition
+    // field's values — these may differ).
+    const saleDispoField = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
+    const saleDispoOpts = Array.isArray(saleDispoField?.options) ? saleDispoField.options.filter(o => typeof o === 'string') : [];
+    const opts = [...new Set([...(dispositions || []), ...saleDispoOpts])];
+    return {
+      name: dataset === 'sales' ? 'closer_disposition' : 'latest_disposition',
+      label: 'Disposition',
+      field_type: 'select',
+      options: opts,
+      _enum: true,
+    };
+  }, [dataset, dispositions, fields]);
+
+  // Status + Disposition are always present (dataset-specific); before form_fields.
+  const allFilterFields = useMemo(
+    () => [cfg.statusField, dispositionField, ...fields],
+    [cfg, dispositionField, fields],
+  );
 
   const payload = useMemo(() => {
     const base = buildPayload(allFilterFields, filters);

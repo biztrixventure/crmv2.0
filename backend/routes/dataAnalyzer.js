@@ -40,7 +40,7 @@ const DATASETS = {
     typed: new Set([
       'id', 'company_id', 'created_by', 'assigned_to', 'assigned_closer_id', 'status',
       'normalized_phone', 'rejected_by', 'rejection_reason', 'rejected_at', 'rejection_count',
-      'sale_reference_no', 'created_at', 'updated_at',
+      'sale_reference_no', 'latest_disposition', 'created_at', 'updated_at',
     ]),
   },
 };
@@ -326,11 +326,11 @@ router.post('/export', asyncHandler(async (req, res) => {
 
   // Base typed columns per dataset. Same as before — these stay first in the
   // CSV so existing reports keep their column positions.
-  const TYPED_SALES = ['id', 'sale_date', 'status', 'customer_name', 'customer_phone', 'customer_email',
+  const TYPED_SALES = ['id', 'sale_date', 'status', 'closer_disposition', 'customer_name', 'customer_phone', 'customer_email',
     'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
     'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
     'closer_name', 'fronter_name', 'company_name', 'created_at'];
-  const TYPED_TRANSFERS = ['id', 'status', 'created_by_name', 'assigned_closer_name', 'company_name',
+  const TYPED_TRANSFERS = ['id', 'status', 'latest_disposition', 'created_by_name', 'assigned_closer_name', 'company_name',
     'normalized_phone', 'rejection_reason', 'rejection_count', 'sale_reference_no',
     'created_at', 'updated_at'];
 
