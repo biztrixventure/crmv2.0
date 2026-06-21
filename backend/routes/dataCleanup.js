@@ -34,21 +34,58 @@ const SALE_COL_BY_TYPE = {
 };
 const saleColumnFor = (field, fieldType) => SALE_COL_BY_FIELD[field] || SALE_COL_BY_TYPE[fieldType] || null;
 
-// ── counters (head:true → count only, no rows) ───────────────────────────────
-async function countJsonb(table, field, value, blank) {
+// Escape LIKE metacharacters so a search for "60%" or "a_b" matches literally.
+const likeEscape = (s) => String(s).replace(/[\\%_]/g, '\\$&');
+
+// Apply the chosen match to a query: blank | contains (case-insensitive
+// substring) | exact (default). Used by every count/sample/distinct helper so
+// all three datasets share one matching rule.
+const applyJsonbMatch = (q, field, value, blank, mode) => {
   const path = `form_data->>${field}`;
+  if (blank) return q.or(`${path}.is.null,${path}.eq.`);
+  if (mode === 'contains') return q.filter(path, 'ilike', `%${likeEscape(value)}%`);
+  return q.filter(path, 'eq', value);
+};
+const applyColMatch = (q, col, value, blank, mode) => {
+  if (blank) return q.or(`${col}.is.null,${col}.eq.`);
+  if (mode === 'contains') return q.ilike(col, `%${likeEscape(value)}%`);
+  return q.eq(col, value);
+};
+
+// ── counters (head:true → count only, no rows) ───────────────────────────────
+async function countJsonb(table, field, value, blank, mode) {
   let q = supabaseAdmin.from(table).select('id', { count: 'exact', head: true });
-  q = blank ? q.or(`${path}.is.null,${path}.eq.`) : q.filter(path, 'eq', value);
+  q = applyJsonbMatch(q, field, value, blank, mode);
   const { count, error } = await q;
-  if (error) throw new Error(`${table}.${path}: ${error.message}`);
+  if (error) throw new Error(`${table}.form_data->>${field}: ${error.message}`);
   return count || 0;
 }
-async function countColumn(table, col, value, blank) {
+async function countColumn(table, col, value, blank, mode) {
   let q = supabaseAdmin.from(table).select('id', { count: 'exact', head: true });
-  q = blank ? q.or(`${col}.is.null,${col}.eq.`) : q.eq(col, value);
+  q = applyColMatch(q, col, value, blank, mode);
   const { count, error } = await q;
   if (error) throw new Error(`${table}.${col}: ${error.message}`);
   return count || 0;
+}
+
+// Distinct field values among matching rows (so a "contains" search surfaces
+// every junk variant — 60k, 150K, "60k mi" — with how many rows each has).
+async function distinctValues(field, value, blank, mode, cap = 5000) {
+  const counts = new Map();
+  for (const table of ['transfers', 'sales']) {
+    let q = supabaseAdmin.from(table).select('form_data').limit(cap);
+    q = applyJsonbMatch(q, field, value, blank, mode);
+    const { data } = await q;
+    (data || []).forEach(r => {
+      const v = r.form_data ? r.form_data[field] : undefined;
+      const key = (v == null || v === '') ? '' : String(v);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 80);
 }
 
 // ── phone/name extraction for the preview sample ─────────────────────────────
@@ -57,15 +94,15 @@ const fdPhone = (fd) => { if (!fd) return ''; for (const k of TRANSFER_PHONE_KEY
 const fdName  = (fd) => { if (!fd) return ''; const n = [fd.FirstName, fd.LastName].filter(Boolean).join(' ').trim(); return n || fd.customer_name || ''; };
 
 // Sample matching rows (capped) so the operator can eyeball the phone numbers.
-async function sampleJsonb(table, field, value, blank, sel, limit) {
+async function sampleJsonb(table, field, value, blank, mode, sel, limit) {
   let q = supabaseAdmin.from(table).select(sel).limit(limit);
-  q = blank ? q.or(`form_data->>${field}.is.null,form_data->>${field}.eq.`) : q.filter(`form_data->>${field}`, 'eq', value);
+  q = applyJsonbMatch(q, field, value, blank, mode);
   const { data } = await q;
   return data || [];
 }
-async function sampleColumn(table, col, value, blank, sel, limit) {
+async function sampleColumn(table, col, value, blank, mode, sel, limit) {
   let q = supabaseAdmin.from(table).select(sel).limit(limit);
-  q = blank ? q.or(`${col}.is.null,${col}.eq.`) : q.eq(col, value);
+  q = applyColMatch(q, col, value, blank, mode);
   const { data } = await q;
   return data || [];
 }
@@ -76,23 +113,26 @@ const parseBody = (b) => ({
   oldValue:   b.old_value == null ? '' : String(b.old_value),
   newValue:   b.new_value == null ? '' : String(b.new_value),
   matchBlank: !!b.match_blank,
+  mode:       b.mode === 'contains' ? 'contains' : 'exact',
 });
 
 // ── POST /preview ─────────────────────────────────────────────────────────────
 router.post('/preview', asyncHandler(async (req, res) => {
-  const { field, fieldType, oldValue, matchBlank } = parseBody(req.body);
+  const { field, fieldType, oldValue, matchBlank, mode } = parseBody(req.body);
   if (!field) return res.status(400).json({ error: 'field is required' });
-  if (!matchBlank && oldValue === '') return res.status(400).json({ error: 'old_value is required (or enable blank matching)' });
+  if (!matchBlank && oldValue === '') return res.status(400).json({ error: 'a search value is required (or enable blank matching)' });
 
   const col = saleColumnFor(field, fieldType);
   const SAMPLE = 200;
-  const [transfers_form_data, sales_form_data, sales_column, tRows, sRows, cRows] = await Promise.all([
-    countJsonb('transfers', field, oldValue, matchBlank),
-    countJsonb('sales', field, oldValue, matchBlank),
-    col ? countColumn('sales', col, oldValue, matchBlank) : Promise.resolve(0),
-    sampleJsonb('transfers', field, oldValue, matchBlank, 'id, normalized_phone, form_data', SAMPLE),
-    sampleJsonb('sales', field, oldValue, matchBlank, 'id, customer_phone, customer_name', SAMPLE),
-    col ? sampleColumn('sales', col, oldValue, matchBlank, 'id, customer_phone, customer_name', SAMPLE) : Promise.resolve([]),
+  const [transfers_form_data, sales_form_data, sales_column, tRows, sRows, cRows, values] = await Promise.all([
+    countJsonb('transfers', field, oldValue, matchBlank, mode),
+    countJsonb('sales', field, oldValue, matchBlank, mode),
+    col ? countColumn('sales', col, oldValue, matchBlank, mode) : Promise.resolve(0),
+    sampleJsonb('transfers', field, oldValue, matchBlank, mode, 'id, normalized_phone, form_data', SAMPLE),
+    sampleJsonb('sales', field, oldValue, matchBlank, mode, 'id, customer_phone, customer_name', SAMPLE),
+    col ? sampleColumn('sales', col, oldValue, matchBlank, mode, 'id, customer_phone, customer_name', SAMPLE) : Promise.resolve([]),
+    // Distinct matching values — the heart of a "contains" search (and handy for exact too).
+    distinctValues(field, oldValue, matchBlank, mode),
   ]);
 
   // Build a de-duplicated sample (per source+id) of phone + name so the operator
@@ -110,9 +150,10 @@ router.post('/preview', asyncHandler(async (req, res) => {
 
   const total = transfers_form_data + sales_form_data + sales_column;
   res.json({
-    field, old_value: oldValue, match_blank: matchBlank, column: col,
+    field, old_value: oldValue, match_blank: matchBlank, mode, column: col,
     counts: { transfers_form_data, sales_form_data, sales_column },
     total,
+    values,                 // [{ value, count }] distinct matching values
     samples: samples.slice(0, SAMPLE),
     sample_truncated: total > Math.min(samples.length, SAMPLE),
   });

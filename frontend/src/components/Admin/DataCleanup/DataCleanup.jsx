@@ -16,6 +16,7 @@ const DataCleanup = () => {
 
   const [fieldName, setFieldName]   = useState('');
   const [matchBlank, setMatchBlank] = useState(false);
+  const [mode, setMode]             = useState('exact');   // 'exact' | 'contains' (search)
   const [oldValue, setOldValue]     = useState('');
   const [newValue, setNewValue]     = useState('');
   const [preview, setPreview]       = useState(null);
@@ -36,21 +37,32 @@ const DataCleanup = () => {
   const resetPreview = () => { setPreview(null); setResult(null); };
 
   const canPreview = !!fieldName && (matchBlank || oldValue.trim() !== '');
+  // Replace only runs on an EXACT value (Contains is search-only — pick a value
+  // from the results to replace it precisely, so revert stays correct).
   const canRun = canPreview && newValue.trim() !== ''
-    && (matchBlank || oldValue !== newValue)
+    && (matchBlank || (mode === 'exact' && oldValue !== newValue))
     && preview && preview.total > 0;
 
-  const runPreview = async () => {
-    if (!canPreview) return;
+  const runPreview = async (over = {}) => {
+    const _old   = over.oldValue  !== undefined ? over.oldValue  : oldValue;
+    const _mode  = over.mode      !== undefined ? over.mode      : mode;
+    const _blank = over.matchBlank!== undefined ? over.matchBlank: matchBlank;
+    if (!fieldName || (!_blank && _old.trim() === '')) return;
     setBusy(true); setResult(null);
     try {
       const r = await client.post('data-cleanup/preview', {
-        field: fieldName, field_type: field?.field_type, old_value: oldValue, match_blank: matchBlank,
+        field: fieldName, field_type: field?.field_type, old_value: _old, match_blank: _blank, mode: _mode,
       });
       setPreview(r.data);
-      if (!r.data.total) toast.info(matchBlank ? 'No blank records for this field.' : 'No records contain that value.');
+      if (!r.data.total) toast.info(_blank ? 'No blank records for this field.' : (_mode === 'contains' ? 'No values contain that text.' : 'No records have exactly that value.'));
     } catch (e) { toast.error(e.response?.data?.error || 'Preview failed'); setPreview(null); }
     finally { setBusy(false); }
+  };
+
+  // Click a distinct value → load it as an EXACT target ready to replace.
+  const pickValue = (val) => {
+    setMatchBlank(false); setMode('exact'); setOldValue(val); setResult(null);
+    runPreview({ oldValue: val, mode: 'exact', matchBlank: false });
   };
 
   const execute = async () => {
@@ -115,28 +127,51 @@ const DataCleanup = () => {
           <span className="text-sm" style={{ color: 'var(--color-text)' }}>Find <strong>empty / blank</strong> records and fill them</span>
         </label>
 
+        {/* Match mode (hidden while filling blanks) */}
+        {!matchBlank && (
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Match</label>
+            <div className="flex rounded-lg overflow-hidden w-fit" style={{ border: '1px solid var(--color-border)' }}>
+              {[['exact', 'Exact'], ['contains', 'Contains (search)']].map(([m, l]) => (
+                <button key={m} type="button" onClick={() => { setMode(m); resetPreview(); }}
+                  className="px-3 py-1.5 text-xs font-bold transition-colors"
+                  style={{ backgroundColor: mode === m ? 'var(--color-primary-600)' : 'var(--color-surface)', color: mode === m ? 'white' : 'var(--color-text-secondary)' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Old → New */}
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-end gap-3">
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{matchBlank ? 'Current value' : 'Wrong value'}</label>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {matchBlank ? 'Current value' : (mode === 'contains' ? 'Search text (contains)' : 'Wrong value')}
+            </label>
             <input value={matchBlank ? '' : oldValue} disabled={matchBlank}
               onChange={e => { setOldValue(e.target.value); resetPreview(); }} className="input disabled:opacity-50"
-              placeholder={matchBlank ? '(blank / empty)' : 'Hodna'} />
+              placeholder={matchBlank ? '(blank / empty)' : (mode === 'contains' ? 'e.g. k  (finds 60k, 150K, “60k mi”…)' : 'Hodna')} />
           </div>
           <ArrowRight size={18} className="mb-2.5 mx-auto hidden sm:block" style={{ color: 'var(--color-text-tertiary)' }} />
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{matchBlank ? 'Fill with' : 'Correct value'}</label>
-            <input value={newValue} onChange={e => { setNewValue(e.target.value); setResult(null); }} className="input" placeholder="Honda" />
+            <input value={newValue} disabled={!matchBlank && mode === 'contains'}
+              onChange={e => { setNewValue(e.target.value); setResult(null); }} className="input disabled:opacity-50" placeholder="Honda" />
           </div>
         </div>
 
         <p className="text-xs flex items-start gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
-          <Database size={13} className="mt-0.5 flex-shrink-0" /> {matchBlank ? 'Blank = missing or empty value.' : 'Match is exact + case-sensitive.'} Preview first; every change is logged and can be reverted below.
+          <Database size={13} className="mt-0.5 flex-shrink-0" />
+          {matchBlank ? 'Blank = missing or empty value.'
+            : mode === 'contains' ? 'Contains = case-insensitive search. Preview, then click a value below to load it for a precise replace.'
+            : 'Exact match (case-sensitive). Preview first.'}
+          {' '}Every change is logged and can be reverted below.
         </p>
 
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={runPreview} disabled={!canPreview || busy} className="flex items-center gap-1.5">
-            {busy && !confirm ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Preview
+          <Button variant="secondary" onClick={() => runPreview()} disabled={!canPreview || busy} className="flex items-center gap-1.5">
+            {busy && !confirm ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} {mode === 'contains' && !matchBlank ? 'Search' : 'Preview'}
           </Button>
           <Button variant="primary" onClick={() => { setAck(false); setConfirm(true); }} disabled={!canRun || busy} className="flex items-center gap-1.5">
             <Eraser size={15} /> {matchBlank ? 'Fill all' : 'Replace all'}
@@ -151,6 +186,29 @@ const DataCleanup = () => {
             <Count label="Transfers (form data)" n={preview.counts.transfers_form_data} />
             <Count label="Sales (form data)" n={preview.counts.sales_form_data} />
             {preview.column && <Count label={`Sales · ${preview.column} column`} n={preview.counts.sales_column} />}
+
+            {/* Distinct matching values — click one to replace it precisely. */}
+            {preview.values?.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Distinct values {preview.mode === 'contains' ? '· click one to fix it' : ''}
+                </p>
+                <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
+                  {preview.values.map((v, i) => {
+                    const isSel = preview.mode !== 'contains' && v.value === oldValue;
+                    return (
+                      <button key={i} type="button" onClick={() => pickValue(v.value)}
+                        title="Load as the value to replace"
+                        className="text-xs font-semibold px-2 py-1 rounded-md transition-colors flex items-center gap-1"
+                        style={{ backgroundColor: isSel ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: isSel ? 'white' : 'var(--color-text)', border: `1px solid ${isSel ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
+                        <span className="font-mono">{v.value === '' ? '(blank)' : v.value}</span>
+                        <span className="text-[10px] font-bold px-1 rounded" style={{ backgroundColor: isSel ? 'rgba(255,255,255,0.25)' : 'var(--color-primary-100)', color: isSel ? 'white' : 'var(--color-primary-700)' }}>{v.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Phone numbers of the matching records — verify before running. */}
             {preview.samples?.length > 0 && (
