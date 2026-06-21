@@ -1,12 +1,19 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2, Building2, CalendarRange } from 'lucide-react';
+import { useRef } from 'react';
+import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2, Building2, CalendarRange, GripVertical } from 'lucide-react';
 import client from '../../../api/client';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 
-// Date columns offered by the global date-range filter, per dataset.
+// Persisted custom order of the filter cards (drag-and-drop).
+const ORDER_KEY = 'bsx_data_analyzer_field_order_v1';
+const readOrder  = () => { try { return JSON.parse(localStorage.getItem(ORDER_KEY) || '[]'); } catch { return []; } };
+const writeOrder = (o) => { try { localStorage.setItem(ORDER_KEY, JSON.stringify(o)); } catch { /* quota */ } };
+
+// Single, meaningful date column per dataset: the actual sale date for sales,
+// the date the transfer happened for transfers.
 const DATE_FIELDS = {
-  sales:     [{ v: 'created_at', l: 'Created' }, { v: 'sale_date', l: 'Sale date' }],
-  transfers: [{ v: 'created_at', l: 'Created' }, { v: 'updated_at', l: 'Updated' }],
+  sales:     [{ v: 'sale_date',  l: 'Sale date' }],
+  transfers: [{ v: 'created_at', l: 'Transfer date' }],
 };
 const ymd = (d) => d.toISOString().slice(0, 10);
 
@@ -516,7 +523,7 @@ const DataAnalyzer = () => {
   // Global scope filters (apply on top of the per-field filters, and to export).
   const [companies, setCompanies]   = useState([]);
   const [companyIds, setCompanyIds] = useState([]);
-  const [dateField, setDateField]   = useState('created_at');
+  const [dateField, setDateField]   = useState('sale_date');
   const [dateFrom, setDateFrom]     = useState('');
   const [dateTo, setDateTo]         = useState('');
 
@@ -528,6 +535,10 @@ const DataAnalyzer = () => {
 
   // Filter presets
   const [presets, setPresets] = useState(readPresets);
+
+  // Drag-and-drop filter order (persisted).
+  const [fieldOrder, setFieldOrder] = useState(readOrder);
+  const dragName = useRef(null);
 
   // Vehicle registry powers the Car Make chip grid AND the Car Model child
   // filter — keeping the full tree (not just make names) lets the Model
@@ -554,7 +565,7 @@ const DataAnalyzer = () => {
     setAgg(null);
     setRows([]);
     setTotal(0);
-    setDateField('created_at');   // sale_date/updated_at differ per dataset
+    setDateField((DATE_FIELDS[dataset] || DATE_FIELDS.sales)[0].v);
   }, [dataset]);
 
   // Disposition filter — dynamic options from disposition_configs. Filters the
@@ -582,6 +593,25 @@ const DataAnalyzer = () => {
     () => [cfg.statusField, dispositionField, ...fields],
     [cfg, dispositionField, fields],
   );
+
+  // Apply the saved drag-and-drop order; new/unordered fields fall to the end.
+  const orderedFields = useMemo(() => {
+    const byName = new Map(allFilterFields.map(f => [f.name, f]));
+    const out = [];
+    fieldOrder.forEach(n => { if (byName.has(n)) { out.push(byName.get(n)); byName.delete(n); } });
+    allFilterFields.forEach(f => { if (byName.has(f.name)) out.push(f); });
+    return out;
+  }, [allFilterFields, fieldOrder]);
+
+  const onFilterDrop = (targetName) => {
+    const from = dragName.current; dragName.current = null;
+    if (!from || from === targetName) return;
+    const names = orderedFields.map(f => f.name);
+    const fromIdx = names.indexOf(from), toIdx = names.indexOf(targetName);
+    if (fromIdx < 0 || toIdx < 0) return;
+    names.splice(toIdx, 0, names.splice(fromIdx, 1)[0]);
+    setFieldOrder(names); writeOrder(names);
+  };
 
   const payload = useMemo(() => {
     const base = buildPayload(allFilterFields, filters);
@@ -735,9 +765,9 @@ const DataAnalyzer = () => {
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <Label><span className="flex items-center gap-1.5"><CalendarRange size={13} /> Date filter</span></Label>
-            <select value={dateField} onChange={e => setDateField(e.target.value)} className="input text-sm py-1.5" style={{ minWidth: 130 }}>
-              {(DATE_FIELDS[dataset] || DATE_FIELDS.sales).map(d => <option key={d.v} value={d.v}>{d.l}</option>)}
-            </select>
+            <div className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', minWidth: 130 }}>
+              {(DATE_FIELDS[dataset] || DATE_FIELDS.sales)[0].l}
+            </div>
           </div>
           <div>
             <Label>From</Label>
@@ -787,14 +817,22 @@ const DataAnalyzer = () => {
 
           <Section title={<span className="flex items-center gap-1.5"><Filter size={14} /> Filters</span>}
             open={open.filters} onToggle={() => setOpen(o => ({ ...o, filters: !o.filters }))} count={activeCount}>
-            {allFilterFields.map(f => {
+            <p className="text-[10px] -mt-1 mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Drag the ⠿ handle to reorder filters — your layout is remembered.</p>
+            {orderedFields.map(f => {
               const v = filters[f.name];
               const active = v != null && v !== '' && !(Array.isArray(v) && v.length === 0);
               return (
                 <div key={f.id || f.name} className="rounded-lg p-2.5"
+                  onDragOver={e => e.preventDefault()} onDrop={() => onFilterDrop(f.name)}
                   style={{ border: `1px solid ${active ? 'var(--color-primary-300)' : 'var(--color-border)'}`, backgroundColor: active ? 'var(--color-primary-50)' : 'transparent' }}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <Label sub={`(${f.field_type})`}>{f.label || f.name}</Label>
+                    <span className="flex items-center gap-1 min-w-0">
+                      <span draggable onDragStart={() => { dragName.current = f.name; }} onDragEnd={() => { dragName.current = null; }}
+                        title="Drag to reorder" className="cursor-grab active:cursor-grabbing flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
+                        <GripVertical size={13} />
+                      </span>
+                      <Label sub={`(${f.field_type})`}>{f.label || f.name}</Label>
+                    </span>
                     {active && (
                       <button type="button" onClick={() => setFilters(s => { const n = { ...s }; delete n[f.name]; return n; })}
                         className="text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
