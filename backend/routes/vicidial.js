@@ -265,7 +265,10 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   if (tr) {
     const dispoCompanyId = closerCompanyId || tr.company_id;
     const mapped = await bumpDispoMap(dispoCompanyId, rawCode);
-    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId, dispoName: mapped?.disposition_name || null, rawDispo: dispo, talk });
+    // Always log a disposition_action so the outcome shows everywhere (compliance,
+    // closer tab, admin) like a manual one. Mapped → friendly name; unmapped →
+    // the raw dialer code (still visible; admin can map it later to rename).
+    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId, dispoName: mapped?.disposition_name || dispo || rawCode || null, rawDispo: dispo, talk });
     dbg.outcome = `matched transfer ${tr.id} on "${code}"`;
     logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← "${dispo}" → ${mapped?.disposition_name || '(unmapped)'}`);
     return res.json({ ok: true, transfer_id: tr.id, mapped: mapped?.disposition_name || null });

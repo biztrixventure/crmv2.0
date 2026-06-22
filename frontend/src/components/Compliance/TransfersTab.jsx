@@ -153,6 +153,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
     const rows = all.map(t => [
       customerName(t), t.form_data?.Phone || '',
       t.created_by_name || '', t.assigned_closer_name || '',
+      t.latest_disposition?.disposition_name || '',
       t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
       fmtDate(t.created_at),
       t.is_duplicate ? 'Yes' : 'No',
@@ -160,8 +161,8 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
     ]);
     // Trailing summary row so the duplicate count travels with the export.
     rows.push([]);
-    rows.push([`Total transfers: ${all.length}`, '', '', '', '', '', '', `Duplicates: ${dupCount}`, '']);
-    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Company','Status','Created','Is Duplicate','Duplicate Reason'],
+    rows.push([`Total transfers: ${all.length}`, '', '', '', '', '', '', '', `Duplicates: ${dupCount}`, '']);
+    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Disposition','Company','Status','Created','Is Duplicate','Duplicate Reason'],
       `transfers_${todayET()}.csv`);
   };
 
@@ -242,6 +243,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
                   <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
                   <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
+                  <Th>Disposition</Th>
                   <Th>Company</Th>
                   <SortTh col="status"     sort={sort} onSort={toggleSort}>Transfer Status</SortTh>
                   <Th>Sale Status</Th>
@@ -276,6 +278,15 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.assigned_closer_name || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {t.latest_disposition?.disposition_name ? (
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={{ backgroundColor: `${t.latest_disposition.color || '#6b7280'}22`, color: t.latest_disposition.color || '#6b7280' }}
+                          title={[t.latest_disposition.setter_name && `By ${t.latest_disposition.setter_name}`, t.latest_disposition.note].filter(Boolean).join(' — ')}>
+                          {t.latest_disposition.disposition_name}
+                        </span>
+                      ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.company_name || '—'}
@@ -344,6 +355,22 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   <InfoTile label="Company" value={detail.company_name} />
                   <InfoTile label="Fronter" value={detail.created_by_name} />
                   <InfoTile label="Closer"  value={detail.assigned_closer_name} />
+                  {detail.latest_disposition?.disposition_name && (
+                    <InfoTile label="Disposition" value={
+                      <div>
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={{ backgroundColor: `${detail.latest_disposition.color || '#6b7280'}22`, color: detail.latest_disposition.color || '#6b7280' }}>
+                          {detail.latest_disposition.disposition_name}
+                        </span>
+                        {detail.latest_disposition.setter_name && (
+                          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>By {detail.latest_disposition.setter_name}</p>
+                        )}
+                        {detail.latest_disposition.note && (
+                          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{detail.latest_disposition.note}</p>
+                        )}
+                      </div>
+                    } />
+                  )}
                   <InfoTile label="Entered At"      value={fmtDateTime(detail.created_at)} />
                   <InfoTile label="Last Updated"    value={fmtDateTime(detail.updated_at)} />
                 </div>
