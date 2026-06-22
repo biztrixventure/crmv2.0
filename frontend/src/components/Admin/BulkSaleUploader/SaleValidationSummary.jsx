@@ -28,6 +28,22 @@ const Collapsible = ({ icon: Icon, color, title, rows, render }) => {
   );
 };
 
+// Generic expand/collapse wrapper around arbitrary content (defaults open).
+const CollapsibleSection = ({ icon: Icon, color, title, count, defaultOpen = true, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.25)' }}>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4">
+        <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color }}>
+          {Icon && <Icon size={15} />} {title}{count != null ? ` (${count})` : ''}
+        </span>
+        <ChevronDown size={16} className="transition-transform" style={{ color, transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+};
+
 // Cards for auto-matched NEW sales: show the picked transfer + let the user
 // switch to another candidate (duplicate transfers for the same phone).
 const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
@@ -163,6 +179,22 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
 
   return (
     <div className="space-y-4">
+      {/* Sticky action bar — Apply stays reachable from anywhere in the review. */}
+      <div className="sticky top-0 z-20 py-2 -mt-2" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl px-4 py-3"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-md)' }}>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <strong style={{ color: 'var(--color-text)' }}>{newSales.length}</strong> new + <strong style={{ color: 'var(--color-text)' }}>{includedUpdates}</strong> update{includedUpdates !== 1 ? 's' : ''} will be applied
+          </p>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={onBack}>Back</Button>
+            <Button variant="primary" onClick={onConfirm} disabled={busy || total === 0}>
+              {busy ? 'Applying…' : `Apply ${total} record${total !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2.5">
         <Stat icon={CheckCircle2} color="var(--color-success-600)" count={newSales.length} label="New sales" />
         <Stat icon={RefreshCw} color="#2563eb" count={updates.length} label="Updates (review)" />
@@ -174,10 +206,9 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
       <AutoMatchedReview newSales={newSales} onChangeTransfer={onChangeTransfer} />
 
       {updates.length > 0 && (
-        <div className="rounded-2xl p-4" style={{ backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.25)' }}>
-          <h4 className="text-sm font-bold mb-3 flex items-center gap-1.5" style={{ color: '#2563eb' }}><RefreshCw size={15} /> Existing sales — review each update</h4>
+        <CollapsibleSection icon={RefreshCw} color="#2563eb" title="Existing sales — review each update" count={updates.length}>
           <SaleUpdateReviewer updates={updates} decisions={decisions} toggleUpdate={toggleUpdate} setAllUpdates={setAllUpdates} />
-        </div>
+        </CollapsibleSection>
       )}
 
       <UnmatchedFixer unmatched={unmatched} onCreateTransfer={onCreateTransfer} />
@@ -188,18 +219,6 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
         render={(r, i) => <div key={i} className="text-xs py-1 px-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{rowLabel(r)}{r.reason && <span style={{ color: '#d97706' }}> — {r.reason}</span>}</div>} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Invalid (missing required fields)" rows={invalid || []}
         render={(r, i) => <div key={i} className="text-xs py-1 px-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{rowLabel(r)}{r.reason && <span style={{ color: 'var(--color-error-600)' }}> — {r.reason}</span>}</div>} />
-
-      <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          <strong style={{ color: 'var(--color-text)' }}>{newSales.length}</strong> new + <strong style={{ color: 'var(--color-text)' }}>{includedUpdates}</strong> update{includedUpdates !== 1 ? 's' : ''} will be applied
-        </p>
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onBack}>Back</Button>
-          <Button variant="primary" onClick={onConfirm} disabled={busy || total === 0}>
-            {busy ? 'Applying…' : `Apply ${total} record${total !== 1 ? 's' : ''}`}
-          </Button>
-        </div>
-      </div>
     </div>
   );
 };

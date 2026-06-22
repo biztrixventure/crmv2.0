@@ -26,6 +26,22 @@ const Collapsible = ({ icon: Icon, color, title, rows, render }) => {
   );
 };
 
+// Generic expand/collapse wrapper around arbitrary content (defaults open).
+const CollapsibleSection = ({ icon: Icon, color, title, count, bg, border, defaultOpen = true, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: bg, border: `1px solid ${border}` }}>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4">
+        <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color }}>
+          {Icon && <Icon size={15} />} {title}{count != null ? ` (${count})` : ''}
+        </span>
+        <ChevronDown size={16} className="transition-transform" style={{ color, transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+};
+
 const rowLine = (r, i) => (
   <div key={i} className="text-xs py-1 px-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
     <strong style={{ color: 'var(--color-text)' }}>{r.cli_number || '—'}</strong> · {r.fronter_name || '—'} · {r.company_name || '—'}
@@ -94,6 +110,24 @@ const ValidationSummary = ({
 
   return (
     <div className="space-y-4">
+      {/* Sticky action bar — Apply stays reachable from anywhere in the review. */}
+      <div className="sticky top-0 z-20 py-2 -mt-2" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl px-4 py-3"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-md)' }}>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <strong style={{ color: 'var(--color-text)' }}>{toInsert}</strong> insert{toInsert !== 1 ? 's' : ''}
+            {' · '}
+            <strong style={{ color: 'var(--color-text)' }}>{toUpdate}</strong> update{toUpdate !== 1 ? 's' : ''}
+          </p>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={onBack}>Back</Button>
+            <Button variant="primary" onClick={onConfirm} disabled={busy || total === 0}>
+              {busy ? 'Applying…' : `Apply ${total} record${total !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2.5">
         <Stat icon={CheckCircle2} color="var(--color-success-600)" count={clean.length} label="Ready to insert" />
         <Stat icon={RefreshCw} color="var(--color-primary-600)" count={toUpdate} label={updatesUnchanged ? `Updates (+${updatesUnchanged} unchanged)` : 'Updates (existing records)'} />
@@ -103,10 +137,10 @@ const ValidationSummary = ({
       </div>
 
       {conflicts.length > 0 && (
-        <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-200, #fde68a)' }}>
-          <h4 className="text-sm font-bold mb-3 flex items-center gap-1.5" style={{ color: '#b45309' }}><AlertTriangle size={15} /> Conflicts — review each</h4>
+        <CollapsibleSection icon={AlertTriangle} color="#b45309" title="Conflicts — review each" count={conflicts.length}
+          bg="var(--color-warning-50, #fffbeb)" border="var(--color-warning-200, #fde68a)">
           <ConflictResolver conflicts={conflicts} decisions={decisions} toggleConflict={toggleConflict} setAllConflicts={setAllConflicts} />
-        </div>
+        </CollapsibleSection>
       )}
 
       {updates.length > 0 && (
@@ -141,22 +175,6 @@ const ValidationSummary = ({
       <Collapsible icon={XCircle} color="var(--color-error-600)" title="In-file duplicates (same row twice — skipped)" rows={trueDuplicates} render={rowLine} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Unmatched (fronter/company not found)" rows={unmatched} render={rowLine} />
       <Collapsible icon={Ban} color="var(--color-text-tertiary)" title="Invalid (missing required fields)" rows={invalid} render={rowLine} />
-
-      <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          <strong style={{ color: 'var(--color-text)' }}>{toInsert}</strong> insert{toInsert !== 1 ? 's' : ''}
-          {' · '}
-          <strong style={{ color: 'var(--color-text)' }}>{toUpdate}</strong> update{toUpdate !== 1 ? 's' : ''}
-          {includedConflicts > 0 && <> ({clean.length} clean + {includedConflicts} conflict{includedConflicts !== 1 ? 's' : ''})</>}
-          {updatesUnchanged > 0 && <> · {updatesUnchanged} unchanged</>}
-        </p>
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onBack}>Back</Button>
-          <Button variant="primary" onClick={onConfirm} disabled={busy || total === 0}>
-            {busy ? 'Applying…' : `Apply ${total} record${total !== 1 ? 's' : ''}`}
-          </Button>
-        </div>
-      </div>
     </div>
   );
 };

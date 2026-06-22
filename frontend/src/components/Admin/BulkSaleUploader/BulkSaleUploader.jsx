@@ -32,9 +32,9 @@ const BulkSaleUploader = () => {
 
       {u.step === 'guide' && (
         <>
-          <SaleFileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
-          <UploadBestPractices kind="sale" fields={u.fields} startOpen />
           <FileDropzone onFile={u.onFile} busy={u.busy} />
+          <SaleFileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
+          <UploadBestPractices kind="sale" fields={u.fields} />
         </>
       )}
 

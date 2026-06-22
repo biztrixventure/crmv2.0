@@ -32,12 +32,12 @@ const BulkUploader = () => {
       {u.error && <Alert type="error" message={u.error} />}
       {u.progress && <UploadProgress progress={u.progress} />}
 
-      {/* Step 1 — guide + dropzone (the guide is always the first thing visible) */}
+      {/* Step 1 — dropzone first (upload is the primary action), then the guide. */}
       {u.step === 'guide' && (
         <>
-          <FileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
-          <UploadBestPractices kind="transfer" fields={u.fields} startOpen />
           <FileDropzone onFile={u.onFile} busy={u.busy} />
+          <FileRequirementsGuide reference={u.reference} fields={u.fields} formFields={u.formFields} phoneKey={u.phoneKey} />
+          <UploadBestPractices kind="transfer" fields={u.fields} />
         </>
       )}
 
