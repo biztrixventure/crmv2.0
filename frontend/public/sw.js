@@ -44,6 +44,19 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Mirror of resolveNotificationTarget() — kept tiny + dependency-free so the SW
+// can build a cold-open deep link. Keep in sync with utils/notificationNav.js.
+function focusParamsFromData(data) {
+  const d = data || {};
+  const type = String(d.type || '').toLowerCase();
+  if (d.callback_id || type.includes('callback_due') || type === 'callback') return { fkind: 'callback', fid: d.callback_id };
+  if (d.callback_number_id || type === 'number_claimable')                   return { fkind: 'number',   fid: d.callback_number_id };
+  if (d.sale_id || type.indexOf('sale') === 0)                               return { fkind: 'sale',     fid: d.sale_id };
+  if (d.transfer_id || type.indexOf('transfer') === 0)                       return { fkind: 'transfer', fid: d.transfer_id };
+  if (d.conversation_id || d.chat_id || type.includes('chat') || type.includes('message')) return { fkind: 'chat', fid: d.conversation_id || d.chat_id };
+  return null;
+}
+
 // ── Notification click ─────────────────────────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -51,7 +64,7 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-      // Focus existing tab if open
+      // Focus existing tab if open — the page handles NOTIFICATION_CLICK live.
       for (const client of clients) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
           client.focus();
@@ -59,9 +72,13 @@ self.addEventListener('notificationclick', (event) => {
           return;
         }
       }
-      // Open new tab
+      // No tab open → cold open with a deep link the app consumes on load.
       if (self.clients.openWindow) {
-        self.clients.openWindow('/dashboard');
+        const fp = focusParamsFromData(data);
+        const url = fp && fp.fid
+          ? `/dashboard?fkind=${encodeURIComponent(fp.fkind)}&fid=${encodeURIComponent(fp.fid)}`
+          : '/dashboard';
+        self.clients.openWindow(url);
       }
     })
   );

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { useChatUnread } from '../../hooks/useChatUnread';
+import { useFocus } from '../../contexts/FocusContext';
 import ChatPanel from './ChatPanel';
 
 // Header chat trigger + total-unread badge (mirrors NotificationBell styling).
@@ -17,6 +18,14 @@ const ChatLauncher = () => {
   // that opens a panel they can only stare at.
   const enabled = !!user?.id && !isReadOnly && isEnabled('chat');
   const { total, banned, refresh } = useChatUnread(enabled);
+
+  // A clicked chat notification (bell or OS push) → open the panel on that
+  // conversation. focus.ts changes per click, so each one re-opens.
+  const { focus } = useFocus();
+  const [focusConv, setFocusConv] = useState(null);
+  useEffect(() => {
+    if (focus?.kind === 'chat') { setOpen(true); setFocusConv(focus.id || null); }
+  }, [focus]);
 
   if (!enabled) return null;
 
@@ -43,7 +52,7 @@ const ChatLauncher = () => {
         )}
       </button>
 
-      <ChatPanel open={open} onClose={() => { setOpen(false); refresh(); }} meId={user.id} banned={banned} />
+      <ChatPanel open={open} onClose={() => { setOpen(false); refresh(); }} meId={user.id} banned={banned} focusConversationId={focusConv} />
     </>
   );
 };

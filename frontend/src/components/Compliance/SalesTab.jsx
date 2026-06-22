@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
+import { useFocus } from '../../contexts/FocusContext';
 import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
@@ -51,6 +52,16 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
+
+  // Notification deep-link → scroll + highlight the matching sale row 5s.
+  const { focus } = useFocus();
+  const focusRef = useRef(null);
+  const focusedId = focus?.kind === 'sale' ? focus.id : null;
+  useEffect(() => {
+    if (focusedId && focusRef.current) {
+      try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }
+    }
+  }, [focusedId, sales]);
   const [exportOpen, setExportOpen] = useState(false);
 
   // Return modal
@@ -323,13 +334,19 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 </tr>
               </thead>
               <tbody>
-                {sales.map(s => (
-                  <>
-                    <tr key={s.id} className="cursor-pointer"
-                      style={{ borderBottom: '1px solid var(--color-border)' }}
+                {sales.map(s => {
+                  const focused = focusedId && String(focusedId) === String(s.id);
+                  return (
+                  <Fragment key={s.id}>
+                    <tr className="cursor-pointer"
+                      ref={focused ? focusRef : null}
+                      style={{ borderBottom: '1px solid var(--color-border)',
+                        backgroundColor: focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent',
+                        boxShadow: focused ? 'inset 3px 0 0 var(--color-primary-500, #6366f1)' : 'none',
+                        transition: 'background-color 0.3s' }}
                       onClick={() => setDetailSale(s)}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent'}>
                       <td className="px-4 py-3">
                         <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</p>
                         <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{s.customer_phone || ''}</p>
@@ -450,8 +467,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                         </td>
                       </tr>
                     )}
-                  </>
-                ))}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

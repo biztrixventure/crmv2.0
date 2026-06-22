@@ -4,6 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
 import ChatLauncher from '../../Chat/ChatLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
+import { useFocus } from '../../../contexts/FocusContext';
 
 const AdminHeader = ({
   theme, onToggleTheme, onLogout,
@@ -13,6 +14,7 @@ const AdminHeader = ({
 }) => {
   const { user, updateUser } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+  const { openFromNotification } = useFocus();
 
   const initials = user?.first_name
     ? `${user.first_name[0]}${user.last_name?.[0] || ''}`.toUpperCase()
@@ -74,6 +76,7 @@ const AdminHeader = ({
             onMarkAllRead={onMarkAllRead}
             onDelete={onDeleteNotification}
             onClearAll={onClearNotifications}
+            onNavigate={openFromNotification}
           />
 
           {/* Theme toggle */}

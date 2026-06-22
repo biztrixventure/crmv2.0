@@ -13,7 +13,7 @@ import GroupSettingsModal from './GroupSettingsModal';
 // Full chat window: dim backdrop + opaque docked panel. On large screens it's a
 // two-pane layout (conversation list always visible alongside the open thread,
 // so going back is one click); on mobile it's single-pane with a back button.
-const ChatPanel = ({ open, onClose, meId, banned }) => {
+const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) => {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('list');   // 'list' | 'new'
@@ -83,6 +83,13 @@ const ChatPanel = ({ open, onClose, meId, banned }) => {
     setView('list');
     setActive(c);
   };
+
+  // Deep-link from a chat notification → open that conversation once it's loaded.
+  useEffect(() => {
+    if (!open || !focusConversationId) return;
+    const c = conversations.find(x => String(x.id) === String(focusConversationId));
+    if (c && active?.id !== c.id) openConversation(c);
+  }, [open, focusConversationId, conversations]); // eslint-disable-line react-hooks/exhaustive-deps
   const onNewGroup = () => { setActive(null); setView('new'); };
 
   // Open the conversation straight from the picker's response. A new DM has no

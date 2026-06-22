@@ -11,6 +11,7 @@ import { AppHeader } from '../components/Layout';
 import EngagementBanners from '../components/Engagement/EngagementBanners';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFormFields } from '../hooks/useFormFields';
+import { useFocus } from '../contexts/FocusContext';
 import { dispositionTabs, isPostDateDispo } from '../utils/dispositions';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
@@ -81,6 +82,17 @@ const ComplianceShell = () => {
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
+
+  // Notification deep-link: a clicked notification (bell or OS push) sets a
+  // focus target → jump to the matching tab so the record is in view + the row
+  // self-highlights (useFocusHighlight) for ~5s.
+  const { focus } = useFocus();
+  useEffect(() => {
+    if (!focus) return;
+    const KIND_TAB = { sale: 'sales', transfer: 'transfers', callback: 'callbacks', number: 'numbers' };
+    const tab = KIND_TAB[focus.kind];
+    if (tab && TABS.some(t => t.key === tab)) setActiveTab(tab);
+  }, [focus, TABS]);
   const [companyList, setCompanyList] = useState([]);
   const [loadingCo, setLoadingCo]   = useState(false);
 

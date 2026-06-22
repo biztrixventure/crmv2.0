@@ -18,6 +18,7 @@ import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
+import { useFocus } from "../contexts/FocusContext";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
@@ -216,6 +217,16 @@ const ManagerShell = () => {
       if (fallback) setActiveTab(fallback);
     }
   }, [TABS, activeTab, managerDefaultTab, setActiveTab]);
+
+  // Notification deep-link → jump to the matching tab.
+  const { focus } = useFocus();
+  useEffect(() => {
+    if (!focus) return;
+    const KIND_TAB = { transfer: 'transfers', sale: 'sales', callback: 'callbacks' };
+    const tab = KIND_TAB[focus.kind];
+    setActiveNav('dashboard');
+    if (tab && tabKeys.has(tab)) setActiveTab(tab);
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeNav !== 'dashboard' ? activeNav : activeTab); }, [activeTab, activeNav]);

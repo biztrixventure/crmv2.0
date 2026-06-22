@@ -4,6 +4,7 @@ import NotificationBell from '../UI/NotificationBell';
 import ChatLauncher from '../Chat/ChatLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
+import { useFocus } from '../../contexts/FocusContext';
 
 const CompanyLogoImg = ({ src }) => {
   const [errored, setErrored] = useState(false);
@@ -61,6 +62,7 @@ const AppHeader = ({
   ...props
 }) => {
   const [profileOpen, setProfileOpen] = useState(false);
+  const { openFromNotification } = useFocus();
 
   // Push notification setup — lives here so it only runs when authenticated
   const {
@@ -128,6 +130,7 @@ const AppHeader = ({
               onMarkAllRead={onMarkAllRead}
               onDelete={onDeleteNotification}
               onClearAll={onClearNotifications}
+              onNavigate={openFromNotification}
               pushSubscribed={pushSubscribed}
               pushPermission={pushPermission}
               pushLoading={pushLoading}

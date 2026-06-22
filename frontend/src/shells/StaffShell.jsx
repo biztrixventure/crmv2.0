@@ -60,6 +60,7 @@ import { useShellLayout } from "../hooks/useShellLayout";
 import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
+import { useFocus } from "../contexts/FocusContext";
 import { useFormFields } from "../hooks/useFormFields";
 import { dispositionTabs, isPostDateDispo, prettyDispo } from "../utils/dispositions";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
@@ -267,6 +268,35 @@ const StaffShell = () => {
   const [dialerRefresh, setDialerRefresh] = useState(0);
   const [dupOpen, setDupOpen] = useState(false);
   const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
+
+  // Notification deep-link → jump to the right tab/section so the record shows
+  // and self-highlights for ~5s (the lists read useFocus()).
+  const { focus } = useFocus();
+  useEffect(() => {
+    if (!focus) return;
+    setActiveNav('dashboard');
+    if (focus.kind === 'callback') setActiveTab('callbacks');
+    else if (focus.kind === 'number') setActiveTab('numbers');
+    else if (focus.kind === 'transfer') {
+      if (isCloser) { setActiveTab('sales'); setCloserSection('assigned'); }
+      else setActiveTab('transfers');
+    } else if (focus.kind === 'sale') {
+      if (isCloser) { setActiveTab('sales'); setCloserSection('sales'); }
+      else setActiveTab('transfers');
+    }
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll the focused card into view + a helper the cards use to ring 5s.
+  const focusCardRef = useRef(null);
+  const isFocused = (kind, id) => !!focus && focus.kind === kind && id != null && String(focus.id) === String(id);
+  const focusRing = (on) => on
+    ? { boxShadow: '0 0 0 2px var(--color-primary-500, #6366f1), 0 0 0 6px rgba(99,102,241,0.13)' }
+    : null;
+  useEffect(() => {
+    if (focus && focusCardRef.current) {
+      try { focusCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }
+    }
+  }, [focus, transfers, sales]);
 
   // Vehicle registry — populates the CarMake / CarModel typeahead inside the
   // fronter's New Transfer modal. Fetched once on mount; cheap enough that we
@@ -1113,10 +1143,12 @@ const StaffShell = () => {
                       const si = transferStatusInfo(t.status);
                       const veh = transferVehicle(t.form_data);
                       const dt = fmtCardDate(t.created_at || t.assigned_at);
+                      const _f = isFocused('transfer', t.id);
                       return (
                       <div key={t.id} onClick={() => setDetailTransfer(t)}
+                        ref={_f ? focusCardRef : null}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', ...focusRing(_f) }}>
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="min-w-0">
                             <p className="font-semibold text-text truncate">
@@ -1205,10 +1237,13 @@ const StaffShell = () => {
                 ) : (
                   <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {sales.map(s => (
+                    {sales.map(s => {
+                      const _f = isFocused('sale', s.id);
+                      return (
                       <div key={s.id} onClick={() => setDetailSale(s)}
+                        ref={_f ? focusCardRef : null}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', ...focusRing(_f) }}>
 
                         {/* Compliance note banner for needs_revision */}
                         {s.status === 'needs_revision' && s.compliance_note && (
@@ -1322,7 +1357,8 @@ const StaffShell = () => {
                           </button>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
                   </>
@@ -1355,10 +1391,13 @@ const StaffShell = () => {
                 ) : (
                   <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {sales.map(s => (
+                    {sales.map(s => {
+                      const _f = isFocused('sale', s.id);
+                      return (
                       <div key={s.id} onClick={() => setDetailSale(s)}
+                        ref={_f ? focusCardRef : null}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', ...focusRing(_f) }}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="font-semibold text-text truncate">{s.customer_name || 'Sale'}</p>
@@ -1386,7 +1425,8 @@ const StaffShell = () => {
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
                   </>
@@ -1690,11 +1730,13 @@ const StaffShell = () => {
                       const dispoName = d?.disposition_name || t.sale_closer_disposition;
                       const dispoColor = d?.color || '#6b7280';
                       const needsRev = t.sale_status === 'needs_revision';
+                      const _f = isFocused('transfer', t.id);
                       return (
                         <div key={t.id} onClick={() => setDetailTransfer(t)}
+                          ref={_f ? focusCardRef : null}
                           className="p-4 rounded-2xl border transition-all hover:shadow-md cursor-pointer flex flex-col"
                           style={{ borderColor: needsRev ? 'var(--color-error-300)' : 'var(--color-border)',
-                            backgroundColor: needsRev ? 'var(--color-error-50)' : 'var(--color-surface)' }}>
+                            backgroundColor: needsRev ? 'var(--color-error-50)' : 'var(--color-surface)', ...focusRing(_f) }}>
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
                               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"

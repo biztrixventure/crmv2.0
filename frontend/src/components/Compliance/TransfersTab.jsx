@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useFocus } from '../../contexts/FocusContext';
 import { ArrowRight, AlertTriangle, CalendarDays, X, Copy } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { todayET } from '../../utils/timezone';
@@ -62,6 +63,16 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   const [detail, setDetail]         = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [todayCount, setTodayCount] = useState(null);
+
+  // Notification deep-link → scroll + highlight the matching transfer row 5s.
+  const { focus } = useFocus();
+  const focusRef = useRef(null);
+  const focusedId = focus?.kind === 'transfer' ? focus.id : null;
+  useEffect(() => {
+    if (focusedId && focusRef.current) {
+      try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }
+    }
+  }, [focusedId, transfers]);
 
   const today         = todayET();
   const isTodayActive = dateFrom === today && dateTo === today;
@@ -254,12 +265,18 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                 </tr>
               </thead>
               <tbody>
-                {transfers.map(t => (
+                {transfers.map(t => {
+                  const focused = focusedId && String(focusedId) === String(t.id);
+                  return (
                   <tr key={t.id} className="cursor-pointer"
-                    style={{ borderBottom: '1px solid var(--color-border)' }}
+                    ref={focused ? focusRef : null}
+                    style={{ borderBottom: '1px solid var(--color-border)',
+                      backgroundColor: focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent',
+                      boxShadow: focused ? 'inset 3px 0 0 var(--color-primary-500, #6366f1)' : 'none',
+                      transition: 'background-color 0.3s' }}
                     onClick={() => setDetail(t)}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent'}>
                     <td className="px-4 py-3">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -317,7 +334,8 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                       {fmtDate(t.created_at)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

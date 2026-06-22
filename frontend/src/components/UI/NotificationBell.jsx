@@ -35,6 +35,7 @@ const NotificationBell = ({
   onMarkAllRead,
   onDelete,
   onClearAll,
+  onNavigate,          // (notification) => void — deep-link to the record + highlight
   // Push notification props
   pushSubscribed   = null,  // null = loading/unknown, false = not subscribed, true = active
   pushPermission   = 'default',
@@ -215,7 +216,10 @@ const NotificationBell = ({
                       backgroundColor: n.is_read ? 'transparent' : 'var(--color-primary-50, #f5f3ff)',
                       borderBottom: '1px solid var(--color-border)',
                     }}
-                    onClick={() => !n.is_read && onMarkRead(n.id)}
+                    onClick={() => {
+                      if (!n.is_read) onMarkRead(n.id);
+                      if (onNavigate) { onNavigate(n); setOpen(false); }
+                    }}
                   >
                     {/* Icon */}
                     <div

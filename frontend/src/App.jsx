@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
 import { FeatureFlagsProvider, useFeatureFlags } from "./contexts/FeatureFlagsContext";
 import { PresenceProvider } from "./contexts/PresenceContext";
+import { FocusProvider } from "./contexts/FocusContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
@@ -134,8 +135,10 @@ function App() {
               shell. Chat dots, last-seen, and the admin activity panel all
               read from this one channel. */}
           <PresenceProvider>
-            <AppToaster />
-            <AppContent />
+            <FocusProvider>
+              <AppToaster />
+              <AppContent />
+            </FocusProvider>
           </PresenceProvider>
         </FeatureFlagsProvider>
       </AuthProvider>
