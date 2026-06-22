@@ -148,21 +148,14 @@ function invalidate(campaignId) { cache.delete(campaignId); }
 function invalidateAll()         { cache.clear(); }
 
 // Call when sales activity changes (e.g. compliance approves a sale). Auto
-// sales/revenue campaigns derive progress from the `sales` table — which is NOT
-// in the realtime publication — so the SpiffWidget would never refresh on its
-// own. We (1) drop the cache so the next read recomputes, and (2) fire a
-// realtime event on spiff_campaigns (which IS published and the widget already
-// listens to) via a no-op write, so every viewer's counter refreshes instantly.
-// spiff_campaigns has no updated_at column, so re-writing `status` to its own
-// value is the safe no-op that still emits a logical-replication change.
+// sales/revenue campaigns derive progress from the `sales` table, so we drop the
+// cache and the next SpiffWidget poll recomputes fresh progress.
+//
+// (Previously this also did a no-op write to spiff_campaigns to fire a realtime
+// event. The widget now polls instead of subscribing, so that write — pure WAL +
+// Realtime-decode overhead — was removed as part of the Realtime IO cleanup.)
 async function onSalesActivityChanged() {
   invalidateAll();
-  try {
-    await supabaseAdmin.from('spiff_campaigns')
-      .update({ status: 'active' })
-      .eq('status', 'active')
-      .in('metric_source', ['sales', 'revenue']);
-  } catch { /* non-critical — cache is already busted */ }
 }
 
 module.exports = { getProgress, invalidate, invalidateAll, onSalesActivityChanged, CLOSED_LIKE, REVENUE_LIKE };

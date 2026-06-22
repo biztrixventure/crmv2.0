@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Trophy, Medal, Clock } from 'lucide-react';
 import client from '../../api/client';
-import { supabase } from '../../api/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import RichView from '../UI/RichView';
 
@@ -24,16 +23,11 @@ const SpiffWidget = () => {
     let alive = true;
     const load = () => client.get('spiff').then(r => { if (alive) setCampaigns(r.data.campaigns || []); }).catch(() => {});
     load();
-    // Auto (sales/revenue) campaigns derive progress from the sales table, which
-    // is NOT in the realtime publication — so the backend pings spiff_campaigns
-    // (a no-op write) whenever a sale's status changes (e.g. compliance approval),
-    // which lands here as a spiff_campaigns event → we refetch fresh progress.
-    const ch = supabase
-      .channel('spiff-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'spiff_entries' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'spiff_campaigns' }, load)
-      .subscribe();
-    return () => { alive = false; supabase.removeChannel(ch); };
+    // Slow poll instead of Realtime on spiff_entries/spiff_campaigns. Progress
+    // derives from sales, so a poll keeps it fresh without a per-client channel
+    // (and lets us drop the backend's no-op spiff_campaigns "ping" writes).
+    const t = setInterval(load, 90 * 1000);
+    return () => { alive = false; clearInterval(t); };
   }, [user?.id]);
 
   if (!campaigns.length) return null;

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Megaphone, AlertTriangle, X } from 'lucide-react';
 import client from '../../api/client';
-import { supabase } from '../../api/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 
@@ -25,11 +24,10 @@ const AnnouncementPopup = () => {
       .then(r => { if (alive) setQueue((r.data.announcements || []).filter(a => a.due)); })
       .catch(() => {});
     load();
-    const ch = supabase
-      .channel('announcement-popup')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, load)
-      .subscribe();
-    return () => { alive = false; supabase.removeChannel(ch); };
+    // Slow poll instead of a global Realtime channel — announcements are rare,
+    // and a postgres_changes subscription per client was costly DB-side.
+    const t = setInterval(load, 3 * 60 * 1000);
+    return () => { alive = false; clearInterval(t); };
   }, [user?.id]);
 
   const current = queue[0];

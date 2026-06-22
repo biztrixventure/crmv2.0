@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import client from '../../api/client';
-import { supabase } from '../../api/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import MarqueeStrip from './MarqueeStrip';
 
 // Sticky marquee shown below the top nav. Fetches the viewer's active items via
-// the API and refetches instantly on any marquee change (Supabase Realtime),
-// falling back fine without realtime. Cycles through multiple active items.
+// the API on mount + a slow poll (marquees change rarely). Dropped the Realtime
+// channel: a global postgres_changes subscription per client was heavy on the
+// DB's Realtime budget for content that updates maybe once a day.
+const REFRESH_MS = 3 * 60 * 1000;
 const MarqueeBanner = () => {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
@@ -17,11 +18,8 @@ const MarqueeBanner = () => {
     let alive = true;
     const load = () => client.get('marquee').then(r => { if (alive) setItems(r.data.items || []); }).catch(() => {});
     load();
-    const ch = supabase
-      .channel('marquee-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'marquee_items' }, load)
-      .subscribe();
-    return () => { alive = false; supabase.removeChannel(ch); };
+    const t = setInterval(load, REFRESH_MS);
+    return () => { alive = false; clearInterval(t); };
   }, [user?.id]);
 
   // Rotate through multiple active items.
