@@ -107,6 +107,10 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
   if (closerUserId && !transfer.assigned_closer_id) {
     updates.assigned_closer_id = closerUserId;
     updates.assigned_to = closerUserId;
+    // Mirror the manual flow: a transfer a closer has worked is "assigned", not
+    // "pending" — so it shows in the closer's assigned tab + compliance + admin.
+    // Only promote a still-pending transfer (never downgrade completed/rejected).
+    if (!transfer.status || transfer.status === 'pending') updates.status = 'assigned';
   }
   const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', transfer.id);
   if (error) throw new Error(error.message);
@@ -215,7 +219,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   let tr = null, code = candidates[0];
   for (const c of candidates) {
     const { data } = await supabaseAdmin
-      .from('transfers').select('id, company_id, assigned_closer_id').eq('vicidial_vendor_code', c).maybeSingle();
+      .from('transfers').select('id, company_id, assigned_closer_id, status').eq('vicidial_vendor_code', c).maybeSingle();
     if (data) { tr = data; code = c; break; }
   }
   // Phone fallback — the customer phone is identical on both sides even when the
@@ -224,7 +228,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
       const { data: byPhone } = await supabaseAdmin
-        .from('transfers').select('id, company_id, assigned_closer_id')
+        .from('transfers').select('id, company_id, assigned_closer_id, status')
         .eq('normalized_phone', ph).order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
@@ -241,7 +245,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const now = new Date();
     const since = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
     let rq = supabaseAdmin.from('transfers')
-      .select('id, company_id, assigned_closer_id')
+      .select('id, company_id, assigned_closer_id, status')
       .is('vicidial_dispo', null)
       .not('vicidial_vendor_code', 'is', null)   // only real dialer transfers (skip seeds)
       .gte('created_at', since)
@@ -348,7 +352,7 @@ api.post('/closer-dispos/:id/assign', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Pending disposition not found' });
   }
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, assigned_closer_id').eq('id', transferId).maybeSingle();
+    .from('transfers').select('id, company_id, assigned_closer_id, status').eq('id', transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
 
   const dispoCompanyId = qrow.company_id || tr.company_id;
@@ -413,7 +417,7 @@ api.get('/pending', asyncHandler(async (req, res) => {
 // ── API: fill remaining fields + confirm → becomes a normal transfer ─────────
 api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, created_by, form_data, vicidial_pending').eq('id', req.params.id).maybeSingle();
+    .from('transfers').select('id, created_by, form_data, vicidial_pending, assigned_closer_id').eq('id', req.params.id).maybeSingle();
   if (!tr || tr.created_by !== req.user.id || !tr.vicidial_pending) {
     return res.status(404).json({ error: 'Pending transfer not found' });
   }
@@ -424,7 +428,10 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
 
   const { data, error } = await supabaseAdmin.from('transfers').update({
     vicidial_pending: false,
-    status: 'pending',
+    // If the closer already dispositioned (claimed) it, confirm into "assigned"
+    // so it lands in the closer's assigned tab + compliance + admin — same as a
+    // manual closer-worked transfer. No closer yet → plain "pending".
+    status: tr.assigned_closer_id ? 'assigned' : 'pending',
     form_data: { ...merged, cli_number: norm || merged.cli_number || null },
     normalized_phone: norm || null,
     updated_at: new Date().toISOString(),
