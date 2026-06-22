@@ -65,6 +65,7 @@ const UserManagement = () => {
           full_name: userData.full_name,
           role_id: userData.role_id,
           password: userData.password, // Optional - only sent if user provided it
+          vicidial_agent_id: userData.vicidial_agent_id,
         });
       } else {
         // Create new user with company assignment
@@ -75,6 +76,7 @@ const UserManagement = () => {
           password: userData.password,
           company_id: userData.company_id,
           require_verification: userData.require_verification,
+          vicidial_agent_id: userData.vicidial_agent_id,
         });
       }
       setShowModal(false);

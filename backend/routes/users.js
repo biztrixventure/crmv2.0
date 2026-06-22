@@ -83,7 +83,7 @@ router.get(
 
         const { data: profiles, error: profileError } = await supabaseAdmin
           .from("user_profiles")
-          .select("user_id,first_name,last_name")
+          .select("user_id,first_name,last_name,vicidial_agent_id")
           .in("user_id", userIds);
 
         if (profileError) {
@@ -120,6 +120,7 @@ router.get(
           email: emailMap[u.user_id] || 'N/A',
           first_name: profileMap[u.user_id]?.first_name,
           last_name: profileMap[u.user_id]?.last_name,
+          vicidial_agent_id: profileMap[u.user_id]?.vicidial_agent_id || null,
         }));
 
         logger.success('GET_USERS', `Combined data for ${users.length} users`, { total: users.length });
@@ -204,7 +205,7 @@ router.get(
       logger.debug('GET_USER_BY_ID', `Fetching user profile`, { user_id: data.user_id });
       const { data: profile } = await supabaseAdmin
         .from("user_profiles")
-        .select("first_name,last_name,avatar_url")
+        .select("first_name,last_name,avatar_url,vicidial_agent_id")
         .eq("user_id", data.user_id)
         .single();
 
@@ -237,6 +238,7 @@ router.get(
         email: email,
         first_name: profile?.first_name,
         last_name: profile?.last_name,
+        vicidial_agent_id: profile?.vicidial_agent_id || null,
         role: data.custom_roles.name,
         role_level: data.custom_roles.level,
         company_id: data.company_id,
@@ -343,6 +345,7 @@ router.post(
     body("company_id").isUUID().optional(),
     body("password").optional().isLength({ min: 8 }),
     body("require_verification").optional().isBoolean(),
+    body("vicidial_agent_id").optional({ nullable: true }).trim(),
   ],
   asyncHandler(async (req, res) => {
     logger.debug('CREATE_USER', 'POST /users request received', { email: req.body.email, full_name: req.body.full_name, role_id: req.body.role_id, require_verification: req.body.require_verification });
@@ -354,6 +357,8 @@ router.post(
     }
 
     const { email, role_id, company_id, password, require_verification } = req.body;
+    // Optional VICIdial dialer agent id (maps dialer dispositions → this user).
+    const vicidialAgentId = (req.body.vicidial_agent_id || '').toString().trim() || null;
     // Derive first/last from full_name when provided; fall back to explicit fields.
     let { first_name, last_name } = req.body.full_name
       ? splitFullName(req.body.full_name)
@@ -455,6 +460,16 @@ router.post(
         }
       }
 
+      // VICIdial agent id is UNIQUE per user — reject a duplicate up front so we
+      // don't create an orphan auth user whose profile insert then fails.
+      if (vicidialAgentId) {
+        const { data: clash } = await supabaseAdmin.from('user_profiles')
+          .select('user_id').eq('vicidial_agent_id', vicidialAgentId).maybeSingle();
+        if (clash) {
+          return res.status(400).json({ error: `VICIdial Agent ID "${vicidialAgentId}" is already assigned to another user.` });
+        }
+      }
+
       // Create user in Supabase Auth
       // - require_verification=true  → invite email sent, user clicks link to activate
       // - require_verification=false → created immediately, password works right away
@@ -495,6 +510,7 @@ router.post(
         first_name,
         last_name,
         theme_preference: "light",
+        ...(vicidialAgentId ? { vicidial_agent_id: vicidialAgentId } : {}),
       });
 
       logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
@@ -557,6 +573,7 @@ router.put(
     body("role_id").isUUID().optional(),
     body("is_active").isBoolean().optional(),
     body("company_id").isUUID().optional(), // NOTE: For future reassignment - not implemented yet
+    body("vicidial_agent_id").optional({ nullable: true }).trim(),
   ],
   asyncHandler(async (req, res) => {
     logger.debug('UPDATE_USER', 'PUT /users/:id request received', { id: req.params.id, body: req.body });
@@ -575,6 +592,9 @@ router.put(
 
     const { id } = req.params;
     const { first_name, last_name, role_id, is_active, company_id } = req.body;
+    // VICIdial dialer agent id — present key means "set it" (empty = clear).
+    const hasAgentField = Object.prototype.hasOwnProperty.call(req.body, 'vicidial_agent_id');
+    const vicidialAgentId = hasAgentField ? ((req.body.vicidial_agent_id || '').toString().trim() || null) : undefined;
     const userId = req.user.id;
 
     logger.info('UPDATE_USER', `Updating user`, { id, userId, updates: { first_name, last_name, role_id, is_active, company_id } });
@@ -650,16 +670,27 @@ router.put(
         }
       }
 
-      // Update user profile if provided
-      if (first_name || last_name) {
+      // VICIdial agent id is UNIQUE — block reassigning one already held by someone else.
+      if (hasAgentField && vicidialAgentId) {
+        const { data: clash } = await supabaseAdmin.from('user_profiles')
+          .select('user_id').eq('vicidial_agent_id', vicidialAgentId)
+          .neq('user_id', targetAssignment.user_id).maybeSingle();
+        if (clash) {
+          return res.status(400).json({ error: `VICIdial Agent ID "${vicidialAgentId}" is already assigned to another user.` });
+        }
+      }
+
+      // Update user profile if provided (name and/or VICIdial agent id)
+      const profileUpdate = {};
+      if (first_name) profileUpdate.first_name = first_name;
+      if (last_name)  profileUpdate.last_name  = last_name;
+      if (hasAgentField) profileUpdate.vicidial_agent_id = vicidialAgentId;
+      if (Object.keys(profileUpdate).length > 0) {
         logger.debug('UPDATE_USER', 'Updating user profile', { user_id: targetAssignment.user_id });
+        profileUpdate.updated_at = new Date().toISOString();
         await supabaseAdmin
           .from("user_profiles")
-          .update({
-            first_name: first_name || undefined,
-            last_name: last_name || undefined,
-            updated_at: new Date().toISOString(),
-          })
+          .update(profileUpdate)
           .eq("user_id", targetAssignment.user_id);
 
         logger.success('UPDATE_USER', `User profile updated`);

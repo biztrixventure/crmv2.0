@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button, FormField } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
-import { Mail, Lock, ShieldCheck, UserCheck } from 'lucide-react';
+import { Mail, Lock, ShieldCheck, UserCheck, Headphones } from 'lucide-react';
 
 // Roles that require email verification by default (big roles)
 const HIGH_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'closer_manager', 'operations_manager', 'manager'];
@@ -15,6 +15,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
     password: '',
     company_id: '',
     require_verification: false,
+    vicidial_agent_id: '',
   });
   const [errors, setErrors] = useState({});
 
@@ -29,6 +30,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         password: '',
         company_id: user.company_id || '',
         require_verification: false,
+        vicidial_agent_id: user.vicidial_agent_id || '',
       });
     } else {
       const userCompanyId = localStorage.getItem('user_company_id');
@@ -123,6 +125,17 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
           No assignable roles available — you can only assign roles below your own level.
         </p>
       )}
+
+      {/* VICIdial dialer agent id — maps dialer dispositions to this user */}
+      <FormField label="VICIdial Agent ID"
+        hint="Dialer login/agent id (e.g. TMC100626). Maps this user's dialer dispositions to the CRM. Leave blank if not on the dialer.">
+        <div className="relative">
+          <Headphones size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          <input type="text" name="vicidial_agent_id" value={formData.vicidial_agent_id}
+            onChange={handleInputChange} placeholder="e.g. TMC100626"
+            className="input pl-9" />
+        </div>
+      </FormField>
 
       {/* Company — CREATE MODE */}
       {!user && (

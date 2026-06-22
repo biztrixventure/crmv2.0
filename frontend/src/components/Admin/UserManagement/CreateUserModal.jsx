@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Eye, EyeOff, Shield } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, Shield, Headphones } from 'lucide-react';
 import Modal from '../../UI/Modal';
 import Button from '../../UI/Button';
 import client from '../../../api/client';
@@ -90,7 +90,7 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
   }, [isOpen, companyId]);
 
   const reset = () => {
-    setForm({ full_name: '', email: '', password: '', role_id: '' });
+    setForm({ full_name: '', email: '', password: '', role_id: '', vicidial_agent_id: '' });
     setError('');
     setShowPassword(false);
   };
@@ -159,6 +159,21 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
+          </div>
+
+          {/* VICIdial dialer agent id (optional) */}
+          <div>
+            <label className="block text-xs font-semibold text-text-secondary mb-1">
+              VICIdial Agent ID
+            </label>
+            <div className="relative">
+              <Headphones size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} />
+              <input className="input pl-9" value={form.vicidial_agent_id} onChange={set('vicidial_agent_id')}
+                placeholder="e.g. TMC100626 (optional)" />
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+              Dialer agent id — maps this user's dialer dispositions to the CRM.
+            </p>
           </div>
 
           {/* Role picker */}
