@@ -100,35 +100,59 @@ router.get('/companies', asyncHandler(async (req, res) => {
   // a naive select silently truncated to the first 1000 — for "All Time" (10k+
   // transfers) that made high-volume companies undercount or show 0. Page through
   // every row instead.
-  const fetchAll = async (build) => {
-    const PAGE = 1000;
-    let all = [], from = 0;
-    for (;;) {
-      const { data, error } = await build().range(from, from + PAGE - 1);
-      if (error || !data) break;
-      all = all.concat(data);
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-    return all;
-  };
-  const [usersData, salesData, transfersData] = await Promise.all([
-    fetchAll(() => supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids)),
-    fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids))),
-    fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids))),
-  ]);
-
   const userCount = {}, saleCount = {}, pendingCount = {}, completedCount = {}, cancelledCount = {}, grossValue = {}, transferCount = {};
-  usersData.forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
-  salesData.forEach(s => {
-    const c = s.company_id;
-    saleCount[c] = (saleCount[c] || 0) + 1;
-    if (s.status === 'pending_review')                          pendingCount[c]   = (pendingCount[c]   || 0) + 1;
-    if (s.status === 'closed_won' || s.status === 'sold')       completedCount[c] = (completedCount[c] || 0) + 1;
-    if (s.status === 'cancelled' || s.status === 'compliance_cancelled') cancelledCount[c] = (cancelledCount[c] || 0) + 1;
-    grossValue[c] = (grossValue[c] || 0) + (Number(s.down_payment) || 0);
+
+  // Fast path: one grouped query per table inside the DB (migration 103) — reads
+  // ~one row per company instead of paging every sale + transfer. Falls back to
+  // the legacy page-everything-and-count-in-JS scan if the RPC isn't present yet.
+  const { data: kpis, error: kpiErr } = await supabaseAdmin.rpc('compliance_company_kpis', {
+    p_ids:       ids,
+    p_sale_from: date_from || null,
+    p_sale_to:   date_to   || null,
+    p_xfer_from: date_from ? etDateToUtcStart(date_from) : null,
+    p_xfer_to:   date_to   ? etDateToUtcEnd(date_to)     : null,
   });
-  transfersData.forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
+
+  if (!kpiErr && Array.isArray(kpis)) {
+    kpis.forEach(k => {
+      userCount[k.company_id]      = Number(k.user_count) || 0;
+      saleCount[k.company_id]      = Number(k.sale_count) || 0;
+      pendingCount[k.company_id]   = Number(k.pending_review_count) || 0;
+      completedCount[k.company_id] = Number(k.completed_count) || 0;
+      cancelledCount[k.company_id] = Number(k.cancelled_count) || 0;
+      grossValue[k.company_id]     = Number(k.gross_value) || 0;
+      transferCount[k.company_id]  = Number(k.transfer_count) || 0;
+    });
+  } else {
+    if (kpiErr) logger.warn('COMPLIANCE', `KPI RPC unavailable, falling back to scan: ${kpiErr.message}`);
+    const fetchAll = async (build) => {
+      const PAGE = 1000;
+      let all = [], from = 0;
+      for (;;) {
+        const { data, error } = await build().range(from, from + PAGE - 1);
+        if (error || !data) break;
+        all = all.concat(data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    };
+    const [usersData, salesData, transfersData] = await Promise.all([
+      fetchAll(() => supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids)),
+      fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids))),
+      fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids))),
+    ]);
+    usersData.forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
+    salesData.forEach(s => {
+      const c = s.company_id;
+      saleCount[c] = (saleCount[c] || 0) + 1;
+      if (s.status === 'pending_review')                          pendingCount[c]   = (pendingCount[c]   || 0) + 1;
+      if (s.status === 'closed_won' || s.status === 'sold')       completedCount[c] = (completedCount[c] || 0) + 1;
+      if (s.status === 'cancelled' || s.status === 'compliance_cancelled') cancelledCount[c] = (cancelledCount[c] || 0) + 1;
+      grossValue[c] = (grossValue[c] || 0) + (Number(s.down_payment) || 0);
+    });
+    transfersData.forEach(t => { transferCount[t.company_id] = (transferCount[t.company_id] || 0) + 1; });
+  }
 
   const enriched = (companies || []).map(c => ({
     ...c,
