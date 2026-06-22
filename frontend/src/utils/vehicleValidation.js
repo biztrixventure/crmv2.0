@@ -3,8 +3,14 @@
 // symptom: a Year field that isn't a real year, or a Make field that's numeric
 // (e.g. the year landed in the make column).
 
-const YEAR_RE = /year/i;   // CarYear, Car Year, year…
-const MAKE_RE = /make/i;   // CarMake, Make…
+const YEAR_RE  = /year/i;            // CarYear, Car Year, year…
+const MAKE_RE  = /make/i;            // CarMake, Make…
+const MILES_RE = /mile|mileage|odomet/i;  // Miles, Mileage, Odometer…
+
+// Mileage must be 3–6 digits (e.g. 100 … 999999). Blocks a 2-digit typo and an
+// over-long junk value before the form can be submitted.
+const MILES_MIN_DIGITS = 3;
+const MILES_MAX_DIGITS = 6;
 
 // Returns { [prefix+fieldName]: message } for any implausible vehicle value.
 export function vehicleFieldIssues(fields, values, prefix = '') {
@@ -21,6 +27,11 @@ export function vehicleFieldIssues(fields, values, prefix = '') {
       }
     } else if (MAKE_RE.test(name) && /^\d+(\.\d+)?$/.test(v)) {
       issues[`${prefix}${f.name}`] = `Car make can't be a number ("${v}") — columns may be shifted.`;
+    } else if (MILES_RE.test(name) || MILES_RE.test(f.label || '')) {
+      const digits = v.replace(/\D/g, '');
+      if (digits.length < MILES_MIN_DIGITS || digits.length > MILES_MAX_DIGITS) {
+        issues[`${prefix}${f.name}`] = `Mileage must be ${MILES_MIN_DIGITS}–${MILES_MAX_DIGITS} digits — "${v}" has ${digits.length}.`;
+      }
     }
   });
   return issues;
