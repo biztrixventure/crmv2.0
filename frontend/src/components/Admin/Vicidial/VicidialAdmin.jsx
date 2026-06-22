@@ -195,7 +195,13 @@ const DispoMap = () => {
     catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
   };
 
-  const unmapped = rows.filter(r => !r.disposition_name).length;
+  // A code with a Global row (company_id null + named) resolves for EVERY company
+  // via fallback — so a company's own blank row for that code isn't really
+  // unmapped. Only flag codes that have neither a company name nor a global one.
+  const globalByCode = {};
+  rows.forEach(r => { if (!r.company_id && r.disposition_name) globalByCode[r.vici_code] = r.disposition_name; });
+  const isCovered = (r) => !!r.disposition_name || !!globalByCode[r.vici_code];
+  const unmapped = rows.filter(r => !isCovered(r)).length;
 
   return (
     <div className="space-y-4">
@@ -211,7 +217,9 @@ const DispoMap = () => {
       {companyId && (
         <>
           {dispositions.length === 0 && <Alert type="warning" message="This company has no configured dispositions yet — add them under Dispositions/Form config first, then map here." />}
-          {unmapped > 0 && <p className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}><AlertTriangle size={13} /> {unmapped} unmapped code(s) the dialer sent — resolve below.</p>}
+          {unmapped > 0
+            ? <p className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}><AlertTriangle size={13} /> {unmapped} code(s) with no mapping (and no Global fallback) — resolve below.</p>
+            : companyId !== '__global__' && <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-success-700, #047857)' }}><Check size={13} /> Every code the dialer sent is covered (here or by 🌐 Global). Nothing to do.</p>}
 
           {/* Add row */}
           <div className="flex items-end gap-2 flex-wrap rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -232,23 +240,28 @@ const DispoMap = () => {
                   {['Dialer code', 'CRM disposition', 'Hits', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
-                  {rows.map(r => (
-                    <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: r.disposition_name ? undefined : 'var(--color-warning-50, #fffbeb)' }}>
+                  {rows.map(r => {
+                    const coveredByGlobal = !r.disposition_name && !!globalByCode[r.vici_code] && !!r.company_id;
+                    const trulyUnmapped = !r.disposition_name && !coveredByGlobal;
+                    return (
+                    <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: trulyUnmapped ? 'var(--color-warning-50, #fffbeb)' : undefined }}>
                       <td className="px-4 py-2.5 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
                         {r.vici_code}
                         {!r.company_id && <span className="ml-2 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>🌐 global</span>}
                       </td>
                       <td className="px-4 py-2.5">
                         <select value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">
-                          <option value="">— unmapped —</option>
+                          <option value="">{coveredByGlobal ? `— using 🌐 Global: ${globalByCode[r.vici_code]} —` : '— unmapped —'}</option>
                           {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
                           {r.disposition_name && !dispositions.includes(r.disposition_name) && <option value={r.disposition_name}>{r.disposition_name}</option>}
                         </select>
+                        {coveredByGlobal && <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Resolves via 🌐 Global — only set here to override for this company.</p>}
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.hits}</td>
                       <td className="px-4 py-2.5"><button onClick={() => del(r)} className="p-1.5 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: '#ef4444' }} /></button></td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -263,30 +276,70 @@ const DispoMap = () => {
 const Setup = () => {
   const base = window.location.origin.replace(/\/$/, '');
   const block = (s) => <pre className="text-[11px] whitespace-pre-wrap rounded-lg p-3 overflow-x-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>{s}</pre>;
+  const Card = ({ title, children }) => (
+    <div className="rounded-xl p-4 space-y-2" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <p className="font-bold" style={{ color: 'var(--color-text)' }}>{title}</p>
+      {children}
+    </div>
+  );
   return (
     <div className="space-y-5 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in the URLs below. The fronter Dispo Call URL fires on <strong>every</strong> disposition — set <strong>Transfer dispos</strong> on the Prefix registry tab so only real transfers (e.g. <code>XFER</code>) create a pending transfer.</p>
-      <p className="text-xs">The <code>{'{PREFIX}'}</code> only keeps the correlation code unique across dialers — the backend doesn't parse it. The hard rule: the fronter and closer URLs must send the <strong>identical</strong> code. Keep a prefix if more than one fronter dialer feeds this CRM.</p>
+      <p>Set <code>VICIDIAL_INGEST_TOKEN</code> in the backend env, then use <code>?key=THAT_TOKEN</code> in every URL below.</p>
 
-      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>1 · Fronter Dispo Call URL — SAME VICIdial box</p>
-        <p className="mb-2 text-xs">The transfer keeps the same <code>lead_id</code>. <strong>No webform, no prefix</strong> needed (add <code>{'{PREFIX}'}</code> before <code>--A--lead_id--B--</code> only if multiple dialers feed this CRM).</p>
+      {/* Golden rules */}
+      <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
+        <p className="font-bold mb-2" style={{ color: 'var(--color-primary-700, #4338ca)' }}>Read this first — the 3 rules that make it work</p>
+        <ul className="list-disc pl-5 space-y-1 text-xs">
+          <li><strong>Map agents FIRST</strong> (Agent mapping tab). A pending transfer is created only for a mapped <em>fronter</em> agent; a disposition is attributed only for a mapped <em>closer</em> agent. Unmapped agent → it's lost.</li>
+          <li><strong>Fronter URL → the fronter CAMPAIGN's Dispo Call URL.</strong> It fires on the transfer disposition (set <strong>Transfer dispos = XFER</strong> on the Prefix tab so only real transfers create a pending).</li>
+          <li><strong>Closer URL → the closer IN-GROUP's Dispo Call URL — NOT the campaign.</strong> Inbound/transferred calls fire the <em>in-group</em>, not the campaign. Put it on <em>every</em> in-group a closer answers transfers in (e.g. SIP_INB, ETCdialer, TransferGroup).</li>
+        </ul>
+      </div>
+
+      {/* Scenario A */}
+      <Card title="Scenario A · SAME VICIdial box (fronter + closer share one dialer)">
+        <p className="text-xs">The transfer keeps the same <code>lead_id</code> + customer phone, so it matches by <strong>phone</strong>. No webform, no prefix needed.</p>
+        <p className="text-xs font-semibold mt-1" style={{ color: 'var(--color-text)' }}>① Fronter outbound campaign → Dispo Call URL:</p>
         {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code=--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
-      </div>
+        <p className="text-xs font-semibold mt-1" style={{ color: 'var(--color-text)' }}>② Closer in-group → Dispo Call URL (the one closer URL, see below).</p>
+      </Card>
 
-      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>2 · Fronter Dispo Call URL — DIFFERENT VICIdial box</p>
-        <p className="mb-2 text-xs">The closer box assigns its own <code>lead_id</code>, so the fronter's id rides across in <code>vendor_lead_code</code>. First add this param to the fronter <strong>webform (add_lead)</strong>, pointed at the closer box:</p>
+      {/* Scenario B */}
+      <Card title="Scenario B · DIFFERENT VICIdial box (fronter pushes to the closer box)">
+        <p className="text-xs">The closer box makes its own <code>lead_id</code>, so the fronter's id must ride across in <code>vendor_lead_code</code>. Matches by <strong>vendor_lead_code</strong> (<code>{'{PREFIX}'}</code> + lead id) — exact.</p>
+        <p className="text-xs font-semibold mt-1" style={{ color: 'var(--color-text)' }}>① Fronter <strong>webform (add_lead)</strong>, pushing the lead to the closer box — append:</p>
         {block('&vendor_lead_code={PREFIX}--A--lead_id--B--')}
-        <p className="font-semibold mb-1 mt-2" style={{ color: 'var(--color-text)' }}>Then the fronter Dispo Call URL:</p>
+        <p className="text-xs font-semibold mt-1" style={{ color: 'var(--color-text)' }}>② Fronter outbound campaign → Dispo Call URL (same prefix):</p>
         {block(`${base}/api/vicidial/fronter-xfer?key=YOUR_TOKEN&code={PREFIX}--A--lead_id--B--&phone=--A--phone_number--B--&agent=--A--user--B--&dispo=--A--dispo--B--`)}
-      </div>
+        <p className="text-xs font-semibold mt-1" style={{ color: 'var(--color-text)' }}>③ Closer in-group → Dispo Call URL (the one closer URL, see below).</p>
+        <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Register <code>{'{PREFIX}'}</code> (e.g. ETC) on the Prefix tab for that fronter. The webform and the fronter URL must use the <strong>identical</strong> prefix.</p>
+      </Card>
 
-      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold mb-2" style={{ color: 'var(--color-text)' }}>3 · Closer Dispo Call URL — works for BOTH</p>
-        <p className="mb-2 text-xs">One URL for every closer campaign. It sends <code>vendor_lead_code</code> (matches different-box leads) and <code>lead_id</code> as a fallback (matches same-box leads) — the CRM uses whichever hits.</p>
-        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&alt_code=--A--lead_id--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
-      </div>
+      {/* Closer URL */}
+      <Card title="The Closer Dispo Call URL — one URL, every in-group, both scenarios">
+        <p className="text-xs">Put this on each closer <strong>in-group</strong>'s Dispo Call URL. It sends <code>vendor_lead_code</code> (matches Scenario B) and <code>lead_id</code> + <code>phone</code> (match Scenario A) — the CRM uses whichever hits.</p>
+        {block(`${base}/api/vicidial/closer-dispo?key=YOUR_TOKEN&code=--A--vendor_lead_code--B--&alt_code=--A--lead_id--B--&phone=--A--phone_number--B--&dispo=--A--dispo--B--&talk_time=--A--talk_time--B--&agent=--A--user--B--`)}
+      </Card>
+
+      {/* Matching */}
+      <Card title="How a disposition finds its lead (and why it never mixes up closers)">
+        <ol className="list-decimal pl-5 space-y-1 text-xs">
+          <li><strong>vendor_lead_code</strong> — exact, the lead's own id (Scenario B).</li>
+          <li><strong>phone</strong> — the customer's own number (Scenario A).</li>
+          <li><strong>No match → queued</strong> for that closer to attach to the right lead by hand (their "pending dispositions"). It <strong>never guesses</strong> a lead from "whatever came in last", so one closer's disposition can never land on another's.</li>
+        </ol>
+      </Card>
+
+      {/* Troubleshooting */}
+      <Card title="Troubleshooting">
+        <ul className="list-disc pl-5 space-y-1 text-xs">
+          <li><code>{'{ok:false, "agent not mapped"}'}</code> → map that dialer agent (Agent mapping).</li>
+          <li><strong>Pending transfer never appears</strong> → the <em>fronter</em> agent isn't mapped, or the fronter-xfer URL isn't on the fronter <em>campaign</em>, or Transfer dispos doesn't include the dispo the fronter used.</li>
+          <li><strong>Closer dispo doesn't attach</strong> → the closer URL is on the <em>campaign</em>, not the <em>in-group</em> — move it. Or <code>vendor_lead_code</code>/<code>phone</code> isn't being sent.</li>
+          <li><strong>Dispo shows the raw code</strong> (e.g. <code>SALE</code>) → name it in the Disposition map (use 🌐 Global to cover every company at once).</li>
+          <li><strong>Disposition tagged to the wrong company</strong> → the agent is mapped to the wrong company; fix it in Agent mapping.</li>
+        </ul>
+      </Card>
     </div>
   );
 };
