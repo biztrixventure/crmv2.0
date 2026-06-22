@@ -228,8 +228,11 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         }}
       />
 
-      {/* Stats strip — total matches + per-status breakdown of the page. */}
-      <TabStatsStrip total={total} records={transfers} />
+      {/* Stats strip — total matches + per-status breakdown of the page.
+          Click a status tile to filter the list to that status. */}
+      <TabStatsStrip total={total} records={transfers}
+        activeStatus={status}
+        onSelectStatus={(s) => { setStatus(s); setPage(1); }} />
 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

@@ -56,9 +56,12 @@ export default function TabStatsStrip({
   statusKey = 'status',
   labelOf,
   badgeOf,
-  extraTiles = [],   // [{ key, label, value, bg, color, icon }]
+  extraTiles = [],   // [{ key, label, value, bg, color, icon, onClick, active }]
+  activeStatus,      // currently-selected status ('' / undefined = none)
+  onSelectStatus,    // (statusKey | '') => void — when set, status tiles filter
 }) {
   const loaded = records.length;
+  const clickable = typeof onSelectStatus === 'function';
 
   // Aggregate the visible page by status. We deliberately do NOT call the
   // backend a second time — the count strip is meant to summarize what the
@@ -86,7 +89,7 @@ export default function TabStatsStrip({
   // Append any extra caller-provided tiles (e.g. Overdue for callbacks).
   for (const t of extraTiles) {
     if (t && t.value !== undefined && t.value !== null) tiles.push({
-      ...t, icon: t.icon || Layers,
+      ...t, icon: t.icon || Layers, extra: true,
     });
   }
 
@@ -106,15 +109,22 @@ export default function TabStatsStrip({
       style={{
         gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_W}px, 1fr))`,
       }}>
-      {/* Total tile — primary accent, always first. */}
-      <div
-        className="flex items-center gap-2 px-2.5 rounded-lg"
+      {/* Total tile — primary accent, always first. Clickable → clear status. */}
+      {(() => {
+        const TotalTag = clickable ? 'button' : 'div';
+        const totalActive = clickable && !activeStatus;
+        return (
+      <TotalTag
+        type={clickable ? 'button' : undefined}
+        onClick={clickable ? () => onSelectStatus('') : undefined}
+        className={`flex items-center gap-2 px-2.5 rounded-lg w-full text-left ${clickable ? 'cursor-pointer transition-transform hover:scale-[1.03]' : ''}`}
         style={{
           ...tileBase,
           background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, var(--color-surface) 70%)',
           border: '1px solid var(--color-primary-200, #c7d2fe)',
+          boxShadow: totalActive ? '0 0 0 2px var(--color-primary-500, #6366f1)' : undefined,
         }}
-        title={loaded < total ? `${total.toLocaleString()} total · ${loaded} on this page` : `${total.toLocaleString()} total`}>
+        title={clickable ? 'Show all (clear status filter)' : (loaded < total ? `${total.toLocaleString()} total · ${loaded} on this page` : `${total.toLocaleString()} total`)}>
         <div className="rounded-md flex-shrink-0 flex items-center justify-center"
           style={{ width: 26, height: 26, backgroundColor: 'var(--color-primary-100, #e0e7ff)' }}>
           <Layers size={13} style={{ color: 'var(--color-primary-700, #4338ca)' }} />
@@ -127,20 +137,32 @@ export default function TabStatsStrip({
             {total.toLocaleString()}
           </p>
         </div>
-      </div>
+      </TotalTag>
+        );
+      })()}
 
       {/* Per-status tiles */}
       {tiles.map(t => {
         const Icon = t.icon;
+        // A status tile filters the list; an extra tile filters only if it
+        // provides its own onClick. Otherwise it's a plain display tile.
+        const isExtra   = t.extra === true;
+        const canClick  = isExtra ? typeof t.onClick === 'function' : clickable;
+        const isActive  = isExtra ? !!t.active : (clickable && activeStatus === t.key);
+        const onClick   = isExtra ? t.onClick : (clickable ? () => onSelectStatus(activeStatus === t.key ? '' : t.key) : undefined);
+        const Tag = canClick ? 'button' : 'div';
         return (
-          <div key={t.key + ':' + t.label}
-            className="flex items-center gap-2 px-2.5 rounded-lg"
+          <Tag key={t.key + ':' + t.label}
+            type={canClick ? 'button' : undefined}
+            onClick={onClick}
+            className={`flex items-center gap-2 px-2.5 rounded-lg w-full text-left ${canClick ? 'cursor-pointer transition-transform hover:scale-[1.03]' : ''}`}
             style={{
               ...tileBase,
               backgroundColor: t.bg,
               border: `1px solid ${t.color}30`,
+              boxShadow: isActive ? `0 0 0 2px ${t.color}` : undefined,
             }}
-            title={`${t.label}: ${t.value} on this page`}>
+            title={canClick ? `Filter by ${t.label}` : `${t.label}: ${t.value} on this page`}>
             <div className="rounded-md flex-shrink-0 flex items-center justify-center"
               style={{ width: 26, height: 26, backgroundColor: `${t.color}1a` }}>
               <Icon size={13} style={{ color: t.color }} />
@@ -152,7 +174,7 @@ export default function TabStatsStrip({
                 {Number(t.value || 0).toLocaleString()}
               </p>
             </div>
-          </div>
+          </Tag>
         );
       })}
     </div>

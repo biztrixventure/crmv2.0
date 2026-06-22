@@ -609,6 +609,8 @@ const CallbacksTab = ({ companyList }) => {
         <TabStatsStrip
           total={total}
           records={callbacks}
+          activeStatus={status}
+          onSelectStatus={(s) => { setStatus(s); setPage(1); }}
           extraTiles={overdueOnPage > 0 ? [{
             key: 'overdue', label: 'Overdue', value: overdueOnPage,
             bg: '#fef2f2', color: '#dc2626', icon: AlertCircle,

@@ -288,6 +288,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       <TabStatsStrip
         total={total}
         records={sales}
+        activeStatus={status}
+        onSelectStatus={(s) => { setStatus(s); setPage(1); }}
         labelOf={labelOf}
         badgeOf={(key) => {
           // Map the catalog badge variant to bg/color the strip expects.
