@@ -211,9 +211,12 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
 // ── Conversations tab (filters + search) ──────────────────────────────────────
 const FILTERS = [{ k: '', label: 'All' }, { k: 'dm', label: 'Direct' }, { k: 'group', label: 'Groups' }, { k: 'broadcast', label: 'Broadcasts' }];
 
+const CONV_PAGE = 50;
 const ConversationsTab = ({ openId, setOpenId }) => {
   const [convs, setConvs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
   const [locked, setLocked] = useState(false);
@@ -225,30 +228,38 @@ const ConversationsTab = ({ openId, setOpenId }) => {
 
   useEffect(() => { client.get('chat/directory-meta').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
 
-  // Specific-user picker (scoped to the chosen company when set).
+  // Specific-user picker — only searches when you TYPE a name (scoped to the
+  // chosen company). Selecting a company alone just filters the list below; it
+  // no longer pops a user dropdown over everything.
   useEffect(() => {
-    if (selectedUser) return;
+    if (selectedUser || !userQuery.trim()) { setUserResults([]); return; }
     const t = setTimeout(async () => {
-      if (!userQuery.trim() && !companyId) { setUserResults([]); return; }
-      try { const r = await client.get('chat/users', { params: { q: userQuery || undefined, company_id: companyId || undefined } }); setUserResults(r.data.users || []); }
+      try { const r = await client.get('chat/users', { params: { q: userQuery, company_id: companyId || undefined } }); setUserResults(r.data.users || []); }
       catch { setUserResults([]); }
     }, 250);
     return () => clearTimeout(t);
   }, [userQuery, companyId, selectedUser]);
 
-  const load = useCallback(async () => {
+  // Paged loader — replace on page 1 / filter change, append on "Load more".
+  const load = useCallback(async (nextPage = 1, append = false) => {
     setLoading(true);
     try {
       const r = await client.get('chat/admin/conversations', { params: {
         q, type, locked: locked ? 'true' : undefined,
         company_id: selectedUser ? undefined : (companyId || undefined),
         user_id: selectedUser?.id || undefined,
+        page: nextPage, limit: CONV_PAGE,
       } });
-      setConvs(r.data.conversations || []);
+      const list = r.data.conversations || [];
+      setConvs(prev => append ? [...prev, ...list] : list);
+      setHasMore(!!r.data.has_more);
+      setPage(nextPage);
     }
     catch { /* ignore */ } finally { setLoading(false); }
   }, [q, type, locked, companyId, selectedUser]);
-  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+  // Filter change → debounce back to page 1.
+  useEffect(() => { const t = setTimeout(() => load(1, false), 250); return () => clearTimeout(t); }, [load]);
+  const loadMore = () => load(page + 1, true);
 
   return (
     <div>
@@ -290,10 +301,10 @@ const ConversationsTab = ({ openId, setOpenId }) => {
         ))}
         <button onClick={() => setLocked(l => !l)} className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5"
           style={{ background: locked ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: locked ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}><Lock size={12} /> Locked</button>
-        <button onClick={load} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }} title="Refresh"><RefreshCw size={14} /></button>
+        <button onClick={() => load(1, false)} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }} title="Refresh"><RefreshCw size={14} /></button>
       </div>
 
-      {loading ? <Spinner /> : convs.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No conversations</p> : (
+      {loading && convs.length === 0 ? <Spinner /> : convs.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No conversations</p> : (
         <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -314,7 +325,22 @@ const ConversationsTab = ({ openId, setOpenId }) => {
           </table>
         </div>
       )}
-      {openId && <ConversationViewer conversationId={openId} onClose={() => setOpenId(null)} onChanged={load} />}
+
+      {/* Count + lazy "Load more" — the list pages 50 at a time instead of
+          pulling every conversation; chat content loads only when a row is opened. */}
+      {convs.length > 0 && (
+        <div className="flex items-center justify-between gap-3 mt-3">
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            Showing {convs.length}{hasMore ? '+' : ''} conversation{convs.length !== 1 ? 's' : ''}
+          </span>
+          {hasMore && (
+            <Button size="sm" variant="secondary" onClick={loadMore} disabled={loading}>
+              {loading ? 'Loading…' : `Load ${CONV_PAGE} more`}
+            </Button>
+          )}
+        </div>
+      )}
+      {openId && <ConversationViewer conversationId={openId} onClose={() => setOpenId(null)} onChanged={() => load(1, false)} />}
     </div>
   );
 };

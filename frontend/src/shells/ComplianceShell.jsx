@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -27,6 +27,8 @@ import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 import BulkStatusUpdate    from '../components/Compliance/BulkStatusUpdate';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
+import ScriptPanel        from '../components/FAQ/ScriptPanel';
+import FAQPanel           from '../components/FAQ/FAQPanel';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -38,6 +40,8 @@ const CODE_TABS = [
   { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
   { key: 'reviews',     label: 'Call Reviews',       icon: Star },
   { key: 'numbers',     label: 'Call Numbers',       icon: Hash },
+  { key: 'scripts',     label: 'Scripts & Rebuttals', icon: ScrollText },
+  { key: 'faqs',        label: 'FAQs',               icon: HelpCircle },
 ];
 
 const ComplianceShell = () => {
@@ -237,6 +241,10 @@ const ComplianceShell = () => {
         {activeTab === 'numbers' && (
           <CallbackNumbersTab companyList={companyList} />
         )}
+        {/* Read-only knowledge base — compliance sees every audience (fronter +
+            closer + both); the /scripts API returns all audiences for this role. */}
+        {activeTab === 'scripts' && <ScriptPanel />}
+        {activeTab === 'faqs'    && <FAQPanel />}
         <DevCredit />
       </main>
     </div>
