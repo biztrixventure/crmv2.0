@@ -281,16 +281,36 @@ router.post('/query', asyncHandler(async (req, res) => {
   const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
   const cfg     = pickDataset(dataset);
 
-  let query = supabaseAdmin.from(cfg.table).select('*', { count: 'exact' }).order('created_at', { ascending: false });
-  for (const f of filters) query = applyFilter(query, f, cfg);
   const offset = (page - 1) * limit;
-  query = query.range(offset, offset + limit - 1);
 
-  const { data, error, count } = await query;
-  if (error) {
+  // Deferred-join pagination: ORDER BY + LIMIT on a NARROW (id) projection so the
+  // sort operates on tiny tuples, not full form_data rows. Selecting * and
+  // ordering directly made the planner sort the whole filtered set of wide JSONB
+  // rows into temp files (hundreds of MB spilled to disk per call). We page the
+  // ids here, then fetch the wide rows for just this page.
+  let idQuery = supabaseAdmin.from(cfg.table).select('id', { count: 'exact' }).order('created_at', { ascending: false });
+  for (const f of filters) idQuery = applyFilter(idQuery, f, cfg);
+  idQuery = idQuery.range(offset, offset + limit - 1);
+
+  const { data: idRows, error: idErr, count } = await idQuery;
+  if (idErr) {
     // eslint-disable-next-line no-console
-    console.error('[data-analyzer/query] supabase error', { code: error.code, message: error.message, filters });
-    return res.status(500).json({ error: error.message, code: error.code });
+    console.error('[data-analyzer/query] supabase error', { code: idErr.code, message: idErr.message, filters });
+    return res.status(500).json({ error: idErr.message, code: idErr.code });
+  }
+
+  const pageIds = (idRows || []).map(r => r.id);
+  let data = [];
+  if (pageIds.length) {
+    const { data: full, error: fErr } = await supabaseAdmin.from(cfg.table).select('*').in('id', pageIds);
+    if (fErr) {
+      // eslint-disable-next-line no-console
+      console.error('[data-analyzer/query] fetch error', { code: fErr.code, message: fErr.message });
+      return res.status(500).json({ error: fErr.message, code: fErr.code });
+    }
+    // .in() doesn't preserve order — restore the paged created_at DESC order.
+    const pos = new Map(pageIds.map((id, i) => [id, i]));
+    data = (full || []).sort((a, b) => pos.get(a.id) - pos.get(b.id));
   }
 
   const enriched = await enrichNames(data || [], dataset);
