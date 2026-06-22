@@ -29,11 +29,16 @@ const DATASETS = {
     typed: new Set([
       'id', 'transfer_id', 'created_by', 'closer_id', 'fronter_id', 'company_id', 'status',
       'customer_name', 'customer_phone', 'customer_phone_2', 'customer_email', 'customer_address',
-      'car_year', 'car_make', 'car_model', 'car_miles', 'car_vin',
+      'car_year', 'car_make', 'car_model', 'car_miles', 'car_vin', 'miles_num',
       'plan', 'down_payment', 'monthly_payment', 'payment_due_note', 'reference_no',
       'client_name', 'sale_date', 'closer_disposition', 'compliance_note',
       'created_at', 'updated_at', 'submitted_for_review_at', 'compliance_reviewed_at',
     ]),
+    // Map a form-field name to a typed numeric column so range filters compare
+    // numerically instead of lexicographically on JSONB text. miles_num is the
+    // digits-only mirror of form_data.Miles (migration 102); car_year is already
+    // a populated INTEGER column.
+    aliases: { Miles: 'miles_num', CarYear: 'car_year' },
   },
   transfers: {
     table: 'transfers',
@@ -49,8 +54,10 @@ const ALLOWED_OPS = new Set(['eq', 'neq', 'in', 'gte', 'lte', 'between', 'ilike'
 
 function applyFilter(query, f, cfg) {
   if (!f || !f.field || !ALLOWED_OPS.has(f.op)) return query;
-  const isTyped = cfg.typed.has(f.field);
-  const col = isTyped ? f.field : `form_data->>${f.field}`;
+  // Resolve an alias (e.g. Miles → miles_num) so range ops hit a numeric column.
+  const field = (cfg.aliases && cfg.aliases[f.field]) || f.field;
+  const isTyped = cfg.typed.has(field);
+  const col = isTyped ? field : `form_data->>${field}`;
   const v   = f.value;
 
   switch (f.op) {

@@ -60,6 +60,10 @@ const kindFor = (f) => {
   // future renames safe).
   if (/\bmodel\b/.test(name) || /\bmodel\b/.test(label)) return 'car_model';
   if (/make/.test(name)    || /make/.test(label))    return 'make';
+  // Numeric fields → a start/end range. Detected by name/label because the form
+  // schema often types mileage/zip as plain text/zip rather than number. Year is
+  // also caught here (in addition to its field_type:number).
+  if (/year|mile|odomet|zip|postal/.test(name) || /year|mile|odomet|zip|postal/.test(label)) return 'range_num';
   // sale_client → Plan parent; sale_plan → its child. Field_type-based detection
   // covers admin-named variants like SalePlan / CustomPlan.
   if (f.field_type === 'sale_client') return 'sale_client';
@@ -382,7 +386,7 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     );
   }
   if (kind === 'range_num') {
-    const [lo = '', hi = ''] = value || [];
+    const [lo = '', hi = ''] = Array.isArray(value) ? value : [];
     return (
       <div className="grid grid-cols-2 gap-2">
         <input type="number" value={lo} onChange={e => set([e.target.value, hi])} className="input text-sm" placeholder="Min" />
@@ -417,7 +421,7 @@ const buildPayload = (fields, filters) => fields
     }
     if (kind === 'bool') return { field: f.name, op: 'eq', value: v };
     if (kind === 'range_num' || kind === 'range_date') {
-      const [lo, hi] = v;
+      const [lo, hi] = Array.isArray(v) ? v : [];
       if ((lo === '' || lo == null) && (hi === '' || hi == null)) return null;
       return { field: f.name, op: 'between', value: [lo, hi] };
     }
