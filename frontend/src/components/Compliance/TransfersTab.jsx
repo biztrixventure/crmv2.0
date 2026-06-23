@@ -175,7 +175,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
     // Trailing summary row so the duplicate count travels with the export.
     rows.push([]);
     rows.push([`Total transfers: ${all.length}`, '', '', '', '', '', '', '', `Duplicates: ${dupCount}`, '']);
-    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Disposition','Company','Status','Created','Is Duplicate','Duplicate Reason'],
+    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Disposition','Company','Status','Transfer Date','Is Duplicate','Duplicate Reason'],
       `transfers_${todayET()}.csv`);
   };
 
