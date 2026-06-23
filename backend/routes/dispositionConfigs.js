@@ -62,6 +62,7 @@ router.post('/', async (req, res) => {
       name, color = '#6b7280', description,
       notify_roles = [], notify_fronter = false,
       notify_fronter_manager = false, requires_note = false,
+      opens_sale_form = false,
       sort_order = 0,
     } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name required' });
@@ -75,7 +76,7 @@ router.post('/', async (req, res) => {
         company_id: targetCompany,
         name: name.trim(), color, description,
         notify_roles, notify_fronter, notify_fronter_manager,
-        requires_note, sort_order, is_active: true,
+        requires_note, opens_sale_form, sort_order, is_active: true,
       })
       .select()
       .single();
@@ -103,7 +104,7 @@ router.put('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const allowed = ['name','color','description','notify_roles','notify_fronter','notify_fronter_manager','requires_note','sort_order','is_active'];
+    const allowed = ['name','color','description','notify_roles','notify_fronter','notify_fronter_manager','requires_note','opens_sale_form','sort_order','is_active'];
     const updates = { updated_at: new Date().toISOString() };
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
     if (updates.name) updates.name = updates.name.trim();

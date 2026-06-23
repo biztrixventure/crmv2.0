@@ -82,6 +82,18 @@ async function bumpDispoMap(companyId, rawCode) {
   return g ? { disposition_name: g } : null;
 }
 
+// Does this disposition require the closer to fill the sale form before it
+// counts (disposition_configs.opens_sale_form)? Company-specific row wins, else
+// global. Drives the "Confirm → open sale form" closer flow instead of auto-apply.
+async function dispoOpensSaleForm(companyId, dispoName) {
+  if (!dispoName) return false;
+  const { data } = await supabaseAdmin.from('disposition_configs')
+    .select('opens_sale_form, company_id').eq('name', dispoName).eq('is_active', true)
+    .or(`company_id.is.null,company_id.eq.${companyId}`)
+    .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
+  return !!data?.opens_sale_form;
+}
+
 // Read-only mapped-name lookup (no hit bump) — company-specific then global.
 async function lookupDispoName(companyId, rawCode) {
   if (!rawCode) return null;
@@ -259,10 +271,26 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   if (tr) {
     const dispoCompanyId = closerCompanyId || tr.company_id;
     const mapped = await bumpDispoMap(dispoCompanyId, rawCode);
+    const dispoName = mapped?.disposition_name || dispo || rawCode || null;
+
+    // Sale-form dispositions (admin toggle) don't auto-apply: drop a
+    // "Confirm → open sale form" item (WITH the matched transfer) into the
+    // closer's dialer-dispositions banner. The closer fills the sale + submits
+    // to compliance, exactly like the manual search → sale flow.
+    if (closerUserId && await dispoOpensSaleForm(dispoCompanyId, dispoName)) {
+      const { data: q } = await supabaseAdmin.from('vicidial_closer_dispo_queue').insert({
+        closer_user_id: closerUserId, company_id: dispoCompanyId,
+        vici_code: rawCode, disposition_name: dispoName, raw_dispo: dispo, transfer_id: tr.id,
+      }).select('id').single();
+      dbg.outcome = `matched transfer ${tr.id} → sale-form pending (closer confirms)`;
+      logger.success('VICIDIAL_DISPO', `Sale-form pending: transfer ${tr.id} ← "${dispo}" for closer ${closerUserId}`);
+      return res.json({ ok: true, sale_form_pending: true, transfer_id: tr.id, id: q?.id, mapped: dispoName });
+    }
+
     // Always log a disposition_action so the outcome shows everywhere (compliance,
     // closer tab, admin) like a manual one. Mapped → friendly name; unmapped →
     // the raw dialer code (still visible; admin can map it later to rename).
-    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId, dispoName: mapped?.disposition_name || dispo || rawCode || null, rawDispo: dispo, talk });
+    await applyCloserDispo({ transfer: tr, dispoCompanyId, closerUserId, dispoName, rawDispo: dispo, talk });
     dbg.outcome = `matched transfer ${tr.id} on "${code}"`;
     logger.success('VICIDIAL_DISPO', `Transfer ${tr.id} ← "${dispo}" → ${mapped?.disposition_name || '(unmapped)'}`);
     return res.json({ ok: true, transfer_id: tr.id, mapped: mapped?.disposition_name || null });
@@ -297,11 +325,22 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
 api.get('/closer-dispos', asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('vicidial_closer_dispo_queue')
-    .select('id, vici_code, disposition_name, raw_dispo, created_at')
+    .select('id, vici_code, disposition_name, raw_dispo, created_at, transfer_id')
     .eq('closer_user_id', req.user.id).eq('status', 'pending')
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ dispos: data || [] });
+
+  // Sale-form items already carry the matched transfer — hydrate its form_data
+  // so the closer's banner can open the pre-filled sale form in one click.
+  const tids = [...new Set((data || []).map(d => d.transfer_id).filter(Boolean))];
+  let tmap = {};
+  if (tids.length) {
+    const { data: tfs } = await supabaseAdmin
+      .from('transfers').select('id, form_data, company_id, assigned_closer_id, status').in('id', tids);
+    (tfs || []).forEach(t => { tmap[t.id] = t; });
+  }
+  const dispos = (data || []).map(d => ({ ...d, transfer: d.transfer_id ? (tmap[d.transfer_id] || null) : null }));
+  res.json({ dispos });
 }));
 
 // Recent transfers the closer can attach a queued disposition to — assigned to

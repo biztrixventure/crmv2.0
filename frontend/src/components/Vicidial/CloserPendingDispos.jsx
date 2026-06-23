@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ClipboardCheck, Phone, X, Loader2, Search, Check, Hash } from 'lucide-react';
+import { ClipboardCheck, Phone, X, Loader2, Search, Check, Hash, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 
@@ -7,7 +7,7 @@ import client from '../../api/client';
 // couldn't be matched to a lead (VICIdial sends only dispo+agent for the
 // closer's calls). The closer assigns each to the right lead from their CRM,
 // mirroring the fronter's pending-transfer confirm. Self-hides when empty.
-export default function CloserPendingDispos({ onChanged, refreshSignal }) {
+export default function CloserPendingDispos({ onChanged, refreshSignal, onOpenSaleForm }) {
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(null);
 
@@ -30,7 +30,10 @@ export default function CloserPendingDispos({ onChanged, refreshSignal }) {
           <ClipboardCheck size={16} /> {items.length} disposition{items.length > 1 ? 's' : ''} from the dialer — assign to a lead
         </p>
         <div className="space-y-1.5">
-          {items.map(it => (
+          {items.map(it => {
+            const fd = it.transfer?.form_data || {};
+            const cust = fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || fd.Phone || fd.customer_phone;
+            return (
             <div key={it.id} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text)' }}>
@@ -41,15 +44,28 @@ export default function CloserPendingDispos({ onChanged, refreshSignal }) {
                   {!it.disposition_name && (
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)' }}>unmapped</span>
                   )}
+                  {it.transfer && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(16,185,129,0.12)', color: '#047857' }}>needs sale form</span>
+                  )}
                 </p>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{new Date(it.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {it.transfer && cust ? <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{cust} · </span> : null}
+                  {new Date(it.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </p>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button onClick={() => setOpen(it)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: 'var(--gradient-sidebar)' }}>Assign</button>
+                {it.transfer ? (
+                  <button onClick={() => onOpenSaleForm?.(it)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white flex items-center gap-1" style={{ background: 'linear-gradient(135deg,#10b981,#059669)' }}>
+                    <DollarSign size={13} /> Open sale form
+                  </button>
+                ) : (
+                  <button onClick={() => setOpen(it)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: 'var(--gradient-sidebar)' }}>Assign</button>
+                )}
                 <button onClick={() => dismiss(it)} title="Dismiss" className="p-1.5 rounded-lg hover:bg-bg-secondary" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
       {open && <AssignModal item={open} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(); onChanged?.(); }} />}

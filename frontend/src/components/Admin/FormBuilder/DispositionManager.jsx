@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast, toastError } from '../../../utils/toast';
-import { Plus, X, Save, Edit3, Bell, BellOff, MessageSquare, GripVertical, Globe, Building2, RotateCcw, Trash2, EyeOff, Info } from 'lucide-react';
+import { Plus, X, Save, Edit3, Bell, BellOff, MessageSquare, GripVertical, Globe, Building2, RotateCcw, Trash2, EyeOff, Info, DollarSign } from 'lucide-react';
 import client from '../../../api/client';
 
 const NOTIFIABLE_ROLES = [
@@ -26,6 +26,7 @@ const DispositionForm = ({ initial, onSave, onCancel, saving }) => {
     notify_fronter:        initial?.notify_fronter        ?? false,
     notify_fronter_manager:initial?.notify_fronter_manager?? false,
     requires_note:         initial?.requires_note         ?? false,
+    opens_sale_form:       initial?.opens_sale_form       ?? false,
     sort_order:            initial?.sort_order            ?? 0,
   });
   const [err, setErr] = useState('');
@@ -182,6 +183,34 @@ const DispositionForm = ({ initial, onSave, onCancel, saving }) => {
             style={{ backgroundColor: form.requires_note ? '#d97706' : 'var(--color-border)' }}>
             <div className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
               style={{ left: form.requires_note ? '18px' : '2px' }} />
+          </div>
+        </button>
+      </div>
+
+      {/* Opens sale form — a dialer disposition with this on doesn't auto-apply;
+          the closer gets a Confirm → open sale form prompt (Sale / Post Date). */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setForm(p => ({ ...p, opens_sale_form: !p.opens_sale_form }))}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all w-full"
+          style={{
+            backgroundColor: form.opens_sale_form ? 'rgba(16,185,129,0.08)' : 'var(--color-bg-secondary)',
+            border:          `1.5px solid ${form.opens_sale_form ? 'rgba(16,185,129,0.4)' : 'var(--color-border)'}`,
+          }}>
+          <DollarSign size={14} style={{ color: form.opens_sale_form ? '#059669' : 'var(--color-text-tertiary)', flexShrink: 0 }} />
+          <div>
+            <p className="text-xs font-bold" style={{ color: form.opens_sale_form ? '#047857' : 'var(--color-text-secondary)' }}>
+              Opens the Sale Form
+            </p>
+            <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              When a dialer call gets this disposition, the closer must Confirm → fill the sale form (e.g. Sale, Post Date). Other dispositions auto-apply.
+            </p>
+          </div>
+          <div className="ml-auto flex-shrink-0 w-9 h-5 rounded-full relative transition-colors"
+            style={{ backgroundColor: form.opens_sale_form ? '#059669' : 'var(--color-border)' }}>
+            <div className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+              style={{ left: form.opens_sale_form ? '18px' : '2px' }} />
           </div>
         </button>
       </div>

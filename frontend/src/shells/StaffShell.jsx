@@ -430,11 +430,24 @@ const StaffShell = () => {
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
+  // Tracks the dialer dispo-queue item when the sale form was opened from the
+  // CloserPendingDispos banner — so only that path clears the queue item on save.
+  const saleFormQueueId = useRef(null);
   const openSaleModal = (transfer = null) => {
+    saleFormQueueId.current = null;   // normal open: not tied to a queue item
     setActiveTransfer(transfer);
     setSaleError('');
     setSaleSuccess('');
     setModalOpen(true);
+  };
+
+  // A dialer "sale-form" disposition (e.g. Sale / Post Date) confirmed from the
+  // CloserPendingDispos banner: open the pre-filled sale form for its matched
+  // transfer, then drop the queue item once the sale is submitted.
+  const openSaleFormFromDispo = (it) => {
+    if (!it?.transfer) return;
+    openSaleModal(it.transfer);
+    saleFormQueueId.current = it.id;  // set AFTER openSaleModal cleared it
   };
 
   const handleSaleSubmit = async (formData) => {
@@ -451,6 +464,12 @@ const StaffShell = () => {
         await Promise.all(created.filter(s => s?.id).map(s => client.post(`sales/${s.id}/submit-review`)));
       }
       setModalOpen(false);
+      // If this came from a dialer sale-form disposition, clear that queue item.
+      if (saleFormQueueId.current) {
+        client.delete(`vicidial/closer-dispos/${saleFormQueueId.current}`).catch(() => {});
+        saleFormQueueId.current = null;
+        setDialerRefresh(x => x + 1);
+      }
       setSaleSuccess(isPost
         ? 'Post-dated sale saved — in the Post Date tab until you charge it.'
         : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!'));
@@ -812,7 +831,7 @@ const StaffShell = () => {
 
         {/* VICIdial: closer's dialer dispositions awaiting a lead (the closer
             assigns each to a lead). Self-hides when the closer has none. */}
-        <CloserPendingDispos onChanged={() => fetchTransfers && fetchTransfers()} />
+        <CloserPendingDispos onChanged={() => fetchTransfers && fetchTransfers()} refreshSignal={dialerRefresh} onOpenSaleForm={openSaleFormFromDispo} />
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
