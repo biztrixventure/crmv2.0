@@ -94,6 +94,37 @@ async function dispoOpensSaleForm(companyId, dispoName) {
   return !!data?.opens_sale_form;
 }
 
+// Timing-race reconcile: a closer can disposition a transferred call BEFORE the
+// fronter dispositions their leg (which is what fires fronter-xfer + creates the
+// transfer). That dispo queues with no transfer. When the transfer finally
+// lands, attach the most recent pending dispo for the same phone. Fault-tolerant
+// — never blocks the transfer write.
+async function reconcileQueuedDispoForTransfer(transfer, norm) {
+  if (!norm || !transfer?.id) return;
+  try {
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const { data: pend } = await supabaseAdmin.from('vicidial_closer_dispo_queue')
+      .select('*').eq('status', 'pending').is('transfer_id', null)
+      .eq('normalized_phone', norm).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!pend) return;
+    // A sale-form disposition just links to the transfer → the closer still gets
+    // the "Confirm → open sale form" prompt. Everything else applies straight.
+    if (await dispoOpensSaleForm(pend.company_id, pend.disposition_name)) {
+      await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ transfer_id: transfer.id }).eq('id', pend.id);
+    } else {
+      await applyCloserDispo({
+        transfer: { id: transfer.id, company_id: transfer.company_id, assigned_closer_id: null, status: 'pending' },
+        dispoCompanyId: pend.company_id, closerUserId: pend.closer_user_id,
+        dispoName: pend.disposition_name, rawDispo: pend.raw_dispo,
+      });
+      await supabaseAdmin.from('vicidial_closer_dispo_queue')
+        .update({ status: 'applied', transfer_id: transfer.id }).eq('id', pend.id);
+    }
+    logger.success('VICIDIAL_XFER', `Reconciled queued dispo ${pend.id} → transfer ${transfer.id} (phone ${norm})`);
+  } catch { /* non-critical */ }
+}
+
 // Read-only mapped-name lookup (no hit bump) — company-specific then global.
 async function lookupDispoName(companyId, rawCode) {
   if (!rawCode) return null;
@@ -159,6 +190,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     await supabaseAdmin.from('transfers')
       .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
       .eq('id', existing.id);
+    await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
     return res.json({ ok: true, transfer_id: existing.id, updated: true });
   }
 
@@ -198,6 +230,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
   logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code})`);
+  await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
   res.json({ ok: true, transfer_id: data.id });
 }));
 
@@ -267,6 +300,15 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const talk = parseInt(p.talk_time, 10);
   const rawCode = dispo.toUpperCase();
 
+  // No lead context at all (no code AND no phone) — this is a no-connect in-group
+  // event (answering machine / no-answer / dead air): the dialer fires the URL
+  // with no lead tokens because no customer connected. Nothing to match or
+  // assign, so don't clutter the closer's queue. 200 so the dialer won't retry.
+  if (!tr && !candidates.length && !dbg.normalized) {
+    dbg.outcome = `ignored — no lead context (no code/phone), no-connect "${dispo}"`;
+    return res.json({ ok: true, ignored: true });
+  }
+
   // ── matched a lead → apply straight away (scoped to the closer's company) ──
   if (tr) {
     const dispoCompanyId = closerCompanyId || tr.company_id;
@@ -305,6 +347,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const { data: q } = await supabaseAdmin.from('vicidial_closer_dispo_queue').insert({
       closer_user_id: closerUserId, company_id: closerCompanyId,
       vici_code: rawCode, disposition_name: mapped?.disposition_name || null, raw_dispo: dispo,
+      normalized_phone: dbg.normalized || null,   // lets a late fronter-xfer reconcile this by phone
     }).select('id').single();
     // Spell out WHY it didn't match so the debug log is self-diagnosing:
     // which codes were tried + whether a phone was even sent.
