@@ -316,12 +316,17 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const talk = parseInt(p.talk_time, 10);
   const rawCode = dispo.toUpperCase();
 
-  // No lead context at all (no code AND no phone) — this is a no-connect in-group
-  // event (answering machine / no-answer / dead air): the dialer fires the URL
-  // with no lead tokens because no customer connected. Nothing to match or
-  // assign, so don't clutter the closer's queue. 200 so the dialer won't retry.
-  if (!tr && !candidates.length && !dbg.normalized) {
-    dbg.outcome = `ignored — no lead context (no code/phone), no-connect "${dispo}"`;
+  // No lead context (no code AND no phone) — the dialer fired the URL with no
+  // lead tokens. ONLY ignore the clearly no-customer-contact codes (answering
+  // machine / no-answer / dead air / busy / disconnected …). A REAL outcome
+  // (SALE, CALLBK, NI, DNC, post-date…) must NEVER be silently dropped — it
+  // falls through to the queue so the closer can attach it to a lead by hand.
+  const NO_CONNECT = new Set([
+    'A', 'N', 'NA', 'DAIR', 'DROP', 'AFTHRS', 'B', 'DC', 'AB', 'ADC',
+    'PDROP', 'AA', 'NANQUE', 'TIMEOT', 'CXHNGP',
+  ]);
+  if (!tr && !candidates.length && !dbg.normalized && NO_CONNECT.has(rawCode)) {
+    dbg.outcome = `ignored — no-connect "${dispo}" (no customer contact, no code/phone)`;
     return res.json({ ok: true, ignored: true });
   }
 
