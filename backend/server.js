@@ -178,10 +178,21 @@ const userIdFromToken = (req) => {
   }
   return req.ip;
 };
+// Machine-to-machine VICIdial ingest (fronter-xfer / closer-dispo / dispo-debug)
+// has no JWT, so it would all collapse into one IP bucket and 429 real
+// dispositions at dialer volume. They're already guarded by the ingest token —
+// give them their own generous limiter and exempt them from the per-user one.
+const isVicidialIngest = (req) =>
+  /\/api\/vicidial\/(fronter-xfer|closer-dispo|dispo-debug)\b/.test(req.originalUrl || req.url || '');
+
+app.use(['/api/vicidial/fronter-xfer', '/api/vicidial/closer-dispo', '/api/vicidial/dispo-debug'],
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20000, message: { error: 'Too many requests' } }));
+
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
   keyGenerator: userIdFromToken,
+  skip: isVicidialIngest,
   message: { error: 'Too many requests' },
 }));
 
