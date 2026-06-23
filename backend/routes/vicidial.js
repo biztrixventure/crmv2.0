@@ -173,32 +173,46 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
   }
 }
 
+// Ring buffer of recent fronter-xfer hits — the symmetric diagnostic to
+// dispo-debug, so we can SEE which fronter transfers did/didn't create a CRM
+// transfer (agent not mapped / non-transfer dispo / created). In-memory only.
+const recentXfer = [];
+ingest.get('/xfer-debug', requireToken, (req, res) => res.json({ recent: recentXfer }));
+
 // ── INGEST: fronter XFER → pending transfer (code + phone only) ──────────────
 ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const code  = String(p.code || '').trim();
   const phone = String(p.phone || '').trim();
   const agent = String(p.agent || '').trim();
-  if (!code || !phone) return res.status(400).json({ ok: false, error: 'code and phone required' });
+  const norm  = normPhone(phone);
+  const xdbg = {
+    at: new Date().toISOString(), code, phone, normalized: norm || '',
+    agent, dispo: String(p.dispo || ''), agent_mapped: null, company_id: null, outcome: 'pending',
+  };
+  recentXfer.unshift(xdbg); if (recentXfer.length > 500) recentXfer.pop();
+  if (!code || !phone) { xdbg.outcome = 'rejected — missing code or phone'; return res.status(400).json({ ok: false, error: 'code and phone required' }); }
 
   // Idempotent on the correlation code.
   const { data: existing } = await supabaseAdmin
     .from('transfers').select('id').eq('vicidial_vendor_code', code).maybeSingle();
 
-  const norm = normPhone(phone);
   if (existing) {
     await supabaseAdmin.from('transfers')
       .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
       .eq('id', existing.id);
     await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
+    xdbg.outcome = `updated existing transfer ${existing.id}`;
     return res.json({ ok: true, transfer_id: existing.id, updated: true });
   }
 
   // Route to the fronter the VICIdial agent maps to. Unmapped agent → capture
   // is skipped (200 so the dialer doesn't retry) and logged for the superadmin.
   const { userId, companyId } = await resolveAgent(agent);
+  xdbg.agent_mapped = !!userId; xdbg.company_id = companyId;
   if (!userId || !companyId) {
     logger.warn('VICIDIAL_XFER', `Unmapped agent "${agent}" (code ${code}) — pending transfer not created`);
+    xdbg.outcome = `NO TRANSFER — fronter agent "${agent}" not mapped`;
     return res.json({ ok: false, reason: 'agent not mapped', code });
   }
 
@@ -213,6 +227,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     const xferDispos = Array.isArray(cfg?.field_map?.xfer_dispos)
       ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
     if (xferDispos.length && !xferDispos.includes(dispo)) {
+      xdbg.outcome = `NO TRANSFER — "${dispo}" not in xfer_dispos [${xferDispos.join(',')}]`;
       return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
     }
   }
@@ -227,10 +242,11 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     normalized_phone: norm || null,
     form_data: { cli_number: norm || null, customer_phone: phone, Phone: phone },
   }).select('id').single();
-  if (error) return res.status(500).json({ ok: false, error: error.message });
+  if (error) { xdbg.outcome = `DB error: ${error.message}`; return res.status(500).json({ ok: false, error: error.message }); }
 
   logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code})`);
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
+  xdbg.outcome = `created transfer ${data.id}`;
   res.json({ ok: true, transfer_id: data.id });
 }));
 
