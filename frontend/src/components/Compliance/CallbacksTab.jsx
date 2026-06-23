@@ -436,7 +436,7 @@ const CallbacksTab = ({ companyList }) => {
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
-      setStatusCounts(res.data.status_counts || null);
+      setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
     } catch { } finally { setLoading(false); }
   }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, sort]);
 

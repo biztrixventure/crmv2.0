@@ -112,7 +112,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       });
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
-      setStatusCounts(res.data.status_counts || null);
+      // Keep page-1 totals across pages; clear when a status filter is active
+      // (then the page-derived breakdown — the one filtered status — is correct).
+      setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, sort]);
 

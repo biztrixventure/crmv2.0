@@ -100,7 +100,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       });
       setTransfers(res.data.transfers || []);
       setTotal(res.data.total || 0);
-      setStatusCounts(res.data.status_counts || null);
+      setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [status, company, search, dateFrom, dateTo, page, sort]);
 

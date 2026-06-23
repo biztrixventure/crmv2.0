@@ -318,8 +318,10 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // "This Month"). One light single-column query, only when no status filter is
   // active (when one is, the `total` above is already that status's true count).
   // Additive + fault-tolerant: any error → omit, UI falls back to page counts.
+  // Only on page 1 (filters reset to page 1) — the totals don't change between
+  // pages, so paging never re-runs this. null on later pages → UI keeps it.
   let status_counts = null;
-  if (!status) {
+  if (!status && parseInt(page) === 1) {
     try {
       let scq = (companyType === 'fronter')
         ? supabaseAdmin.from('sales').select('status, transfers!inner(company_id)').eq('transfers.company_id', company_id)
@@ -415,7 +417,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   let status_counts = null;
-  if (!status) {
+  if (!status && parseInt(page) === 1) {
     try {
       const src = includeDuplicates ? 'v_compliance_transfer_records' : 'transfers';
       let { data: scRows, error: scErr } = await buildStatusQuery(src);
@@ -609,8 +611,9 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   // True per-status totals for the strip (same filters minus status + paging).
+  // Page 1 only — totals are page-independent, so paging never re-runs this.
   let status_counts = null;
-  if (!status) {
+  if (!status && parseInt(page) === 1) {
     try {
       let scq = supabaseAdmin.from('callbacks').select('status');
       if (company_id) scq = scq.eq('company_id', company_id);
