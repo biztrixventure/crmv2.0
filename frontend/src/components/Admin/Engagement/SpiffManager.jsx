@@ -215,7 +215,11 @@ const SpiffManager = () => {
   const save = async (payload) => { if (modal?.row) await client.put(`spiff/${modal.row.id}`, payload); else await client.post('spiff', payload); load(); };
   const del = async (c) => { try { await client.delete(`spiff/${c.id}`); } catch {} setConfirm(null); load(); };
   const fmt = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return '—'; } };
-  const statusVariant = { draft: 'secondary', active: 'success', ended: 'warning' };
+  const statusVariant = { draft: 'secondary', active: 'success', ended: 'warning', expired: 'warning' };
+  // An 'active' campaign past its ends_at is effectively over — show "Expired" to
+  // the admin even if the stored status hasn't been flipped (the user widget
+  // already hides it). Keeps the report list honest without a status-flip job.
+  const effStatus = (c) => (c.status === 'active' && c.ends_at && new Date(c.ends_at).getTime() < Date.now()) ? 'expired' : c.status;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -263,7 +267,7 @@ const SpiffManager = () => {
                   <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>{String(c.metric).replace(/_/g, ' ')}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.target_value}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.reward_description || (c.reward_amount ? `$${c.reward_amount}` : '—')}</td>
-                  <td className="px-4 py-3"><Badge variant={statusVariant[c.status] || 'secondary'} size="sm">{c.status}</Badge></td>
+                  <td className="px-4 py-3">{(() => { const st = effStatus(c); return <Badge variant={statusVariant[st] || 'secondary'} size="sm">{st}</Badge>; })()}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmt(c.starts_at)} – {fmt(c.ends_at)}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.participant_count}</td>
                   <td className="px-4 py-3"><div className="flex items-center gap-1">

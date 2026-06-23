@@ -157,11 +157,20 @@ router.get('/manage', manageAccess, asyncHandler(async (req, res) => {
   res.json({ campaigns: out });
 }));
 
-// Active campaigns targeted to the caller + their progress + top-5 leaderboard
+// Active campaigns targeted to the caller + their progress + top-5 leaderboard.
+// Only campaigns whose time window is OPEN right now (started + not yet ended)
+// reach the user dashboard, so an expired spiff drops off the widget on its own
+// the moment the clock passes ends_at — no manual status flip needed. Admin
+// /manage still returns ended ones for reporting.
 router.get('/', asyncHandler(async (req, res) => {
   const viewer = { id: req.user.id, role: req.user.role, company_id: req.user.company_id };
+  const nowIso = new Date().toISOString();
   const { data, error } = await supabaseAdmin
-    .from('spiff_campaigns').select('*').eq('status', 'active').order('ends_at', { ascending: true });
+    .from('spiff_campaigns').select('*')
+    .eq('status', 'active')
+    .lte('starts_at', nowIso)
+    .gte('ends_at', nowIso)
+    .order('ends_at', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
 
   const campaigns = (data || []).filter(c => arrayTargetMatches(c, viewer));
