@@ -198,8 +198,17 @@ ingest.get('/dispo-debug', requireToken, (req, res) => res.json({ recent: recent
 ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const dispo = String(p.dispo || '').trim();
-  const dbg = { at: new Date().toISOString(), code: String(p.code || ''), alt_code: String(p.alt_code || ''), phone: String(p.phone || ''), dispo, agent: String(p.agent || ''), outcome: 'pending' };
-  recentDispo.unshift(dbg); if (recentDispo.length > 20) recentDispo.pop();
+  // Rich debug entry — captures exactly what the dialer sent + how it resolved,
+  // so the dispo-debug URL alone explains every match/queue. In-memory only.
+  const dbg = {
+    at: new Date().toISOString(),
+    code: String(p.code || ''), alt_code: String(p.alt_code || ''),
+    phone: String(p.phone || ''), normalized: normPhone(String(p.phone || '')) || '',
+    dispo, agent: String(p.agent || ''),
+    agent_mapped: null, closer_company_id: null,
+    outcome: 'pending',
+  };
+  recentDispo.unshift(dbg); if (recentDispo.length > 500) recentDispo.pop();
   // One closer URL works for both topologies: it sends vendor_lead_code (set on
   // different-box leads) AND lead_id as a fallback (matches same-box leads).
   // Try each in order; first hit wins.
@@ -215,6 +224,8 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const { userId, companyId } = await resolveAgent(closerAgent);
     closerUserId = userId; closerCompanyId = companyId;
   }
+  dbg.agent_mapped = !!closerUserId;
+  dbg.closer_company_id = closerCompanyId;
 
   let tr = null, code = candidates[0];
   for (const c of candidates) {
@@ -267,12 +278,17 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
       closer_user_id: closerUserId, company_id: closerCompanyId,
       vici_code: rawCode, disposition_name: mapped?.disposition_name || null, raw_dispo: dispo,
     }).select('id').single();
-    dbg.outcome = `queued for closer ${closerUserId} (no lead match)`;
-    logger.success('VICIDIAL_DISPO', `Queued "${dispo}" for closer ${closerUserId} (no lead match)`);
+    // Spell out WHY it didn't match so the debug log is self-diagnosing:
+    // which codes were tried + whether a phone was even sent.
+    const why = candidates.length
+      ? `tried code=[${candidates.join(',')}]${dbg.normalized ? ` + phone=${dbg.normalized}` : ' + NO PHONE SENT'} → no transfer`
+      : (dbg.normalized ? `phone=${dbg.normalized} not found in any transfer` : 'NO code AND NO phone sent by the dialer');
+    dbg.outcome = `queued (no lead match) · ${why}`;
+    logger.success('VICIDIAL_DISPO', `Queued "${dispo}" for closer ${closerUserId} — ${why}`);
     return res.json({ ok: true, queued: true, id: q?.id, mapped: mapped?.disposition_name || null });
   }
 
-  dbg.outcome = `NO MATCH and agent "${closerAgent}" not mapped`;
+  dbg.outcome = `NO MATCH + agent "${closerAgent}" not mapped (phone=${dbg.normalized || 'none'})`;
   logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} and agent "${closerAgent}" not mapped`);
   return res.json({ ok: false, reason: 'no matching transfer and agent not mapped', sent: candidates });
 }));
