@@ -59,9 +59,13 @@ export default function TabStatsStrip({
   extraTiles = [],   // [{ key, label, value, bg, color, icon, onClick, active }]
   activeStatus,      // currently-selected status ('' / undefined = none)
   onSelectStatus,    // (statusKey | '') => void — when set, status tiles filter
+  statusTotals,      // { status: count } true totals for the whole filtered set
 }) {
   const loaded = records.length;
   const clickable = typeof onSelectStatus === 'function';
+  // True totals (from the backend) beat page-derived counts so the breakdown is
+  // consistent across pages; fall back to the current page when not provided.
+  const hasTotals = statusTotals && Object.keys(statusTotals).length > 0;
 
   // Aggregate the visible page by status. We deliberately do NOT call the
   // backend a second time — the count strip is meant to summarize what the
@@ -78,7 +82,8 @@ export default function TabStatsStrip({
   }, [records, statusKey]);
 
   // Sort descending by count so the most common state lands first.
-  const tiles = Object.entries(byStatus)
+  const tiles = Object.entries(hasTotals ? statusTotals : byStatus)
+    .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => {
       const pal = (badgeOf && badgeOf(k)) || DEFAULT_PALETTE[k] || { bg: '#f3f4f6', color: '#6b7280', label: null };

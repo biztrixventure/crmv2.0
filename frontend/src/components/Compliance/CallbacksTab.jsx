@@ -364,6 +364,7 @@ const CallbacksTab = ({ companyList }) => {
   const [view,        setView]        = useState('callbacks'); // 'callbacks' | 'audit'
   const [callbacks,   setCallbacks]   = useState([]);
   const [total,       setTotal]       = useState(0);
+  const [statusCounts, setStatusCounts] = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [page,        setPage]        = useState(1);
   const [cbType,      setCbType]      = useState('fronter');
@@ -435,6 +436,7 @@ const CallbacksTab = ({ companyList }) => {
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
+      setStatusCounts(res.data.status_counts || null);
     } catch { } finally { setLoading(false); }
   }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, sort]);
 
@@ -609,6 +611,7 @@ const CallbacksTab = ({ companyList }) => {
         <TabStatsStrip
           total={total}
           records={callbacks}
+          statusTotals={statusCounts}
           activeStatus={status}
           onSelectStatus={(s) => { setStatus(s); setPage(1); }}
           extraTiles={overdueOnPage > 0 ? [{

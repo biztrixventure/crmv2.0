@@ -313,7 +313,32 @@ router.get('/sales', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  // True per-status totals for the WHOLE filtered set (so the stats strip is
+  // consistent across pages — page-only counts made "Today" look bigger than
+  // "This Month"). One light single-column query, only when no status filter is
+  // active (when one is, the `total` above is already that status's true count).
+  // Additive + fault-tolerant: any error → omit, UI falls back to page counts.
+  let status_counts = null;
+  if (!status) {
+    try {
+      let scq = (companyType === 'fronter')
+        ? supabaseAdmin.from('sales').select('status, transfers!inner(company_id)').eq('transfers.company_id', company_id)
+        : supabaseAdmin.from('sales').select('status');
+      if (company_id && companyType !== 'fronter') scq = scq.eq('company_id', company_id);
+      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) scq = scq.in('closer_id', ids); }
+      if (disposition) scq = scq.eq('closer_disposition', disposition);
+      else if (exclude_post_date) scq = scq.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
+      if (charge_from) scq = scq.gte('charge_at', charge_from);
+      if (charge_to)   scq = scq.lte('charge_at', charge_to);
+      if (date_from)   scq = scq.gte('sale_date', date_from);
+      if (date_to)     scq = scq.lte('sale_date', date_to);
+      if (search) { const s = escapeOrValue(search); scq = scq.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
+      const { data: scRows } = await scq.limit(20000);
+      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
+    } catch { status_counts = null; }
+  }
+
+  res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
@@ -358,6 +383,26 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     return q.range(offset, offset + parseInt(limit) - 1);
   };
 
+  // Light status-only query (same filters minus status + paging) for the true
+  // per-status totals on the stats strip — consistent across pages.
+  const buildStatusQuery = (from) => {
+    let q = supabaseAdmin.from(from).select('status');
+    if (company_id) q = q.eq('company_id', company_id);
+    if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('created_by', ids); }
+    if (closer_id) q = q.eq('assigned_closer_id', closer_id);
+    if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
+    if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
+    if (search) {
+      const s = escapeOrValue(search);
+      q = q.or(
+        `normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,` +
+        `form_data->>customer_phone.ilike.%${s}%,form_data->>Phone.ilike.%${s}%,` +
+        `form_data->>FirstName.ilike.%${s}%,form_data->>LastName.ilike.%${s}%`
+      );
+    }
+    return q.limit(20000);
+  };
+
   let data, error, count;
   if (includeDuplicates) {
     ({ data, error, count } = await buildQuery('v_compliance_transfer_records'));
@@ -368,6 +413,16 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     ({ data, error, count } = await buildQuery('transfers'));
   }
   if (error) return res.status(500).json({ error: error.message });
+
+  let status_counts = null;
+  if (!status) {
+    try {
+      const src = includeDuplicates ? 'v_compliance_transfer_records' : 'transfers';
+      let { data: scRows, error: scErr } = await buildStatusQuery(src);
+      if (scErr) ({ data: scRows } = await buildStatusQuery('transfers'));
+      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
+    } catch { status_counts = null; }
+  }
 
   // Fetch profiles for both creator and assigned closer in one query
   const allUserIds = [...new Set([
@@ -506,7 +561,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
 }));
 
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────
@@ -553,6 +608,25 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
+  // True per-status totals for the strip (same filters minus status + paging).
+  let status_counts = null;
+  if (!status) {
+    try {
+      let scq = supabaseAdmin.from('callbacks').select('status');
+      if (company_id) scq = scq.eq('company_id', company_id);
+      else if (scopeCompanyIds) scq = scq.in('company_id', scopeCompanyIds);
+      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) scq = scq.in('user_id', ids); }
+      if (priority)     scq = scq.eq('priority', priority);
+      if (date_from)    scq = scq.gte('callback_at', etDateToUtcStart(date_from));
+      if (date_to)      scq = scq.lte('callback_at', etDateToUtcEnd(date_to));
+      if (created_from) scq = scq.gte('created_at',  etDateToUtcStart(created_from));
+      if (created_to)   scq = scq.lte('created_at',  etDateToUtcEnd(created_to));
+      if (search) { const s = escapeOrValue(search); scq = scq.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
+      const { data: scRows } = await scq.limit(20000);
+      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
+    } catch { status_counts = null; }
+  }
+
   const [profileMap, companyMap] = await Promise.all([
     enrichProfiles(data || [], c => c.user_id),
     enrichCompanies(data || [], c => c.company_id),
@@ -565,7 +639,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
     company_type: companyMap[c.company_id]?.company_type || null,
   }));
 
-  res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
 }));
 
 // ── GET /compliance/callbacks/phone-history ──────────────────────────────────

@@ -48,6 +48,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   useEffect(() => { fetchFields(); }, [fetchFields]);
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal]         = useState(0);
+  const [statusCounts, setStatusCounts] = useState(null);
   const [loading, setLoading]     = useState(false);
   const [page, setPage]           = useState(1);
   const [status, setStatus]       = useState(initStatus);
@@ -99,6 +100,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       });
       setTransfers(res.data.transfers || []);
       setTotal(res.data.total || 0);
+      setStatusCounts(res.data.status_counts || null);
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [status, company, search, dateFrom, dateTo, page, sort]);
 
@@ -242,6 +244,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       {/* Stats strip — total matches + per-status breakdown of the page.
           Click a status tile to filter the list to that status. */}
       <TabStatsStrip total={total} records={transfers}
+        statusTotals={statusCounts}
         activeStatus={status}
         onSelectStatus={(s) => { setStatus(s); setPage(1); }} />
 
@@ -261,7 +264,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   <Th>Company</Th>
                   <SortTh col="status"     sort={sort} onSort={toggleSort}>Transfer Status</SortTh>
                   <Th>Sale Status</Th>
-                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
+                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Transfer Date</SortTh>
                 </tr>
               </thead>
               <tbody>

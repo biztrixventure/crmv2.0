@@ -40,6 +40,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [editFieldsTarget, setEditFieldsTarget] = useState(null);
   const [editFieldsSaving, setEditFieldsSaving] = useState(false);
   const [total, setTotal]       = useState(0);
+  const [statusCounts, setStatusCounts] = useState(null);
   const [loading, setLoading]   = useState(false);
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
@@ -111,6 +112,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       });
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
+      setStatusCounts(res.data.status_counts || null);
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, sort]);
 
@@ -299,6 +301,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       <TabStatsStrip
         total={total}
         records={sales}
+        statusTotals={statusCounts}
         activeStatus={status}
         onSelectStatus={(s) => { setStatus(s); setPage(1); }}
         labelOf={labelOf}
@@ -328,7 +331,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
                   <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
-                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Date</SortTh>
+                  <SortTh col="sale_date" sort={sort} onSort={toggleSort}>Sale Date</SortTh>
                   {isPostDate && <Th>Charge Date</Th>}
                   <Th>Actions</Th>
                 </tr>
