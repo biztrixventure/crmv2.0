@@ -232,6 +232,38 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     }
   }
 
+  // DEDUP: a fronter who ALSO typed the transfer into the CRM by hand creates a
+  // richer, code-less transfer seconds before the dialer's XFER fires here. Those
+  // two never merged (idempotency keys on the code, which the manual one lacks),
+  // so the lead showed up twice. Before inserting, look for that just-created
+  // hand-entered transfer (same phone + company, NO dialer code, last 30 min) and
+  // STAMP the code onto it instead of making a second row. We keep its richer
+  // form_data/status untouched — only attach the code + agent so closer-dispos
+  // can match it. Scoped tight (code-less + 30 min) so it never merges a genuine
+  // separate transfer or a repeat customer from another day.
+  if (norm) {
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const { data: manual } = await supabaseAdmin
+      .from('transfers')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('normalized_phone', norm)
+      .is('vicidial_vendor_code', null)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (manual) {
+      await supabaseAdmin.from('transfers')
+        .update({ vicidial_vendor_code: code, vicidial_agent: agent || null })
+        .eq('id', manual.id);
+      await reconcileQueuedDispoForTransfer({ id: manual.id }, norm);
+      logger.success('VICIDIAL_XFER', `Merged dialer XFER into hand-entered transfer ${manual.id} (code ${code})`);
+      xdbg.outcome = `merged into hand-entered transfer ${manual.id} (no duplicate)`;
+      return res.json({ ok: true, transfer_id: manual.id, merged: true });
+    }
+  }
+
   const { data, error } = await supabaseAdmin.from('transfers').insert({
     company_id: companyId,
     created_by: userId,
