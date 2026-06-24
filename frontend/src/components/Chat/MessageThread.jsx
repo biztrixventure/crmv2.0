@@ -60,9 +60,13 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact,
         {/* Sender name takes the per-user font color (Chat Control → Font
             Colors) when set, falling back to the system primary. */}
         {showName && !mine && (
-          <p className="text-xs font-semibold mb-0.5 px-1"
-            style={{ color: m.sender_font_color || 'var(--color-primary-600)' }}>
+          <p className="text-xs font-semibold mb-0.5 px-1 flex items-center gap-1.5"
+            style={{ color: m.is_guest ? '#0891b2' : (m.sender_font_color || 'var(--color-primary-600)') }}>
             {m.sender_name}
+            {m.is_guest && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide"
+                style={{ backgroundColor: 'rgba(8,145,178,0.12)', color: '#0891b2' }}>Guest</span>
+            )}
           </p>
         )}
         <div className="relative flex items-end gap-1">

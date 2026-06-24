@@ -524,7 +524,7 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 50);
   let q = supabaseAdmin
     .from('messages')
-    .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at')
+    .select('id, conversation_id, sender_id, guest_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at')
     .eq('conversation_id', req.params.id)
     .order('created_at', { ascending: false })
     .limit(limit + 1);
@@ -578,12 +578,23 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
     });
   }
 
+  // Guest (outsider) message authors — resolve their names so internal members
+  // see the guest's name + an external badge instead of a blank "User".
+  const guestIds = [...new Set(page.map(m => m.guest_id).filter(Boolean))];
+  const guestNames = {};
+  if (guestIds.length) {
+    const { data: gs } = await supabaseAdmin.from('chat_guests').select('id, name').in('id', guestIds);
+    (gs || []).forEach(g => { guestNames[g.id] = g.name; });
+  }
+
   // Return chronological (oldest → newest) for straightforward rendering.
   const messages = page.reverse().map(m => ({
     id: m.id,
     conversation_id: m.conversation_id,
     sender_id: m.sender_id,
-    sender_name: cards.get(m.sender_id)?.name || 'User',
+    guest_id: m.guest_id || null,
+    is_guest: !!m.guest_id,
+    sender_name: m.guest_id ? (guestNames[m.guest_id] || 'Guest') : (cards.get(m.sender_id)?.name || 'User'),
     sender_font_color: stylesById[m.sender_id] || null,
     body: m.deleted_at ? null : m.body,
     body_html: m.deleted_at ? null : (m.body_html || null),

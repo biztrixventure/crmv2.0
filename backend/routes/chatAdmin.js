@@ -7,6 +7,7 @@
  */
 
 const express = require('express');
+const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -582,6 +583,65 @@ router.patch('/feature', [
 
   await logModeration({ actorId: req.user.id, action: 'feature_toggle', detail: { company_id, is_enabled } });
   res.json({ flag: data });
+}));
+
+// ── Guest (outsider) chat links ───────────────────────────────────────────────
+// A named external participant tied to ONE group, reachable only via a tokenized
+// link. No auth account. Superadmin toggles the link on/off.
+
+// POST /api/chat/admin/guests — create a guest tied to one group.
+router.post('/guests', [
+  body('name').isString().trim().notEmpty().isLength({ max: 80 }),
+  body('conversation_id').isUUID(),
+], asyncHandler(async (req, res) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) return res.status(400).json({ error: 'A name and a group are required' });
+
+  const { data: conv } = await supabaseAdmin
+    .from('conversations').select('id').eq('id', req.body.conversation_id).maybeSingle();
+  if (!conv) return res.status(404).json({ error: 'Group not found' });
+
+  const token = crypto.randomBytes(24).toString('hex');   // 48-char URL credential
+  const { data, error } = await supabaseAdmin.from('chat_guests').insert({
+    conversation_id: req.body.conversation_id,
+    name: req.body.name.trim(),
+    token,
+    created_by: req.user.id,
+  }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ guest: data });
+}));
+
+// GET /api/chat/admin/guests?conversation_id= — list guests (optionally per group).
+router.get('/guests', asyncHandler(async (req, res) => {
+  let q = supabaseAdmin.from('chat_guests')
+    .select('id, conversation_id, name, token, is_active, created_at, last_seen_at')
+    .order('created_at', { ascending: false });
+  if (req.query.conversation_id) q = q.eq('conversation_id', req.query.conversation_id);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ guests: data || [] });
+}));
+
+// PATCH /api/chat/admin/guests/:id — enable/disable the link, or rename.
+router.patch('/guests/:id', asyncHandler(async (req, res) => {
+  const updates = {};
+  if (typeof req.body.is_active === 'boolean') updates.is_active = req.body.is_active;
+  if (typeof req.body.name === 'string' && req.body.name.trim()) updates.name = req.body.name.trim().slice(0, 80);
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await supabaseAdmin
+    .from('chat_guests').update(updates).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data)  return res.status(404).json({ error: 'Guest not found' });
+  res.json({ guest: data });
+}));
+
+// DELETE /api/chat/admin/guests/:id — remove the guest + permanently kill the link.
+router.delete('/guests/:id', asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('chat_guests').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'Guest removed' });
 }));
 
 module.exports = router;

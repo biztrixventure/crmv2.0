@@ -48,6 +48,7 @@ const { ingest: vicidialIngest, api: vicidialApi } = require('./routes/vicidial'
 const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
+const guestChatRoutes           = require('./routes/guestChat');
 const presenceRoutes            = require('./routes/presence');
 const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
@@ -235,6 +236,11 @@ app.use('/api/auth', authRoutes);
 // VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
 // shared token in the URL. Mounted before the authed groups so it isn't gated.
 app.use('/api/vicidial', vicidialIngest);
+// Guest (outsider) chat — PUBLIC, the token in the URL is the credential. Mounted
+// before the authed groups so it isn't gated; rate-limited since it's open.
+app.use('/api/guest',
+  rateLimit({ windowMs: 60 * 1000, max: 120, message: { error: 'Too many requests' } }),
+  guestChatRoutes);
 
 // ============================================================================
 // PROTECTED ROUTES (auth required)

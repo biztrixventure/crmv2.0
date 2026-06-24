@@ -101,7 +101,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
 
   const mapRow = useCallback((row) => ({
     id: row.id, conversation_id: row.conversation_id, sender_id: row.sender_id,
-    sender_name: nameOf(row.sender_id),
+    guest_id: row.guest_id || null, is_guest: !!row.guest_id,
+    // A guest (outsider) message has no sender_id; its name resolves on the next
+    // full fetch (server-side). Live, it shows "Guest" with the badge.
+    sender_name: row.guest_id ? 'Guest' : nameOf(row.sender_id),
     body: row.deleted_at ? null : row.body,
     body_html: row.deleted_at ? null : (row.body_html || null),
     attachments: row.deleted_at ? null : (row.attachments || null),
@@ -240,7 +243,8 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
           (payload) => {
             if (!payload.new) return;
             const msg = { id: payload.new.id, conversation_id: payload.new.conversation_id, sender_id: payload.new.sender_id,
-              sender_name: nameOf(payload.new.sender_id), body: payload.new.deleted_at ? null : payload.new.body,
+              guest_id: payload.new.guest_id || null, is_guest: !!payload.new.guest_id,
+              sender_name: payload.new.guest_id ? 'Guest' : nameOf(payload.new.sender_id), body: payload.new.deleted_at ? null : payload.new.body,
               body_html: payload.new.deleted_at ? null : (payload.new.body_html || null),
               attachments: payload.new.deleted_at ? null : (payload.new.attachments || null),
               mentions: payload.new.mentions || null,

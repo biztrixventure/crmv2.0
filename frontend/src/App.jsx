@@ -12,6 +12,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import AcceptInvite from "./pages/AcceptInvite";
 import ImpersonateCallback from "./pages/ImpersonateCallback";
+import GuestChat from "./pages/GuestChat";
 import BrandedLoader from "./components/UI/BrandedLoader";
 import "./styles/global.css";
 
@@ -61,6 +62,7 @@ const AppContent = () => {
           <Route path="/forgot-password"   element={<ForgotPassword />} />
           <Route path="/reset-password"    element={<ResetPassword />} />
           <Route path="/accept-invite"     element={<AcceptInvite />} />
+          <Route path="/guest/:token"      element={<GuestChat />} />
           <Route path="/impersonate-callback" element={<ImpersonateCallback />} />
 
           {/* Smart redirect */}
