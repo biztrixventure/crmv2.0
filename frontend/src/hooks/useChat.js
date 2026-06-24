@@ -81,6 +81,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const oldestRef = useRef(null);
   const typingRef = useRef(new Map());
   const messagesRef = useRef([]); useEffect(() => { messagesRef.current = messages; }, [messages]);
+  // The conversation currently in view. Set synchronously on switch so any
+  // in-flight fetch/poll/realtime from the PREVIOUS conversation is ignored —
+  // this is what stops one chat's messages bleeding into another.
+  const activeConvRef = useRef(conversationId);
 
   // Volatile values accessed inside the long-lived effect via refs.
   const tokenRef = useRef(token);   useEffect(() => { tokenRef.current = token; }, [token]);
@@ -117,19 +121,23 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   const fetchLatest = useCallback(async (silent = false) => {
     if (!conversationId) return;
     if (silent && fetchingRef.current) return;
+    const cid = conversationId;                 // pin the target conversation
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     fetchingRef.current = true;
     if (!silent) setLoading(true);
     try {
-      const res = await client.get(`chat/conversations/${conversationId}/messages`, {
+      const res = await client.get(`chat/conversations/${cid}/messages`, {
         params: { limit: 30 }, signal: abortRef.current.signal,
       });
+      if (cid !== activeConvRef.current) return; // switched away mid-fetch → drop it
       const fetched = res.data.messages || [];
       setMessages(prev => {
-        const merged = dedupe([...prev, ...fetched]);
+        // Drop anything not from this conversation (stale optimistic/realtime).
+        const base = prev.filter(m => m.conversation_id === cid);
+        const merged = dedupe([...base, ...fetched]);
         oldestRef.current = merged.length ? merged[0].created_at : null;
-        if (!prev.length) setHasMore(!!res.data.has_more);
+        if (!base.length) setHasMore(!!res.data.has_more);
         // Keep the same reference when nothing changed → no needless repaint.
         return sameMessages(prev, merged) ? prev : merged;
       });
@@ -146,15 +154,17 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
 
   const loadOlder = useCallback(async () => {
     if (!conversationId || !hasMore || loadingOlder || !oldestRef.current) return;
+    const cid = conversationId;
     setLoadingOlder(true);
     try {
-      const res = await client.get(`chat/conversations/${conversationId}/messages`, {
+      const res = await client.get(`chat/conversations/${cid}/messages`, {
         params: { limit: 30, before: oldestRef.current },
       });
+      if (cid !== activeConvRef.current) return;  // switched away → ignore
       const older = res.data.messages || [];
       setHasMore(!!res.data.has_more);
       if (older.length) oldestRef.current = older[0].created_at;
-      setMessages(prev => dedupe([...older, ...prev]));
+      setMessages(prev => dedupe([...older, ...prev.filter(m => m.conversation_id === cid)]));
     } catch { /* ignore */ }
     finally { setLoadingOlder(false); }
   }, [conversationId, hasMore, loadingOlder]);
@@ -224,9 +234,10 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
 
   // ── realtime + polling lifecycle (keyed ONLY on conversationId + meId) ─────
   useEffect(() => {
+    activeConvRef.current = conversationId;       // mark the active conversation first
     if (!conversationId) { setMessages([]); return; }
     oldestRef.current = null;
-    setMessages([]);
+    setMessages([]);                              // never carry the previous chat over
     fetchLatest();
     schedulePoll();
     setRealtimeAuth(tokenRef.current || localStorage.getItem('token'));
@@ -242,6 +253,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           (payload) => {
             if (!payload.new) return;
+            if (payload.new.conversation_id !== activeConvRef.current) return; // stale channel from a prior conversation
             const msg = { id: payload.new.id, conversation_id: payload.new.conversation_id, sender_id: payload.new.sender_id,
               guest_id: payload.new.guest_id || null, is_guest: !!payload.new.guest_id,
               sender_name: payload.new.guest_id ? 'Guest' : nameOf(payload.new.sender_id), body: payload.new.deleted_at ? null : payload.new.body,
