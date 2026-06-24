@@ -17,8 +17,11 @@ function viewerAudiences(role) {
   return ['closer', 'fronter', 'both']; // oversight roles see everything
 }
 
+// Compliance managers get full CRUD too — they own the knowledge base across all
+// companies, same as the superadmin.
 async function canManage(req) {
   return (await isSuperAdmin(req.user.id))
+    || req.user.role === 'compliance_manager'
     || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
 }
 

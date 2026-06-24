@@ -40,8 +40,11 @@ function viewerAudiences(role) {
 }
 
 // Scripts reuse the manage_faqs permission (same knowledge-base authority).
+// Compliance managers get full CRUD too — they own the knowledge base across all
+// companies, same as the superadmin.
 async function canManage(req) {
   return (await isSuperAdmin(req.user.id))
+    || req.user.role === 'compliance_manager'
     || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
 }
 

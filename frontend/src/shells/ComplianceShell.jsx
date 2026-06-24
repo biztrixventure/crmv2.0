@@ -27,8 +27,8 @@ import CallbackNumbersTab  from '../components/Compliance/CallbackNumbersTab';
 import BulkStatusUpdate    from '../components/Compliance/BulkStatusUpdate';
 import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
-import ScriptPanel        from '../components/FAQ/ScriptPanel';
-import FAQPanel           from '../components/FAQ/FAQPanel';
+import ScriptManager      from '../components/Admin/ScriptManager/ScriptManager';
+import FAQManager         from '../components/Admin/FAQManager/FAQManager';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -241,10 +241,10 @@ const ComplianceShell = () => {
         {activeTab === 'numbers' && (
           <CallbackNumbersTab companyList={companyList} />
         )}
-        {/* Read-only knowledge base — compliance sees every audience (fronter +
-            closer + both); the /scripts API returns all audiences for this role. */}
-        {activeTab === 'scripts' && <ScriptPanel />}
-        {activeTab === 'faqs'    && <FAQPanel />}
+        {/* Full knowledge-base CRUD — compliance manages scripts/rebuttals + FAQs
+            for every audience (fronter + closer + both), same as the superadmin. */}
+        {activeTab === 'scripts' && <ScriptManager />}
+        {activeTab === 'faqs'    && <FAQManager />}
         <DevCredit />
       </main>
     </div>
