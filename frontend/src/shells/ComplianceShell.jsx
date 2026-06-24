@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -29,6 +29,7 @@ import EventsCalendar      from '../components/Calendar/EventsCalendar';
 import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
 import ScriptManager      from '../components/Admin/ScriptManager/ScriptManager';
 import FAQManager         from '../components/Admin/FAQManager/FAQManager';
+import CallQuestionsManager from '../components/Compliance/CallQuestionsManager';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -42,6 +43,7 @@ const CODE_TABS = [
   { key: 'numbers',     label: 'Call Numbers',       icon: Hash },
   { key: 'scripts',     label: 'Scripts & Rebuttals', icon: ScrollText },
   { key: 'faqs',        label: 'FAQs',               icon: HelpCircle },
+  { key: 'questions',   label: 'Call Questions',     icon: ClipboardCheck },
 ];
 
 const ComplianceShell = () => {
@@ -245,6 +247,7 @@ const ComplianceShell = () => {
             for every audience (fronter + closer + both), same as the superadmin. */}
         {activeTab === 'scripts' && <ScriptManager />}
         {activeTab === 'faqs'    && <FAQManager />}
+        {activeTab === 'questions' && <CallQuestionsManager />}
         <DevCredit />
       </main>
     </div>

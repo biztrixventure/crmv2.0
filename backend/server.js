@@ -37,6 +37,7 @@ const dispositionConfigsRoutes  = require('./routes/dispositionConfigs');
 const zipcodeRoutes             = require('./routes/zipcode');
 const faqsRoutes                = require('./routes/faqs');
 const scriptsRoutes             = require('./routes/scripts');
+const callChecklistRoutes       = require('./routes/callChecklist');
 const uploadsRoutes             = require('./routes/uploads');
 const saleUploadsRoutes         = require('./routes/saleUploads');
 const announcementsRoutes       = require('./routes/announcements');
@@ -277,6 +278,7 @@ app.use('/api/disposition-configs', authMiddleware, readonlyGuard, dispositionCo
 app.use('/api/zipcode',            authMiddleware, readonlyGuard, zipcodeRoutes);
 app.use('/api/faqs',               authMiddleware, readonlyGuard, faqsRoutes);
 app.use('/api/scripts',            authMiddleware, readonlyGuard, scriptsRoutes);
+app.use('/api/call-checklist',     authMiddleware, readonlyGuard, callChecklistRoutes);
 app.use('/api/uploads',            authMiddleware, readonlyGuard, uploadsRoutes);
 app.use('/api/sale-uploads',       authMiddleware, readonlyGuard, saleUploadsRoutes);
 app.use('/api/announcements',      authMiddleware, readonlyGuard, announcementsRoutes);

@@ -86,6 +86,7 @@ import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
+import CallChecklistWidget from "../components/Closer/CallChecklistWidget";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 
@@ -1979,6 +1980,9 @@ const StaffShell = () => {
       <TransferDetailDrawer transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
       <SaleDetailDrawer     sale={detailSale}         onClose={() => setDetailSale(null)}
         onResold={(newSale) => { setDetailSale(null); if (newSale?.id) setEditSale(newSale); }} />
+
+      {/* Closers only — floating call-checklist mini-panel */}
+      {isCloser && <CallChecklistWidget />}
     </div>
   );
 };
