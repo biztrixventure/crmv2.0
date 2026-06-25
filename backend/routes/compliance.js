@@ -541,6 +541,34 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     }
   }
 
+  // For ANY duplicate row with no closer/disposition of its own — the in-place
+  // refresh rows AND a re-transfer flagged against a prior lead (e.g. a customer
+  // already sold) — borrow the closer + disposition from that related ORIGINAL
+  // transfer, so the record shows who worked it and how instead of a blank row.
+  const originalIds = [...new Set([
+    ...Object.keys(refreshedMap),
+    ...Object.values(dupMap).map(d => d.original_transfer?.id),
+  ].filter(Boolean))];
+  const borrowDispo = {}, borrowCloser = {};
+  if (originalIds.length) {
+    const [bd, bt] = await Promise.all([
+      supabaseAdmin.from('disposition_actions')
+        .select('transfer_id, disposition_name, color, user_id, setter_role, created_at')
+        .in('transfer_id', originalIds).order('created_at', { ascending: false }),
+      supabaseAdmin.from('transfers').select('id, assigned_closer_id').in('id', originalIds),
+    ]);
+    const need = [...new Set([
+      ...(bd.data || []).map(a => a.user_id),
+      ...(bt.data || []).map(t => t.assigned_closer_id),
+    ].filter(id => id && !profileMap[id]))];
+    if (need.length) {
+      const { data: np } = await supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', need);
+      (np || []).forEach(p => { profileMap[p.user_id] = p; });
+    }
+    (bd.data || []).forEach(a => { if (!borrowDispo[a.transfer_id]) borrowDispo[a.transfer_id] = { ...a, setter_name: profileName(profileMap, a.user_id) }; });
+    (bt.data || []).forEach(t => { if (t.assigned_closer_id) borrowCloser[t.id] = t.assigned_closer_id; });
+  }
+
   const enriched = (data || []).map(t => {
     const sale = saleMap[t.id] || null;
     const dup  = dupMap[t.id] || null;
@@ -548,18 +576,21 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     // than via dupMap (which only covers reengage / sale_overlap real rows).
     const isRefreshDup = t.record_type === 'duplicate_refresh';
     const refreshed = isRefreshDup && t.refreshed_transfer_id ? refreshedMap[t.refreshed_transfer_id] : null;
+    // The related original (refresh target or prior lead) to borrow from.
+    const relatedId = t.refreshed_transfer_id || dup?.original_transfer?.id || null;
+    const borrowedCloserId = (!t.assigned_closer_id && relatedId) ? borrowCloser[relatedId] : null;
     return {
       ...t,
       created_by_name:       profileName(profileMap, t.created_by),
-      assigned_closer_name:  profileName(profileMap, t.assigned_closer_id),
+      assigned_closer_name:  profileName(profileMap, t.assigned_closer_id) || (borrowedCloserId ? profileName(profileMap, borrowedCloserId) : null),
       company_name:          companyMap[t.company_id]?.name || null,
       sale_id:               sale?.id || null,
       sale_status:           sale?.status || null,
       sale_compliance_note:  sale?.compliance_note || null,
       sale_reference_no:     sale?.reference_no || null,
-      // In-place duplicate rows have no disposition of their own → fall back to
-      // the disposition of the original transfer they refreshed.
-      latest_disposition:    latestDispoMap[t.id] || (t.refreshed_transfer_id ? latestDispoMap[t.refreshed_transfer_id] : null) || null,
+      // A duplicate row has no disposition of its own → fall back to the original
+      // transfer it refreshed / duplicates, so the record isn't blank.
+      latest_disposition:    latestDispoMap[t.id] || (relatedId ? (latestDispoMap[relatedId] || borrowDispo[relatedId]) : null) || null,
       is_duplicate:          isRefreshDup ? true : !!dup,
       duplicate_reason:      isRefreshDup ? 'refresh' : (dup?.duplicate_reason || null),
       duplicate_detected_at: isRefreshDup ? t.created_at : (dup?.duplicate_detected_at || null),
