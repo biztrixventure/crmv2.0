@@ -434,7 +434,12 @@ api.get('/closer-dispos', asyncHandler(async (req, res) => {
   const { data: saleCfgs } = await supabaseAdmin
     .from('disposition_configs').select('name').eq('opens_sale_form', true).eq('is_active', true);
   const saleNames = new Set((saleCfgs || []).map(d => (d.name || '').trim().toLowerCase()));
-  const saleRows = (data || []).filter(d => saleNames.has((d.disposition_name || '').trim().toLowerCase()));
+  // A queue row is a sale-form item if it already carries a transfer (only the
+  // sale-form branch ever queues WITH a transfer_id) OR its disposition is a
+  // sale-form one. The transfer_id check keeps matched sales visible even if the
+  // config lookup momentarily returns nothing — never silently hide a sale.
+  const saleRows = (data || []).filter(d =>
+    !!d.transfer_id || saleNames.has((d.disposition_name || '').trim().toLowerCase()));
 
   // Sale-form items already carry the matched transfer — hydrate its form_data
   // so the closer's banner can open the pre-filled sale form in one click.

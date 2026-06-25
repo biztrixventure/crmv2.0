@@ -12,15 +12,18 @@ const BOXES = [
 // VICIdial no-customer-contact statuses — never a real disposition outcome.
 const NO_CONNECT = new Set(['A', 'N', 'NA', 'DAIR', 'DROP', 'AFTHRS', 'B', 'DC', 'AB', 'ADC', 'PDROP', 'AA', 'NANQUE', 'TIMEOT', 'CXHNGP', 'INCALL', 'QUEUE', 'CH']);
 
-// phone_number_log on one box for a phone → parsed call rows (any order).
+const axios = require('axios');
+
+// phone_number_log on one box for a phone → parsed call rows (any order). Uses
+// axios (always present) — bare global fetch isn't guaranteed on every Node.
 async function phoneCallLog(box, phone) {
-  const qs = new URLSearchParams({
+  const params = {
     source: 'crm', user: box.user, pass: box.pass, function: 'phone_number_log',
     phone_number: phone, type: 'ALL', detail: 'ALL', stage: 'pipe',
-  });
+  };
   try {
-    const r = await fetch(`${box.base}/vicidial/non_agent_api.php?${qs}`);
-    const text = await r.text();
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, { params, timeout: 15000, responseType: 'text' });
+    const text = typeof r.data === 'string' ? r.data : String(r.data || '');
     if (!text || /^ERROR|^NOTICE/m.test(text)) return [];
     return text.trim().split(/\r?\n/).filter(Boolean).map(l => {
       const [phone_number, call_date, list_id, length_in_sec, lead_status, hangup_reason, call_status, source_id, user] = l.split('|');
