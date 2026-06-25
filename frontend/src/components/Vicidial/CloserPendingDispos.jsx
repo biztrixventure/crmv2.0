@@ -27,7 +27,7 @@ export default function CloserPendingDispos({ onChanged, refreshSignal, onOpenSa
     <>
       <div className="rounded-2xl p-4 mb-5" style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-200, #fde68a)' }}>
         <p className="text-sm font-bold flex items-center gap-2 mb-2.5" style={{ color: 'var(--color-warning-700, #b45309)' }}>
-          <ClipboardCheck size={16} /> {items.length} disposition{items.length > 1 ? 's' : ''} from the dialer — assign to a lead
+          <ClipboardCheck size={16} /> {items.length} sale{items.length > 1 ? 's' : ''} to confirm — open the sale form
         </p>
         <div className="space-y-1.5">
           {items.map(it => {

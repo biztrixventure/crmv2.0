@@ -25,6 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
+const { latestDisposition } = require('../utils/dialerBoxes');
 
 const ingest = express.Router();
 const api = express.Router();
@@ -426,16 +427,25 @@ api.get('/closer-dispos', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
 
+  // ONLY sale-form dispositions (Sale / Post Date) need the closer — they open
+  // the sale form. Every other disposition the dialer fires is recorded
+  // automatically (matched immediately, or reconciled when the transfer appears),
+  // so it must NOT clutter the closer's banner. Show only sale-form dispositions.
+  const { data: saleCfgs } = await supabaseAdmin
+    .from('disposition_configs').select('name').eq('opens_sale_form', true).eq('is_active', true);
+  const saleNames = new Set((saleCfgs || []).map(d => (d.name || '').trim().toLowerCase()));
+  const saleRows = (data || []).filter(d => saleNames.has((d.disposition_name || '').trim().toLowerCase()));
+
   // Sale-form items already carry the matched transfer — hydrate its form_data
   // so the closer's banner can open the pre-filled sale form in one click.
-  const tids = [...new Set((data || []).map(d => d.transfer_id).filter(Boolean))];
+  const tids = [...new Set(saleRows.map(d => d.transfer_id).filter(Boolean))];
   let tmap = {};
   if (tids.length) {
     const { data: tfs } = await supabaseAdmin
       .from('transfers').select('id, form_data, company_id, assigned_closer_id, status').in('id', tids);
     (tfs || []).forEach(t => { tmap[t.id] = t; });
   }
-  const dispos = (data || []).map(d => ({ ...d, transfer: d.transfer_id ? (tmap[d.transfer_id] || null) : null }));
+  const dispos = saleRows.map(d => ({ ...d, transfer: d.transfer_id ? (tmap[d.transfer_id] || null) : null }));
   res.json({ dispos });
 }));
 
@@ -477,6 +487,42 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
     return { id: t.id, name, phone, created_at: t.created_at, code: t.vicidial_vendor_code || null, pending: !!t.vicidial_pending };
   });
   res.json({ transfers: rows });
+}));
+
+// ── Fetch Dispo: pull a record's closer disposition on demand ─────────────────
+// Any CRM user can hit this on a transfer that shows no disposition. It first
+// attaches a closer disposition already sitting in the CRM queue (the common
+// case); if none, it asks the dialer for the latest real disposition on that
+// phone and attaches that. Idempotent-ish: re-running just re-applies the latest.
+api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
+  const { data: tr } = await supabaseAdmin
+    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status').eq('id', req.params.transferId).maybeSingle();
+  if (!tr) return res.status(404).json({ error: 'Transfer not found' });
+  const norm = tr.normalized_phone;
+  if (!norm) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
+
+  // 1) Queue-first — a closer disposition may already be queued (fired by the
+  //    dialer but unattached because the transfer was created the manual way).
+  const { data: q } = await supabaseAdmin
+    .from('vicidial_closer_dispo_queue').select('*')
+    .eq('normalized_phone', norm).eq('status', 'pending').is('transfer_id', null)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (q) {
+    const dispoName = q.disposition_name || await lookupDispoName(q.company_id || tr.company_id, q.vici_code);
+    await applyCloserDispo({ transfer: tr, dispoCompanyId: q.company_id || tr.company_id, closerUserId: q.closer_user_id, dispoName, rawDispo: q.raw_dispo, talk: NaN });
+    await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ status: 'applied', transfer_id: tr.id }).eq('id', q.id);
+    return res.json({ ok: true, source: 'queue', disposition_name: dispoName || q.vici_code });
+  }
+
+  // 2) Dialer backstop — ask the boxes for the latest real disposition on this
+  //    phone (e.g. when the dialer URL never reached the CRM at all).
+  const found = await latestDisposition(norm);
+  if (!found) return res.json({ ok: false, message: 'No disposition found on the dialer for this number yet.' });
+
+  const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
+  const { userId: closerUserId } = await resolveAgent(found.user);
+  await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: found.code, talk: NaN });
+  res.json({ ok: true, source: 'dialer', disposition_name: dispoName, agent: found.user, at: found.at });
 }));
 
 // Attach a queued disposition to a chosen transfer.

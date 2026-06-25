@@ -21,6 +21,7 @@ import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
 import FilterBar from '../UI/FilterBar';
 import TransferFormModal from '../Transfers/TransferFormModal';
+import FetchDispoButton from '../Vicidial/FetchDispoButton';
 import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
@@ -392,6 +393,14 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                         {detail.latest_disposition.note && (
                           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{detail.latest_disposition.note}</p>
                         )}
+                      </div>
+                    } />
+                  )}
+                  {!detail.latest_disposition?.disposition_name && (
+                    <InfoTile label="Disposition" value={
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>—</span>
+                        <FetchDispoButton transferId={detail.id} onFetched={() => { setDetail(null); load(); }} />
                       </div>
                     } />
                   )}

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
+import FetchDispoButton from '../Vicidial/FetchDispoButton';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
@@ -78,7 +79,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
   const [dispoHistory, setDispoHistory] = useState([]);
   const [histLoading,  setHistLoading]  = useState(false);
 
-  useEffect(() => {
+  const loadHistory = useCallback(() => {
     if (!transfer?.id) return;
     setHistLoading(true);
     client.get(`disposition-configs/history/${transfer.id}`)
@@ -86,6 +87,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
       .catch(() => setDispoHistory([]))
       .finally(() => setHistLoading(false));
   }, [transfer?.id]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   if (!transfer) return null;
 
@@ -207,11 +209,12 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           ))}
         </div>
       ) : dispoHistory.length === 0 ? (
-        <div className="px-4 py-3 rounded-xl flex items-center gap-2"
+        <div className="px-4 py-3 rounded-xl flex items-center gap-2 flex-wrap"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#9ca3af' }} />
           <span className="text-xs font-semibold" style={{ color: '#6b7280' }}>In Progress</span>
-          <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
+          <span className="ml-auto"><FetchDispoButton transferId={transfer.id} onFetched={loadHistory} /></span>
         </div>
       ) : (
         <div className="relative">
