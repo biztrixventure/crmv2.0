@@ -314,7 +314,17 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // Try each in order; first hit wins.
   // No code/alt_code is normal for the closer URL (dispo+agent only) — VICIdial
   // can't send lead tokens for the closer's calls. We fall through to the queue.
-  const candidates = [String(p.code || '').trim(), String(p.alt_code || '').trim()].filter(Boolean);
+  const inCode  = String(p.code || '').trim();
+  const inAlt   = String(p.alt_code || '').trim();
+  // The CRM stores transfer codes WITH a box prefix (WTI/ETC/TMC + lead_id), but
+  // the dialer sends the BARE lead_id (alt_code) and an empty vendor_lead_code
+  // when the fronter never pressed the webform. So also try the prefixed variants
+  // of any bare numeric value → a same-cluster lead matches by CODE with NO
+  // webform needed (falls back to phone only if no code variant matches).
+  const candidates = [...new Set([
+    inCode, inAlt,
+    ...[inCode, inAlt].filter(v => /^\d+$/.test(v)).flatMap(v => ['WTI' + v, 'ETC' + v, 'TMC' + v]),
+  ].filter(Boolean))];
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
 
   // Closer identity from the dialing agent — drives company scoping + the queue.
@@ -328,10 +338,13 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   dbg.closer_company_id = closerCompanyId;
 
   let tr = null, code = candidates[0];
-  for (const c of candidates) {
-    const { data } = await supabaseAdmin
-      .from('transfers').select('id, company_id, assigned_closer_id, status').eq('vicidial_vendor_code', c).maybeSingle();
-    if (data) { tr = data; code = c; break; }
+  if (candidates.length) {
+    // One indexed lookup over all code variants (newest wins if several match).
+    const { data: matches } = await supabaseAdmin
+      .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
+      .in('vicidial_vendor_code', candidates)
+      .order('created_at', { ascending: false }).limit(1);
+    if (matches && matches.length) { tr = matches[0]; code = tr.vicidial_vendor_code; }
   }
   // Phone fallback — the customer phone is identical on both sides even when the
   // closer's lead_id differs (same-box transfers that spawn a fresh closer lead).
