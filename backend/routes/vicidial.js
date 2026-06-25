@@ -574,6 +574,9 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
     updated_at: new Date().toISOString(),
   }).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
+  // A closer may have dispositioned between the pending-create and this confirm
+  // → attach that queued disposition now.
+  await reconcileQueuedDispoForTransfer({ id: data.id, company_id: data.company_id }, norm);
   res.json({ transfer: data });
 }));
 
@@ -720,4 +723,8 @@ api.delete('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
   res.json({ message: 'deleted' });
 }));
 
-module.exports = { ingest, api };
+// Exported so the CRM transfer-create / confirm paths can attach a closer
+// disposition that queued before the transfer existed (the fronter-xfer path
+// already reconciles; the manual/webform paths did not, leaving the dispo stuck
+// in the queue and the transfer showing no closer/disposition).
+module.exports = { ingest, api, reconcileQueuedDispoForTransfer };

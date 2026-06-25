@@ -8,6 +8,7 @@ const notifications = require('../utils/notificationService');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
+const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
 
@@ -936,6 +937,14 @@ router.post('/', [
       event_type:        managerEvent,
       normalized_phone:  norm || null,
     }).then(() => {}).catch(() => {});
+  }
+
+  // A closer may have dispositioned this lead on the dialer BEFORE the fronter
+  // typed/confirmed it here (the disposition is sitting in the queue). The
+  // dialer's fronter-xfer reconcile doesn't run on this manual path, so do it
+  // now → attach the queued dispo so the transfer shows the closer + outcome.
+  if (transfer?.id && norm) {
+    reconcileQueuedDispoForTransfer({ id: transfer.id, company_id: transfer.company_id }, norm).catch(() => {});
   }
 
   res.status(201).json({ transfer, action });
