@@ -9,8 +9,15 @@ const BOXES = [
   { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002' },
 ];
 
-// VICIdial no-customer-contact statuses — never a real disposition outcome.
-const NO_CONNECT = new Set(['A', 'N', 'NA', 'DAIR', 'DROP', 'AFTHRS', 'B', 'DC', 'AB', 'ADC', 'PDROP', 'AA', 'NANQUE', 'TIMEOT', 'CXHNGP', 'INCALL', 'QUEUE', 'CH']);
+// Statuses that are NOT a closer outcome — no customer contact (A/N/DAIR…),
+// in-progress/system states, and the transfer event itself (XFER and friends).
+// "Fetch dispo" wants the closer's actual disposition, so these are skipped; if
+// only these exist, it reports "no disposition yet" rather than guessing XFER.
+const NO_CONNECT = new Set([
+  'A', 'N', 'NA', 'DAIR', 'DROP', 'AFTHRS', 'B', 'DC', 'AB', 'ADC', 'PDROP', 'AA',
+  'NANQUE', 'TIMEOT', 'CXHNGP', 'INCALL', 'QUEUE', 'CH', 'DISPO', 'NEW',
+  'XFER', 'TRANSFER', 'XDROP', 'IVRXFR', 'RQXFER',
+]);
 
 const axios = require('axios');
 

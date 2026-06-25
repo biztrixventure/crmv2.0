@@ -114,8 +114,14 @@ async function reconcileQueuedDispoForTransfer(transfer, norm) {
     if (await dispoOpensSaleForm(pend.company_id, pend.disposition_name)) {
       await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ transfer_id: transfer.id }).eq('id', pend.id);
     } else {
+      // Use the transfer's REAL state so applyCloserDispo never overwrites an
+      // existing closer or downgrades a completed/rejected transfer to assigned
+      // (the new manual-create / confirm call sites can pass a worked transfer).
+      const { data: real } = await supabaseAdmin.from('transfers')
+        .select('id, company_id, assigned_closer_id, status').eq('id', transfer.id).maybeSingle();
+      const tgt = real || { id: transfer.id, company_id: transfer.company_id, assigned_closer_id: null, status: 'pending' };
       await applyCloserDispo({
-        transfer: { id: transfer.id, company_id: transfer.company_id, assigned_closer_id: null, status: 'pending' },
+        transfer: tgt,
         dispoCompanyId: pend.company_id, closerUserId: pend.closer_user_id,
         dispoName: pend.disposition_name, rawDispo: pend.raw_dispo,
       });
