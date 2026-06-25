@@ -557,7 +557,7 @@ const Backfill = () => {
             </ul>
             <p className="mt-2">Extra columns ignored. Comma / tab / pipe auto-detected. Column order doesn't matter.</p>
             <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>How matching works</p>
-            <p>Leads are grouped by phone. For each CRM transfer on that phone with no code yet, the <b>nearest-dated</b> unused lead (within ±21 days) is chosen — so a number with several transfers maps each to its own call, not all to one. The lead id is stamped as <code>{boxPrefix}&lt;lead_id&gt;</code>; the status fills the dispo (no-connect/XFER leads still map the id but set no dispo). Already-coded transfers are never touched.</p>
+            <p>Leads are grouped by phone. For each CRM transfer on that phone with no code yet, the <b>nearest-dated</b> unused lead (within ±21 days) is chosen — so a number with several transfers maps each to its own call, not all to one. The lead id is stamped as <code>{boxPrefix}&lt;lead_id&gt;</code>; the status fills the dispo. <b>Every real status maps</b> (incl. no-answer / answering-machine / dead-air); only <i>non-dispositions</i> — a lead still routing or never worked (<code>NEW</code>, <code>XFER</code>, <code>QUEUE</code>, blank) — map the id but set no dispo. A transfer that already has a disposition (column or actions log) is never overwritten.</p>
           </div>
         )}
 

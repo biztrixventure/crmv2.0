@@ -736,10 +736,14 @@ api.delete('/config/:id', superOnly, asyncHandler(async (req, res) => {
 // client parses the CSV and sends rows in batches; we match each to the newest
 // CRM transfer on that phone still missing a dispo and fill it. Real outcomes
 // only — no-connect / transfer / system codes are skipped.
+// In a LIST EXPORT the status is the lead's FINAL disposition, so we map it as-is
+// — including the dialer's no-contact outcomes (A/N/DAIR/DROP/BUSY…), which ARE
+// real results here (unlike the live URL flow, where they're transient noise).
+// We only skip statuses that are NOT a disposition at all: a lead still routing /
+// mid-call / never worked, plus blanks. The lead_id is mapped regardless.
 const LIST_SKIP = new Set([
-  'A','N','NA','DAIR','DROP','AFTHRS','B','DC','AB','ADC','PDROP','AA','NANQUE',
-  'TIMEOT','CXHNGP','INCALL','QUEUE','CH','DISPO','NEW','XFER','TRANSFER','XDROP',
-  'IVRXFR','RQXFER','','-',
+  '', '-', 'NEW', 'INCALL', 'QUEUE', 'CH', 'DISPO',
+  'XFER', 'TRANSFER', 'XDROP', 'IVRXFR', 'RQXFER',
 ]);
 const MATCH_WINDOW_MS = 21 * 864e5;  // a lead may sit ±21 days from its transfer
 api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
