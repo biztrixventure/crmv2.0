@@ -797,16 +797,24 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
       }
     }
     pairs.sort((a, b) => a.diff - b.diff);
-    const usedT = new Set(), usedL = new Set();
+    const usedT = new Set(), usedLid = new Set();  // one transfer ↔ one lead_id
     for (const p of pairs) {
-      if (usedT.has(p.ti) || usedL.has(p.li)) continue;
-      usedT.add(p.ti); usedL.add(p.li);
+      const lid = leads[p.li].leadId;
+      if (usedT.has(p.ti) || usedLid.has(lid)) continue;   // dedup by lead_id, not array slot
+      usedT.add(p.ti); usedLid.add(lid);
       const tr = trs[p.ti], best = leads[p.li];
       matched++;
       if (dryRun) continue;
       try {
         const code = prefix + best.leadId;                 // the durable lead_id mapping
-        const setDispo = !LIST_SKIP.has(best.status);      // skip XFER / no-connect as a dispo
+        // Guard: never create a duplicate code (e.g. wrong box prefix picked, or
+        // the same id already coded). If it lives on any other transfer, skip.
+        const { data: clash } = await supabaseAdmin.from('transfers')
+          .select('id').eq('vicidial_vendor_code', code).limit(1);
+        if (clash && clash.length) continue;
+        // Map the lead_id always; set the dispo ONLY if currently empty (never
+        // clobber an existing disposition) and it's a real outcome.
+        const setDispo = !LIST_SKIP.has(best.status) && !tr.vicidial_dispo;
         const updates = { vicidial_vendor_code: code };
         if (setDispo) { updates.vicidial_dispo = best.status; updates.vicidial_dispo_at = now; }
         await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
@@ -839,8 +847,8 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
         }
       } catch { /* skip a bad row, keep going */ }
     }
-    // leads left unpaired = no matching transfer (in window)
-    noMatch += leads.length - usedL.size;
+    // distinct lead_ids that found no transfer (in window)
+    noMatch += new Set(leads.map(l => l.leadId)).size - usedLid.size;
   }
 
   if (batchOk) {

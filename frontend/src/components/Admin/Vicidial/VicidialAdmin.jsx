@@ -386,7 +386,22 @@ const Backfill = () => {
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       if (!lines.length) throw new Error('Empty file');
       const delim = lines[0].includes('\t') ? '\t' : lines[0].includes('|') ? '|' : ',';
-      const split = (l) => l.split(delim).map(s => s.replace(/^"|"$/g, '').trim());
+      // Quote-aware split — a quoted field may contain the delimiter (VICIdial
+      // address/comment columns) and "" is an escaped quote.
+      const split = (line) => {
+        const out = []; let cur = '', inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQ) {
+            if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+            else cur += ch;
+          } else if (ch === '"') { inQ = true; }
+          else if (ch === delim) { out.push(cur); cur = ''; }
+          else cur += ch;
+        }
+        out.push(cur);
+        return out.map(s => s.trim());
+      };
       const header = split(lines[0]).map(h => h.toLowerCase());
       const find = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
       const iPhone = find('phone_number', 'phone');
