@@ -327,15 +327,16 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // can't send lead tokens for the closer's calls. We fall through to the queue.
   const inCode  = String(p.code || '').trim();
   const inAlt   = String(p.alt_code || '').trim();
-  // The CRM stores transfer codes WITH a box prefix (WTI/ETC/TMC + lead_id), but
-  // the dialer sends the BARE lead_id (alt_code) and an empty vendor_lead_code
-  // when the fronter never pressed the webform. So also try the prefixed variants
-  // of any bare numeric value → a same-cluster lead matches by CODE with NO
-  // webform needed (falls back to phone only if no code variant matches).
-  const candidates = [...new Set([
-    inCode, inAlt,
-    ...[inCode, inAlt].filter(v => /^\d+$/.test(v)).flatMap(v => ['WTI' + v, 'ETC' + v, 'TMC' + v]),
-  ].filter(Boolean))];
+  // Exact codes carry the box prefix (WTI/ETC/TMC + lead_id) → globally unique.
+  const exactCodes = [...new Set([inCode, inAlt].filter(Boolean))];
+  // Prefixed variants of a BARE numeric id — used when the fronter never pressed
+  // the webform so vendor_lead_code is empty and the dialer only sent the bare
+  // lead_id. The bare id is NOT unique across boxes, so these are matched ONLY
+  // together with the customer phone (below), never on their own.
+  const prefixedCodes = [...new Set(
+    [inCode, inAlt].filter(v => /^\d+$/.test(v)).flatMap(v => ['WTI' + v, 'ETC' + v, 'TMC' + v])
+  )];
+  const candidates = [...new Set([...exactCodes, ...prefixedCodes])];
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
 
   // Closer identity from the dialing agent — drives company scoping + the queue.
@@ -349,13 +350,26 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   dbg.closer_company_id = closerCompanyId;
 
   let tr = null, code = candidates[0];
-  if (candidates.length) {
-    // One indexed lookup over all code variants (newest wins if several match).
-    const { data: matches } = await supabaseAdmin
+  // 1. Exact (prefixed) code — globally unique, trust it directly.
+  if (exactCodes.length) {
+    const { data } = await supabaseAdmin
       .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
-      .in('vicidial_vendor_code', candidates)
+      .in('vicidial_vendor_code', exactCodes)
       .order('created_at', { ascending: false }).limit(1);
-    if (matches && matches.length) { tr = matches[0]; code = tr.vicidial_vendor_code; }
+    if (data && data.length) { tr = data[0]; code = data[0].vicidial_vendor_code; }
+  }
+  // 2. Prefixed bare lead_id — ambiguous across boxes, so REQUIRE the customer
+  //    phone to also match (lead_id + phone together is unambiguous). Prevents a
+  //    same numeric lead_id on another box stealing this disposition.
+  if (!tr && prefixedCodes.length) {
+    const ph = normPhone(String(p.phone || ''));
+    if (ph) {
+      const { data } = await supabaseAdmin
+        .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
+        .in('vicidial_vendor_code', prefixedCodes).eq('normalized_phone', ph)
+        .order('created_at', { ascending: false }).limit(1);
+      if (data && data.length) { tr = data[0]; code = data[0].vicidial_vendor_code; }
+    }
   }
   // Phone fallback — the customer phone is identical on both sides even when the
   // closer's lead_id differs (same-box transfers that spawn a fresh closer lead).

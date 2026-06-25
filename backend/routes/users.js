@@ -27,9 +27,13 @@ function parseAgentIds(raw) {
 async function agentIdClash(ids, excludeUserId) {
   if (!ids.length) return null;
   const list = ids.join(',');
-  const { data } = await supabaseAdmin.from('user_profiles')
+  let { data, error } = await supabaseAdmin.from('user_profiles')
     .select('user_id, vicidial_agent_id, vicidial_agent_ids')
     .or(`vicidial_agent_id.in.(${list}),vicidial_agent_ids.ov.{${list}}`).limit(5);
+  if (error && /vicidial_agent_ids|column/i.test(error.message || '')) {  // pre-111: single column only
+    ({ data } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, vicidial_agent_id').in('vicidial_agent_id', ids).limit(5));
+  }
   const row = (data || []).find(r => r.user_id !== excludeUserId);
   if (!row) return null;
   return ids.find(i => i === row.vicidial_agent_id || (row.vicidial_agent_ids || []).includes(i)) || ids[0];
@@ -540,13 +544,17 @@ router.post(
 
       // Create user profile
       logger.debug('CREATE_USER', 'Creating user profile', { user_id: authUser.user.id });
-      const profileResult = await supabaseAdmin.from("user_profiles").insert({
-        user_id: authUser.user.id,
-        first_name,
-        last_name,
-        theme_preference: "light",
+      const baseProfile = { user_id: authUser.user.id, first_name, last_name, theme_preference: "light" };
+      let profileResult = await supabaseAdmin.from("user_profiles").insert({
+        ...baseProfile,
         ...(vicidialAgentId ? { vicidial_agent_id: vicidialAgentId, vicidial_agent_ids: vicidialAgentIds } : {}),
       });
+      if (profileResult.error && /vicidial_agent_ids|column/i.test(profileResult.error.message || '')) {  // pre-111 fallback
+        profileResult = await supabaseAdmin.from("user_profiles").insert({
+          ...baseProfile,
+          ...(vicidialAgentId ? { vicidial_agent_id: vicidialAgentId } : {}),
+        });
+      }
 
       logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
 
@@ -723,10 +731,14 @@ router.put(
       if (Object.keys(profileUpdate).length > 0) {
         logger.debug('UPDATE_USER', 'Updating user profile', { user_id: targetAssignment.user_id });
         profileUpdate.updated_at = new Date().toISOString();
-        await supabaseAdmin
+        let { error: upErr } = await supabaseAdmin
           .from("user_profiles")
           .update(profileUpdate)
           .eq("user_id", targetAssignment.user_id);
+        if (upErr && /vicidial_agent_ids|column/i.test(upErr.message || '')) {  // pre-111 fallback
+          const { vicidial_agent_ids, ...rest } = profileUpdate;
+          await supabaseAdmin.from("user_profiles").update(rest).eq("user_id", targetAssignment.user_id);
+        }
 
         logger.success('UPDATE_USER', `User profile updated`);
       }
