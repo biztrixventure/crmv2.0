@@ -729,6 +729,42 @@ api.delete('/config/:id', superOnly, asyncHandler(async (req, res) => {
   res.json({ message: 'deleted' });
 }));
 
+// ── superadmin: backfill dispositions from a vicidial_list CSV export ─────────
+// The dialer API can't dump a list's leads, but the admin UI "Download leads"
+// can — that CSV carries phone_number + status for every lead, and vicidial_list
+// persists (no archive wall), so even old code-less transfers are covered. The
+// client parses the CSV and sends rows in batches; we match each to the newest
+// CRM transfer on that phone still missing a dispo and fill it. Real outcomes
+// only — no-connect / transfer / system codes are skipped.
+const LIST_SKIP = new Set([
+  'A','N','NA','DAIR','DROP','AFTHRS','B','DC','AB','ADC','PDROP','AA','NANQUE',
+  'TIMEOT','CXHNGP','INCALL','QUEUE','CH','DISPO','NEW','XFER','TRANSFER','XDROP',
+  'IVRXFR','RQXFER','','-',
+]);
+api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  const dryRun = req.body.dry_run === true;
+  let matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
+  for (const r of rows) {
+    const ph = normPhone(String(r.phone || r.phone_number || ''));
+    const status = String(r.status || '').trim().toUpperCase();
+    if (!ph) { noMatch++; continue; }
+    if (LIST_SKIP.has(status)) { skippedStatus++; continue; }
+    // newest CRM transfer on this phone still missing a disposition
+    const { data: tr } = await supabaseAdmin
+      .from('transfers').select('id, company_id, assigned_closer_id, status')
+      .eq('normalized_phone', ph).is('vicidial_dispo', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!tr) { noMatch++; continue; }
+    matched++;
+    if (dryRun) continue;
+    const dispoName = await lookupDispoName(tr.company_id, status) || status;
+    try { await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: status, talk: NaN }); applied++; }
+    catch { /* skip a bad row, keep going */ }
+  }
+  res.json({ ok: true, received: rows.length, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
+}));
+
 // ── superadmin: backfill dispositions for OLD coded transfers ────────────────
 // Only CODED transfers are recoverable: the lead's status persists in
 // vicidial_list (archive-proof) so lead_field_info(status, lead_id) returns the

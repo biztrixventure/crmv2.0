@@ -352,6 +352,40 @@ const Backfill = () => {
   const [processed, setProcessed] = useState(0);
   const [remaining, setRemaining] = useState(null);
   const [done, setDone] = useState(false);
+  const [impBusy, setImpBusy] = useState(false);
+  const [impRes, setImpRes] = useState(null);
+
+  // Parse a vicidial_list "Download leads" CSV and match phone→status into the CRM.
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImpBusy(true); setImpRes(null);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) throw new Error('Empty file');
+      const delim = lines[0].includes('\t') ? '\t' : lines[0].includes('|') ? '|' : ',';
+      const split = (l) => l.split(delim).map(s => s.replace(/^"|"$/g, '').trim());
+      const header = split(lines[0]).map(h => h.toLowerCase());
+      const iPhone = header.findIndex(h => h === 'phone_number' || h === 'phone');
+      const iStatus = header.findIndex(h => h === 'status');
+      if (iPhone < 0 || iStatus < 0) throw new Error('CSV needs a phone_number and a status column (use VICIdial "Download leads" with a header row)');
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const c = split(lines[i]);
+        if (c[iPhone] && c[iStatus]) rows.push({ phone: c[iPhone], status: c[iStatus] });
+      }
+      let matched = 0, applied = 0, skipped = 0, noMatch = 0;
+      for (let i = 0; i < rows.length; i += 500) {
+        const r = await client.post('vicidial/backfill/from-list', { rows: rows.slice(i, i + 500) });
+        matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
+        setImpRes({ total: rows.length, processed: Math.min(i + 500, rows.length), matched, applied, skipped, noMatch });
+      }
+      toast.success(`Filled ${applied} disposition${applied === 1 ? '' : 's'} from ${rows.length} list rows`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Import failed');
+    } finally { setImpBusy(false); e.target.value = ''; }
+  };
 
   const run = async () => {
     setRunning(true); setDone(false); setFound(0); setProcessed(0);
@@ -374,12 +408,12 @@ const Backfill = () => {
   return (
     <div className="space-y-4 max-w-2xl">
       <Alert variant="info">
-        <p className="font-semibold mb-1">Only coded transfers can be recovered.</p>
+        <p className="font-semibold mb-1">Two ways to recover dispositions.</p>
         <p className="text-sm">
-          A transfer that carries a dialer code (<code>WTI/ETC/TMC…</code>) can have its disposition read straight from
-          the dialer by lead id — that status never archives. <b>Code-less transfers</b> (most of the old, pre-link ones)
-          have no lead id and the dialer's call log archives daily, so there is no source to read — they're skipped.
-          Going forward, the fronter-xfer URLs make every new transfer coded, so this gap stops growing.
+          <b>Coded transfers</b> (carry <code>WTI/ETC/TMC…</code>): read straight from the dialer by lead id — use the
+          button below. <b>Code-less transfers</b> (no lead id, phone call-log archives daily): the API can't reach them,
+          but the closer/transfer list still holds them — export that list and use the CSV import below. Going forward
+          the fronter-xfer URLs make every new transfer coded, so this gap stops growing.
         </p>
       </Alert>
 
@@ -405,6 +439,34 @@ const Backfill = () => {
               {remaining != null && <span>Coded still missing: <b style={{ color: 'var(--color-text)' }}>{remaining}</b></span>}
             </div>
             {done && <p className="mt-2 flex items-center gap-1.5" style={{ color: 'var(--color-success-600, #059669)' }}><Check size={15} /> Done — {found} recovered. The rest had no readable status (purged / no-connect).</p>}
+          </div>
+        )}
+      </div>
+
+      {/* Code-LESS recovery via a vicidial_list export (the 46k) */}
+      <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Import from a list export (code-less transfers)</p>
+        <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+          For transfers with no dialer code: export the closer/transfer list from the dialer
+          (<b>Admin → Lists → 101010 → Download leads</b>, with a header row), then upload the CSV here. Each
+          row's <code>phone_number</code> + <code>status</code> is matched to the newest CRM transfer on that phone
+          still missing a disposition. No-connect / transfer / system codes are skipped.
+        </p>
+        <label className="inline-flex items-center gap-2 mt-3 px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer text-white disabled:opacity-40"
+          style={{ background: 'var(--gradient-sidebar)', opacity: impBusy ? 0.5 : 1, pointerEvents: impBusy ? 'none' : 'auto' }}>
+          {impBusy ? <Loader2 size={15} className="animate-spin" /> : <DownloadCloud size={15} />}
+          {impBusy ? 'Matching…' : 'Upload list CSV'}
+          <input type="file" accept=".csv,.txt,.tsv" className="hidden" onChange={onFile} disabled={impBusy} />
+        </label>
+
+        {impRes && (
+          <div className="mt-4 pt-4 text-sm" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <div className="flex gap-5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+              <span>Rows: <b style={{ color: 'var(--color-text)' }}>{impRes.processed}/{impRes.total}</b></span>
+              <span>Filled: <b style={{ color: 'var(--color-success-600, #059669)' }}>{impRes.applied}</b></span>
+              <span>No CRM match: <b style={{ color: 'var(--color-text)' }}>{impRes.noMatch}</b></span>
+              <span>Skipped (no-connect): <b style={{ color: 'var(--color-text)' }}>{impRes.skipped}</b></span>
+            </div>
           </div>
         )}
       </div>
