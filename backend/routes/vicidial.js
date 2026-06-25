@@ -729,6 +729,43 @@ api.delete('/config/:id', superOnly, asyncHandler(async (req, res) => {
   res.json({ message: 'deleted' });
 }));
 
+// ── superadmin: backfill dispositions for OLD coded transfers ────────────────
+// Only CODED transfers are recoverable: the lead's status persists in
+// vicidial_list (archive-proof) so lead_field_info(status, lead_id) returns the
+// real disposition. Code-LESS transfers have no lead_id and the phone call-log
+// archives daily, so there is no source to read — they are intentionally skipped.
+// Cursor-paged (created_at) + throttled so it never hammers the dialer; the
+// client loops until done. Idempotent — re-running just re-applies the latest.
+api.post('/backfill/coded', superOnly, asyncHandler(async (req, res) => {
+  const batch  = Math.min(parseInt(req.body.batch, 10) || 25, 50);
+  const before = req.body.before || null;  // created_at cursor — process OLDER than this
+  let q = supabaseAdmin.from('transfers')
+    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at')
+    .is('vicidial_dispo', null).not('vicidial_vendor_code', 'is', null)
+    .order('created_at', { ascending: false }).limit(batch);
+  if (before) q = q.lt('created_at', before);
+  const { data: rows } = await q;
+
+  let found = 0, lastCursor = before;
+  for (const tr of (rows || [])) {
+    lastCursor = tr.created_at;
+    try {
+      const code = await leadStatusByCode(tr.vicidial_vendor_code);   // real status or null
+      if (code) {
+        const dispoName = await lookupDispoName(tr.company_id, code) || code;
+        await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: code, talk: NaN });
+        found++;
+      }
+    } catch { /* skip a purged/bad lead, keep going */ }
+    await new Promise(r => setTimeout(r, 250));  // gentle on the dialer
+  }
+  // total coded transfers still missing a dispo (informational progress denominator)
+  const { count: remaining } = await supabaseAdmin.from('transfers')
+    .select('*', { count: 'exact', head: true })
+    .is('vicidial_dispo', null).not('vicidial_vendor_code', 'is', null);
+  res.json({ ok: true, processed: rows?.length || 0, found, cursor: lastCursor, remaining: remaining || 0, done: (rows?.length || 0) < batch });
+}));
+
 // Agent-id map — list users (search) with their current mapping.
 api.get('/agents', superOnly, asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -11,6 +11,7 @@ const TABS = [
   { k: 'prefixes', label: 'Prefix registry',  icon: Hash },
   { k: 'agents',   label: 'Agent mapping',    icon: Users },
   { k: 'dispo',    label: 'Disposition map',  icon: ListChecks },
+  { k: 'backfill', label: 'Backfill dispos',  icon: DownloadCloud },
   { k: 'setup',    label: 'Setup URLs',       icon: PhoneCall },
 ];
 
@@ -344,6 +345,73 @@ const Setup = () => {
   );
 };
 
+// ── Backfill dispositions for OLD coded transfers ────────────────────────────
+const Backfill = () => {
+  const [running, setRunning] = useState(false);
+  const [found, setFound] = useState(0);
+  const [processed, setProcessed] = useState(0);
+  const [remaining, setRemaining] = useState(null);
+  const [done, setDone] = useState(false);
+
+  const run = async () => {
+    setRunning(true); setDone(false); setFound(0); setProcessed(0);
+    let before = null, tFound = 0, tProc = 0;
+    try {
+      for (;;) {
+        const r = await client.post('vicidial/backfill/coded', { batch: 25, before });
+        tFound += r.data.found; tProc += r.data.processed;
+        setFound(tFound); setProcessed(tProc); setRemaining(r.data.remaining);
+        before = r.data.cursor;
+        if (r.data.done) break;
+      }
+      setDone(true);
+      toast.success(`Backfill complete — recovered ${tFound} disposition${tFound === 1 ? '' : 's'}`);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Backfill failed');
+    } finally { setRunning(false); }
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <Alert variant="info">
+        <p className="font-semibold mb-1">Only coded transfers can be recovered.</p>
+        <p className="text-sm">
+          A transfer that carries a dialer code (<code>WTI/ETC/TMC…</code>) can have its disposition read straight from
+          the dialer by lead id — that status never archives. <b>Code-less transfers</b> (most of the old, pre-link ones)
+          have no lead id and the dialer's call log archives daily, so there is no source to read — they're skipped.
+          Going forward, the fronter-xfer URLs make every new transfer coded, so this gap stops growing.
+        </p>
+      </Alert>
+
+      <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Recover dispositions from the dialer</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Reads each coded transfer's lead status (throttled — gentle on the dialer). Safe to re-run.
+            </p>
+          </div>
+          <Button onClick={run} disabled={running}>
+            {running ? <Loader2 size={15} className="animate-spin" /> : <DownloadCloud size={15} />}
+            {running ? 'Running…' : 'Start backfill'}
+          </Button>
+        </div>
+
+        {(running || done) && (
+          <div className="mt-4 pt-4 text-sm" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <div className="flex gap-6 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+              <span>Scanned: <b style={{ color: 'var(--color-text)' }}>{processed}</b></span>
+              <span>Recovered: <b style={{ color: 'var(--color-success-600, #059669)' }}>{found}</b></span>
+              {remaining != null && <span>Coded still missing: <b style={{ color: 'var(--color-text)' }}>{remaining}</b></span>}
+            </div>
+            {done && <p className="mt-2 flex items-center gap-1.5" style={{ color: 'var(--color-success-600, #059669)' }}><Check size={15} /> Done — {found} recovered. The rest had no readable status (purged / no-connect).</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const VicidialAdmin = () => {
   const [tab, setTab] = useState('prefixes');
   return (
@@ -372,6 +440,7 @@ const VicidialAdmin = () => {
       {tab === 'prefixes' && <Prefixes />}
       {tab === 'agents'   && <Agents />}
       {tab === 'dispo'    && <DispoMap />}
+      {tab === 'backfill' && <Backfill />}
       {tab === 'setup'    && <Setup />}
     </div>
   );
