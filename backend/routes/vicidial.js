@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode } = require('../utils/dialerBoxes');
 
 const ingest = express.Router();
 const api = express.Router();
@@ -507,7 +507,7 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
 // phone and attaches that. Idempotent-ish: re-running just re-applies the latest.
 api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status').eq('id', req.params.transferId).maybeSingle();
+    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code').eq('id', req.params.transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
   const norm = tr.normalized_phone;
   if (!norm) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
@@ -525,10 +525,22 @@ api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
     return res.json({ ok: true, source: 'queue', disposition_name: dispoName || q.vici_code });
   }
 
-  // 2) Dialer backstop — ask the boxes for the latest real disposition on this
-  //    phone (e.g. when the dialer URL never reached the CRM at all).
+  // 2) By lead code — the lead's STATUS persists in vicidial_list even after the
+  //    call log archives, so a coded transfer can fetch an OLD disposition by its
+  //    lead_id (no-connect/XFER are filtered out inside leadStatusByCode).
+  if (tr.vicidial_vendor_code) {
+    const code = await leadStatusByCode(tr.vicidial_vendor_code);
+    if (code) {
+      const dispoName = await lookupDispoName(tr.company_id, code) || code;
+      await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: code, talk: NaN });
+      return res.json({ ok: true, source: 'lead', disposition_name: dispoName });
+    }
+  }
+
+  // 3) Dialer call log — latest real disposition on this phone. Only sees the
+  //    ACTIVE log (the dialer archives old calls), so this is a same-day backstop.
   const found = await latestDisposition(norm);
-  if (!found) return res.json({ ok: false, message: 'No disposition found on the dialer for this number yet.' });
+  if (!found) return res.json({ ok: false, message: 'No disposition found yet — the call may have archived (old) and this transfer has no dialer code to look up.' });
 
   const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
   const { userId: closerUserId } = await resolveAgent(found.user);

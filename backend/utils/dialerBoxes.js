@@ -39,6 +39,32 @@ async function phoneCallLog(box, phone) {
   } catch { return []; }
 }
 
+// Map a vendor-code prefix → the box that lead lives on.
+const BOX_BY_PREFIX = { WTI: 'wavetech', ETC: 'etc', TMC: 'tmc' };
+
+// The lead's CURRENT status persists in vicidial_list (NOT archived like the call
+// log), so for a coded transfer we can read the disposition directly by lead_id —
+// works for OLD transfers the call-log lookup can no longer see. Returns the raw
+// status code, or null. (Cross-cluster note: this is the status on the lead's own
+// box; for same-box closers it IS the closer's disposition.)
+async function leadStatusByCode(code) {
+  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
+  if (!m) return null;
+  const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
+  const leadId = m[2];
+  if (!box || !leadId) return null;
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'status', lead_id: leadId },
+      timeout: 15000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (!text || /^ERROR|^NOTICE/m.test(text)) return null;
+    const status = text.split(/\r?\n/)[0].trim();
+    return (status && !NO_CONNECT.has(status.toUpperCase())) ? status : null;
+  } catch { return null; }
+}
+
 // Pull every call for a phone across all boxes, newest first.
 async function lookupCallsByPhone(phone) {
   const all = (await Promise.all(BOXES.map(b => phoneCallLog(b, phone)))).flat();
@@ -57,4 +83,4 @@ async function latestDisposition(phone) {
   return { code: (real.call_status || real.lead_status), user: real.user, box: real.box, at: real.call_date };
 }
 
-module.exports = { BOXES, lookupCallsByPhone, latestDisposition };
+module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode };
