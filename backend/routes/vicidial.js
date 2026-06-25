@@ -748,9 +748,15 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
   const source  = (req.body.source || '').toString().slice(0, 200) || 'list export';
 
   // Open the batch on the first chunk (idempotent — later chunks reuse it).
+  // Best-effort: if migration 112 isn't applied the fill still works, just without
+  // undo tracking (batchOk stays false).
+  let batchOk = false;
   if (batchId && !dryRun) {
-    await supabaseAdmin.from('vicidial_backfill_batches')
-      .upsert({ id: batchId, source, created_by: req.user.id }, { onConflict: 'id', ignoreDuplicates: true });
+    try {
+      await supabaseAdmin.from('vicidial_backfill_batches')
+        .upsert({ id: batchId, source, created_by: req.user.id }, { onConflict: 'id', ignoreDuplicates: true });
+      batchOk = true;
+    } catch { /* 112 not applied → proceed without undo tracking */ }
   }
 
   let matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
@@ -788,23 +794,28 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
         }).select('id').single();
         actionId = da?.id || null;
       } catch { /* actions log is non-critical */ }
-      if (batchId) {
-        await supabaseAdmin.from('vicidial_backfill_fills').insert({
-          batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
-          new_dispo: status, dispo_action_id: actionId,
-        });
-      }
       applied++;
+      // Undo tracking — best-effort, never affects the fill or the count.
+      if (batchOk) {
+        try {
+          await supabaseAdmin.from('vicidial_backfill_fills').insert({
+            batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
+            new_dispo: status, dispo_action_id: actionId,
+          });
+        } catch { /* tracking is non-critical */ }
+      }
     } catch { /* skip a bad row, keep going */ }
   }
 
   // Roll the running totals onto the batch (chunks are sequential → no race).
-  if (batchId && !dryRun) {
-    const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches')
-      .select('total_rows, applied_count').eq('id', batchId).maybeSingle();
-    await supabaseAdmin.from('vicidial_backfill_batches')
-      .update({ total_rows: (b?.total_rows || 0) + rows.length, applied_count: (b?.applied_count || 0) + applied })
-      .eq('id', batchId);
+  if (batchOk) {
+    try {
+      const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches')
+        .select('total_rows, applied_count').eq('id', batchId).maybeSingle();
+      await supabaseAdmin.from('vicidial_backfill_batches')
+        .update({ total_rows: (b?.total_rows || 0) + rows.length, applied_count: (b?.applied_count || 0) + applied })
+        .eq('id', batchId);
+    } catch { /* tracking non-critical */ }
   }
   res.json({ ok: true, batch_id: batchId, received: rows.length, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
 }));
