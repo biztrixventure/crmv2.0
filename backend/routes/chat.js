@@ -522,15 +522,20 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   if (!membership) return res.status(403).json({ error: 'Not a member of this conversation' });
 
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 50);
-  let q = supabaseAdmin
-    .from('messages')
-    .select('id, conversation_id, sender_id, guest_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at')
-    .eq('conversation_id', req.params.id)
-    .order('created_at', { ascending: false })
-    .limit(limit + 1);
-  if (req.query.before) q = q.lt('created_at', req.query.before);
-
-  const { data, error } = await q;
+  // Tolerate messages.guest_id not being migrated yet (108): retry without it so
+  // chat never breaks if the backend ships before the migration is applied.
+  const baseCols = 'id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at';
+  const runMsgQuery = (withGuest) => {
+    let q = supabaseAdmin.from('messages')
+      .select(withGuest ? `${baseCols}, guest_id` : baseCols)
+      .eq('conversation_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(limit + 1);
+    if (req.query.before) q = q.lt('created_at', req.query.before);
+    return q;
+  };
+  let { data, error } = await runMsgQuery(true);
+  if (error && /guest_id|column/i.test(error.message || '')) ({ data, error } = await runMsgQuery(false));
   if (error) return res.status(500).json({ error: error.message });
 
   const hasMore = (data || []).length > limit;
