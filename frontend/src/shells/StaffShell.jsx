@@ -826,9 +826,11 @@ const StaffShell = () => {
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.
             Shown by ownership, not role — /pending only returns transfers THIS
-            user created (the fronter who XFERd). A closer who never XFERd has
-            none, so the banner self-hides; no fragile role gate needed. */}
-        <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />
+            user created (the fronter who XFERd). Confirming a pending transfer is
+            a FRONTER action (it opens the transfer form) — closers work leads via
+            the sale-form flow below, so gate this to fronters so they never see a
+            transfer Confirm button. */}
+        {isFronter && <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />}
 
         {/* VICIdial: closer's dialer dispositions awaiting a lead (the closer
             assigns each to a lead). Self-hides when the closer has none. */}

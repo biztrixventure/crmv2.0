@@ -439,8 +439,14 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     : {};
   const companyMap = await enrichCompanies(data || [], t => t.company_id);
 
-  // Enrich with linked sale data + latest disposition
-  const transferIds = (data || []).map(t => t.id).filter(Boolean);
+  // Enrich with linked sale data + latest disposition. Include the refreshed
+  // original's id too, so a synthetic 'Duplicate · in-place' row can borrow the
+  // disposition of the transfer it merged into (the synthetic row has none of
+  // its own — that's why the dispo column was blank on those rows).
+  const transferIds = [...new Set([
+    ...(data || []).map(t => t.id),
+    ...(data || []).map(t => t.refreshed_transfer_id),
+  ].filter(Boolean))];
   let saleMap = {};
   let latestDispoMap = {};
   if (transferIds.length > 0) {
@@ -551,7 +557,9 @@ router.get('/transfers', asyncHandler(async (req, res) => {
       sale_status:           sale?.status || null,
       sale_compliance_note:  sale?.compliance_note || null,
       sale_reference_no:     sale?.reference_no || null,
-      latest_disposition:    latestDispoMap[t.id] || null,
+      // In-place duplicate rows have no disposition of their own → fall back to
+      // the disposition of the original transfer they refreshed.
+      latest_disposition:    latestDispoMap[t.id] || (t.refreshed_transfer_id ? latestDispoMap[t.refreshed_transfer_id] : null) || null,
       is_duplicate:          isRefreshDup ? true : !!dup,
       duplicate_reason:      isRefreshDup ? 'refresh' : (dup?.duplicate_reason || null),
       duplicate_detected_at: isRefreshDup ? t.created_at : (dup?.duplicate_detected_at || null),
