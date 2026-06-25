@@ -776,7 +776,7 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
 
     // Code-less transfers on this phone, oldest → newest (so date-pairing is stable).
     const { data: trs } = await supabaseAdmin
-      .from('transfers').select('id, company_id, created_at, vicidial_dispo, vicidial_vendor_code')
+      .from('transfers').select('id, company_id, created_at, vicidial_dispo, vicidial_vendor_code, assigned_closer_id')
       .eq('normalized_phone', ph).is('vicidial_vendor_code', null)
       .order('created_at', { ascending: true });
     if (!trs?.length) { noMatch += leads.length; continue; }
@@ -828,9 +828,11 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
               .or(`company_id.is.null,company_id.eq.${tr.company_id}`)
               .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
             const { data: da } = await supabaseAdmin.from('disposition_actions').insert({
-              transfer_id: tr.id, company_id: tr.company_id, user_id: null,
+              transfer_id: tr.id, company_id: tr.company_id,
+              user_id: tr.assigned_closer_id || req.user.id,  // user_id is NOT NULL — fall back to the importing admin
               disposition_config_id: cfg?.id || null, disposition_name: dispoName,
-              color: cfg?.color || null, note: `Backfill from list (${best.status})`, setter_role: 'closer',
+              color: cfg?.color || '#6b7280',                 // color is NOT NULL — neutral grey when unmapped
+              note: `Backfill from list (${best.status})`, setter_role: 'closer',
             }).select('id').single();
             actionId = da?.id || null;
           } catch { /* actions log is non-critical */ }
