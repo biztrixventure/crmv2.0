@@ -812,9 +812,18 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
         const { data: clash } = await supabaseAdmin.from('transfers')
           .select('id').eq('vicidial_vendor_code', code).limit(1);
         if (clash && clash.length) continue;
-        // Map the lead_id always; set the dispo ONLY if currently empty (never
-        // clobber an existing disposition) and it's a real outcome.
-        const setDispo = !LIST_SKIP.has(best.status) && !tr.vicidial_dispo;
+        // Map the lead_id always; set the dispo ONLY if the transfer has NO
+        // disposition yet (column OR a disposition_actions row — a real closer
+        // dispo like SALE lives in the actions log, not the column) and it's a
+        // real outcome. Prevents a backfill CALLBK landing on top of a SALE.
+        const realOutcome = !LIST_SKIP.has(best.status);
+        let alreadyDisposed = !!tr.vicidial_dispo;
+        if (realOutcome && !alreadyDisposed) {
+          const { count } = await supabaseAdmin.from('disposition_actions')
+            .select('*', { count: 'exact', head: true }).eq('transfer_id', tr.id);
+          alreadyDisposed = (count || 0) > 0;
+        }
+        const setDispo = realOutcome && !alreadyDisposed;
         const updates = { vicidial_vendor_code: code };
         if (setDispo) { updates.vicidial_dispo = best.status; updates.vicidial_dispo_at = now; }
         await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);

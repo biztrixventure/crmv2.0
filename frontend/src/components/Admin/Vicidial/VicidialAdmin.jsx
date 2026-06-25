@@ -358,6 +358,7 @@ const Backfill = () => {
   const [undoing, setUndoing] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
   const [boxPrefix, setBoxPrefix] = useState('WTI');
+  const [dateFmt, setDateFmt] = useState('AUTO');
 
   const loadBatches = useCallback(async () => {
     try { const r = await client.get('vicidial/backfill/batches'); setBatches(r.data.batches || []); } catch { /* ignore */ }
@@ -407,16 +408,49 @@ const Backfill = () => {
       const iPhone = find('phone_number', 'phone');
       const iStatus = find('status');
       const iLead = find('lead_id', 'leadid');
-      const iDate = find('last_local_call_time', 'entry_date', 'modify_date', 'call_date', 'date');
+      // Match any date/time-ish column, incl. combined headers like
+      // "last_local_call_time/entry_date".
+      const iDate = header.findIndex(h => /call_time|entry_date|modify_date|call_date|last_local|date/.test(h));
       if (iPhone < 0 || iStatus < 0 || iLead < 0) throw new Error('CSV needs phone_number, status, and lead_id columns (VICIdial "Download leads" with a header row)');
+
+      // ── date parsing ── ISO is unambiguous; slash dates need a day/month order.
+      const rawRows = lines.slice(1).map(split).filter(c => c[iPhone] && c[iStatus] && c[iLead]);
+      const detectFmt = () => {
+        if (iDate < 0) return 'NONE';
+        let iso = 0, slash = 0, dmy = 0, mdy = 0;
+        for (const c of rawRows) {
+          const t = (c[iDate] || '').trim();
+          if (/^\d{4}-\d{1,2}-\d{1,2}/.test(t)) iso++;
+          else { const m = t.match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}/); if (m) { slash++; if (+m[1] > 12) dmy++; else if (+m[2] > 12) mdy++; } }
+        }
+        if (iso >= slash) return 'ISO';
+        if (dmy && !mdy) return 'DMY';
+        if (mdy && !dmy) return 'MDY';
+        return 'DMY';  // ambiguous slash (e.g. 01/05) → default day-first; user can override
+      };
+      const usedFmt = dateFmt === 'AUTO' ? detectFmt() : dateFmt;
+      const toIso = (s) => {
+        if (!s || iDate < 0 || usedFmt === 'NONE') return '';
+        s = s.trim();
+        let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/);
+        if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0))).toISOString();
+        m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T,]+(\d{1,2}):(\d{2}))?/);
+        if (m) {
+          let p1 = +m[1], p2 = +m[2], y = +m[3]; if (y < 100) y += 2000;
+          const day = usedFmt === 'MDY' ? p2 : p1, mon = usedFmt === 'MDY' ? p1 : p2;
+          if (mon < 1 || mon > 12 || day < 1 || day > 31) return '';
+          return new Date(Date.UTC(y, mon - 1, day, +(m[4] || 0), +(m[5] || 0))).toISOString();
+        }
+        return '';
+      };
+
       const norm = (p) => String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
       const map = new Map();  // normalized phone → [{ status, lead_id, date }]
-      for (let i = 1; i < lines.length; i++) {
-        const c = split(lines[i]);
-        const ph = norm(c[iPhone]); const status = c[iStatus]; const lead_id = c[iLead];
-        if (!ph || !status || !lead_id) continue;
+      for (const c of rawRows) {
+        const ph = norm(c[iPhone]);
+        if (!ph) continue;
         if (!map.has(ph)) map.set(ph, []);
-        map.get(ph).push({ status, lead_id, date: iDate >= 0 ? c[iDate] : '' });
+        map.get(ph).push({ status: c[iStatus], lead_id: c[iLead], date: toIso(c[iDate]) });
       }
       const groups = [...map.entries()].map(([phone, leads]) => ({ phone, leads }));
       if (!groups.length) throw new Error('No usable rows found under the header (need phone_number + status + lead_id)');
@@ -427,7 +461,8 @@ const Backfill = () => {
         received += r.data.received; matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
         setImpRes({ total: groups.length, processed: Math.min(i + 300, groups.length), received, matched, applied, skipped, noMatch });
       }
-      toast.success(`Mapped ${applied} transfer${applied === 1 ? '' : 's'} to ${boxPrefix} lead ids`);
+      const fmtLabel = usedFmt === 'NONE' ? 'no date column (order-based)' : usedFmt === 'ISO' ? 'ISO dates' : usedFmt === 'DMY' ? 'DD/MM/YYYY dates' : 'MM/DD/YYYY dates';
+      toast.success(`Mapped ${applied} to ${boxPrefix} lead ids · ${fmtLabel}`);
       await loadBatches();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Import failed');
@@ -526,7 +561,7 @@ const Backfill = () => {
           </div>
         )}
 
-        <div className="flex items-center gap-3 mt-3 flex-wrap">
+        <div className="flex items-center gap-4 mt-3 flex-wrap">
           <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
             This export is from:
             <select value={boxPrefix} onChange={e => setBoxPrefix(e.target.value)} disabled={impBusy}
@@ -534,6 +569,16 @@ const Backfill = () => {
               <option value="WTI">Wavetech (WTI)</option>
               <option value="ETC">EasyTech (ETC)</option>
               <option value="TMC">Mejor / TMC (TMC)</option>
+            </select>
+          </label>
+          <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            Date format:
+            <select value={dateFmt} onChange={e => setDateFmt(e.target.value)} disabled={impBusy}
+              className="input ml-2 py-1.5 text-sm" style={{ width: 'auto', display: 'inline-block' }}>
+              <option value="AUTO">Auto-detect</option>
+              <option value="ISO">ISO (YYYY-MM-DD)</option>
+              <option value="DMY">DD/MM/YYYY</option>
+              <option value="MDY">MM/DD/YYYY</option>
             </select>
           </label>
         </div>
