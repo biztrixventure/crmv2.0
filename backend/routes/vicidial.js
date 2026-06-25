@@ -744,7 +744,17 @@ const LIST_SKIP = new Set([
 api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
   const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
   const dryRun = req.body.dry_run === true;
+  const batchId = (req.body.batch_id && /^[0-9a-f-]{36}$/i.test(req.body.batch_id)) ? req.body.batch_id : null;
+  const source  = (req.body.source || '').toString().slice(0, 200) || 'list export';
+
+  // Open the batch on the first chunk (idempotent — later chunks reuse it).
+  if (batchId && !dryRun) {
+    await supabaseAdmin.from('vicidial_backfill_batches')
+      .upsert({ id: batchId, source, created_by: req.user.id }, { onConflict: 'id', ignoreDuplicates: true });
+  }
+
   let matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
+  const now = new Date().toISOString();
   for (const r of rows) {
     const ph = normPhone(String(r.phone || r.phone_number || ''));
     const status = String(r.status || '').trim().toUpperCase();
@@ -752,17 +762,86 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
     if (LIST_SKIP.has(status)) { skippedStatus++; continue; }
     // newest CRM transfer on this phone still missing a disposition
     const { data: tr } = await supabaseAdmin
-      .from('transfers').select('id, company_id, assigned_closer_id, status')
+      .from('transfers').select('id, company_id, vicidial_dispo')
       .eq('normalized_phone', ph).is('vicidial_dispo', null)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (!tr) { noMatch++; continue; }
     matched++;
     if (dryRun) continue;
-    const dispoName = await lookupDispoName(tr.company_id, status) || status;
-    try { await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: status, talk: NaN }); applied++; }
-    catch { /* skip a bad row, keep going */ }
+    try {
+      // Set ONLY the dialer-disposition fields (no status/closer cascade) so the
+      // fill is self-contained + cleanly reversible.
+      await supabaseAdmin.from('transfers')
+        .update({ vicidial_dispo: status, vicidial_dispo_at: now }).eq('id', tr.id);
+      // Mirror a closer dispo into the actions log; capture its id for undo.
+      const dispoName = await lookupDispoName(tr.company_id, status) || status;
+      let actionId = null;
+      try {
+        const { data: cfg } = await supabaseAdmin.from('disposition_configs')
+          .select('id, color').eq('name', dispoName).eq('is_active', true)
+          .or(`company_id.is.null,company_id.eq.${tr.company_id}`)
+          .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
+        const { data: da } = await supabaseAdmin.from('disposition_actions').insert({
+          transfer_id: tr.id, company_id: tr.company_id, user_id: null,
+          disposition_config_id: cfg?.id || null, disposition_name: dispoName,
+          color: cfg?.color || null, note: `Backfill from list (${status})`, setter_role: 'closer',
+        }).select('id').single();
+        actionId = da?.id || null;
+      } catch { /* actions log is non-critical */ }
+      if (batchId) {
+        await supabaseAdmin.from('vicidial_backfill_fills').insert({
+          batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
+          new_dispo: status, dispo_action_id: actionId,
+        });
+      }
+      applied++;
+    } catch { /* skip a bad row, keep going */ }
   }
-  res.json({ ok: true, received: rows.length, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
+
+  // Roll the running totals onto the batch (chunks are sequential → no race).
+  if (batchId && !dryRun) {
+    const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches')
+      .select('total_rows, applied_count').eq('id', batchId).maybeSingle();
+    await supabaseAdmin.from('vicidial_backfill_batches')
+      .update({ total_rows: (b?.total_rows || 0) + rows.length, applied_count: (b?.applied_count || 0) + applied })
+      .eq('id', batchId);
+  }
+  res.json({ ok: true, batch_id: batchId, received: rows.length, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
+}));
+
+// List recent import batches (newest first) so the superadmin can review / undo.
+api.get('/backfill/batches', superOnly, asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('vicidial_backfill_batches')
+    .select('id, source, created_at, total_rows, applied_count, undone_at, undone_count')
+    .order('created_at', { ascending: false }).limit(50);
+  res.json({ batches: data || [] });
+}));
+
+// Undo a batch: restore each filled transfer's disposition to its previous value
+// and delete the disposition_actions row we inserted — but ONLY where the value
+// still equals what this batch wrote (never clobber a change made since).
+api.post('/backfill/batches/:id/undo', superOnly, asyncHandler(async (req, res) => {
+  const id = req.params.id;
+  const { data: batch } = await supabaseAdmin.from('vicidial_backfill_batches')
+    .select('id, undone_at').eq('id', id).maybeSingle();
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  if (batch.undone_at) return res.status(400).json({ error: 'This batch is already undone' });
+
+  const { data: fills } = await supabaseAdmin.from('vicidial_backfill_fills')
+    .select('transfer_id, prev_dispo, new_dispo, dispo_action_id').eq('batch_id', id);
+  let undone = 0, skipped = 0;
+  for (const f of (fills || [])) {
+    const { data: tr } = await supabaseAdmin.from('transfers')
+      .select('id, vicidial_dispo').eq('id', f.transfer_id).maybeSingle();
+    if (!tr || tr.vicidial_dispo !== f.new_dispo) { skipped++; continue; }  // changed since → leave it
+    await supabaseAdmin.from('transfers')
+      .update({ vicidial_dispo: f.prev_dispo || null, vicidial_dispo_at: null }).eq('id', f.transfer_id);
+    if (f.dispo_action_id) await supabaseAdmin.from('disposition_actions').delete().eq('id', f.dispo_action_id);
+    undone++;
+  }
+  await supabaseAdmin.from('vicidial_backfill_batches')
+    .update({ undone_at: new Date().toISOString(), undone_count: undone }).eq('id', id);
+  res.json({ ok: true, undone, skipped });
 }));
 
 // ── superadmin: backfill dispositions for OLD coded transfers ────────────────

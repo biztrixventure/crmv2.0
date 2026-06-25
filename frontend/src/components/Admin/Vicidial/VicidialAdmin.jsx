@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -354,6 +354,25 @@ const Backfill = () => {
   const [done, setDone] = useState(false);
   const [impBusy, setImpBusy] = useState(false);
   const [impRes, setImpRes] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [undoing, setUndoing] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  const loadBatches = useCallback(async () => {
+    try { const r = await client.get('vicidial/backfill/batches'); setBatches(r.data.batches || []); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  const undoBatch = async (id) => {
+    if (!window.confirm('Undo this import? It restores every disposition this batch filled (leaving any that changed since).')) return;
+    setUndoing(id);
+    try {
+      const r = await client.post(`vicidial/backfill/batches/${id}/undo`);
+      toast.success(`Undone — ${r.data.undone} reverted${r.data.skipped ? `, ${r.data.skipped} left (changed since)` : ''}`);
+      await loadBatches();
+    } catch (e) { toast.error(e.response?.data?.error || 'Undo failed'); }
+    finally { setUndoing(null); }
+  };
 
   // Parse a vicidial_list "Download leads" CSV and match phone→status into the CRM.
   const onFile = async (e) => {
@@ -375,13 +394,16 @@ const Backfill = () => {
         const c = split(lines[i]);
         if (c[iPhone] && c[iStatus]) rows.push({ phone: c[iPhone], status: c[iStatus] });
       }
+      if (!rows.length) throw new Error('No data rows found under the header');
+      const batchId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}-4000-8000-000000000000`.padEnd(36, '0').slice(0, 36));
       let matched = 0, applied = 0, skipped = 0, noMatch = 0;
       for (let i = 0; i < rows.length; i += 500) {
-        const r = await client.post('vicidial/backfill/from-list', { rows: rows.slice(i, i + 500) });
+        const r = await client.post('vicidial/backfill/from-list', { batch_id: batchId, source: file.name, rows: rows.slice(i, i + 500) });
         matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
         setImpRes({ total: rows.length, processed: Math.min(i + 500, rows.length), matched, applied, skipped, noMatch });
       }
       toast.success(`Filled ${applied} disposition${applied === 1 ? '' : 's'} from ${rows.length} list rows`);
+      await loadBatches();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Import failed');
     } finally { setImpBusy(false); e.target.value = ''; }
@@ -445,13 +467,39 @@ const Backfill = () => {
 
       {/* Code-LESS recovery via a vicidial_list export (the 46k) */}
       <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Import from a list export (code-less transfers)</p>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Import from a list export (code-less transfers)</p>
+          <button onClick={() => setShowHelp(v => !v)} className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
+            <Info size={13} /> {showHelp ? 'Hide' : 'How to get & prepare the file'}
+          </button>
+        </div>
         <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-          For transfers with no dialer code: export the closer/transfer list from the dialer
-          (<b>Admin → Lists → 101010 → Download leads</b>, with a header row), then upload the CSV here. Each
-          row's <code>phone_number</code> + <code>status</code> is matched to the newest CRM transfer on that phone
-          still missing a disposition. No-connect / transfer / system codes are skipped.
+          For transfers with no dialer code: export the closer/transfer list from the dialer, then upload the CSV here.
+          Each row's <code>phone_number</code> + <code>status</code> is matched to the newest CRM transfer on that phone
+          still missing a disposition. No-connect / transfer / system codes are skipped. Every upload is undoable below.
         </p>
+
+        {showHelp && (
+          <div className="mt-3 rounded-xl p-4 text-xs leading-relaxed" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <p className="font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>Where to get the file</p>
+            <ol className="list-decimal ml-4 space-y-1">
+              <li>In VICIdial admin (the dialer the closers run on — Wavetech): <b>Admin → Lists</b>.</li>
+              <li>Open the closer/transfer list — e.g. <b>List ID 101010</b> (campaign <code>transfer</code>).</li>
+              <li>Click <b>Download leads</b> (bottom of the list page). Choose <b>CSV</b> and <b>include the header row</b>.</li>
+              <li>Repeat for any other closer list, one file at a time.</li>
+            </ol>
+            <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>Required columns (header names)</p>
+            <ul className="list-disc ml-4 space-y-1">
+              <li><code>phone_number</code> — the customer number (10 digits; +1 is fine, it's normalized).</li>
+              <li><code>status</code> — the dialer disposition code (e.g. <code>SALE</code>, <code>NI</code>, <code>CALLBK</code>).</li>
+              <li><code>lead_id</code> — optional, ignored by the match (handy for your own reference).</li>
+            </ul>
+            <p className="mt-2">Any extra columns are ignored. Comma, tab, or pipe delimited — all auto-detected. The order of columns doesn't matter; matching is by header name.</p>
+            <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>How matching works</p>
+            <p>For each row, the newest CRM transfer on that phone that <b>has no disposition yet</b> gets the status. Transfers that already have a dispo are never touched. A number with several transfers fills the most recent one. Numbers not in the CRM, and no-connect/transfer codes, are skipped (counted below).</p>
+          </div>
+        )}
+
         <label className="inline-flex items-center gap-2 mt-3 px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer text-white disabled:opacity-40"
           style={{ background: 'var(--gradient-sidebar)', opacity: impBusy ? 0.5 : 1, pointerEvents: impBusy ? 'none' : 'auto' }}>
           {impBusy ? <Loader2 size={15} className="animate-spin" /> : <DownloadCloud size={15} />}
@@ -470,6 +518,35 @@ const Backfill = () => {
           </div>
         )}
       </div>
+
+      {/* Recent imports — review + undo */}
+      {batches.length > 0 && (
+        <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <p className="font-bold text-sm mb-3" style={{ color: 'var(--color-text)' }}>Recent imports</p>
+          <div className="space-y-2">
+            {batches.map(b => (
+              <div key={b.id} className="flex items-center justify-between gap-3 flex-wrap rounded-lg px-3 py-2" style={{ border: '1px solid var(--color-border)' }}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{b.source || 'list export'}</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {new Date(b.created_at).toLocaleString()} · filled <b>{b.applied_count}</b> of {b.total_rows} rows
+                    {b.undone_at && <span style={{ color: 'var(--color-error-600, #dc2626)' }}> · undone ({b.undone_count} reverted)</span>}
+                  </p>
+                </div>
+                {b.undone_at ? (
+                  <span className="text-xs font-semibold px-2 py-1 rounded" style={{ color: 'var(--color-text-tertiary)' }}>Undone</span>
+                ) : (
+                  <button onClick={() => undoBatch(b.id)} disabled={undoing === b.id || b.applied_count === 0}
+                    className="text-xs font-bold px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 disabled:opacity-40"
+                    style={{ border: '1px solid var(--color-error-300, #fca5a5)', color: 'var(--color-error-600, #dc2626)' }}>
+                    {undoing === b.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Undo
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
