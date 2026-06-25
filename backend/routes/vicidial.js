@@ -741,15 +741,18 @@ const LIST_SKIP = new Set([
   'TIMEOT','CXHNGP','INCALL','QUEUE','CH','DISPO','NEW','XFER','TRANSFER','XDROP',
   'IVRXFR','RQXFER','','-',
 ]);
+const MATCH_WINDOW_MS = 21 * 864e5;  // a lead may sit ±21 days from its transfer
 api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
-  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  // Payload is phone-GROUPED: [{ phone, leads: [{ status, lead_id, date }] }].
+  const groups = Array.isArray(req.body.groups) ? req.body.groups : [];
   const dryRun = req.body.dry_run === true;
   const batchId = (req.body.batch_id && /^[0-9a-f-]{36}$/i.test(req.body.batch_id)) ? req.body.batch_id : null;
   const source  = (req.body.source || '').toString().slice(0, 200) || 'list export';
+  const prefix  = ['WTI', 'ETC', 'TMC'].includes(String(req.body.box_prefix || '').toUpperCase())
+    ? String(req.body.box_prefix).toUpperCase() : 'WTI';
 
-  // Open the batch on the first chunk (idempotent — later chunks reuse it).
-  // Best-effort: if migration 112 isn't applied the fill still works, just without
-  // undo tracking (batchOk stays false).
+  // Open the batch on the first chunk (idempotent). Best-effort: if migration 112
+  // isn't applied the fill still works, just without undo tracking.
   let batchOk = false;
   if (batchId && !dryRun) {
     try {
@@ -759,65 +762,97 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
     } catch { /* 112 not applied → proceed without undo tracking */ }
   }
 
-  let matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
+  let received = 0, matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
   const now = new Date().toISOString();
-  for (const r of rows) {
-    const ph = normPhone(String(r.phone || r.phone_number || ''));
-    const status = String(r.status || '').trim().toUpperCase();
-    if (!ph) { noMatch++; continue; }
-    if (LIST_SKIP.has(status)) { skippedStatus++; continue; }
-    // newest CRM transfer on this phone still missing a disposition
-    const { data: tr } = await supabaseAdmin
-      .from('transfers').select('id, company_id, vicidial_dispo')
-      .eq('normalized_phone', ph).is('vicidial_dispo', null)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (!tr) { noMatch++; continue; }
-    matched++;
-    if (dryRun) continue;
-    try {
-      // Set ONLY the dialer-disposition fields (no status/closer cascade) so the
-      // fill is self-contained + cleanly reversible.
-      await supabaseAdmin.from('transfers')
-        .update({ vicidial_dispo: status, vicidial_dispo_at: now }).eq('id', tr.id);
-      // Mirror a closer dispo into the actions log; capture its id for undo.
-      const dispoName = await lookupDispoName(tr.company_id, status) || status;
-      let actionId = null;
-      try {
-        const { data: cfg } = await supabaseAdmin.from('disposition_configs')
-          .select('id, color').eq('name', dispoName).eq('is_active', true)
-          .or(`company_id.is.null,company_id.eq.${tr.company_id}`)
-          .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
-        const { data: da } = await supabaseAdmin.from('disposition_actions').insert({
-          transfer_id: tr.id, company_id: tr.company_id, user_id: null,
-          disposition_config_id: cfg?.id || null, disposition_name: dispoName,
-          color: cfg?.color || null, note: `Backfill from list (${status})`, setter_role: 'closer',
-        }).select('id').single();
-        actionId = da?.id || null;
-      } catch { /* actions log is non-critical */ }
-      applied++;
-      // Undo tracking — best-effort, never affects the fill or the count.
-      if (batchOk) {
-        try {
-          await supabaseAdmin.from('vicidial_backfill_fills').insert({
-            batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
-            new_dispo: status, dispo_action_id: actionId,
-          });
-        } catch { /* tracking is non-critical */ }
+  for (const g of groups) {
+    const ph = normPhone(String(g.phone || ''));
+    const leads = (Array.isArray(g.leads) ? g.leads : []).map(l => ({
+      status: String(l.status || '').trim().toUpperCase(),
+      leadId: String(l.lead_id || '').replace(/\D/g, ''),
+      t: l.date ? Date.parse(l.date) : NaN,
+    })).filter(l => l.leadId);
+    received += leads.length;
+    if (!ph || !leads.length) { noMatch += leads.length; continue; }
+
+    // Code-less transfers on this phone, oldest → newest (so date-pairing is stable).
+    const { data: trs } = await supabaseAdmin
+      .from('transfers').select('id, company_id, created_at, vicidial_dispo, vicidial_vendor_code')
+      .eq('normalized_phone', ph).is('vicidial_vendor_code', null)
+      .order('created_at', { ascending: true });
+    if (!trs?.length) { noMatch += leads.length; continue; }
+
+    // Global nearest-first assignment: build every in-window (transfer × lead)
+    // pair, sort by date distance, then greedily claim closest pairs first — so a
+    // repeat number's transfers each grab their OWN-date lead, not whichever the
+    // oldest-first pass happened to reach. Undated leads sort last (fallback for
+    // single-lead phones). One lead per transfer, one transfer per lead.
+    const pairs = [];
+    for (let ti = 0; ti < trs.length; ti++) {
+      const trT = Date.parse(trs[ti].created_at);
+      for (let li = 0; li < leads.length; li++) {
+        const lt = leads[li].t;
+        const diff = Number.isFinite(lt) ? Math.abs(lt - trT) : Number.MAX_SAFE_INTEGER;
+        if (Number.isFinite(lt) && diff > MATCH_WINDOW_MS) continue;  // dated but too far → not a candidate
+        pairs.push({ ti, li, diff });
       }
-    } catch { /* skip a bad row, keep going */ }
+    }
+    pairs.sort((a, b) => a.diff - b.diff);
+    const usedT = new Set(), usedL = new Set();
+    for (const p of pairs) {
+      if (usedT.has(p.ti) || usedL.has(p.li)) continue;
+      usedT.add(p.ti); usedL.add(p.li);
+      const tr = trs[p.ti], best = leads[p.li];
+      matched++;
+      if (dryRun) continue;
+      try {
+        const code = prefix + best.leadId;                 // the durable lead_id mapping
+        const setDispo = !LIST_SKIP.has(best.status);      // skip XFER / no-connect as a dispo
+        const updates = { vicidial_vendor_code: code };
+        if (setDispo) { updates.vicidial_dispo = best.status; updates.vicidial_dispo_at = now; }
+        await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
+
+        let actionId = null;
+        if (setDispo) {
+          try {
+            const dispoName = await lookupDispoName(tr.company_id, best.status) || best.status;
+            const { data: cfg } = await supabaseAdmin.from('disposition_configs')
+              .select('id, color').eq('name', dispoName).eq('is_active', true)
+              .or(`company_id.is.null,company_id.eq.${tr.company_id}`)
+              .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
+            const { data: da } = await supabaseAdmin.from('disposition_actions').insert({
+              transfer_id: tr.id, company_id: tr.company_id, user_id: null,
+              disposition_config_id: cfg?.id || null, disposition_name: dispoName,
+              color: cfg?.color || null, note: `Backfill from list (${best.status})`, setter_role: 'closer',
+            }).select('id').single();
+            actionId = da?.id || null;
+          } catch { /* actions log is non-critical */ }
+        }
+        applied++;
+        if (!setDispo) skippedStatus++;  // mapped the lead_id but no dispo set
+        if (batchOk) {
+          try {
+            await supabaseAdmin.from('vicidial_backfill_fills').insert({
+              batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
+              new_dispo: setDispo ? best.status : null, new_code: code, dispo_action_id: actionId,
+            });
+          } catch { /* tracking is non-critical */ }
+        }
+      } catch { /* skip a bad row, keep going */ }
+    }
+    // leads left unpaired = no matching transfer (in window)
+    noMatch += leads.length - usedL.size;
   }
 
-  // Roll the running totals onto the batch (chunks are sequential → no race).
   if (batchOk) {
     try {
       const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches')
         .select('total_rows, applied_count').eq('id', batchId).maybeSingle();
       await supabaseAdmin.from('vicidial_backfill_batches')
-        .update({ total_rows: (b?.total_rows || 0) + rows.length, applied_count: (b?.applied_count || 0) + applied })
+        .update({ total_rows: (b?.total_rows || 0) + received, applied_count: (b?.applied_count || 0) + applied })
         .eq('id', batchId);
     } catch { /* tracking non-critical */ }
   }
-  res.json({ ok: true, batch_id: batchId, received: rows.length, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
+  res.json({ ok: true, batch_id: batchId, received, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
 }));
 
 // List recent import batches (newest first) so the superadmin can review / undo.
@@ -838,15 +873,23 @@ api.post('/backfill/batches/:id/undo', superOnly, asyncHandler(async (req, res) 
   if (!batch) return res.status(404).json({ error: 'Batch not found' });
   if (batch.undone_at) return res.status(400).json({ error: 'This batch is already undone' });
 
-  const { data: fills } = await supabaseAdmin.from('vicidial_backfill_fills')
-    .select('transfer_id, prev_dispo, new_dispo, dispo_action_id').eq('batch_id', id);
+  let { data: fills, error: fErr } = await supabaseAdmin.from('vicidial_backfill_fills')
+    .select('transfer_id, prev_dispo, new_dispo, new_code, dispo_action_id').eq('batch_id', id);
+  if (fErr && /new_code|column/i.test(fErr.message || '')) {  // pre-113 fallback (no code revert)
+    ({ data: fills } = await supabaseAdmin.from('vicidial_backfill_fills')
+      .select('transfer_id, prev_dispo, new_dispo, dispo_action_id').eq('batch_id', id));
+  }
   let undone = 0, skipped = 0;
   for (const f of (fills || [])) {
     const { data: tr } = await supabaseAdmin.from('transfers')
-      .select('id, vicidial_dispo').eq('id', f.transfer_id).maybeSingle();
-    if (!tr || tr.vicidial_dispo !== f.new_dispo) { skipped++; continue; }  // changed since → leave it
-    await supabaseAdmin.from('transfers')
-      .update({ vicidial_dispo: f.prev_dispo || null, vicidial_dispo_at: null }).eq('id', f.transfer_id);
+      .select('id, vicidial_dispo, vicidial_vendor_code').eq('id', f.transfer_id).maybeSingle();
+    if (!tr) { skipped++; continue; }
+    const updates = {};
+    // Revert each field only if it still holds exactly what this batch wrote.
+    if (f.new_dispo && tr.vicidial_dispo === f.new_dispo) { updates.vicidial_dispo = f.prev_dispo || null; updates.vicidial_dispo_at = null; }
+    if (f.new_code && tr.vicidial_vendor_code === f.new_code) { updates.vicidial_vendor_code = null; }
+    if (!Object.keys(updates).length) { skipped++; continue; }  // changed since → leave it
+    await supabaseAdmin.from('transfers').update(updates).eq('id', f.transfer_id);
     if (f.dispo_action_id) await supabaseAdmin.from('disposition_actions').delete().eq('id', f.dispo_action_id);
     undone++;
   }

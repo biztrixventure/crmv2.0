@@ -357,6 +357,7 @@ const Backfill = () => {
   const [batches, setBatches] = useState([]);
   const [undoing, setUndoing] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [boxPrefix, setBoxPrefix] = useState('WTI');
 
   const loadBatches = useCallback(async () => {
     try { const r = await client.get('vicidial/backfill/batches'); setBatches(r.data.batches || []); } catch { /* ignore */ }
@@ -374,7 +375,8 @@ const Backfill = () => {
     finally { setUndoing(null); }
   };
 
-  // Parse a vicidial_list "Download leads" CSV and match phone→status into the CRM.
+  // Parse a vicidial_list "Download leads" CSV → group leads by phone → map each
+  // transfer to its nearest-in-time lead (lead_id + status) on the backend.
   const onFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -386,23 +388,31 @@ const Backfill = () => {
       const delim = lines[0].includes('\t') ? '\t' : lines[0].includes('|') ? '|' : ',';
       const split = (l) => l.split(delim).map(s => s.replace(/^"|"$/g, '').trim());
       const header = split(lines[0]).map(h => h.toLowerCase());
-      const iPhone = header.findIndex(h => h === 'phone_number' || h === 'phone');
-      const iStatus = header.findIndex(h => h === 'status');
-      if (iPhone < 0 || iStatus < 0) throw new Error('CSV needs a phone_number and a status column (use VICIdial "Download leads" with a header row)');
-      const rows = [];
+      const find = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+      const iPhone = find('phone_number', 'phone');
+      const iStatus = find('status');
+      const iLead = find('lead_id', 'leadid');
+      const iDate = find('last_local_call_time', 'entry_date', 'modify_date', 'call_date', 'date');
+      if (iPhone < 0 || iStatus < 0 || iLead < 0) throw new Error('CSV needs phone_number, status, and lead_id columns (VICIdial "Download leads" with a header row)');
+      const norm = (p) => String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      const map = new Map();  // normalized phone → [{ status, lead_id, date }]
       for (let i = 1; i < lines.length; i++) {
         const c = split(lines[i]);
-        if (c[iPhone] && c[iStatus]) rows.push({ phone: c[iPhone], status: c[iStatus] });
+        const ph = norm(c[iPhone]); const status = c[iStatus]; const lead_id = c[iLead];
+        if (!ph || !status || !lead_id) continue;
+        if (!map.has(ph)) map.set(ph, []);
+        map.get(ph).push({ status, lead_id, date: iDate >= 0 ? c[iDate] : '' });
       }
-      if (!rows.length) throw new Error('No data rows found under the header');
+      const groups = [...map.entries()].map(([phone, leads]) => ({ phone, leads }));
+      if (!groups.length) throw new Error('No usable rows found under the header (need phone_number + status + lead_id)');
       const batchId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}-4000-8000-000000000000`.padEnd(36, '0').slice(0, 36));
-      let matched = 0, applied = 0, skipped = 0, noMatch = 0;
-      for (let i = 0; i < rows.length; i += 500) {
-        const r = await client.post('vicidial/backfill/from-list', { batch_id: batchId, source: file.name, rows: rows.slice(i, i + 500) });
-        matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
-        setImpRes({ total: rows.length, processed: Math.min(i + 500, rows.length), matched, applied, skipped, noMatch });
+      let received = 0, matched = 0, applied = 0, skipped = 0, noMatch = 0;
+      for (let i = 0; i < groups.length; i += 300) {
+        const r = await client.post('vicidial/backfill/from-list', { batch_id: batchId, source: file.name, box_prefix: boxPrefix, groups: groups.slice(i, i + 300) });
+        received += r.data.received; matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
+        setImpRes({ total: groups.length, processed: Math.min(i + 300, groups.length), received, matched, applied, skipped, noMatch });
       }
-      toast.success(`Filled ${applied} disposition${applied === 1 ? '' : 's'} from ${rows.length} list rows`);
+      toast.success(`Mapped ${applied} transfer${applied === 1 ? '' : 's'} to ${boxPrefix} lead ids`);
       await loadBatches();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Import failed');
@@ -468,37 +478,50 @@ const Backfill = () => {
       {/* Code-LESS recovery via a vicidial_list export (the 46k) */}
       <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Import from a list export (code-less transfers)</p>
+          <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Map code-less transfers to dialer lead ids</p>
           <button onClick={() => setShowHelp(v => !v)} className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
             <Info size={13} /> {showHelp ? 'Hide' : 'How to get & prepare the file'}
           </button>
         </div>
         <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-          For transfers with no dialer code: export the closer/transfer list from the dialer, then upload the CSV here.
-          Each row's <code>phone_number</code> + <code>status</code> is matched to the newest CRM transfer on that phone
-          still missing a disposition. No-connect / transfer / system codes are skipped. Every upload is undoable below.
+          Export the <b>closer list</b> the closers work in (one source for all fronters), then upload it. Each transfer is
+          matched to its <b>nearest-in-time</b> lead by phone, then stamped with that <code>lead_id</code> (becomes coded →
+          Fetch Dispo works on it forever) plus its <code>status</code>. Only fills transfers with no code yet. Undoable below.
         </p>
 
         {showHelp && (
           <div className="mt-3 rounded-xl p-4 text-xs leading-relaxed" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
             <p className="font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>Where to get the file</p>
             <ol className="list-decimal ml-4 space-y-1">
-              <li>In VICIdial admin (the dialer the closers run on — Wavetech): <b>Admin → Lists</b>.</li>
-              <li>Open the closer/transfer list — e.g. <b>List ID 101010</b> (campaign <code>transfer</code>).</li>
-              <li>Click <b>Download leads</b> (bottom of the list page). Choose <b>CSV</b> and <b>include the header row</b>.</li>
-              <li>Repeat for any other closer list, one file at a time.</li>
+              <li>On the dialer the <b>closers</b> run on (Wavetech): <b>Admin → Lists</b>.</li>
+              <li>Open <b>every list in the <code>transfer</code> campaign</b> — the active one is <b>List 101010</b>, plus any older/rotated closer lists (to cover the full 1.5 years).</li>
+              <li>Click <b>Download leads</b> → <b>CSV</b>, <b>include the header row</b>. One file per list.</li>
+              <li>Pick the matching <b>box</b> below before uploading each file.</li>
             </ol>
-            <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>Required columns (header names)</p>
+            <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>Required columns (by header name)</p>
             <ul className="list-disc ml-4 space-y-1">
-              <li><code>phone_number</code> — the customer number (10 digits; +1 is fine, it's normalized).</li>
-              <li><code>status</code> — the dialer disposition code (e.g. <code>SALE</code>, <code>NI</code>, <code>CALLBK</code>).</li>
-              <li><code>lead_id</code> — optional, ignored by the match (handy for your own reference).</li>
+              <li><code>phone_number</code> — customer number (10-digit; +1 / dashes fine, it's normalized).</li>
+              <li><code>status</code> — the closer's disposition code (<code>SALE</code>, <code>NI</code>, <code>CALLBK</code>…).</li>
+              <li><code>lead_id</code> — the dialer lead id (this is what gets stamped — <b>required</b>).</li>
+              <li><i>a date column</i> — <code>last_local_call_time</code> / <code>entry_date</code> (optional but recommended; it's how a repeat number's transfers align to the right lead).</li>
             </ul>
-            <p className="mt-2">Any extra columns are ignored. Comma, tab, or pipe delimited — all auto-detected. The order of columns doesn't matter; matching is by header name.</p>
+            <p className="mt-2">Extra columns ignored. Comma / tab / pipe auto-detected. Column order doesn't matter.</p>
             <p className="font-bold mt-3 mb-1.5" style={{ color: 'var(--color-text)' }}>How matching works</p>
-            <p>For each row, the newest CRM transfer on that phone that <b>has no disposition yet</b> gets the status. Transfers that already have a dispo are never touched. A number with several transfers fills the most recent one. Numbers not in the CRM, and no-connect/transfer codes, are skipped (counted below).</p>
+            <p>Leads are grouped by phone. For each CRM transfer on that phone with no code yet, the <b>nearest-dated</b> unused lead (within ±21 days) is chosen — so a number with several transfers maps each to its own call, not all to one. The lead id is stamped as <code>{boxPrefix}&lt;lead_id&gt;</code>; the status fills the dispo (no-connect/XFER leads still map the id but set no dispo). Already-coded transfers are never touched.</p>
           </div>
         )}
+
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            This export is from:
+            <select value={boxPrefix} onChange={e => setBoxPrefix(e.target.value)} disabled={impBusy}
+              className="input ml-2 py-1.5 text-sm" style={{ width: 'auto', display: 'inline-block' }}>
+              <option value="WTI">Wavetech (WTI)</option>
+              <option value="ETC">EasyTech (ETC)</option>
+              <option value="TMC">Mejor / TMC (TMC)</option>
+            </select>
+          </label>
+        </div>
 
         <label className="inline-flex items-center gap-2 mt-3 px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer text-white disabled:opacity-40"
           style={{ background: 'var(--gradient-sidebar)', opacity: impBusy ? 0.5 : 1, pointerEvents: impBusy ? 'none' : 'auto' }}>
@@ -510,10 +533,10 @@ const Backfill = () => {
         {impRes && (
           <div className="mt-4 pt-4 text-sm" style={{ borderTop: '1px solid var(--color-border)' }}>
             <div className="flex gap-5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
-              <span>Rows: <b style={{ color: 'var(--color-text)' }}>{impRes.processed}/{impRes.total}</b></span>
-              <span>Filled: <b style={{ color: 'var(--color-success-600, #059669)' }}>{impRes.applied}</b></span>
+              <span>Phones: <b style={{ color: 'var(--color-text)' }}>{impRes.processed}/{impRes.total}</b></span>
+              <span>Mapped: <b style={{ color: 'var(--color-success-600, #059669)' }}>{impRes.applied}</b></span>
               <span>No CRM match: <b style={{ color: 'var(--color-text)' }}>{impRes.noMatch}</b></span>
-              <span>Skipped (no-connect): <b style={{ color: 'var(--color-text)' }}>{impRes.skipped}</b></span>
+              <span>Lead-id only (no dispo): <b style={{ color: 'var(--color-text)' }}>{impRes.skipped}</b></span>
             </div>
           </div>
         )}
