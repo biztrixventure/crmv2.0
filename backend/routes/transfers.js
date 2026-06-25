@@ -9,6 +9,15 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
+const { getConfig } = require('../utils/businessConfig');
+
+// Global master switch for duplicate handling. When OFF, the CRM stops detecting
+// /flagging duplicates entirely — transfers are created plainly, no dup warnings,
+// no synthetic in-place rows, no pills. Reverts to the simple "just add it" flow.
+async function isDedupEnabled(companyId) {
+  const v = await getConfig(companyId, 'dedup.enabled', true);
+  return !(v === false || v === 'false' || v === 0 || v === '0');
+}
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
 
@@ -528,6 +537,8 @@ router.get('/duplicate-check', asyncHandler(async (req, res) => {
   const companyId = req.user.company_id;
   const norm      = normPhone(req.query.phone);
   if (!companyId || norm.length < 7) return res.json({ result: 'clean' });
+  // Duplicate handling disabled globally → never warn (no dup picker at create).
+  if (!(await isDedupEnabled(companyId))) return res.json({ result: 'clean' });
 
   // Most recent matching transfer decides the case (Case A vs B). created_at is
   // selected in the same indexed lookup — no extra round trip for the date.
@@ -868,7 +879,9 @@ router.post('/', [
   // race between the debounced input check and submit). STRICTLY this fronter's
   // own records (company_id + created_by + normalized_phone).
   let transfer, action = 'created', managerEvent = null, priorId = null;
-  if (norm) {
+  // Skip all duplicate resolution when the global switch is off → the transfer is
+  // just inserted plainly below (no dedup, no flagging, no in-place refresh).
+  if (norm && await isDedupEnabled(companyId)) {
     const { data: tfs } = await supabaseAdmin
       .from('transfers').select('id, created_at')
       .eq('company_id', companyId).eq('created_by', userId).eq('normalized_phone', norm)

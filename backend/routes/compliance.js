@@ -351,7 +351,13 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   // invisible 'refresh' duplicate attempts (migration 089), so every VICIDIAL
   // transfer attempt is a visible, countable, exportable record. Pass
   // include_duplicates=false to read the bare transfers table instead.
-  const includeDuplicates = req.query.include_duplicates !== 'false';
+  // Global duplicate-handling switch. When OFF, compliance shows NO duplicate UI
+  // at all — no synthetic in-place rows, no pills — even for already-flagged
+  // records. Reverts to the plain transfers list.
+  const { getConfig } = require('../utils/businessConfig');
+  const dedupV = await getConfig(null, 'dedup.enabled', true);
+  const dedupEnabled = !(dedupV === false || dedupV === 'false' || dedupV === 0 || dedupV === '0');
+  const includeDuplicates = dedupEnabled && req.query.include_duplicates !== 'false';
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   // Same filters either way — built against whichever relation we read from.
@@ -486,7 +492,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   // and is intentionally not flagged. Duplicates stay in the normal list so the
   // tab still shows every transfer created (real + duplicate) for easy counting.
   let dupMap = {};
-  if (transferIds.length > 0) {
+  if (dedupEnabled && transferIds.length > 0) {
     const { data: dedup } = await supabaseAdmin
       .from('transfer_dedup_events')
       .select('transfer_id, prior_transfer_id, event_type, created_at')
@@ -602,7 +608,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
+  res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, dedup_enabled: dedupEnabled });
 }));
 
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────

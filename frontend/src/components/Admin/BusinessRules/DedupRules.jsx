@@ -88,6 +88,7 @@ const SORT_OPTS = [
 ];
 
 const DedupRules = ({ config, scope, onSave }) => {
+  const dedupOn        = cfg(config, 'dedup.enabled', true);
   const dedupDays      = cfg(config, 'dedup.window_days', 30);
   const sameCo         = cfg(config, 'dedup.different_fronter_same_co', 'new_transfer');
   const crossCo        = cfg(config, 'dedup.cross_company', 'new_transfer');
@@ -116,6 +117,29 @@ const DedupRules = ({ config, scope, onSave }) => {
           Controls how the same phone number is handled across calls — within a fronter, across fronters in one company, and across companies. Also tunes how the closer's PhoneSearch sorts results.
         </p>
       </div>
+
+      {/* Global master switch — one switch for everyone. */}
+      {scope === 'global' && (
+        <div className="rounded-2xl p-4 mb-5 flex items-center gap-4"
+          style={{ backgroundColor: dedupOn ? 'rgba(16,185,129,0.06)' : 'var(--color-bg-secondary)', border: `1px solid ${dedupOn ? 'rgba(16,185,129,0.3)' : 'var(--color-border)'}` }}>
+          <div className="flex-1">
+            <p className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
+              Duplicate handling {dedupOn ? '' : '— OFF'}
+            </p>
+            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+              Master switch (global). When <b>OFF</b>, the CRM stops detecting &amp; showing duplicates everywhere — no duplicate warning at create, no pills, no “in-place” rows, no compliance duplicate column. Fronters just add transfers like before. Turning it back <b>ON</b> resumes detection instantly. The settings below only apply while it’s ON.
+            </p>
+          </div>
+          <button onClick={() => onSave('dedup.enabled', !dedupOn)} role="switch" aria-checked={dedupOn}
+            title={dedupOn ? 'Turn duplicate handling OFF' : 'Turn duplicate handling ON'}
+            className="relative w-12 h-7 rounded-full transition-colors flex-shrink-0"
+            style={{ backgroundColor: dedupOn ? '#059669' : '#cbd5e1' }}>
+            <span className="absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all" style={{ left: dedupOn ? '26px' : '4px' }} />
+          </button>
+        </div>
+      )}
+
+      <div style={{ opacity: dedupOn ? 1 : 0.45, pointerEvents: dedupOn ? 'auto' : 'none' }}>
 
       <Section accent="primary"
         title="Dedup window (same fronter, same company)"
@@ -157,6 +181,7 @@ const DedupRules = ({ config, scope, onSave }) => {
           label="Apply the dedup window to bulk uploads"
           sub="When OFF, bulk uploads always insert (and may produce duplicates the manual flow would have merged)" />
       </Section>
+      </div>
     </div>
   );
 };
