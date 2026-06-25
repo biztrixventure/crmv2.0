@@ -41,8 +41,19 @@ const requireToken = (req, res, next) => {
 // Resolve a VICIdial agent id → CRM user + their (active) company.
 async function resolveAgent(agentId) {
   if (!agentId) return { userId: null, companyId: null };
-  const { data: prof } = await supabaseAdmin
-    .from('user_profiles').select('user_id').eq('vicidial_agent_id', agentId).maybeSingle();
+  const a = String(agentId).trim();
+  // A user may have several dialer ids (one per box) in vicidial_agent_ids[];
+  // match any of them. Fall back to the legacy single column if the array isn't
+  // migrated yet (111) or wasn't populated.
+  let prof = null;
+  const arr = await supabaseAdmin
+    .from('user_profiles').select('user_id').contains('vicidial_agent_ids', [a]).limit(1).maybeSingle();
+  if (arr.data?.user_id) prof = arr.data;
+  if (!prof) {
+    const one = await supabaseAdmin
+      .from('user_profiles').select('user_id').eq('vicidial_agent_id', a).maybeSingle();
+    prof = one.data || null;
+  }
   if (!prof?.user_id) return { userId: null, companyId: null };
   const { data: ucr } = await supabaseAdmin
     .from('user_company_roles').select('company_id').eq('user_id', prof.user_id).eq('is_active', true)
@@ -707,9 +718,15 @@ api.delete('/config/:id', superOnly, asyncHandler(async (req, res) => {
 // Agent-id map — list users (search) with their current mapping.
 api.get('/agents', superOnly, asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
-  let query = supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_id').order('first_name').limit(100);
-  if (q) { const s = q.replace(/[%,]/g, ''); query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,vicidial_agent_id.ilike.%${s}%`); }
-  const { data: profs } = await query;
+  const buildQuery = (cols) => {
+    let query = supabaseAdmin.from('user_profiles').select(cols).order('first_name').limit(100);
+    if (q) { const s = q.replace(/[%,]/g, ''); query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,vicidial_agent_id.ilike.%${s}%`); }
+    return query;
+  };
+  let { data: profs, error: pErr } = await buildQuery('user_id, first_name, last_name, vicidial_agent_id, vicidial_agent_ids');
+  if (pErr && /vicidial_agent_ids|column/i.test(pErr.message || '')) {  // pre-111 fallback
+    ({ data: profs } = await buildQuery('user_id, first_name, last_name, vicidial_agent_id'));
+  }
   const ids = (profs || []).map(p => p.user_id);
   let meta = {};
   if (ids.length) {
@@ -717,16 +734,35 @@ api.get('/agents', superOnly, asyncHandler(async (req, res) => {
       .select('user_id, companies(name), custom_roles(level)').in('user_id', ids).eq('is_active', true);
     (ucr || []).forEach(r => { if (!meta[r.user_id]) meta[r.user_id] = { company: r.companies?.name || '', role: r.custom_roles?.level || '' }; });
   }
-  res.json({ agents: (profs || []).map(p => ({
-    user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User',
-    vicidial_agent_id: p.vicidial_agent_id || '', company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
-  })) });
+  res.json({ agents: (profs || []).map(p => {
+    // All dialer ids (multi-box) surfaced as a comma list; round-trips on save.
+    const all = (p.vicidial_agent_ids && p.vicidial_agent_ids.length) ? p.vicidial_agent_ids : (p.vicidial_agent_id ? [p.vicidial_agent_id] : []);
+    return {
+      user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User',
+      vicidial_agent_id: all.join(', '), company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
+    };
+  }) });
 }));
 
 api.post('/agents', superOnly, asyncHandler(async (req, res) => {
   if (!req.body.user_id) return res.status(400).json({ error: 'user_id required' });
-  const agent = String(req.body.agent_id || '').trim() || null;
-  const { error } = await supabaseAdmin.from('user_profiles').update({ vicidial_agent_id: agent }).eq('user_id', req.body.user_id);
+  // Accept one id or a comma/space-separated list (a user can work several boxes).
+  const agentIds = [...new Set(String(req.body.agent_id || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean))];
+  const primary = agentIds[0] || null;
+  if (agentIds.length) {  // reject ids already mapped to ANOTHER user (both columns)
+    const list = agentIds.join(',');
+    const { data: clash } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, vicidial_agent_id, vicidial_agent_ids')
+      .or(`vicidial_agent_id.in.(${list}),vicidial_agent_ids.ov.{${list}}`).limit(5);
+    if ((clash || []).some(r => r.user_id !== req.body.user_id)) {
+      return res.status(409).json({ error: 'One of those agent ids is already mapped to another user' });
+    }
+  }
+  let { error } = await supabaseAdmin.from('user_profiles')
+    .update({ vicidial_agent_id: primary, vicidial_agent_ids: agentIds }).eq('user_id', req.body.user_id);
+  if (error && /vicidial_agent_ids|column/i.test(error.message || '')) {  // pre-111 fallback
+    ({ error } = await supabaseAdmin.from('user_profiles').update({ vicidial_agent_id: primary }).eq('user_id', req.body.user_id));
+  }
   if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'That agent id is already mapped to another user' : error.message });
   res.json({ ok: true });
 }));

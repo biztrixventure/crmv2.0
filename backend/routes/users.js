@@ -16,6 +16,25 @@ const {
 } = require('../models/helpers');
 const { validatePassword, generateSecurePassword } = require('../utils/passwordValidator');
 
+// A user can have several dialer agent ids (one per box). Accept a single id or
+// a comma/space-separated list → { primary, ids[] } (trimmed, de-duped).
+function parseAgentIds(raw) {
+  const ids = [...new Set(String(raw || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean))];
+  return { primary: ids[0] || null, ids };
+}
+// Reject if any of these ids already belongs to ANOTHER user (checks the single
+// column + the array). Returns the clashing id or null. excludeUserId skips self.
+async function agentIdClash(ids, excludeUserId) {
+  if (!ids.length) return null;
+  const list = ids.join(',');
+  const { data } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, vicidial_agent_id, vicidial_agent_ids')
+    .or(`vicidial_agent_id.in.(${list}),vicidial_agent_ids.ov.{${list}}`).limit(5);
+  const row = (data || []).find(r => r.user_id !== excludeUserId);
+  if (!row) return null;
+  return ids.find(i => i === row.vicidial_agent_id || (row.vicidial_agent_ids || []).includes(i)) || ids[0];
+}
+
 const router = express.Router();
 
 // Split a single "Full Name" into first/last: first token is the first name,
@@ -81,10 +100,17 @@ router.get(
         const userIds = users.map(u => u.user_id);
         logger.debug('GET_USERS', `Fetching profiles for ${userIds.length} users`, { userIds });
 
-        const { data: profiles, error: profileError } = await supabaseAdmin
+        // Try the multi-id column (111); fall back if the migration isn't applied.
+        let { data: profiles, error: profileError } = await supabaseAdmin
           .from("user_profiles")
-          .select("user_id,first_name,last_name,vicidial_agent_id")
+          .select("user_id,first_name,last_name,vicidial_agent_id,vicidial_agent_ids")
           .in("user_id", userIds);
+        if (profileError && /vicidial_agent_ids|column/i.test(profileError.message || '')) {
+          ({ data: profiles, error: profileError } = await supabaseAdmin
+            .from("user_profiles")
+            .select("user_id,first_name,last_name,vicidial_agent_id")
+            .in("user_id", userIds));
+        }
 
         if (profileError) {
           logger.error('GET_USERS', 'Failed to fetch user profiles', profileError);
@@ -94,7 +120,9 @@ router.get(
 
         const profileMap = {};
         profiles?.forEach(p => {
-          profileMap[p.user_id] = p;
+          // Surface ALL dialer ids as a comma list so the edit form round-trips them.
+          const ids = (p.vicidial_agent_ids && p.vicidial_agent_ids.length) ? p.vicidial_agent_ids : (p.vicidial_agent_id ? [p.vicidial_agent_id] : []);
+          profileMap[p.user_id] = { ...p, vicidial_agent_id: ids.join(', ') || null };
         });
 
         // Fetch emails via getUserById in parallel — listUsers paginates at 1000
@@ -203,11 +231,19 @@ router.get(
 
       // Fetch user profile
       logger.debug('GET_USER_BY_ID', `Fetching user profile`, { user_id: data.user_id });
-      const { data: profile } = await supabaseAdmin
+      let { data: profile } = await supabaseAdmin
         .from("user_profiles")
-        .select("first_name,last_name,avatar_url,vicidial_agent_id")
+        .select("first_name,last_name,avatar_url,vicidial_agent_id,vicidial_agent_ids")
         .eq("user_id", data.user_id)
         .single();
+      if (!profile) {
+        // Fallback if 111 (vicidial_agent_ids) isn't applied yet.
+        ({ data: profile } = await supabaseAdmin
+          .from("user_profiles")
+          .select("first_name,last_name,avatar_url,vicidial_agent_id")
+          .eq("user_id", data.user_id)
+          .single());
+      }
 
       if (profile) {
         logger.success('GET_USER_BY_ID', `Found user profile`, { first_name: profile.first_name, last_name: profile.last_name });
@@ -238,7 +274,7 @@ router.get(
         email: email,
         first_name: profile?.first_name,
         last_name: profile?.last_name,
-        vicidial_agent_id: profile?.vicidial_agent_id || null,
+        vicidial_agent_id: ((profile?.vicidial_agent_ids && profile.vicidial_agent_ids.length) ? profile.vicidial_agent_ids.join(', ') : profile?.vicidial_agent_id) || null,
         role: data.custom_roles.name,
         role_level: data.custom_roles.level,
         company_id: data.company_id,
@@ -358,7 +394,7 @@ router.post(
 
     const { email, role_id, company_id, password, require_verification } = req.body;
     // Optional VICIdial dialer agent id (maps dialer dispositions → this user).
-    const vicidialAgentId = (req.body.vicidial_agent_id || '').toString().trim() || null;
+    const { primary: vicidialAgentId, ids: vicidialAgentIds } = parseAgentIds(req.body.vicidial_agent_id);
     // Derive first/last from full_name when provided; fall back to explicit fields.
     let { first_name, last_name } = req.body.full_name
       ? splitFullName(req.body.full_name)
@@ -462,11 +498,10 @@ router.post(
 
       // VICIdial agent id is UNIQUE per user — reject a duplicate up front so we
       // don't create an orphan auth user whose profile insert then fails.
-      if (vicidialAgentId) {
-        const { data: clash } = await supabaseAdmin.from('user_profiles')
-          .select('user_id').eq('vicidial_agent_id', vicidialAgentId).maybeSingle();
+      if (vicidialAgentIds.length) {
+        const clash = await agentIdClash(vicidialAgentIds, null);
         if (clash) {
-          return res.status(400).json({ error: `VICIdial Agent ID "${vicidialAgentId}" is already assigned to another user.` });
+          return res.status(400).json({ error: `VICIdial Agent ID "${clash}" is already assigned to another user.` });
         }
       }
 
@@ -510,7 +545,7 @@ router.post(
         first_name,
         last_name,
         theme_preference: "light",
-        ...(vicidialAgentId ? { vicidial_agent_id: vicidialAgentId } : {}),
+        ...(vicidialAgentId ? { vicidial_agent_id: vicidialAgentId, vicidial_agent_ids: vicidialAgentIds } : {}),
       });
 
       logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
@@ -594,7 +629,9 @@ router.put(
     const { first_name, last_name, role_id, is_active, company_id } = req.body;
     // VICIdial dialer agent id — present key means "set it" (empty = clear).
     const hasAgentField = Object.prototype.hasOwnProperty.call(req.body, 'vicidial_agent_id');
-    const vicidialAgentId = hasAgentField ? ((req.body.vicidial_agent_id || '').toString().trim() || null) : undefined;
+    const agentParsed = hasAgentField ? parseAgentIds(req.body.vicidial_agent_id) : null;
+    const vicidialAgentId  = hasAgentField ? agentParsed.primary : undefined;
+    const vicidialAgentIds = hasAgentField ? agentParsed.ids : undefined;
     const userId = req.user.id;
 
     logger.info('UPDATE_USER', `Updating user`, { id, userId, updates: { first_name, last_name, role_id, is_active, company_id } });
@@ -670,13 +707,11 @@ router.put(
         }
       }
 
-      // VICIdial agent id is UNIQUE — block reassigning one already held by someone else.
-      if (hasAgentField && vicidialAgentId) {
-        const { data: clash } = await supabaseAdmin.from('user_profiles')
-          .select('user_id').eq('vicidial_agent_id', vicidialAgentId)
-          .neq('user_id', targetAssignment.user_id).maybeSingle();
+      // VICIdial agent ids are UNIQUE — block reassigning one already held by someone else.
+      if (hasAgentField && vicidialAgentIds.length) {
+        const clash = await agentIdClash(vicidialAgentIds, targetAssignment.user_id);
         if (clash) {
-          return res.status(400).json({ error: `VICIdial Agent ID "${vicidialAgentId}" is already assigned to another user.` });
+          return res.status(400).json({ error: `VICIdial Agent ID "${clash}" is already assigned to another user.` });
         }
       }
 
@@ -684,7 +719,7 @@ router.put(
       const profileUpdate = {};
       if (first_name) profileUpdate.first_name = first_name;
       if (last_name)  profileUpdate.last_name  = last_name;
-      if (hasAgentField) profileUpdate.vicidial_agent_id = vicidialAgentId;
+      if (hasAgentField) { profileUpdate.vicidial_agent_id = vicidialAgentId; profileUpdate.vicidial_agent_ids = vicidialAgentIds || []; }
       if (Object.keys(profileUpdate).length > 0) {
         logger.debug('UPDATE_USER', 'Updating user profile', { user_id: targetAssignment.user_id });
         profileUpdate.updated_at = new Date().toISOString();

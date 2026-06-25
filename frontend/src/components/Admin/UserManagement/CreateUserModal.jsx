@@ -164,15 +164,15 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
           {/* VICIdial dialer agent id (optional) */}
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1">
-              VICIdial Agent ID
+              VICIdial Agent ID(s)
             </label>
             <div className="relative">
               <Headphones size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} />
               <input className="input pl-9" value={form.vicidial_agent_id} onChange={set('vicidial_agent_id')}
-                placeholder="e.g. TMC100626 (optional)" />
+                placeholder="e.g. ETC0895, 2006 (optional)" />
             </div>
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-              Dialer agent id — maps this user's dialer dispositions to the CRM.
+              Dialer agent id — maps dispositions to this user. Works two boxes with different ids? List both comma-separated.
             </p>
           </div>
 

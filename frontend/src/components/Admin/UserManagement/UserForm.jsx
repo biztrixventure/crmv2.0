@@ -127,12 +127,12 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
       )}
 
       {/* VICIdial dialer agent id — maps dialer dispositions to this user */}
-      <FormField label="VICIdial Agent ID"
-        hint="Dialer login/agent id (e.g. TMC100626). Maps this user's dialer dispositions to the CRM. Leave blank if not on the dialer.">
+      <FormField label="VICIdial Agent ID(s)"
+        hint="Dialer login/agent id (e.g. ETC0895). If this person works MORE than one box with different ids, list all comma-separated (e.g. ETC0895, 2006) — dispositions from any of them map to this user. Leave blank if not on the dialer.">
         <div className="relative">
           <Headphones size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
           <input type="text" name="vicidial_agent_id" value={formData.vicidial_agent_id}
-            onChange={handleInputChange} placeholder="e.g. TMC100626"
+            onChange={handleInputChange} placeholder="e.g. ETC0895, 2006"
             className="input pl-9" />
         </div>
       </FormField>

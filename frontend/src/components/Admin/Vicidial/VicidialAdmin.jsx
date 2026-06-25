@@ -123,7 +123,7 @@ const AgentRow = ({ a, onSaved }) => {
         <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{[a.role, a.company].filter(Boolean).join(' · ') || '—'}</p>
       </td>
       <td className="px-4 py-2.5">
-        <input value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && dirty) save(); }} placeholder="e.g. TMC100682" className="input py-1.5 text-sm" style={{ maxWidth: 200, fontFamily: 'monospace' }} />
+        <input value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && dirty) save(); }} placeholder="e.g. ETC0895, 2006" className="input py-1.5 text-sm" style={{ maxWidth: 240, fontFamily: 'monospace' }} />
       </td>
       <td className="px-4 py-2.5">
         <button onClick={save} disabled={!dirty || busy} className="text-xs font-bold px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -148,7 +148,7 @@ const Agents = () => {
   return (
     <div className="space-y-3">
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        Map each VICIdial agent id (the dialer's <code>user</code>) to a CRM user, so pending transfers + dispositions route to the right person. One agent id per user.
+        Map each VICIdial agent id (the dialer's <code>user</code>) to a CRM user, so pending transfers + dispositions route to the right person. A person who works <b>more than one box</b> has a different id per box — list all of them <b>comma-separated</b> (e.g. <code>ETC0895, 2006</code>) and any of them maps here.
       </p>
       <div className="relative max-w-md">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
