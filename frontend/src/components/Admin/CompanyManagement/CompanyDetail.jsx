@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toastError } from '../../../utils/toast';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
@@ -587,6 +587,30 @@ const MembersPanel = ({ companyId }) => {
   const [exportLoading, setExportLoading] = useState(false);
   const [impersonateData,    setImpersonateData]    = useState(null);
   const [impersonateLoading, setImpersonateLoading] = useState(null);
+  const [sort, setSort] = useState({ col: 'name', dir: 'asc' });
+
+  // Click a header to sort; click again to flip direction. Client-side — the
+  // whole member list is already loaded, no pagination.
+  const onSort = (col) => setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  const sortVal = (u, col) => {
+    switch (col) {
+      case 'name':   return `${u.first_name || ''} ${u.last_name || ''}`.trim().toLowerCase();
+      case 'email':  return (u.email || '').toLowerCase();
+      case 'role':   return (u.role || '').toLowerCase();
+      case 'level':  return (u.role_level || '').toLowerCase();
+      case 'status': return u.is_active ? 0 : 1;   // Active first on ascending
+      default:       return '';
+    }
+  };
+  const sorted = useMemo(() => {
+    const arr = [...users];
+    arr.sort((a, b) => {
+      const av = sortVal(a, sort.col), bv = sortVal(b, sort.col);
+      const cmp = (typeof av === 'number' && typeof bv === 'number') ? av - bv : String(av).localeCompare(String(bv));
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [users, sort]);
 
   const handleImpersonate = async (u) => {
     setImpersonateLoading(u.user_id);
@@ -648,7 +672,7 @@ const MembersPanel = ({ companyId }) => {
     if (!users.length) return;
     setExportLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const rows = users.map(u => [
+    const rows = sorted.map(u => [
       [u.first_name, u.last_name].filter(Boolean).join(' ') || '',
       u.email || '',
       u.role || '',
@@ -706,13 +730,16 @@ const MembersPanel = ({ companyId }) => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                  {['Name','Email','Role','Level','Status','Actions'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                  ))}
+                  <SortTh col="name"   sort={sort} onSort={onSort}>Name</SortTh>
+                  <SortTh col="email"  sort={sort} onSort={onSort}>Email</SortTh>
+                  <SortTh col="role"   sort={sort} onSort={onSort}>Role</SortTh>
+                  <SortTh col="level"  sort={sort} onSort={onSort}>Level</SortTh>
+                  <SortTh col="status" sort={sort} onSort={onSort}>Status</SortTh>
+                  <th className="px-3 py-2.5 text-left text-xs font-bold text-text-secondary uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map(u => (
+                {sorted.map(u => (
                   <tr key={u.id} onClick={() => setViewUser(u)}
                     className="hover:bg-bg-secondary cursor-pointer transition-colors"
                     style={{ borderBottom: '1px solid var(--color-border)' }}>
