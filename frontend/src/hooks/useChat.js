@@ -63,7 +63,7 @@ const applyReaction = (list, { message_id, emoji, user_id, reacted }) =>
     return { ...m, reactions: reactions.filter(r => r.user_ids.length) };
   });
 
-export const useChat = (conversationId, { meId, resolveName } = {}) => {
+export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
   const { token } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -89,6 +89,7 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   // Volatile values accessed inside the long-lived effect via refs.
   const tokenRef = useRef(token);   useEffect(() => { tokenRef.current = token; }, [token]);
   const resolveRef = useRef(resolveName); useEffect(() => { resolveRef.current = resolveName; }, [resolveName]);
+  const myNameRef  = useRef(myName);      useEffect(() => { myNameRef.current = myName; }, [myName]);
   const nameOf = useCallback((id) => (resolveRef.current?.(id)) || 'User', []);
 
   const markRead = useCallback(() => {
@@ -222,7 +223,9 @@ export const useChat = (conversationId, { meId, resolveName } = {}) => {
   }, [meId]);
 
   const sendTyping = useCallback(() => {
-    channelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: meId, name: nameOf(meId) } });
+    // Broadcast my REAL name — nameOf(meId) resolves to 'You', which would make
+    // peers show "You is typing".
+    channelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: meId, name: myNameRef.current || 'Someone' } });
   }, [meId, nameOf]);
 
   const schedulePoll = useCallback(() => {

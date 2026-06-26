@@ -173,9 +173,12 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
     return m;
   }, [conversation.members, meId]);
   const resolveName = useMemo(() => (id) => nameMap[id] || (id === meId ? 'You' : 'User'), [nameMap, meId]);
+  // My REAL name (not the 'You' the resolver substitutes) — peers must see the
+  // actual name in the typing indicator, not "You".
+  const myName = useMemo(() => (conversation.members || []).find(c => c.id === meId)?.name || 'Someone', [conversation.members, meId]);
 
   const { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping } =
-    useChat(conversation.id, { meId, resolveName });
+    useChat(conversation.id, { meId, resolveName, myName });
 
   const scrollRef = useRef(null);
   const nearBottomRef = useRef(true);
