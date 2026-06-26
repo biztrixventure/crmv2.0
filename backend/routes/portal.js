@@ -177,75 +177,50 @@ router.get('/me', authMiddleware, requirePortalClient, asyncHandler(async (req, 
   res.json({ name: req.portalClient.name, closers });
 }));
 
-// Assigned closers' sales. Browse mode shows only sales WITH a recording.
-// Phone search (?phone=) matches by customer phone across ALL the client's sales
-// and returns the hits with a has_recording flag (so a found-but-no-recording
-// number gives a clear answer instead of an empty screen).
+// Assigned closers' sales — INSTANT (pure DB, zero dialer calls). The recording
+// is resolved only when a call is played (/sales/:id/recording). Browse = recent
+// by call date; ?phone= matches by customer phone across ALL the client's sales.
 router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const allowed = req.portalClient.closer_ids || [];
   if (!allowed.length) return res.json({ sales: [] });
 
   const closerFilter = req.query.closer_id && allowed.includes(req.query.closer_id) ? [req.query.closer_id] : allowed;
-  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name, vicidial_agent_ids', 'user_id', closerFilter);
+  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name', 'user_id', closerFilter);
   const profById = Object.fromEntries(profs.map(p => [p.user_id, p]));
-
-  // resolve each sale → recording; keepEmpty keeps no-recording rows (flagged)
-  const resolve = async (rows, keepEmpty) => {
-    const trs = await fetchIn('transfers', 'id, vicidial_vendor_code', 'id', rows.map(s => s.transfer_id));
-    const codeByTr = Object.fromEntries(trs.map(t => [t.id, t.vicidial_vendor_code]));
-    const out = await mapLimit(rows, 10, async (s) => {
-      const prof = profById[s.closer_id];
-      const rec = await findSaleRecording({
-        code: codeByTr[s.transfer_id], phone: s.customer_phone,
-        agentIds: prof?.vicidial_agent_ids || [], date: s.sale_date,
-      });
-      if (!rec && !keepEmpty) return null;
-      return {
-        id: s.id,
-        customer_name: s.customer_name || '—',
-        phone: s.customer_phone || '',
-        sale_date: s.sale_date,
-        closer_id: s.closer_id,
-        closer_name: fullName(prof) || '(unnamed)',
-        duration: rec?.duration || null,
-        has_recording: !!rec,
-      };
-    });
-    return out.filter(Boolean);
-  };
+  const shape = (rows) => (rows || []).map(s => ({
+    id: s.id,
+    customer_name: s.customer_name || '—',
+    phone: s.customer_phone || '',
+    sale_date: s.sale_date,
+    closer_id: s.closer_id,
+    closer_name: fullName(profById[s.closer_id]) || '(unnamed)',
+  }));
+  const cols = 'id, customer_name, customer_phone, sale_date, closer_id';
 
   // ── phone search ──
   const phoneQ = String(req.query.phone || '').replace(/\D/g, '');
   if (phoneQ.length >= 4) {
-    const { data: sales } = await supabaseAdmin
-      .from('sales')
-      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id')
+    const { data } = await supabaseAdmin
+      .from('sales').select(cols)
       .in('closer_id', closerFilter)
       .or(`customer_phone.ilike.%${phoneQ}%,customer_phone_2.ilike.%${phoneQ}%`)
       .order('sale_date', { ascending: false })
-      .limit(40);
-    return res.json({ sales: await resolve(sales || [], true), phone_search: true });
+      .limit(60);
+    return res.json({ sales: shape(data), phone_search: true });
   }
 
-  // ── browse (recent, recording-only) ──
-  const scanLimit = Math.min(parseInt(req.query.scan, 10) || 150, 400);
+  // ── browse (recent) ──
+  const limit = Math.min(parseInt(req.query.scan, 10) || 100, 300);
   const offset = parseInt(req.query.offset, 10) || 0;
   let q = supabaseAdmin
-    .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id')
+    .from('sales').select(cols)
     .in('closer_id', closerFilter)
     .order('sale_date', { ascending: false })   // call date, not bulk-import created_at
-    .range(offset, offset + scanLimit - 1);
+    .range(offset, offset + limit - 1);
   if (req.query.date_from) q = q.gte('sale_date', req.query.date_from);
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
-  const { data: sales } = await q;
-  if (!sales?.length) return res.json({ sales: [], scanned: 0, next_offset: null });
-
-  res.json({
-    sales: await resolve(sales, false),
-    scanned: sales.length,
-    next_offset: sales.length === scanLimit ? offset + scanLimit : null,
-  });
+  const { data } = await q;
+  res.json({ sales: shape(data), next_offset: (data?.length === limit) ? offset + limit : null });
 }));
 
 // stream the actual sale recording (source hidden, nothing stored) + audit

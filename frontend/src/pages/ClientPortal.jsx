@@ -68,8 +68,10 @@ export default function ClientPortal() {
       urlRef.current = url;
       const a = audioRef.current;
       if (a) { a.src = url; a.load(); a.play().catch(() => {}); }
-    } catch {
-      setAudioErr('This recording could not be loaded right now.');
+    } catch (e) {
+      setAudioErr(e?.response?.status === 404
+        ? 'No recording available for this call.'
+        : 'This recording could not be loaded right now.');
     } finally { setAudioLoad(false); }
   };
 
@@ -149,28 +151,23 @@ export default function ClientPortal() {
           <div className="space-y-2">
             {filtered.map(s => {
               const on = selected?.id === s.id;
-              const noRec = s.has_recording === false;
               return (
-                <button key={s.id} onClick={() => !noRec && playSale(s)} disabled={noRec}
+                <button key={s.id} onClick={() => playSale(s)}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all group"
                   style={{
                     background: on ? 'linear-gradient(90deg,rgba(99,102,241,0.18),rgba(139,92,246,0.06))' : 'rgba(148,163,184,0.04)',
                     border: `1px solid ${on ? 'rgba(99,102,241,0.5)' : 'rgba(148,163,184,0.1)'}`,
-                    cursor: noRec ? 'default' : 'pointer', opacity: noRec ? 0.55 : 1,
                   }}>
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{ background: on ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(148,163,184,0.1)' }}>
-                    {noRec ? <AudioLines size={15} style={{ color: '#64748b' }} /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
+                    {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold truncate" style={{ color: '#f1f5f9' }}>{s.customer_name}</div>
                     <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: '#64748b' }}>
                       <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
                       <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                      {phoneMode && s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
-                      {noRec
-                        ? <span style={{ color: '#94a3b8' }}>· Recording not available</span>
-                        : s.duration ? <span className="flex items-center gap-1"><AudioLines size={11} />{fmt(s.duration)}</span> : null}
+                      {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
                     </div>
                   </div>
                 </button>
