@@ -21,6 +21,7 @@ const AdminPanel      = lazy(() => import("./pages/AdminPanel"));
 const StaffShell      = lazy(() => import("./shells/StaffShell"));
 const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
 const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
+const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
@@ -88,6 +89,9 @@ const AppContent = () => {
           <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/operations/*"      element={<ProtectedRoute requiredRole="operations_manager"><ManagerShell /></ProtectedRoute>} />
+
+          {/* Client recording portal — isolated external login (no CRM chrome) */}
+          <Route path="/portal/*" element={<ProtectedRoute requiredRole="portal_client"><ClientPortal /></ProtectedRoute>} />
 
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
           <Route path="*" element={<NotFound />} />

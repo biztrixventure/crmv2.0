@@ -3,13 +3,14 @@ import {
   MessageSquare, Activity, Users, Lock, Unlock, Trash2, Pencil, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
   UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw, Palette,
-  Link2, Power, Copy, Check, UserPlus, ChevronRight,
+  Link2, Power, Copy, Check, UserPlus, ChevronRight, Headphones,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import Composer from '../../Chat/Composer';
+import ClientPortalTab from './ClientPortalTab';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'colors',        label: 'Font Colors',    icon: Palette },
   { id: 'log',           label: 'Moderation Log', icon: ScrollText },
   { id: 'companies',     label: 'Rollout',        icon: Building2 },
+  { id: 'portal',        label: 'Client Portal',  icon: Headphones },
 ];
 
 // ── Overview ────────────────────────────────────────────────────────────────
@@ -750,6 +752,7 @@ const ChatAdmin = () => {
       {tab === 'colors' && <ColorsTab />}
       {tab === 'log' && <ModerationTab />}
       {tab === 'companies' && <CompaniesTab />}
+      {tab === 'portal' && <ClientPortalTab />}
     </div>
   );
 };

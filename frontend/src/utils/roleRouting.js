@@ -34,6 +34,9 @@ export const ROLE_ROUTES = {
 
   closer:              '/closer',
   fronter:             '/fronter',
+
+  // External recording-portal client — isolated, no CRM surface.
+  portal_client:       '/portal',
 };
 
 // ─── Hierarchy (lower number = higher authority) ─────────────────────────────
@@ -103,6 +106,11 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   // Compliance manager: only /compliance
   if (normUser === 'compliancemanager') {
     return normRequired === 'compliancemanager';
+  }
+
+  // Portal client: ONLY the recording portal — never any CRM shell.
+  if (normUser === 'portalclient') {
+    return normRequired === 'portalclient';
   }
 
   // Hierarchy check: can access routes at same or lower authority
