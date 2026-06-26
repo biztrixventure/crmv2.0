@@ -57,23 +57,19 @@ const moduleOf = (page) => {
 //          beat is >30 min old (multi-tab boots within the window don't
 //          double-count).
 router.post('/heartbeat', asyncHandler(async (req, res) => {
-  // Subsystem off → no writes at all (this is the load we're shedding).
-  if (!(await activityEnabled())) return res.json({ ok: true, disabled: true });
   const userId = req.user.id;
   const { page = null, device = null, idle = false, boot = false } = req.body || {};
   const now = new Date();
   const nowIso = now.toISOString();
+  const monitorOn = await activityEnabled();
 
-  const { data: prev } = await supabaseAdmin
-    .from('user_presence').select('last_seen_at').eq('user_id', userId).maybeSingle();
-
-  const elapsedMin = prev?.last_seen_at
-    ? Math.max(0, (now - new Date(prev.last_seen_at)) / 60000)
-    : Infinity;
-  // Credit ≈ time since the previous beat, capped at 2× the beat interval so a
-  // single missed beat doesn't lose time but a closed laptop doesn't gain it.
-  const credit = idle ? 0 : Math.min(elapsedMin === Infinity ? 1 : elapsedMin, 4);
-  const newSession = boot === true && elapsedMin > 30;
+  // last_seen — ALWAYS (single-row upsert; powers chat dots + "last seen"). The
+  // previous value is only needed for the aggregate's elapsed/credit math.
+  let prev = null;
+  if (monitorOn) {
+    ({ data: prev } = await supabaseAdmin
+      .from('user_presence').select('last_seen_at').eq('user_id', userId).maybeSingle());
+  }
 
   await supabaseAdmin.from('user_presence').upsert({
     user_id:      userId,
@@ -84,25 +80,33 @@ router.post('/heartbeat', asyncHandler(async (req, res) => {
     updated_at:   nowIso,
   });
 
-  // Daily aggregate (read-modify-write; one beat per user per ~2 min keeps
-  // contention irrelevant).
-  const day = etToday();
-  const { data: agg } = await supabaseAdmin
-    .from('user_activity_daily').select('*').eq('user_id', userId).eq('day', day).maybeSingle();
+  // Heavy per-day aggregate (read-modify-write) — ONLY while the monitor is ON.
+  // This is the continuous load we shed when it's off.
+  if (monitorOn) {
+    const elapsedMin = prev?.last_seen_at
+      ? Math.max(0, (now - new Date(prev.last_seen_at)) / 60000)
+      : Infinity;
+    const credit = idle ? 0 : Math.min(elapsedMin === Infinity ? 1 : elapsedMin, 4);
+    const newSession = boot === true && elapsedMin > 30;
 
-  const mod = moduleOf(page);
-  const moduleMinutes = { ...(agg?.module_minutes || {}) };
-  if (credit > 0) moduleMinutes[mod] = Math.round(((moduleMinutes[mod] || 0) + credit) * 10) / 10;
+    const day = etToday();
+    const { data: agg } = await supabaseAdmin
+      .from('user_activity_daily').select('*').eq('user_id', userId).eq('day', day).maybeSingle();
 
-  await supabaseAdmin.from('user_activity_daily').upsert({
-    user_id:        userId,
-    day,
-    first_seen_at:  agg?.first_seen_at || nowIso,
-    last_seen_at:   nowIso,
-    active_minutes: Math.round((agg?.active_minutes || 0) + credit),
-    login_count:    (agg?.login_count || 0) + (newSession ? 1 : 0),
-    module_minutes: moduleMinutes,
-  });
+    const mod = moduleOf(page);
+    const moduleMinutes = { ...(agg?.module_minutes || {}) };
+    if (credit > 0) moduleMinutes[mod] = Math.round(((moduleMinutes[mod] || 0) + credit) * 10) / 10;
+
+    await supabaseAdmin.from('user_activity_daily').upsert({
+      user_id:        userId,
+      day,
+      first_seen_at:  agg?.first_seen_at || nowIso,
+      last_seen_at:   nowIso,
+      active_minutes: Math.round((agg?.active_minutes || 0) + credit),
+      login_count:    (agg?.login_count || 0) + (newSession ? 1 : 0),
+      module_minutes: moduleMinutes,
+    });
+  }
 
   res.json({ ok: true });
 }));

@@ -63,9 +63,13 @@ export const PresenceProvider = ({ children }) => {
   }, [user?.id]);
 
   useEffect(() => {
-    // Off (or still resolving) → run NOTHING: no channel, no heartbeat, no
-    // listeners. Presence consumers (chat dots, admin panel) just see empty.
-    if (!user?.id || enabled !== true) { setState({ onlineIds: new Set(), idleIds: new Set(), sessions: {}, pages: {} }); return; }
+    // Presence itself — the realtime channel (green dots) + event-driven last-seen
+    // — ALWAYS runs while logged in. It's cheap on the DB: the channel is
+    // in-memory on Supabase Realtime (no DB writes/connections), and last-seen is
+    // a single-row upsert only on login / tab-show / tab-hide. The HEAVY part (the
+    // 2-min aggregate heartbeat) lives in its own effect below, gated by the
+    // monitor switch.
+    if (!user?.id) { setState({ onlineIds: new Set(), idleIds: new Set(), sessions: {}, pages: {} }); return; }
     setRealtimeAuth(token || localStorage.getItem('token'));
 
     const ch = supabase.channel('presence:global', { config: { presence: { key: user.id } } });
@@ -97,15 +101,15 @@ export const PresenceProvider = ({ children }) => {
       .subscribe((status) => { if (status === 'SUBSCRIBED') track(); });
     channelRef.current = ch;
 
-    // ── Heartbeat → server (last seen + daily aggregates) ──────────────────
+    // ── Last-seen → server (single-row upsert; aggregates skipped server-side
+    //    unless the monitor is on). Event-driven only here — no periodic timer. ──
     const beat = (extra = {}) => client.post('presence/heartbeat', {
       page:   window.location.pathname,
       device: deviceLabel(),
       idle:   idleRef.current,
       ...extra,
     }).catch(() => {});
-    beat({ boot: true });                                   // session start
-    const beatTimer = setInterval(() => { if (!document.hidden) beat(); }, HEARTBEAT_MS);
+    beat({ boot: true });                                   // session start (last_seen)
 
     // Final beat when the tab hides/closes — fetch keepalive survives unload,
     // Last-seen keepalive when the tab hides (tab switch / minimize). Stays
@@ -171,7 +175,7 @@ export const PresenceProvider = ({ children }) => {
     window.addEventListener('beforeunload', onUnload);
 
     return () => {
-      clearInterval(beatTimer); clearInterval(idleTimer);
+      clearInterval(idleTimer);
       window.removeEventListener('pointerdown', onActivity);
       window.removeEventListener('keydown', onActivity);
       window.removeEventListener('mousemove', onActivity);
@@ -182,7 +186,21 @@ export const PresenceProvider = ({ children }) => {
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [user?.id, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Periodic heartbeat → the activity-monitor aggregates (session minutes, DAU,
+  // module time). This is the heavy, continuous per-user DB write, so it runs
+  // ONLY while the monitor is ON. Off → presence (above) keeps dots + last-seen
+  // with no recurring DB load.
+  useEffect(() => {
+    if (!user?.id || enabled !== true) return;
+    const t = setInterval(() => {
+      if (!document.hidden) client.post('presence/heartbeat', {
+        page: window.location.pathname, device: deviceLabel(), idle: idleRef.current,
+      }).catch(() => {});
+    }, HEARTBEAT_MS);
+    return () => clearInterval(t);
+  }, [user?.id, enabled]);
 
   const value = useMemo(() => ({ ...state, enabled }), [state, enabled]);
   return <PresenceCtx.Provider value={value}>{children}</PresenceCtx.Provider>;

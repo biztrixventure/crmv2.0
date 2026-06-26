@@ -46,10 +46,12 @@ const SystemRules = ({ config, scope, onSave }) => {
                   User Activity Monitor {activityOn ? '' : '— OFF'}
                 </p>
                 <p className="text-xs mt-1 leading-relaxed max-w-xl" style={{ color: 'var(--color-text-secondary)' }}>
-                  The live presence + per-user activity panel (the slide-out tab on the right of the admin screen).
-                  When <b>OFF</b>, it disappears completely and <b>all of its load stops</b>: no realtime presence channel,
-                  no 2-minute heartbeats, and zero activity writes to the database. Chat still works (it just won't show
-                  online dots / “last seen” while off). Turn it back <b>ON</b> any time to resume.
+                  The slide-out activity panel (right edge of the admin screen) plus the <b>heavy</b> per-user tracking
+                  behind it. When <b>OFF</b>, the panel disappears and the database load stops: <b>no</b> 2-minute
+                  heartbeats and <b>no</b> <code>user_activity_daily</code> session/DAU/module-time writes — the
+                  continuous DB churn. <b>Chat keeps its live green dots and “last seen”</b> (those are cheap — presence
+                  is in-memory on Supabase Realtime, and last-seen is a tiny per-event write). Turn it back <b>ON</b> any
+                  time to resume the full activity stats.
                 </p>
               </div>
             </div>
