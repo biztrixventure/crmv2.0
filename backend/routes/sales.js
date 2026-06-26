@@ -1702,6 +1702,21 @@ router.post('/:id/resell', [
   // Default 'pending_review' shoves the new sale straight to compliance; 'open'
   // lets the closer keep editing before submitting.
   const initialStatus = await getConfig(companyId, 'compliance.resell_initial_status', 'pending_review');
+
+  // Prefill the new sale's FORM with the old customer's identity. The SaleForm
+  // renders dynamic fields from form_data, so without this the resold form opened
+  // blank even though the typed customer columns were copied. We carry every
+  // customer-identity key but DROP the vehicle + policy keys so the closer enters
+  // those fresh (matches the typed columns cleared below).
+  const oldFd = (old.form_data && typeof old.form_data === 'object') ? old.form_data : {};
+  const VEHICLE_RE = /car|vehicle|\bmake\b|model|\bvin\b|mile|odomet|year|variant|trim/i;
+  const POLICY_RE  = /plan|reference|refno|down.?pay|monthly|payment|sale.?date|disposition|coverage|policy|\bterm\b|duration|call.?review/i;
+  const prefillFd = {};
+  for (const [k, v] of Object.entries(oldFd)) {
+    if (VEHICLE_RE.test(k) || POLICY_RE.test(k)) continue;   // closer re-enters vehicle + policy
+    prefillFd[k] = v;
+  }
+
   const newRow = {
     transfer_id:      old.transfer_id,
     company_id:       old.company_id,
@@ -1713,6 +1728,7 @@ router.post('/:id/resell', [
     customer_phone_2: old.customer_phone_2,
     customer_email:   old.customer_email,
     customer_address: old.customer_address,
+    form_data:        prefillFd,                // prefill customer identity into the form
     reference_no:     generateReferenceNo(),
     sale_date:        new Date().toISOString().slice(0, 10),
     status:           initialStatus,

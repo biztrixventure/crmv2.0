@@ -62,6 +62,7 @@ const VehicleManager = () => {
   const [modelCsv, setModelCsv] = useState('');
   const [makeSearch, setMakeSearch]   = useState('');
   const [modelSearch, setModelSearch] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');   // search ANY make OR model across the whole catalog
 
   const load = useCallback(async () => {
     setLoading(true); setErr('');
@@ -126,6 +127,20 @@ const VehicleManager = () => {
   const filteredMakes = makes.filter(m => m.name.toLowerCase().includes(makeSearch.trim().toLowerCase()));
   const activeModels  = (active?.models || []).filter(m => m.name.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
+  // Global search — match across ALL makes AND every model under them, so a
+  // model can be found without first picking its make. Capped so a 1-char query
+  // doesn't render thousands of rows.
+  const gq = globalSearch.trim().toLowerCase();
+  const globalHits = gq ? (() => {
+    const makeHits = makes.filter(m => m.name.toLowerCase().includes(gq)).map(m => ({ type: 'make', make: m }));
+    const modelHits = [];
+    for (const m of makes) for (const mod of (m.models || [])) {
+      if (mod.name.toLowerCase().includes(gq)) modelHits.push({ type: 'model', make: m, model: mod });
+    }
+    return [...makeHits, ...modelHits].slice(0, 60);
+  })() : [];
+  const openHit = (h) => { setActive(h.make); if (h.type === 'model') setModelSearch(h.model.name); else setModelSearch(''); setGlobalSearch(''); };
+
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="rounded-2xl p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -142,6 +157,35 @@ const VehicleManager = () => {
       </div>
 
       {err && <Alert type="error" message={err} />}
+
+      {/* Global search — find any make OR model across the whole catalog. */}
+      <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input value={globalSearch} onChange={e => setGlobalSearch(e.target.value)}
+            placeholder="Search any make or model… (e.g. Camry, BMW, F-150)" className="input text-sm pl-9" />
+          {globalSearch && (
+            <button onClick={() => setGlobalSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-bg-secondary">
+              <X size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+            </button>
+          )}
+        </div>
+        {gq && (
+          <div className="mt-2 max-h-72 overflow-y-auto space-y-0.5">
+            {globalHits.length === 0
+              ? <p className="text-xs italic py-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>No make or model matches “{globalSearch}”.</p>
+              : globalHits.map((h, i) => (
+                <button key={`${h.type}:${h.make.id}:${h.model?.id || ''}:${i}`} onClick={() => openHit(h)}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left text-sm hover:bg-bg-secondary transition-colors">
+                  <Car size={13} style={{ color: 'var(--color-primary-500)', flexShrink: 0 }} />
+                  {h.type === 'make'
+                    ? <span style={{ color: 'var(--color-text)' }}><strong>{h.make.name}</strong> <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· make · {h.make.models?.length || 0} models</span></span>
+                    : <span style={{ color: 'var(--color-text)' }}>{h.make.name} <ChevronRight size={11} className="inline opacity-50" /> <strong>{h.model.name}</strong></span>}
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* ── Makes column ────────────────────────────────────────────── */}

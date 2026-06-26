@@ -3,7 +3,7 @@ import {
   MessageSquare, Activity, Users, Lock, Unlock, Trash2, Pencil, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
   UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw, Palette,
-  Link2, Power, Copy, Check, UserPlus,
+  Link2, Power, Copy, Check, UserPlus, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
@@ -36,8 +36,10 @@ const TABS = [
 ];
 
 // ── Overview ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, value, icon: Icon, accent }) => (
-  <div className="rounded-2xl p-4 relative overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+const StatCard = ({ label, value, icon: Icon, accent, onClick }) => (
+  <button type="button" onClick={onClick} disabled={!onClick}
+    className="rounded-2xl p-4 relative overflow-hidden text-left w-full transition-all enabled:hover:shadow-md enabled:hover:-translate-y-0.5 disabled:cursor-default"
+    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', cursor: onClick ? 'pointer' : 'default' }}>
     <div className="flex items-center gap-3">
       <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white flex-shrink-0" style={{ background: accent || 'var(--gradient-sidebar)' }}><Icon size={18} /></div>
       <div className="min-w-0">
@@ -45,26 +47,30 @@ const StatCard = ({ label, value, icon: Icon, accent }) => (
         <p className="text-xs uppercase tracking-wide font-semibold mt-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
       </div>
     </div>
-  </div>
+    {onClick && <ChevronRight size={14} className="absolute top-3 right-3 opacity-30" />}
+  </button>
 );
 
-const OverviewTab = ({ onOpenConversation }) => {
+const OverviewTab = ({ onOpenConversation, goto }) => {
   const [s, setS] = useState(null);
   const load = useCallback(() => client.get('chat/admin/overview').then(r => setS(r.data)).catch(() => setS({})), []);
   useEffect(() => { load(); }, [load]);
   if (!s) return <Spinner />;
 
+  const toConvos = () => goto?.('conversations');
+  const toUsers  = () => goto?.('users');
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        <StatCard label="Conversations" value={s.total_conversations ?? 0} icon={MessageSquare} />
-        <StatCard label="Total messages" value={s.total_messages ?? 0} icon={MessagesSquare} accent="linear-gradient(135deg,#6366f1,#8b5cf6)" />
-        <StatCard label="Messages today" value={s.messages_today ?? 0} icon={Send} accent="linear-gradient(135deg,#0ea5e9,#2563eb)" />
-        <StatCard label="Messages · 7d" value={s.messages_7d ?? 0} icon={TrendingUp} accent="linear-gradient(135deg,#10b981,#059669)" />
-        <StatCard label="Active today" value={s.active_users_today ?? 0} icon={Users} accent="linear-gradient(135deg,#f59e0b,#d97706)" />
-        <StatCard label="Banned users" value={s.banned_users ?? 0} icon={Ban} accent="linear-gradient(135deg,#ef4444,#b91c1c)" />
-        <StatCard label="Locked rooms" value={s.locked_rooms ?? 0} icon={Lock} accent="linear-gradient(135deg,#64748b,#475569)" />
-        <StatCard label="DM / Group / Bcast" value={`${s.dm_count || 0}/${s.group_count || 0}/${s.broadcast_count || 0}`} icon={Hash} accent="linear-gradient(135deg,#ec4899,#db2777)" />
+        <StatCard label="Conversations" value={s.total_conversations ?? 0} icon={MessageSquare} onClick={toConvos} />
+        <StatCard label="Total messages" value={s.total_messages ?? 0} icon={MessagesSquare} accent="linear-gradient(135deg,#6366f1,#8b5cf6)" onClick={() => goto?.('search')} />
+        <StatCard label="Messages today" value={s.messages_today ?? 0} icon={Send} accent="linear-gradient(135deg,#0ea5e9,#2563eb)" onClick={() => goto?.('search')} />
+        <StatCard label="Messages · 7d" value={s.messages_7d ?? 0} icon={TrendingUp} accent="linear-gradient(135deg,#10b981,#059669)" onClick={() => goto?.('search')} />
+        <StatCard label="Active today" value={s.active_users_today ?? 0} icon={Users} accent="linear-gradient(135deg,#f59e0b,#d97706)" onClick={toUsers} />
+        <StatCard label="Banned users" value={s.banned_users ?? 0} icon={Ban} accent="linear-gradient(135deg,#ef4444,#b91c1c)" onClick={toUsers} />
+        <StatCard label="Locked rooms" value={s.locked_rooms ?? 0} icon={Lock} accent="linear-gradient(135deg,#64748b,#475569)" onClick={toConvos} />
+        <StatCard label="DM / Group / Bcast" value={`${s.dm_count || 0}/${s.group_count || 0}/${s.broadcast_count || 0}`} icon={Hash} accent="linear-gradient(135deg,#ec4899,#db2777)" onClick={toConvos} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -735,7 +741,7 @@ const ChatAdmin = () => {
         })}
       </div>
 
-      {tab === 'overview' && <OverviewTab onOpenConversation={openConversation} />}
+      {tab === 'overview' && <OverviewTab onOpenConversation={openConversation} goto={setTab} />}
       {tab === 'conversations' && <ConversationsTab openId={openId} setOpenId={setOpenId} />}
       {tab === 'search' && <SearchTab setOpenId={openConversation} />}
       {tab === 'users' && <UsersTab />}
