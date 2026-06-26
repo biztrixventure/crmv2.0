@@ -74,9 +74,9 @@ export default function ClientPortal() {
   const pct = dur ? (cur / dur) * 100 : 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: 'radial-gradient(1200px 600px at 80% -10%, #1e293b 0%, #0b1120 45%, #060912 100%)', color: '#e2e8f0' }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'radial-gradient(1200px 600px at 80% -10%, #1e293b 0%, #0b1120 45%, #060912 100%)', color: '#e2e8f0' }}>
       {/* header */}
-      <header className="flex items-center justify-between px-5 sm:px-8 py-4"
+      <header className="flex-shrink-0 flex items-center justify-between px-5 sm:px-8 py-4"
         style={{ borderBottom: '1px solid rgba(148,163,184,0.12)', backdropFilter: 'blur(8px)' }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -95,7 +95,8 @@ export default function ClientPortal() {
         </button>
       </header>
 
-      <main className="max-w-5xl mx-auto px-5 sm:px-8 pb-40 pt-6">
+      <main className="flex-1 overflow-y-auto px-5 sm:px-8 py-6">
+        <div className="max-w-5xl mx-auto">
         {/* closer chips */}
         <div className="flex items-center gap-2 flex-wrap mb-4">
           <button onClick={() => setCloser('')}
@@ -160,11 +161,12 @@ export default function ClientPortal() {
             })}
           </div>
         )}
+        </div>
       </main>
 
-      {/* player bar */}
+      {/* player bar — in-flow at the column bottom (page never grows past one screen) */}
       {selected && (
-        <div className="fixed bottom-0 left-0 right-0 px-5 sm:px-8 py-4"
+        <div className="flex-shrink-0 px-5 sm:px-8 py-4"
           style={{ background: 'rgba(8,12,22,0.92)', borderTop: '1px solid rgba(148,163,184,0.14)', backdropFilter: 'blur(14px)' }}>
           <div className="max-w-5xl mx-auto">
             <div className="flex items-center gap-3 mb-2">
