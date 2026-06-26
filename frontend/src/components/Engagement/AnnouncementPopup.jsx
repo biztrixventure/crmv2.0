@@ -25,9 +25,12 @@ const AnnouncementPopup = () => {
       .catch(() => {});
     load();
     // Slow poll instead of a global Realtime channel — announcements are rare,
-    // and a postgres_changes subscription per client was costly DB-side.
-    const t = setInterval(load, 3 * 60 * 1000);
-    return () => { alive = false; clearInterval(t); };
+    // and a postgres_changes subscription per client was costly DB-side. Skip
+    // hidden tabs, refresh on return → backgrounded tabs cost nothing.
+    const t = setInterval(() => { if (!document.hidden) load(); }, 3 * 60 * 1000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [user?.id]);
 
   const current = queue[0];

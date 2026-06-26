@@ -12,7 +12,14 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
   const load = useCallback(() => {
     client.get('vicidial/pending').then(r => setItems(r.data.pending || [])).catch(() => {});
   }, []);
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load, refreshSignal]);
+  // Poll only while the tab is visible; refresh on return so it's never stale.
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [load, refreshSignal]);
 
   if (!items.length) return null;
 

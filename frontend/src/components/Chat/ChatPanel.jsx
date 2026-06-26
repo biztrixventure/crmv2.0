@@ -72,10 +72,14 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) 
   // messages flicker. Lock/mute changes apply on next open.
   useEffect(() => {
     if (!open) { clearInterval(pollRef.current); return; }
-    load();
-    loadInvites();
-    pollRef.current = setInterval(() => { load(); loadInvites(); }, 20_000);
-    return () => clearInterval(pollRef.current);
+    const refresh = () => { load(); loadInvites(); };
+    refresh();
+    // Slow fallback (messages arrive live over realtime); skip hidden tabs and
+    // refresh on return so a backgrounded chat costs nothing.
+    pollRef.current = setInterval(() => { if (!document.hidden) refresh(); }, 45_000);
+    const onVis = () => { if (!document.hidden) refresh(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(pollRef.current); document.removeEventListener('visibilitychange', onVis); };
   }, [open, load, loadInvites]);
 
   const openConversation = (c) => {

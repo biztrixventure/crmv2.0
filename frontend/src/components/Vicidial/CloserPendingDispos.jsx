@@ -14,7 +14,15 @@ export default function CloserPendingDispos({ onChanged, refreshSignal, onOpenSa
   const load = useCallback(() => {
     client.get('vicidial/closer-dispos').then(r => setItems(r.data.dispos || [])).catch(() => {});
   }, []);
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load, refreshSignal]);
+  // Poll only while the tab is visible (a backgrounded tab polled forever for
+  // nothing); refresh immediately on return so it's never stale. 60s cadence.
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [load, refreshSignal]);
 
   const dismiss = async (it) => {
     try { await client.delete(`vicidial/closer-dispos/${it.id}`); load(); }

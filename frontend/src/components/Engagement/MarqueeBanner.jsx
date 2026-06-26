@@ -18,8 +18,10 @@ const MarqueeBanner = () => {
     let alive = true;
     const load = () => client.get('marquee').then(r => { if (alive) setItems(r.data.items || []); }).catch(() => {});
     load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => { alive = false; clearInterval(t); };
+    const t = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [user?.id]);
 
   // Rotate through multiple active items.

@@ -37,8 +37,11 @@ const SpiffWidget = () => {
     load();
     // Slow poll instead of Realtime on spiff_entries/spiff_campaigns. Progress
     // derives from sales, so a poll keeps it fresh without a per-client channel.
-    const t = setInterval(load, 90 * 1000);
-    return () => { alive = false; clearInterval(t); };
+    // Skip hidden tabs, refresh on return → backgrounded tabs cost nothing.
+    const t = setInterval(() => { if (!document.hidden) load(); }, 90 * 1000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [user?.id]);
 
   // 1s tick drives the countdown + instant local expiry — but only while there's
