@@ -177,56 +177,72 @@ router.get('/me', authMiddleware, requirePortalClient, asyncHandler(async (req, 
   res.json({ name: req.portalClient.name, closers });
 }));
 
-// assigned closers' sales that HAVE a real recording (others are hidden)
+// Assigned closers' sales. Browse mode shows only sales WITH a recording.
+// Phone search (?phone=) matches by customer phone across ALL the client's sales
+// and returns the hits with a has_recording flag (so a found-but-no-recording
+// number gives a clear answer instead of an empty screen).
 router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const allowed = req.portalClient.closer_ids || [];
   if (!allowed.length) return res.json({ sales: [] });
 
   const closerFilter = req.query.closer_id && allowed.includes(req.query.closer_id) ? [req.query.closer_id] : allowed;
-  const scanLimit = Math.min(parseInt(req.query.scan, 10) || 150, 400);   // how many recent sales to probe
-  const offset = parseInt(req.query.offset, 10) || 0;
+  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name, vicidial_agent_ids', 'user_id', closerFilter);
+  const profById = Object.fromEntries(profs.map(p => [p.user_id, p]));
 
-  // Order by sale_date (the call date) — NOT created_at, which surfaces
-  // bulk-imported historical rows (old call, no recording) before the recent
-  // sales that actually have recordings.
+  // resolve each sale → recording; keepEmpty keeps no-recording rows (flagged)
+  const resolve = async (rows, keepEmpty) => {
+    const trs = await fetchIn('transfers', 'id, vicidial_vendor_code', 'id', rows.map(s => s.transfer_id));
+    const codeByTr = Object.fromEntries(trs.map(t => [t.id, t.vicidial_vendor_code]));
+    const out = await mapLimit(rows, 10, async (s) => {
+      const prof = profById[s.closer_id];
+      const rec = await findSaleRecording({
+        code: codeByTr[s.transfer_id], phone: s.customer_phone,
+        agentIds: prof?.vicidial_agent_ids || [], date: s.sale_date,
+      });
+      if (!rec && !keepEmpty) return null;
+      return {
+        id: s.id,
+        customer_name: s.customer_name || '—',
+        phone: s.customer_phone || '',
+        sale_date: s.sale_date,
+        closer_id: s.closer_id,
+        closer_name: fullName(prof) || '(unnamed)',
+        duration: rec?.duration || null,
+        has_recording: !!rec,
+      };
+    });
+    return out.filter(Boolean);
+  };
+
+  // ── phone search ──
+  const phoneQ = String(req.query.phone || '').replace(/\D/g, '');
+  if (phoneQ.length >= 4) {
+    const { data: sales } = await supabaseAdmin
+      .from('sales')
+      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id')
+      .in('closer_id', closerFilter)
+      .or(`customer_phone.ilike.%${phoneQ}%,customer_phone_2.ilike.%${phoneQ}%`)
+      .order('sale_date', { ascending: false })
+      .limit(40);
+    return res.json({ sales: await resolve(sales || [], true), phone_search: true });
+  }
+
+  // ── browse (recent, recording-only) ──
+  const scanLimit = Math.min(parseInt(req.query.scan, 10) || 150, 400);
+  const offset = parseInt(req.query.offset, 10) || 0;
   let q = supabaseAdmin
     .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, status, closer_id, transfer_id')
+    .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id')
     .in('closer_id', closerFilter)
-    .order('sale_date', { ascending: false })
+    .order('sale_date', { ascending: false })   // call date, not bulk-import created_at
     .range(offset, offset + scanLimit - 1);
   if (req.query.date_from) q = q.gte('sale_date', req.query.date_from);
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
   const { data: sales } = await q;
   if (!sales?.length) return res.json({ sales: [], scanned: 0, next_offset: null });
 
-  // closer names + agent ids; transfer codes
-  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name, vicidial_agent_ids', 'user_id', closerFilter);
-  const profById = Object.fromEntries(profs.map(p => [p.user_id, p]));
-  const trs = await fetchIn('transfers', 'id, vicidial_vendor_code', 'id', sales.map(s => s.transfer_id));
-  const codeByTr = Object.fromEntries(trs.map(t => [t.id, t.vicidial_vendor_code]));
-
-  const probed = await mapLimit(sales, 10, async (s) => {
-    const prof = profById[s.closer_id];
-    const rec = await findSaleRecording({
-      code: codeByTr[s.transfer_id],
-      phone: s.customer_phone,
-      agentIds: prof?.vicidial_agent_ids || [],
-      date: s.sale_date,
-    });
-    if (!rec) return null;
-    return {
-      id: s.id,
-      customer_name: s.customer_name || '—',
-      sale_date: s.sale_date,
-      closer_id: s.closer_id,
-      closer_name: fullName(prof) || '(unnamed)',
-      duration: rec.duration || null,
-    };
-  });
-
   res.json({
-    sales: probed.filter(Boolean),
+    sales: await resolve(sales, false),
     scanned: sales.length,
     next_offset: sales.length === scanLimit ? offset + scanLimit : null,
   });

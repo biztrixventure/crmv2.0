@@ -36,14 +36,25 @@ export default function ClientPortal() {
 
   useEffect(() => { client.get('portal/me').then(r => setMe(r.data)).catch(() => {}); }, []);
 
-  const loadSales = useCallback(async () => {
+  const digits = q.replace(/\D/g, '');
+  const phoneMode = digits.length >= 4 && /^[\d\s()+.\-]+$/.test(q.trim());
+
+  const loadSales = useCallback(async (params) => {
     setLoading(true);
     try {
-      const r = await client.get('portal/sales', { params: { closer_id: closer || undefined, scan: 120 } });
+      const r = await client.get('portal/sales', { params: { closer_id: closer || undefined, ...params } });
       setSales(r.data.sales || []);
     } catch { setSales([]); } finally { setLoading(false); }
   }, [closer]);
-  useEffect(() => { loadSales(); }, [loadSales]);
+
+  // Browse recent, OR search by phone (debounced) when the query is a number.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (phoneMode) loadSales({ phone: digits });
+      else loadSales({ scan: 120 });
+    }, phoneMode ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [loadSales, phoneMode, digits]);
 
   // cleanup blob on unmount
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
@@ -66,7 +77,8 @@ export default function ClientPortal() {
   const skip   = (d) => { const a = audioRef.current; if (!a) return; a.currentTime = Math.min(Math.max(0, a.currentTime + d), dur || a.duration || 0); };
   const seek   = (e) => { const a = audioRef.current; if (!a) return; a.currentTime = Number(e.target.value); setCur(Number(e.target.value)); };
 
-  const filtered = sales.filter(s => {
+  // In phone mode the backend already matched; otherwise name-filter locally.
+  const filtered = phoneMode ? sales : sales.filter(s => {
     const t = q.trim().toLowerCase();
     return !t || (s.customer_name || '').toLowerCase().includes(t) || (s.closer_name || '').toLowerCase().includes(t);
   });
@@ -113,11 +125,11 @@ export default function ClientPortal() {
         <div className="flex items-center gap-2 mb-5">
           <div className="relative flex-1">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#475569' }} />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search customer or closer…"
+            <input value={q} onChange={e => setQ(e.target.value)} inputMode="tel" placeholder="Search by phone number, customer, or closer…"
               className="w-full text-sm rounded-xl pl-9 pr-3 py-2.5 outline-none"
               style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.14)', color: '#e2e8f0' }} />
           </div>
-          <button onClick={loadSales} className="p-2.5 rounded-xl" style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.14)' }}>
+          <button onClick={() => loadSales(phoneMode ? { phone: digits } : { scan: 120 })} className="p-2.5 rounded-xl" style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.14)' }}>
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: '#94a3b8' }} />
           </button>
         </div>
@@ -131,29 +143,34 @@ export default function ClientPortal() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center" style={{ color: '#475569' }}>
             <AudioLines size={32} className="mb-3" />
-            <p className="text-sm">No recordings to show{closer ? ' for this closer' : ''}.</p>
+            <p className="text-sm">{phoneMode ? `No sale found for “${q.trim()}”.` : `No recordings to show${closer ? ' for this closer' : ''}.`}</p>
           </div>
         ) : (
           <div className="space-y-2">
             {filtered.map(s => {
               const on = selected?.id === s.id;
+              const noRec = s.has_recording === false;
               return (
-                <button key={s.id} onClick={() => playSale(s)}
+                <button key={s.id} onClick={() => !noRec && playSale(s)} disabled={noRec}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all group"
                   style={{
                     background: on ? 'linear-gradient(90deg,rgba(99,102,241,0.18),rgba(139,92,246,0.06))' : 'rgba(148,163,184,0.04)',
                     border: `1px solid ${on ? 'rgba(99,102,241,0.5)' : 'rgba(148,163,184,0.1)'}`,
+                    cursor: noRec ? 'default' : 'pointer', opacity: noRec ? 0.55 : 1,
                   }}>
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{ background: on ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(148,163,184,0.1)' }}>
-                    {on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
+                    {noRec ? <AudioLines size={15} style={{ color: '#64748b' }} /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold truncate" style={{ color: '#f1f5f9' }}>{s.customer_name}</div>
-                    <div className="flex items-center gap-3 text-[11px] mt-0.5" style={{ color: '#64748b' }}>
+                    <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: '#64748b' }}>
                       <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
                       <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                      {s.duration ? <span className="flex items-center gap-1"><AudioLines size={11} />{fmt(s.duration)}</span> : null}
+                      {phoneMode && s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
+                      {noRec
+                        ? <span style={{ color: '#94a3b8' }}>· Recording not available</span>
+                        : s.duration ? <span className="flex items-center gap-1"><AudioLines size={11} />{fmt(s.duration)}</span> : null}
                     </div>
                   </div>
                 </button>
