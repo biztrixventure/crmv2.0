@@ -67,6 +67,14 @@ export default function ClientPortalTab() {
         <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           {diag.error ? <span style={{ color: 'var(--color-error-600)' }}>{diag.error}</span> : (
             <div className="space-y-1">
+              {diag.server_ip && (
+                <div className="flex items-center gap-2 mb-2 pb-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Whitelist this IP on the dialer (:81):</span>
+                  <code className="px-2 py-0.5 rounded font-mono text-sm font-bold" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-primary-700)' }}>{diag.server_ip}</code>
+                  <button onClick={() => { navigator.clipboard?.writeText(diag.server_ip); toast.success('IP copied'); }}
+                    className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>Copy</button>
+                </div>
+              )}
               <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Dialer reachability from this server</div>
               {(diag.boxes || []).map(b => {
                 const ok = b.status === 'reachable';

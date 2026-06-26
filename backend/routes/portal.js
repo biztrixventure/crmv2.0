@@ -177,6 +177,13 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
   };
   const boxes = await Promise.all(BOXES.map(probe));
 
+  // The server's PUBLIC outbound IP — this is the address to whitelist on the
+  // dialer. (Coolify/Docker NATs egress through the host's public IP.)
+  let server_ip = null;
+  for (const u of ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com']) {
+    try { const r = await axios.get(u, { timeout: 8000, responseType: 'text' }); const ip = String(r.data || '').trim(); if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) { server_ip = ip; break; } } catch { /* try next */ }
+  }
+
   let sale = null;
   if (req.query.sale_id) {
     const { data: s } = await supabaseAdmin.from('sales')
@@ -190,7 +197,7 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
       sale = { customer: s.customer_name, phone: s.customer_phone, date: s.sale_date, code: tr?.vicidial_vendor_code || null, agents: p?.vicidial_agent_ids || [], found: !!rec, duration: rec?.duration || null };
     } else sale = { error: 'sale not found' };
   }
-  res.json({ boxes, sale });
+  res.json({ server_ip, boxes, sale });
 }));
 
 // listen audit for one client
