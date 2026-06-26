@@ -44,12 +44,28 @@ function deviceLabel() {
 export const PresenceProvider = ({ children }) => {
   const { user, token } = useAuth();
   const [state, setState] = useState({ onlineIds: new Set(), idleIds: new Set(), sessions: {}, pages: {} });
+  // Global kill-switch (superadmin). null = not yet known; we DON'T start the
+  // subsystem until we've confirmed it's on, so a disabled deployment never even
+  // opens the channel or beats once.
+  const [enabled, setEnabled] = useState(null);
   const idleRef    = useRef(false);
   const lastInput  = useRef(Date.now());
   const channelRef = useRef(null);
 
+  // Read the switch once per login session (tiny payload, cached server-side).
   useEffect(() => {
-    if (!user?.id) { setState({ onlineIds: new Set(), idleIds: new Set(), sessions: {}, pages: {} }); return; }
+    if (!user?.id) { setEnabled(null); return; }
+    let alive = true;
+    client.get('presence/config')
+      .then(r => { if (alive) setEnabled(r.data?.enabled !== false); })
+      .catch(() => { if (alive) setEnabled(true); });  // fail open — keep current behavior
+    return () => { alive = false; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    // Off (or still resolving) → run NOTHING: no channel, no heartbeat, no
+    // listeners. Presence consumers (chat dots, admin panel) just see empty.
+    if (!user?.id || enabled !== true) { setState({ onlineIds: new Set(), idleIds: new Set(), sessions: {}, pages: {} }); return; }
     setRealtimeAuth(token || localStorage.getItem('token'));
 
     const ch = supabase.channel('presence:global', { config: { presence: { key: user.id } } });
@@ -166,8 +182,8 @@ export const PresenceProvider = ({ children }) => {
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const value = useMemo(() => state, [state]);
+  const value = useMemo(() => ({ ...state, enabled }), [state, enabled]);
   return <PresenceCtx.Provider value={value}>{children}</PresenceCtx.Provider>;
 };

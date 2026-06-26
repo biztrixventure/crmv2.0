@@ -131,7 +131,7 @@ const ActivityPanel = () => {
   const [filter, setFilter]   = useState('all');
   const [roleF, setRoleF]     = useState('');
   const [coF, setCoF]         = useState('');
-  const { onlineIds, idleIds, sessions, pages } = usePresenceContext();
+  const { onlineIds, idleIds, sessions, pages, enabled } = usePresenceContext();
 
   // force=true (Refresh button) bypasses the server's 15s cache for a fresh pull.
   const load = useCallback(async (force = false) => {
@@ -190,6 +190,10 @@ const ActivityPanel = () => {
   }, [users]);
 
   const onlineCount = users.filter(u => onlineIds.has(u.user_id)).length;
+
+  // Kill-switch OFF → render nothing at all (no edge tab, no panel). `enabled`
+  // is null while the flag resolves, so we stay hidden until it's confirmed on.
+  if (enabled !== true) return null;
 
   return (
     <>

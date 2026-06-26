@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -10,6 +10,7 @@ import VehicleEligibilityRules from './VehicleEligibilityRules';
 import ShellLayoutRules from './ShellLayoutRules';
 import NotificationsRules from './NotificationsRules';
 import DrawerLayoutRules from './DrawerLayoutRules';
+import SystemRules from './SystemRules';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -26,6 +27,7 @@ const PAGES = [
   { id: 'shells',       label: 'Shell Layouts',          icon: LayoutDashboard, Component: ShellLayoutRules },
   { id: 'notifications',label: 'Notifications',          icon: Bell,        Component: NotificationsRules },
   { id: 'drawer',       label: 'Drawer Layout',          icon: LayoutTemplate, Component: DrawerLayoutRules },
+  { id: 'system',       label: 'System & Performance',   icon: Gauge,       Component: SystemRules },
 ];
 
 const BusinessRulesHub = () => {

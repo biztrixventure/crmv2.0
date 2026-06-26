@@ -17,9 +17,24 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { getConfig } = require('../utils/businessConfig');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Global kill-switch for the whole activity-monitor / presence subsystem. When a
+// superadmin turns it OFF (Business Rules → Activity Monitor) every moving part
+// stops: clients don't open the realtime channel or heartbeat, the heartbeat
+// endpoint no-ops (zero DB writes), and the admin panel hides itself. Cached
+// 60s in businessConfig, so this gate is effectively free. Default ON.
+const activityEnabled = async () => (await getConfig(null, 'activity_monitor.enabled', true)) !== false;
+
+// ── GET /presence/config ─────────────────────────────────────────────────────
+// Tiny payload every client reads once on login to decide whether to run the
+// presence subsystem at all.
+router.get('/config', asyncHandler(async (req, res) => {
+  res.json({ enabled: await activityEnabled() });
+}));
 
 // ET business day, consistent with the rest of the app's "today" semantics.
 const etToday = () =>
@@ -42,6 +57,8 @@ const moduleOf = (page) => {
 //          beat is >30 min old (multi-tab boots within the window don't
 //          double-count).
 router.post('/heartbeat', asyncHandler(async (req, res) => {
+  // Subsystem off → no writes at all (this is the load we're shedding).
+  if (!(await activityEnabled())) return res.json({ ok: true, disabled: true });
   const userId = req.user.id;
   const { page = null, device = null, idle = false, boot = false } = req.body || {};
   const now = new Date();
@@ -117,6 +134,9 @@ const ACTIVITY_TTL = 35_000;
 router.get('/admin/activity', asyncHandler(async (req, res) => {
   if (!['superadmin', 'readonly_admin'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  if (!(await activityEnabled())) {
+    return res.json({ disabled: true, users: [], summary: { total_users: 0, dau: 0, wau: 0, mau: 0, avg_session_min: 0, total_active_min_today: 0 }, generated_at: new Date().toISOString() });
   }
 
   // ?force=1 (the panel's Refresh button) bypasses the cache for a truly fresh
