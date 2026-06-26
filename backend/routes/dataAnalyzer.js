@@ -367,39 +367,82 @@ router.post('/export', asyncHandler(async (req, res) => {
   const typed = dataset === 'sales' ? TYPED_SALES : TYPED_TRANSFERS;
   const typedSet = new Set(typed);
 
-  // Union of JSONB keys actually present in this result set. Skip keys that
-  // already exist as typed columns so the CSV doesn't duplicate the same
-  // value under both a typed and a JSONB name.
-  const jsonKeys = new Set();
-  enriched.forEach(r => {
-    const fd = r.form_data;
-    if (fd && typeof fd === 'object') {
-      Object.keys(fd).forEach(k => { if (!typedSet.has(k)) jsonKeys.add(k); });
-    }
-  });
-
-  // Order: configured form_fields first (by form-builder order), then any
-  // orphan keys alphabetically so the suffix is deterministic.
-  const ordered = [...jsonKeys].sort((a, b) => {
-    const aHas = fieldOrder.has(a), bHas = fieldOrder.has(b);
-    if (aHas && bHas)        return fieldOrder.get(a) - fieldOrder.get(b);
-    if (aHas !== bHas)       return aHas ? -1 : 1;
-    return a.localeCompare(b);
-  });
-
-  // Header row uses the admin-set label when one exists, raw key otherwise.
-  const headerKeys   = [...typed, ...ordered];
-  const headerLabels = headerKeys.map(k => fieldLabel.get(k) || k);
-
-  // Leaf-value normalizer for JSONB cells — JSON-encode objects/arrays so a
-  // nested value doesn't blow up the row layout, leave scalars raw.
-  const valFor = (row, key) => {
-    if (typedSet.has(key)) return row[key];
-    const fd = row.form_data;
-    return fd && typeof fd === 'object' ? fd[key] : undefined;
+  // ── De-dup ── form_data carries MANY keys that are just other names for a
+  // typed column (Phone↔customer_phone, VIN↔car_vin, SalePlan↔plan, FirstName/
+  // LastName↔customer_name, City/customer_city…). The old export only matched
+  // EXACT names, so every such field showed up twice (or thrice). Match
+  // case/separator-insensitively AND after stripping the customer_/car_/sale_
+  // prefixes, so all the variants fold onto their typed column. typedSet is no
+  // longer used directly — column membership is tracked per-column below.
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sem  = (s) => norm(s).replace(/^(customer|car|sale)/, '');
+  const typedNorm = new Set(typed.map(norm));
+  const typedSem  = new Set(typed.map(sem));
+  // Name parts + the couple of synonyms the prefix-strip can't connect.
+  const EXTRA_SKIP = new Set(['firstname', 'lastname', 'fullname', 'middlename', 'middle', 'client', 'disposition']);
+  const isTypedDup = (k) => {
+    const n = norm(k), s = sem(k);
+    return typedNorm.has(n) || typedSem.has(s) || EXTRA_SKIP.has(n) || EXTRA_SKIP.has(s);
   };
 
-  const rows = enriched.map(r => headerKeys.map(k => valFor(r, k)));
+  // Group every surviving json key by its semantic form so City/city/
+  // customer_city become ONE column — its value read from whichever variant a
+  // given row actually used (rows differ as the form evolved).
+  const semVariants = new Map();   // sem → Set(original keys)
+  enriched.forEach(r => {
+    const fd = r.form_data;
+    if (fd && typeof fd === 'object') Object.keys(fd).forEach(k => {
+      if (isTypedDup(k)) return;
+      const s = sem(k);
+      if (!semVariants.has(s)) semVariants.set(s, new Set());
+      semVariants.get(s).add(k);
+    });
+  });
+  // Representative key per group → drives the header label + column order
+  // (prefer a configured form_field, else the shortest/cleanest variant name).
+  const repOf = (s) => {
+    const ks = [...semVariants.get(s)];
+    return ks.find(k => fieldOrder.has(k)) || ks.slice().sort((a, b) => a.length - b.length)[0];
+  };
+  const orderedSems = [...semVariants.keys()].sort((a, b) => {
+    const ka = repOf(a), kb = repOf(b);
+    const aHas = fieldOrder.has(ka), bHas = fieldOrder.has(kb);
+    if (aHas && bHas) return fieldOrder.get(ka) - fieldOrder.get(kb);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return ka.localeCompare(kb);
+  });
+
+  // Columns: typed first (positions preserved), then one per json group. A
+  // label-level dedup is the final safety net (two surviving keys resolving to
+  // the same human label collapse to one column).
+  const seenLabel = new Set();
+  const cols = [];
+  for (const k of typed) {
+    const label = fieldLabel.get(k) || k;
+    const nl = norm(label);
+    if (seenLabel.has(nl)) continue;
+    seenLabel.add(nl);
+    cols.push({ typed: true, key: k, label });
+  }
+  for (const s of orderedSems) {
+    const rep = repOf(s);
+    const label = fieldLabel.get(rep) || rep;
+    const nl = norm(label);
+    if (seenLabel.has(nl)) continue;
+    seenLabel.add(nl);
+    cols.push({ typed: false, variants: [...semVariants.get(s)], label });
+  }
+
+  const headerLabels = cols.map(c => c.label);
+  const valFor = (row, c) => {
+    if (c.typed) return row[c.key];
+    const fd = row.form_data;
+    if (!fd || typeof fd !== 'object') return undefined;
+    for (const k of c.variants) { const v = fd[k]; if (v != null && v !== '') return v; }  // first non-empty variant
+    return undefined;
+  };
+
+  const rows = enriched.map(r => cols.map(c => valFor(r, c)));
   const csv = [headerLabels, ...rows].map(r => r.map(esc).join(',')).join('\n');
 
   const stamp = new Date().toISOString().slice(0, 10);
