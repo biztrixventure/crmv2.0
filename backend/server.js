@@ -50,6 +50,7 @@ const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
 const guestChatRoutes           = require('./routes/guestChat');
+const portalRoutes              = require('./routes/portal');
 const presenceRoutes            = require('./routes/presence');
 const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
@@ -291,6 +292,10 @@ app.use('/api/vehicles',           authMiddleware, readonlyGuard, vehiclesRoutes
 // moderation always works); user routes behind the per-company 'chat' flag.
 app.use('/api/chat/admin',         authMiddleware, readonlyGuard, chatAdminRoutes);
 app.use('/api/chat',               authMiddleware, readonlyGuard, requireFeature('chat'), chatRoutes);
+// Client recording portal — admin (superadmin) + the isolated client login.
+// Each route guards itself (authMiddleware inside); no readonlyGuard so the
+// client GET stream is reachable, and audit writes aren't blocked.
+app.use('/api/portal',             portalRoutes);
 // Events calendar — reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
 app.use('/api/events',             authMiddleware, readonlyGuard, eventsRoutes);
 // FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)

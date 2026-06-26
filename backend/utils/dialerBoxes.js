@@ -83,4 +83,70 @@ async function latestDisposition(phone) {
   return { code: (real.call_status || real.lead_status), user: real.user, box: real.box, at: real.call_date };
 }
 
-module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode };
+// ── Recording lookup (for the client portal) ───────────────────────────────
+// recording_lookup returns: start_time|user|recording_id|lead_id|duration|location
+// where `location` is the actual .mp3/.wav URL on the recording server.
+// Short TTL cache so building a sales list (same closer-agent+date repeated, or
+// the list endpoint immediately followed by a play) doesn't hammer the dialer.
+const _recCache = new Map();   // key → { at, rows }
+const REC_TTL = 5 * 60 * 1000;
+async function recordingLookup(box, params) {
+  const key = box.id + '|' + JSON.stringify(params);
+  const hit = _recCache.get(key);
+  if (hit && Date.now() - hit.at < REC_TTL) return hit.rows;
+  const rows = await _recordingLookupRaw(box, params);
+  _recCache.set(key, { at: Date.now(), rows });
+  return rows;
+}
+async function _recordingLookupRaw(box, params) {
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'recording_lookup', stage: 'pipe', duration: 'Y', ...params },
+      timeout: 20000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (!text || /NO RECORDINGS|ERROR|NOTICE|PERMISSION/i.test(text)) return [];
+    return text.split(/\r?\n/).filter(Boolean).map(l => {
+      const p = l.split('|');     // start|user|recording_id|lead_id|duration|location
+      return { box: box.id, start: p[0], user: p[1], recording_id: p[2], lead_id: p[3], duration: parseInt(p[4], 10) || 0, location: p[5] };
+    }).filter(x => x.location && /^https?:\/\//.test(x.location));
+  } catch { return []; }
+}
+
+const onlyDigits = s => String(s || '').replace(/\D/g, '');
+const phoneTail  = p => { const d = onlyDigits(p); return d.length >= 10 ? d.slice(-10) : d; };
+
+// Find the ACTUAL sale-call recording for a sale. Precise path = by lead_id on
+// the lead's own box; fallback = the closer's agent recordings for the sale date,
+// narrowed by the customer's phone in the filename. Among candidates we pick the
+// LONGEST call — that's the substantive sale conversation, not a quick redial.
+// Returns { location, recording_id, duration, start, box } or null (no match →
+// the portal hides the sale, never plays a wrong recording).
+async function findSaleRecording({ code, phone, agentIds = [], date } = {}) {
+  const tail = phoneTail(phone);
+  const matchesPhone = rec => tail && onlyDigits(rec.location).includes(tail);
+
+  let pool = [];
+  const m = String(code || '').match(/^([A-Za-z]+)(\d+)$/);
+  if (m) {
+    const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
+    if (box) pool = await recordingLookup(box, { lead_id: m[2] });
+  }
+  if (!pool.length && date && agentIds.length) {
+    const d = String(date).slice(0, 10);
+    const ids = [...new Set(agentIds.filter(Boolean).map(String))];
+    const results = await Promise.all(BOXES.flatMap(b => ids.map(a => recordingLookup(b, { agent_user: a, date: d }))));
+    pool = results.flat();
+  }
+  if (!pool.length) return null;
+
+  const phoneMatched = pool.filter(matchesPhone);
+  // lead_id path is precise → fall back to all if no phone in filename; agent+date
+  // path is broad → REQUIRE a phone match so we never serve someone else's call.
+  const cand = phoneMatched.length ? phoneMatched : (m ? pool : []);
+  if (!cand.length) return null;
+  cand.sort((a, b) => b.duration - a.duration);
+  return cand[0];
+}
+
+module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode, findSaleRecording };

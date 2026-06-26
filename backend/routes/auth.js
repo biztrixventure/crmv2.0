@@ -6,6 +6,32 @@ const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
+// Client-portal user: an isolated external login that has NO company role. They
+// only ever reach the recordings portal (frontend routes role 'portal_client' to
+// /portal and blocks every CRM screen). Returns the portal user shape or null.
+async function portalClientShape(authUser) {
+  if (!authUser?.id) return null;
+  const { data: pc } = await supabaseAdmin
+    .from('portal_clients')
+    .select('id, name, is_active')
+    .eq('auth_user_id', authUser.id)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!pc) return null;
+  return {
+    id: authUser.id,
+    email: authUser.email,
+    role: 'portal_client',
+    role_name: 'Client',
+    portal_client: true,
+    portal_client_id: pc.id,
+    name: pc.name,
+    first_name: pc.name,
+    company_id: null,
+    permissions: [],
+  };
+}
+
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 
@@ -52,6 +78,8 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   ]);
 
   if (!userRoles?.length) {
+    const portalUser = await portalClientShape({ id: userId, email: req.user.email });
+    if (portalUser) return res.json(portalUser);
     return res.status(401).json({ error: 'No active company assignment' });
   }
 
@@ -210,6 +238,14 @@ router.post(
         .single();
 
       if (roleError || !userRoles || userRoles.length === 0) {
+        const portalUser = await portalClientShape(data.user);
+        if (portalUser) {
+          return res.json({
+            token:         data.session.access_token,
+            refresh_token: data.session.refresh_token,
+            user:          portalUser,
+          });
+        }
         return res.status(401).json({ error: "User not assigned to any company" });
       }
 
