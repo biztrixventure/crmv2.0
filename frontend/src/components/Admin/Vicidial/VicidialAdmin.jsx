@@ -456,10 +456,13 @@ const Backfill = () => {
       if (!groups.length) throw new Error('No usable rows found under the header (need phone_number + status + lead_id)');
       const batchId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}-4000-8000-000000000000`.padEnd(36, '0').slice(0, 36));
       let received = 0, matched = 0, applied = 0, skipped = 0, noMatch = 0;
-      for (let i = 0; i < groups.length; i += 300) {
-        const r = await client.post('vicidial/backfill/from-list', { batch_id: batchId, source: file.name, box_prefix: boxPrefix, groups: groups.slice(i, i + 300) });
+      // Backend bulk-processes a whole chunk, so send large batches of phones to
+      // cut round-trips (each request is fast — batched reads + one bulk write).
+      const CHUNK = 1500;
+      for (let i = 0; i < groups.length; i += CHUNK) {
+        const r = await client.post('vicidial/backfill/from-list', { batch_id: batchId, source: file.name, box_prefix: boxPrefix, groups: groups.slice(i, i + CHUNK) });
         received += r.data.received; matched += r.data.matched; applied += r.data.applied; skipped += r.data.skipped_status; noMatch += r.data.no_match;
-        setImpRes({ total: groups.length, processed: Math.min(i + 300, groups.length), received, matched, applied, skipped, noMatch });
+        setImpRes({ total: groups.length, processed: Math.min(i + CHUNK, groups.length), received, matched, applied, skipped, noMatch });
       }
       const fmtLabel = usedFmt === 'NONE' ? 'no date column (order-based)' : usedFmt === 'ISO' ? 'ISO dates' : usedFmt === 'DMY' ? 'DD/MM/YYYY dates' : 'MM/DD/YYYY dates';
       toast.success(`Mapped ${applied} to ${boxPrefix} lead ids · ${fmtLabel}`);

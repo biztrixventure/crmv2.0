@@ -745,7 +745,10 @@ const LIST_SKIP = new Set([
   '', '-', 'NEW', 'INCALL', 'QUEUE', 'CH', 'DISPO',
   'XFER', 'TRANSFER', 'XDROP', 'IVRXFR', 'RQXFER',
 ]);
-const MATCH_WINDOW_MS = 21 * 864e5;  // a lead may sit ±21 days from its transfer
+// Run async work in concurrent batches (fast, but bounded so we don't flood PG).
+const runParallel = async (items, fn, conc = 50) => {
+  for (let i = 0; i < items.length; i += conc) await Promise.all(items.slice(i, i + conc).map(fn));
+};
 api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
   // Payload is phone-GROUPED: [{ phone, leads: [{ status, lead_id, date }] }].
   const groups = Array.isArray(req.body.groups) ? req.body.groups : [];
@@ -754,9 +757,8 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
   const source  = (req.body.source || '').toString().slice(0, 200) || 'list export';
   const prefix  = ['WTI', 'ETC', 'TMC'].includes(String(req.body.box_prefix || '').toUpperCase())
     ? String(req.body.box_prefix).toUpperCase() : 'WTI';
+  const now = new Date().toISOString();
 
-  // Open the batch on the first chunk (idempotent). Best-effort: if migration 112
-  // isn't applied the fill still works, just without undo tracking.
   let batchOk = false;
   if (batchId && !dryRun) {
     try {
@@ -766,8 +768,19 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
     } catch { /* 112 not applied → proceed without undo tracking */ }
   }
 
-  let received = 0, matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
-  const now = new Date().toISOString();
+  // chunked .in() reader (PostgREST caps URL length)
+  const fetchIn = async (table, col, sel, vals) => {
+    const out = [];
+    for (let i = 0; i < vals.length; i += 200) {
+      const { data } = await supabaseAdmin.from(table).select(sel).in(col, vals.slice(i, i + 200));
+      if (data) out.push(...data);
+    }
+    return out;
+  };
+
+  // ── 1. parse → phone → leads ────────────────────────────────────────────────
+  const phoneLeads = new Map();
+  let received = 0;
   for (const g of groups) {
     const ph = normPhone(String(g.phone || ''));
     const leads = (Array.isArray(g.leads) ? g.leads : []).map(l => ({
@@ -776,105 +789,133 @@ api.post('/backfill/from-list', superOnly, asyncHandler(async (req, res) => {
       t: l.date ? Date.parse(l.date) : NaN,
     })).filter(l => l.leadId);
     received += leads.length;
-    if (!ph || !leads.length) { noMatch += leads.length; continue; }
+    if (ph && leads.length) {
+      if (!phoneLeads.has(ph)) phoneLeads.set(ph, []);
+      phoneLeads.get(ph).push(...leads);
+    }
+  }
+  const phones = [...phoneLeads.keys()];
+  let matched = 0, applied = 0, skippedStatus = 0, noMatch = 0;
+  if (!phones.length) return res.json({ ok: true, batch_id: batchId, received, matched, applied, skipped_status: 0, no_match: received });
 
-    // Code-less transfers on this phone, oldest → newest (so date-pairing is stable).
-    const { data: trs } = await supabaseAdmin
-      .from('transfers').select('id, company_id, created_at, vicidial_dispo, vicidial_vendor_code, assigned_closer_id')
-      .eq('normalized_phone', ph).is('vicidial_vendor_code', null)
+  // ── 2. ALL code-less transfers for these phones (one bulk read) ─────────────
+  const allTrs = [];
+  for (let i = 0; i < phones.length; i += 200) {
+    const { data } = await supabaseAdmin.from('transfers')
+      .select('id, company_id, created_at, vicidial_dispo, assigned_closer_id, normalized_phone')
+      .in('normalized_phone', phones.slice(i, i + 200)).is('vicidial_vendor_code', null)
       .order('created_at', { ascending: true });
-    if (!trs?.length) { noMatch += leads.length; continue; }
+    if (data) allTrs.push(...data);
+  }
+  const trsByPhone = new Map();
+  for (const t of allTrs) { if (!trsByPhone.has(t.normalized_phone)) trsByPhone.set(t.normalized_phone, []); trsByPhone.get(t.normalized_phone).push(t); }
 
-    // Global nearest-first assignment: build every in-window (transfer × lead)
-    // pair, sort by date distance, then greedily claim closest pairs first — so a
-    // repeat number's transfers each grab their OWN-date lead, not whichever the
-    // oldest-first pass happened to reach. Undated leads sort last (fallback for
-    // single-lead phones). One lead per transfer, one transfer per lead.
+  // ── 3. which of those already carry a disposition (no-overwrite) ────────────
+  const disposed = new Set();
+  (await fetchIn('disposition_actions', 'transfer_id', 'transfer_id', allTrs.map(t => t.id))).forEach(a => disposed.add(a.transfer_id));
+
+  // ── 4. plan pairings in memory — nearest-date first, NO hard window so every
+  //       transfer that has any lead on its phone gets one (coverage first) ─────
+  const plan = [];
+  for (const [ph, leads] of phoneLeads) {
+    const trs = trsByPhone.get(ph) || [];
+    const distinct = new Set(leads.map(l => l.leadId)).size;
+    if (!trs.length) { noMatch += distinct; continue; }
     const pairs = [];
     for (let ti = 0; ti < trs.length; ti++) {
       const trT = Date.parse(trs[ti].created_at);
       for (let li = 0; li < leads.length; li++) {
         const lt = leads[li].t;
-        const diff = Number.isFinite(lt) ? Math.abs(lt - trT) : Number.MAX_SAFE_INTEGER;
-        if (Number.isFinite(lt) && diff > MATCH_WINDOW_MS) continue;  // dated but too far → not a candidate
-        pairs.push({ ti, li, diff });
+        pairs.push({ ti, li, diff: Number.isFinite(lt) ? Math.abs(lt - trT) : Number.MAX_SAFE_INTEGER });
       }
     }
     pairs.sort((a, b) => a.diff - b.diff);
-    const usedT = new Set(), usedLid = new Set();  // one transfer ↔ one lead_id
+    const usedT = new Set(), usedLid = new Set();
     for (const p of pairs) {
       const lid = leads[p.li].leadId;
-      if (usedT.has(p.ti) || usedLid.has(lid)) continue;   // dedup by lead_id, not array slot
+      if (usedT.has(p.ti) || usedLid.has(lid)) continue;
       usedT.add(p.ti); usedLid.add(lid);
-      const tr = trs[p.ti], best = leads[p.li];
+      const tr = trs[p.ti], lead = leads[p.li];
       matched++;
-      if (dryRun) continue;
-      try {
-        const code = prefix + best.leadId;                 // the durable lead_id mapping
-        // Guard: never create a duplicate code (e.g. wrong box prefix picked, or
-        // the same id already coded). If it lives on any other transfer, skip.
-        const { data: clash } = await supabaseAdmin.from('transfers')
-          .select('id').eq('vicidial_vendor_code', code).limit(1);
-        if (clash && clash.length) continue;
-        // Map the lead_id always; set the dispo ONLY if the transfer has NO
-        // disposition yet (column OR a disposition_actions row — a real closer
-        // dispo like SALE lives in the actions log, not the column) and it's a
-        // real outcome. Prevents a backfill CALLBK landing on top of a SALE.
-        const realOutcome = !LIST_SKIP.has(best.status);
-        let alreadyDisposed = !!tr.vicidial_dispo;
-        if (realOutcome && !alreadyDisposed) {
-          const { count } = await supabaseAdmin.from('disposition_actions')
-            .select('*', { count: 'exact', head: true }).eq('transfer_id', tr.id);
-          alreadyDisposed = (count || 0) > 0;
-        }
-        const setDispo = realOutcome && !alreadyDisposed;
-        const updates = { vicidial_vendor_code: code };
-        if (setDispo) { updates.vicidial_dispo = best.status; updates.vicidial_dispo_at = now; }
-        await supabaseAdmin.from('transfers').update(updates).eq('id', tr.id);
-
-        let actionId = null;
-        if (setDispo) {
-          try {
-            const dispoName = await lookupDispoName(tr.company_id, best.status) || best.status;
-            const { data: cfg } = await supabaseAdmin.from('disposition_configs')
-              .select('id, color').eq('name', dispoName).eq('is_active', true)
-              .or(`company_id.is.null,company_id.eq.${tr.company_id}`)
-              .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
-            const { data: da } = await supabaseAdmin.from('disposition_actions').insert({
-              transfer_id: tr.id, company_id: tr.company_id,
-              user_id: tr.assigned_closer_id || req.user.id,  // user_id is NOT NULL — fall back to the importing admin
-              disposition_config_id: cfg?.id || null, disposition_name: dispoName,
-              color: cfg?.color || '#6b7280',                 // color is NOT NULL — neutral grey when unmapped
-              note: `Backfill from list (${best.status})`, setter_role: 'closer',
-            }).select('id').single();
-            actionId = da?.id || null;
-          } catch { /* actions log is non-critical */ }
-        }
-        applied++;
-        if (!setDispo) skippedStatus++;  // mapped the lead_id but no dispo set
-        if (batchOk) {
-          try {
-            await supabaseAdmin.from('vicidial_backfill_fills').insert({
-              batch_id: batchId, transfer_id: tr.id, prev_dispo: tr.vicidial_dispo || null,
-              new_dispo: setDispo ? best.status : null, new_code: code, dispo_action_id: actionId,
-            });
-          } catch { /* tracking is non-critical */ }
-        }
-      } catch { /* skip a bad row, keep going */ }
+      const real = !LIST_SKIP.has(lead.status);
+      const already = !!tr.vicidial_dispo || disposed.has(tr.id);
+      plan.push({ tr, status: lead.status, code: prefix + lead.leadId, setDispo: real && !already });
     }
-    // distinct lead_ids that found no transfer (in window)
-    noMatch += new Set(leads.map(l => l.leadId)).size - usedLid.size;
+    noMatch += distinct - usedLid.size;
   }
 
-  if (batchOk) {
+  if (dryRun) return res.json({ ok: true, batch_id: batchId, received, matched, applied: 0, skipped_status: 0, no_match: noMatch });
+
+  // ── 5. drop collisions (code already on another transfer) + intra-batch dups ─
+  const existing = new Set();
+  (await fetchIn('transfers', 'vicidial_vendor_code', 'vicidial_vendor_code', [...new Set(plan.map(p => p.code))]))
+    .forEach(e => existing.add(e.vicidial_vendor_code));
+  const seen = new Set();
+  const finalPlan = plan.filter(p => { if (existing.has(p.code) || seen.has(p.code)) return false; seen.add(p.code); return true; });
+
+  // ── 6. dispo name + config maps, in memory ──────────────────────────────────
+  const { data: dmapRows } = await supabaseAdmin.from('vicidial_dispo_map').select('company_id, vici_code, disposition_name');
+  const dmap = new Map();
+  (dmapRows || []).forEach(m => { if (m.disposition_name) dmap.set(`${m.company_id || ''}|${m.vici_code}`, m.disposition_name); });
+  const nameFor = (co, code) => dmap.get(`${co}|${code}`) || dmap.get(`|${code}`) || code;
+  const { data: cfgRows } = await supabaseAdmin.from('disposition_configs').select('id, name, color, company_id').eq('is_active', true);
+  const cfgMap = new Map();
+  (cfgRows || []).forEach(c => cfgMap.set(`${c.company_id || ''}|${c.name}`, c));
+  const cfgFor = (co, name) => cfgMap.get(`${co}|${name}`) || cfgMap.get(`|${name}`) || null;
+
+  // ── 7. apply transfer updates — ONE bulk RPC (migration 114), with a
+  //       per-row parallel fallback if the function isn't there yet ────────────
+  const items = finalPlan.map(p => ({ id: p.tr.id, code: p.code, dispo: p.setDispo ? p.status : null }));
+  let usedRpc = false;
+  if (items.length) {
     try {
-      const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches')
-        .select('total_rows, applied_count').eq('id', batchId).maybeSingle();
-      await supabaseAdmin.from('vicidial_backfill_batches')
-        .update({ total_rows: (b?.total_rows || 0) + received, applied_count: (b?.applied_count || 0) + applied })
-        .eq('id', batchId);
-    } catch { /* tracking non-critical */ }
+      for (let i = 0; i < items.length; i += 2000) {
+        const { error } = await supabaseAdmin.rpc('backfill_apply_transfers', { items: items.slice(i, i + 2000) });
+        if (error) throw error;
+      }
+      usedRpc = true;
+    } catch { usedRpc = false; }
   }
+  if (!usedRpc) {
+    await runParallel(finalPlan, async (p) => {
+      const upd = { vicidial_vendor_code: p.code };
+      if (p.setDispo) { upd.vicidial_dispo = p.status; upd.vicidial_dispo_at = now; }
+      await supabaseAdmin.from('transfers').update(upd).eq('id', p.tr.id);
+    });
+  }
+
+  // ── 8. ONE bulk insert of the visible disposition rows ──────────────────────
+  const dispoPlan = finalPlan.filter(p => p.setDispo);
+  if (dispoPlan.length) {
+    const rows = dispoPlan.map(p => {
+      const name = nameFor(p.tr.company_id, p.status);
+      const cfg = cfgFor(p.tr.company_id, name);
+      return {
+        transfer_id: p.tr.id, company_id: p.tr.company_id, user_id: p.tr.assigned_closer_id || req.user.id,
+        disposition_config_id: cfg?.id || null, disposition_name: name, color: cfg?.color || '#6b7280',
+        note: `Backfill from list (${p.status})`, setter_role: 'closer',
+      };
+    });
+    for (let i = 0; i < rows.length; i += 500) { try { await supabaseAdmin.from('disposition_actions').insert(rows.slice(i, i + 500)); } catch { /* non-critical */ } }
+  }
+
+  applied = finalPlan.length;
+  skippedStatus = finalPlan.filter(p => !p.setDispo).length;
+
+  // ── 9. bulk insert fills + roll batch totals (undo removes actions by note) ──
+  if (batchOk) {
+    const fillRows = finalPlan.map(p => ({
+      batch_id: batchId, transfer_id: p.tr.id, prev_dispo: p.tr.vicidial_dispo || null,
+      new_dispo: p.setDispo ? p.status : null, new_code: p.code, dispo_action_id: null,
+    }));
+    for (let i = 0; i < fillRows.length; i += 500) { try { await supabaseAdmin.from('vicidial_backfill_fills').insert(fillRows.slice(i, i + 500)); } catch { /* non-critical */ } }
+    try {
+      const { data: b } = await supabaseAdmin.from('vicidial_backfill_batches').select('total_rows, applied_count').eq('id', batchId).maybeSingle();
+      await supabaseAdmin.from('vicidial_backfill_batches')
+        .update({ total_rows: (b?.total_rows || 0) + received, applied_count: (b?.applied_count || 0) + applied }).eq('id', batchId);
+    } catch { /* non-critical */ }
+  }
+
   res.json({ ok: true, batch_id: batchId, received, matched, applied, skipped_status: skippedStatus, no_match: noMatch });
 }));
 
@@ -902,20 +943,30 @@ api.post('/backfill/batches/:id/undo', superOnly, asyncHandler(async (req, res) 
     ({ data: fills } = await supabaseAdmin.from('vicidial_backfill_fills')
       .select('transfer_id, prev_dispo, new_dispo, dispo_action_id').eq('batch_id', id));
   }
+  // Bulk-read current state of every filled transfer, then revert in parallel.
+  const ids = [...new Set((fills || []).map(f => f.transfer_id))];
+  const cur = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabaseAdmin.from('transfers')
+      .select('id, vicidial_dispo, vicidial_vendor_code').in('id', ids.slice(i, i + 200));
+    (data || []).forEach(t => cur.set(t.id, t));
+  }
   let undone = 0, skipped = 0;
-  for (const f of (fills || [])) {
-    const { data: tr } = await supabaseAdmin.from('transfers')
-      .select('id, vicidial_dispo, vicidial_vendor_code').eq('id', f.transfer_id).maybeSingle();
-    if (!tr) { skipped++; continue; }
+  await runParallel((fills || []), async (f) => {
+    const tr = cur.get(f.transfer_id);
+    if (!tr) { skipped++; return; }
     const updates = {};
     // Revert each field only if it still holds exactly what this batch wrote.
     if (f.new_dispo && tr.vicidial_dispo === f.new_dispo) { updates.vicidial_dispo = f.prev_dispo || null; updates.vicidial_dispo_at = null; }
     if (f.new_code && tr.vicidial_vendor_code === f.new_code) { updates.vicidial_vendor_code = null; }
-    if (!Object.keys(updates).length) { skipped++; continue; }  // changed since → leave it
+    if (!Object.keys(updates).length) { skipped++; return; }  // changed since → leave it
     await supabaseAdmin.from('transfers').update(updates).eq('id', f.transfer_id);
+    // Remove the visible backfill row: by id if we recorded it (legacy), else by
+    // its exact note on that transfer.
     if (f.dispo_action_id) await supabaseAdmin.from('disposition_actions').delete().eq('id', f.dispo_action_id);
+    else if (f.new_dispo) await supabaseAdmin.from('disposition_actions').delete().eq('transfer_id', f.transfer_id).eq('note', `Backfill from list (${f.new_dispo})`);
     undone++;
-  }
+  });
   await supabaseAdmin.from('vicidial_backfill_batches')
     .update({ undone_at: new Date().toISOString(), undone_count: undone }).eq('id', id);
   res.json({ ok: true, undone, skipped });
