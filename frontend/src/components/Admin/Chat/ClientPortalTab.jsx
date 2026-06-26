@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search } from 'lucide-react';
+import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -12,6 +12,15 @@ export default function ClientPortalTab() {
   const [closers, setClosers] = useState([]);
   const [editing, setEditing] = useState(null);   // client obj or 'new'
   const [auditFor, setAuditFor] = useState(null);
+  const [diag, setDiag] = useState(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+
+  const runDiag = async () => {
+    setDiagBusy(true); setDiag(null);
+    try { const r = await client.get('portal/admin/diag'); setDiag(r.data); }
+    catch (e) { setDiag({ error: e.response?.data?.error || 'Diagnostic failed' }); }
+    finally { setDiagBusy(false); }
+  };
 
   const load = useCallback(async () => {
     const [c, cl] = await Promise.all([
@@ -44,10 +53,41 @@ export default function ClientPortalTab() {
             External logins that only see assigned closers' sales + play the actual sale-call recording. They never see the CRM.
           </p>
         </div>
-        <Button onClick={() => setEditing('new')} variant="primary" className="text-sm">
-          <Plus size={15} className="inline mr-1" /> New client
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={runDiag} disabled={diagBusy} variant="secondary" className="text-sm">
+            {diagBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Wifi size={14} className="inline mr-1" />} Test dialer access
+          </Button>
+          <Button onClick={() => setEditing('new')} variant="primary" className="text-sm">
+            <Plus size={15} className="inline mr-1" /> New client
+          </Button>
+        </div>
       </div>
+
+      {diag && (
+        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {diag.error ? <span style={{ color: 'var(--color-error-600)' }}>{diag.error}</span> : (
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Dialer reachability from this server</div>
+              {(diag.boxes || []).map(b => {
+                const ok = b.status === 'reachable';
+                return (
+                  <div key={b.box} className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background: ok ? 'var(--color-success-500)' : 'var(--color-error-500)' }} />
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{b.box}</span>
+                    <span style={{ color: ok ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{b.status}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{b.ms}ms {b.error || ''}</span>
+                  </div>
+                );
+              })}
+              {(diag.boxes || []).every(b => b.status !== 'reachable') && (
+                <p className="text-xs mt-1" style={{ color: 'var(--color-warning-700)' }}>
+                  All boxes unreachable → this server's IP is likely not whitelisted on the dialer. Recordings can't be fetched until it is.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {clients === null ? (
         <div className="flex justify-center py-10"><Loader2 className="animate-spin" style={{ color: 'var(--color-primary-500)' }} /></div>

@@ -153,6 +153,46 @@ router.delete('/admin/clients/:id', authMiddleware, superOnly, asyncHandler(asyn
   res.json({ ok: true });
 }));
 
+// Dialer reachability diagnostic (run from the PROD server). Tells whether each
+// VICIdial box answers recording_lookup, and (with ?sale_id=) whether a specific
+// sale resolves a recording from here. If boxes show "unreachable", the server's
+// IP is almost certainly not whitelisted on the dialer.
+router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const { BOXES } = require('../utils/dialerBoxes');
+  const probe = async (box) => {
+    const t0 = Date.now();
+    try {
+      const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+        params: { source: 'crm', user: box.user, pass: box.pass, function: 'recording_lookup', stage: 'pipe', lead_id: '1' },
+        timeout: 12000, responseType: 'text',
+      });
+      const text = String(r.data || '').trim().slice(0, 140);
+      let status = 'reachable';
+      if (/PERMISSION/i.test(text)) status = 'no_permission';
+      else if (/^ERROR/i.test(text) && !/NO RECORDINGS/i.test(text)) status = 'error';
+      return { box: box.id, base: box.base, ms: Date.now() - t0, status, sample: text };
+    } catch (e) {
+      return { box: box.id, base: box.base, ms: Date.now() - t0, status: 'unreachable', error: e.code || e.message };
+    }
+  };
+  const boxes = await Promise.all(BOXES.map(probe));
+
+  let sale = null;
+  if (req.query.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales')
+      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id').eq('id', req.query.sale_id).maybeSingle();
+    if (s) {
+      const [{ data: p }, { data: tr }] = await Promise.all([
+        supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', s.closer_id).maybeSingle(),
+        s.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', s.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      const rec = await findSaleRecording({ code: tr?.vicidial_vendor_code, phone: s.customer_phone, agentIds: p?.vicidial_agent_ids || [], date: s.sale_date });
+      sale = { customer: s.customer_name, phone: s.customer_phone, date: s.sale_date, code: tr?.vicidial_vendor_code || null, agents: p?.vicidial_agent_ids || [], found: !!rec, duration: rec?.duration || null };
+    } else sale = { error: 'sale not found' };
+  }
+  res.json({ boxes, sale });
+}));
+
 // listen audit for one client
 router.get('/admin/clients/:id/listens', authMiddleware, superOnly, asyncHandler(async (req, res) => {
   const { data } = await supabaseAdmin
@@ -244,7 +284,10 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     agentIds: prof?.vicidial_agent_ids || [],
     date: sale.sale_date,
   });
-  if (!rec) return res.status(404).json({ error: 'Recording not available' });
+  if (!rec) {
+    logger.info('PORTAL', `no recording: sale=${sale.id} code=${tr?.vicidial_vendor_code || 'none'} agents=${JSON.stringify(prof?.vicidial_agent_ids || [])} date=${sale.sale_date} (dialer reachable? run /portal/admin/diag)`);
+    return res.status(404).json({ error: 'Recording not available' });
+  }
 
   // audit (best-effort; logged only on the first chunk request, not range seeks)
   if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
