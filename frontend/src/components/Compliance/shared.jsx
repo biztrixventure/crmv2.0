@@ -1,5 +1,25 @@
 import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { ET_ZONE } from '../../utils/timezone';
+import client from '../../api/client';
+
+// Fetch EVERY page of a paginated compliance list for export — no 5,000 cap.
+// Loops 5,000-row pages until the server's `total` is reached (or a short page
+// signals the end). Returns the full row array. `onProgress(loaded, total)` is
+// optional for a live count.
+export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress) {
+  const PAGE = 5000;
+  const out = [];
+  for (let page = 1; page <= 4000; page++) {   // safety cap (~20M rows)
+    const res = await client.get(endpoint, { params: { ...params, limit: PAGE, page } });
+    const rows = res.data?.[dataKey] || [];
+    out.push(...rows);
+    const total = res.data?.total;
+    if (onProgress) onProgress(out.length, typeof total === 'number' ? total : out.length);
+    if (rows.length < PAGE) break;                        // last (short) page
+    if (typeof total === 'number' && out.length >= total) break;
+  }
+  return out;
+}
 
 // ── Status maps ───────────────────────────────────────────────────────────────
 

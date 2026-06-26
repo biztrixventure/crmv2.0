@@ -28,6 +28,7 @@ import {
   fmtDate, fmtDateTime, customerName, downloadCSV,
   TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
+  fetchAllForExport,
 } from './shared';
 
 const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
@@ -159,10 +160,9 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   };
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    const res = await client.get('compliance/transfers', {
-      params: { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
-    });
-    const all = res.data.transfers || [];
+    const all = await fetchAllForExport('compliance/transfers',
+      { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
+      'transfers');
     const dupCount = all.filter(t => t.is_duplicate).length;
     const rows = all.map(t => [
       customerName(t), t.form_data?.Phone || '',

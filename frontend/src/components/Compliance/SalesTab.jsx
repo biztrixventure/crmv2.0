@@ -20,7 +20,7 @@ import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
   TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
-  Overlay, ModalBox, ModalHeader,
+  Overlay, ModalBox, ModalHeader, fetchAllForExport,
 } from './shared';
 
 const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
@@ -223,13 +223,14 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   };
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    const res = await client.get('compliance/sales', {
-      // Export mirrors the active tab: a disposition tab exports its own
-      // disposition; All Sales excludes un-charged post-date sales.
-      params: { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
-        date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
-    });
-    const rows = (res.data.sales || []).map(s => [
+    // Export mirrors the active tab: a disposition tab exports its own
+    // disposition; All Sales excludes un-charged post-date sales. Fetches ALL
+    // matching rows (paged), not just the first 5,000.
+    const allSales = await fetchAllForExport('compliance/sales',
+      { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
+        date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
+      'sales');
+    const rows = allSales.map(s => [
       s.customer_name || '', s.customer_phone || '', s.customer_email || '',
       s.reference_no || '', labelOf(s.status) || '',
       s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),

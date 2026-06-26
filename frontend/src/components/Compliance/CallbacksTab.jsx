@@ -12,7 +12,7 @@ import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
   fmtDate, fmtDateTime, downloadCSV,
   TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
-  Overlay, ModalBox, ModalHeader, InfoTile,
+  Overlay, ModalBox, ModalHeader, InfoTile, fetchAllForExport,
 } from './shared';
 
 // ── Priority config ────────────────────────────────────────────────────────────
@@ -272,10 +272,10 @@ const AuditLogView = ({ companyList }) => {
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async () => {
-    const res = await client.get('compliance/callback-audit-log', {
-      params: { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined, limit: 5000, page: 1 },
-    });
-    const rows = (res.data.entries || []).map(e => [
+    const allEntries = await fetchAllForExport('compliance/callback-audit-log',
+      { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+      'entries');
+    const rows = allEntries.map(e => [
       fmtDateTime(e.created_at), e.actor_name || e.actor_id || '—',
       e.customer_name_snapshot || '—', e.customer_phone_snapshot || '—',
       STATUS_LABEL[e.old_status] || e.old_status || '—',
@@ -489,17 +489,14 @@ const CallbacksTab = ({ companyList }) => {
   , 0);
 
   const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    const res = await client.get('compliance/callbacks', {
-      params: {
-        company_type: co ? undefined : cbType, company_id: co || undefined,
-        date_from: df || undefined, date_to: dt || undefined,
-        created_from: createdFrom || undefined, created_to: createdTo || undefined,
-        search: search || undefined, priority: priority || undefined,
-        user_ids: userIds.length ? userIds.join(',') : (selectedUser || undefined),
-        limit: 5000, page: 1,
-      },
-    });
-    const rows = (res.data.callbacks || []).map(c => [
+    const allCallbacks = await fetchAllForExport('compliance/callbacks', {
+      company_type: co ? undefined : cbType, company_id: co || undefined,
+      date_from: df || undefined, date_to: dt || undefined,
+      created_from: createdFrom || undefined, created_to: createdTo || undefined,
+      search: search || undefined, priority: priority || undefined,
+      user_ids: userIds.length ? userIds.join(',') : (selectedUser || undefined),
+    }, 'callbacks');
+    const rows = allCallbacks.map(c => [
       c.customer_name || '', c.customer_phone || '',
       fmtDateTime(c.callback_at),
       STATUS_LABEL[c.status] || c.status || '',

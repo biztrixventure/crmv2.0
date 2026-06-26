@@ -6,7 +6,7 @@ import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import ExportModal from './ExportModal';
 import {
   STATUS_LABEL, STATUS_BADGE, LIMIT, fmtDate, timeAgo, closerName, downloadCSV,
-  TabHeader, Spinner, Empty, Overlay, ModalBox, ModalHeader, FSelect,
+  TabHeader, Spinner, Empty, Overlay, ModalBox, ModalHeader, FSelect, fetchAllForExport,
 } from './shared';
 
 const QueueTab = ({ companyList }) => {
@@ -66,10 +66,10 @@ const QueueTab = ({ companyList }) => {
   };
 
   const handleExport = async ({ dateFrom, dateTo, company: co, userIds }) => {
-    const res = await client.get('compliance/sales', {
-      params: { status: 'pending_review', exclude_post_date: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined, limit: 5000, page: 1 },
-    });
-    const rows = (res.data.sales || []).map(s => [
+    const allSales = await fetchAllForExport('compliance/sales',
+      { status: 'pending_review', exclude_post_date: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
+      'sales');
+    const rows = allSales.map(s => [
       s.customer_name || '', s.customer_phone || '', s.reference_no || '',
       closerName(s), s.companies?.name || '', fmtDate(s.created_at),
     ]);

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Star } from 'lucide-react';
 import client from '../../api/client';
 import ExportModal from './ExportModal';
-import { fmtDate, customerName, downloadCSV, TabHeader, Spinner, Empty, Th } from './shared';
+import { fmtDate, customerName, downloadCSV, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
 
 const RATING_COLOR = {
   excellent: '#16a34a', good: '#2563eb', average: '#d97706',
@@ -32,8 +32,8 @@ const ReviewsTab = ({ companyList }) => {
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async ({ company: co }) => {
-    const res = await client.get('reviews', { params: { company_id: co || undefined, limit: 5000 } });
-    const rows = (res.data.reviews || []).map(r => [
+    const allReviews = await fetchAllForExport('reviews', { company_id: co || undefined }, 'reviews');
+    const rows = allReviews.map(r => [
       customerName(r.transfers) || '',
       companyList.find(c => c.id === r.company_id)?.name || '',
       r.user_profiles ? `${r.user_profiles.first_name || ''} ${r.user_profiles.last_name || ''}`.trim() : '',
