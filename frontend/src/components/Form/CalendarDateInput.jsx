@@ -22,6 +22,8 @@ const CalendarDateInput = ({
   required = false,
   defaultToday = true,
   id,
+  max,                 // ISO yyyy-mm-dd — calendar can't pick a later date (block future)
+  min,                 // ISO yyyy-mm-dd — calendar can't pick an earlier date
 }) => {
   const ref = useRef(null);
 
@@ -49,6 +51,8 @@ const CalendarDateInput = ({
         type="date"
         value={value || (defaultToday ? todayISO() : '')}
         required={required}
+        max={max || undefined}
+        min={min || undefined}
         onChange={(e) => onChange(e.target.value)}
         onClick={openPicker}
         onKeyDown={(e) => { if (e.key !== 'Tab') e.preventDefault(); }}

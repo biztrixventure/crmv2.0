@@ -53,7 +53,9 @@ router.post('/confirm', asyncHandler(async (req, res) => {
   const updateRows = (Array.isArray(req.body?.updateRows) ? req.body.updateRows : []).filter(r => r && typeof r === 'object');
   if (!newRows.length && !updateRows.length) return res.status(400).json({ error: 'Nothing to insert or update.' });
   const batchMeta = (req.body?.batch && typeof req.body.batch === 'object') ? req.body.batch : {};
-  res.json(await confirmUpload({ newRows, updateRows, batchMeta }, req.user.id));
+  const result = await confirmUpload({ newRows, updateRows, batchMeta }, req.user.id);
+  if (result?.error) return res.status(400).json({ error: result.error });
+  res.json(result);
 }));
 
 // POST /sale-uploads/create-transfer — create the missing transfer for an

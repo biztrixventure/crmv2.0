@@ -650,7 +650,7 @@ async function classifyChunk(rows) {
     if (row.sale_date) {
       const d = String(row.sale_date).slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > todayIso) {
-        unmatched.push({ ...row, reason: `Sale Date "${row.sale_date}" is in the future. Auto-warranty sales can't post-date today — check for typos (year column).` });
+        unmatched.push({ ...row, reason: `Future dates are not allowed from the current date — Sale Date "${row.sale_date}" is after today. Fix it (often a year-column typo) and re-upload.` });
         continue;
       }
     }
@@ -932,6 +932,18 @@ function buildSaleRow(row, batchId) {
 // + transfer auto-complete. Updates append an edit_history entry, untagged.
 // ============================================================================
 async function confirmUpload({ newRows = [], updateRows = [], batchMeta = {} }, uploaderId) {
+  // Hard guard (defense-in-depth — the UI blocks this too): a sale can never be
+  // dated in the future. If ANY row to insert/update is, reject the whole batch
+  // so nothing lands. Mirrors the per-row S4 skip in classifyChunk.
+  const todayG = new Date().toISOString().slice(0, 10);
+  const futureRow = [...newRows, ...updateRows].find(r => {
+    const d = String(r?.sale_date || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d > todayG;
+  });
+  if (futureRow) {
+    return { error: `Future dates are not allowed from the current date — a sale is dated ${String(futureRow.sale_date).slice(0, 10)}. Fix the file and re-upload.` };
+  }
+
   const index = buildIndex(await getReference());
 
   // Create the batch first so inserted sales can reference it.

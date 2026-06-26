@@ -135,7 +135,20 @@ export function useBulkSaleUpload() {
     setBusy(true);
     try {
       await client.post('sale-uploads/mapping', { mapping });
-      await runValidation(applyMapping(rawRows, mapping, formFields, phoneKey));
+      const mapped = applyMapping(rawRows, mapping, formFields, phoneKey);
+      // HARD BLOCK: a sale can't be dated in the future. If ANY row's Sale Date
+      // is after today, reject the WHOLE file so the operator fixes it first.
+      const today = new Date().toISOString().split('T')[0];
+      const futures = [];
+      mapped.forEach((row, idx) => {
+        const d = String(row.sale_date || '').slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > today) futures.push(`${row.reference_no || `row ${idx + 1}`} (${d})`);
+      });
+      if (futures.length) {
+        setError(`Future dates are not allowed from the current date. ${futures.length} sale(s) are dated after today: ${futures.slice(0, 6).join(', ')}${futures.length > 6 ? '…' : ''}. Fix the Sale Date in your file and re-upload.`);
+        return;
+      }
+      await runValidation(mapped);
     } catch (e) { setError(e.response?.data?.error || e.message || 'Validation failed.'); }
     finally { setBusy(false); }
   }, [mapping, rawRows, runValidation, formFields, phoneKey, fields]);

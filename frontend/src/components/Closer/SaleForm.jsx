@@ -292,6 +292,16 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     const df = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
     const dv = df ? (formData[df.name] || '') : '';
     if (isPostDateDispo(dv) && !chargeAt) e.__charge_at = 'Pick a charging date & time';
+    // The Sale Date can't be in the future for a normal sale — only a Post Date
+    // disposition allows it. (Backup to the picker's max — covers a stale future
+    // value left over from flipping disposition.)
+    const sdf = fields.find(f => f.field_type === 'sale_date');
+    if (sdf && !isPostDateDispo(dv)) {
+      const sd = String(formData[sdf.name] || '').slice(0, 10);
+      if (sd && sd > new Date().toISOString().split('T')[0]) {
+        e[sdf.name] = 'Future dates are not allowed for a Sale — pick today or earlier, or choose the Post Date disposition.';
+      }
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -515,11 +525,19 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     // only, defaulted to today, MM/DD/YYYY. Manual typing disabled so a
     // MM/DD vs DD/MM slip can't reach Compliance.
     if (field.field_type === 'sale_date' || isDateField(field)) {
+      // The Sale Date can't be in the future for a normal sale — only the
+      // Post Date disposition legitimises a future date. Cap the picker's max
+      // at today unless a post-date disposition is selected (live-reactive).
+      const dispoField = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
+      const curDispo = dispoField ? (formData[dispoField.name] || '') : '';
+      const maxDate = (field.field_type === 'sale_date' && !isPostDateDispo(curDispo))
+        ? new Date().toISOString().split('T')[0] : undefined;
       return (
         <CalendarDateInput
           value={val}
           onChange={(iso) => setValue(field.name, iso)}
           required={field.is_required}
+          max={maxDate}
           className={errClass}
         />
       );
