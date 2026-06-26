@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
+import ReassignOwnership from './ReassignOwnership';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
@@ -375,6 +376,9 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
 
           {/* Sale status — not layout-configurable; shown when a sale is linked. */}
           {transfer.sale_status && saleBlock()}
+
+          {/* Superadmin-only ownership reassignment (renders nothing for others). */}
+          <ReassignOwnership kind="transfer" record={transfer} onDone={onClose} />
         </div>
       </div>
     </>

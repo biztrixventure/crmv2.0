@@ -211,6 +211,40 @@ router.get(
 );
 
 // ============================================================================
+// GET /users/lookup - lightweight active-user list for the superadmin reassign
+// picker. Returns one row per (user, company): { user_id, name, role,
+// company_id, company_name }. Superadmin / readonly_admin only.
+// ============================================================================
+router.get('/lookup', asyncHandler(async (req, res) => {
+  if (!['superadmin', 'readonly_admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  const companyId = req.query.company_id || null;
+  let q = supabaseAdmin.from('user_company_roles')
+    .select('user_id, company_id, custom_roles(level), companies(name)')
+    .eq('is_active', true);
+  if (companyId) q = q.eq('company_id', companyId);
+  const { data: ucr } = await q;
+  const ids = [...new Set((ucr || []).map(r => r.user_id))];
+  const names = {};
+  if (ids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, first_name, last_name').in('user_id', ids);
+    (profs || []).forEach(p => { names[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User'; });
+  }
+  const seen = new Set();
+  const users = [];
+  for (const r of (ucr || [])) {
+    const k = `${r.user_id}|${r.company_id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    users.push({ user_id: r.user_id, name: names[r.user_id] || 'User', role: r.custom_roles?.level || null, company_id: r.company_id, company_name: r.companies?.name || null });
+  }
+  users.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  res.json({ users });
+}));
+
+// ============================================================================
 // GET /users/:id - Get user details
 // ============================================================================
 router.get(

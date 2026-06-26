@@ -1192,6 +1192,74 @@ router.put(
 );
 
 // ============================================================================
+// PATCH /sales/:id/reassign — SUPERADMIN: change ownership
+// Change a sale's fronter (fronter_id), closer (closer_id), creator
+// (created_by) and/or company. Independent of VIN / status / superseded logic
+// (those key on VIN + status, untouched here), so the active-policy reconcile is
+// never disturbed. Optionally cascades onto the sale's linked transfer.
+// ============================================================================
+router.patch('/:id/reassign', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin access required' });
+  const { id } = req.params;
+  const body = req.body || {};
+  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+  const { data: existing } = await supabaseAdmin.from('sales').select('*').eq('id', id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Sale not found' });
+
+  const userExists = async (uid) => {
+    if (!uid) return false;
+    const { data } = await supabaseAdmin.from('user_profiles').select('user_id').eq('user_id', uid).maybeSingle();
+    return !!data;
+  };
+
+  const updates = {}, changes = {};
+  for (const f of ['created_by', 'fronter_id', 'closer_id']) {
+    if (has(f) && (body[f] || null) !== (existing[f] || null)) {
+      if (body[f] && !(await userExists(body[f]))) return res.status(400).json({ error: `New ${f.replace('_id', '')} user not found` });
+      updates[f] = body[f] || null;
+      changes[f] = { from: existing[f], to: body[f] || null };
+    }
+  }
+  if (has('company_id') && body.company_id && body.company_id !== existing.company_id) {
+    const { data: co } = await supabaseAdmin.from('companies').select('id').eq('id', body.company_id).maybeSingle();
+    if (!co) return res.status(400).json({ error: 'Target company not found' });
+    updates.company_id = body.company_id;
+    changes.company_id = { from: existing.company_id, to: body.company_id };
+  }
+  if (!Object.keys(changes).length) return res.status(400).json({ error: 'No ownership changes provided' });
+
+  const history = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+  updates.edit_history = [...history, { at: new Date().toISOString(), by: req.user.id, action: 'reassign', changes }];
+  updates.updated_at = new Date().toISOString();
+
+  const { data: updated, error } = await supabaseAdmin
+    .from('sales').update(await stampActor('sales', updates, req.user.id)).eq('id', id).select('*').single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Optional cascade to the linked transfer.
+  let transferUpdated = false;
+  if (body.cascade_transfer && existing.transfer_id) {
+    const tUpd = {};
+    if (changes.fronter_id) tUpd.created_by = updates.fronter_id;
+    if (changes.closer_id) { tUpd.assigned_closer_id = updates.closer_id; tUpd.assigned_to = updates.closer_id; }
+    if (changes.company_id) tUpd.company_id = updates.company_id;
+    if (Object.keys(tUpd).length) {
+      const { data: tr } = await supabaseAdmin.from('transfers').select('edit_history').eq('id', existing.transfer_id).maybeSingle();
+      const th = Array.isArray(tr?.edit_history) ? tr.edit_history : [];
+      await supabaseAdmin.from('transfers').update(await stampActor('transfers', {
+        ...tUpd, updated_at: new Date().toISOString(),
+        edit_history: [...th, { at: new Date().toISOString(), by: req.user.id, action: 'reassign-cascade', changes }],
+      }, req.user.id)).eq('id', existing.transfer_id);
+      transferUpdated = true;
+    }
+  }
+
+  logger.info('SALE_REASSIGN', `Sale ${id} reassigned by ${req.user.id}`, { changes, transferUpdated });
+  res.json({ ok: true, sale: updated, transfer_updated: transferUpdated });
+}));
+
+// ============================================================================
 // POST /sales/:id/submit-review — Closer submits sale for compliance review
 // ============================================================================
 router.post('/:id/submit-review', asyncHandler(async (req, res) => {

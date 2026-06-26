@@ -1159,6 +1159,94 @@ router.put('/:id', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// PATCH /transfers/:id/reassign — SUPERADMIN: change ownership
+// Move a transfer to a different fronter (created_by) and/or closer
+// (assigned_closer_id) and/or company — regardless of status / sale / dispo on
+// it. Optionally cascades the same owners onto the transfer's linked sale.
+// Validates target users/company exist; full audit trail in edit_history. The
+// dialer reconcile, customer_uuid and VIN logic key on phone/code, not the
+// owner columns, so this never disturbs those flows.
+// ============================================================================
+router.patch('/:id/reassign', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin access required' });
+  const { id } = req.params;
+  const body = req.body || {};
+  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+  const { data: existing } = await supabaseAdmin.from('transfers').select('*').eq('id', id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Transfer not found' });
+
+  const userExists = async (uid) => {
+    if (!uid) return false;
+    const { data } = await supabaseAdmin.from('user_profiles').select('user_id').eq('user_id', uid).maybeSingle();
+    return !!data;
+  };
+
+  const updates = {}, changes = {};
+  // Fronter
+  if (has('created_by') && (body.created_by || null) !== (existing.created_by || null)) {
+    if (body.created_by && !(await userExists(body.created_by))) return res.status(400).json({ error: 'New fronter user not found' });
+    updates.created_by = body.created_by || null;
+    changes.created_by = { from: existing.created_by, to: body.created_by || null };
+  }
+  // Closer (assigned_to mirrors assigned_closer_id everywhere in the app)
+  let closerChanged = false;
+  if (has('assigned_closer_id') && (body.assigned_closer_id || null) !== (existing.assigned_closer_id || null)) {
+    if (body.assigned_closer_id && !(await userExists(body.assigned_closer_id))) return res.status(400).json({ error: 'New closer user not found' });
+    updates.assigned_closer_id = body.assigned_closer_id || null;
+    updates.assigned_to = body.assigned_closer_id || null;
+    changes.assigned_closer_id = { from: existing.assigned_closer_id, to: body.assigned_closer_id || null };
+    closerChanged = true;
+  }
+  // Company
+  if (has('company_id') && body.company_id && body.company_id !== existing.company_id) {
+    const { data: co } = await supabaseAdmin.from('companies').select('id').eq('id', body.company_id).maybeSingle();
+    if (!co) return res.status(400).json({ error: 'Target company not found' });
+    updates.company_id = body.company_id;
+    changes.company_id = { from: existing.company_id, to: body.company_id };
+  }
+  if (!Object.keys(changes).length) return res.status(400).json({ error: 'No ownership changes provided' });
+
+  // Status: assigning a closer to a still-open transfer marks it assigned;
+  // clearing it reverts a merely-assigned one to pending. Never touch a
+  // completed / rejected / closed state.
+  if (closerChanged && ['pending', 'assigned'].includes(existing.status)) {
+    updates.status = updates.assigned_closer_id ? 'assigned' : 'pending';
+  }
+
+  const history = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+  updates.edit_history = [...history, { at: new Date().toISOString(), by: req.user.id, action: 'reassign', changes }];
+  updates.updated_at = new Date().toISOString();
+
+  const { data: updated, error } = await supabaseAdmin
+    .from('transfers').update(await stampActor('transfers', updates, req.user.id)).eq('id', id).select('*').single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Optional cascade to the linked sale(s).
+  let salesUpdated = 0;
+  if (body.cascade_sale) {
+    const saleUpd = {};
+    if (changes.created_by) saleUpd.fronter_id = updates.created_by;
+    if (changes.assigned_closer_id) saleUpd.closer_id = updates.assigned_closer_id;
+    if (changes.company_id) saleUpd.company_id = updates.company_id;
+    if (Object.keys(saleUpd).length) {
+      const { data: sales } = await supabaseAdmin.from('sales').select('id, edit_history').eq('transfer_id', id);
+      for (const s of (sales || [])) {
+        const sh = Array.isArray(s.edit_history) ? s.edit_history : [];
+        await supabaseAdmin.from('sales').update(await stampActor('sales', {
+          ...saleUpd, updated_at: new Date().toISOString(),
+          edit_history: [...sh, { at: new Date().toISOString(), by: req.user.id, action: 'reassign-cascade', changes }],
+        }, req.user.id)).eq('id', s.id);
+        salesUpdated++;
+      }
+    }
+  }
+
+  logger.info('TRANSFER_REASSIGN', `Transfer ${id} reassigned by ${req.user.id}`, { changes, salesUpdated });
+  res.json({ ok: true, transfer: updated, sales_updated: salesUpdated });
+}));
+
+// ============================================================================
 // DELETE /transfers/:id
 // ============================================================================
 router.delete('/:id', asyncHandler(async (req, res) => {

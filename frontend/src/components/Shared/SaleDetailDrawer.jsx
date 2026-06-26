@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
 import ResellModal from '../Closer/ResellModal';
 import CustomerTimeline from './CustomerTimeline';
+import ReassignOwnership from './ReassignOwnership';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
 const SALE_BADGE = {
@@ -446,6 +447,9 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
               </div>
             </div>
           )}
+
+          {/* Superadmin-only ownership reassignment (renders nothing for others). */}
+          <ReassignOwnership kind="sale" record={sale} onDone={onClose} />
         </div>
       </div>
 
