@@ -49,6 +49,7 @@ const STATE_FULL_TO_INITIAL = Object.fromEntries(Object.entries(STATE_INITIAL_TO
 // without per-field hard-coding — a new field_type in form_fields shows up as
 // a text filter until a new branch is added here.
 const kindFor = (f) => {
+  if (f.field_type === 'agent') return 'agent';   // closer/fronter person picker
   const name  = String(f.name  || '').toLowerCase();
   const label = String(f.label || '').toLowerCase();
   // Name/label pattern detection runs BEFORE field_type — so a `select` with
@@ -338,6 +339,19 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     const scoped = scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
     return <ChipGrid value={value || []} onChange={set} options={scoped} cols={4} />;
   }
+  if (kind === 'agent') {
+    // Person picker (closer / fronter). Options are { value: user_id, label }.
+    // Stored as a single-element array so it rides the same `in` payload path.
+    const opts = Array.isArray(field.options) ? field.options : [];
+    const cur = Array.isArray(value) && value.length ? value[0] : '';
+    return (
+      <select value={cur} onChange={e => set(e.target.value ? [e.target.value] : [])}
+        className="input text-sm">
+        <option value="">Any {String(field.label || 'agent').toLowerCase()}…</option>
+        {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  }
   if (kind === 'multi' || kind === 'multi_enum') {
     // Generic option-bearing field. If it happens to be the child side of a
     // parent → child pair, prefer the scoped option list over the raw config.
@@ -415,7 +429,8 @@ const buildPayload = (fields, filters) => fields
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return null;
     if (
       kind === 'state' || kind === 'make' || kind === 'car_model' ||
-      kind === 'sale_client' || kind === 'sale_plan' || kind === 'multi' || kind === 'multi_enum'
+      kind === 'sale_client' || kind === 'sale_plan' || kind === 'multi' || kind === 'multi_enum' ||
+      kind === 'agent'
     ) {
       return Array.isArray(v) && v.length ? { field: f.name, op: 'in', value: v } : null;
     }
@@ -523,6 +538,7 @@ const DataAnalyzer = () => {
   // Disposition names from the Dispositions tab (disposition_configs) — drive the
   // disposition filter dynamically so new dispositions show up without code.
   const [dispositions, setDispositions] = useState([]);
+  const [agents, setAgents] = useState([]);   // active users, for the agent (closer/fronter) filter
 
   // Global scope filters (apply on top of the per-field filters, and to export).
   const [companies, setCompanies]   = useState([]);
@@ -559,6 +575,7 @@ const DataAnalyzer = () => {
     client.get('forms/fields').then(r => setFields(r.data.fields || [])).catch(() => {});
     client.get('vehicles').then(r => setVehicleTree(r.data.makes || [])).catch(() => {});
     client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    client.get('users/lookup').then(r => setAgents(r.data.users || [])).catch(() => {});
     client.get('disposition-configs/all').then(r => {
       const names = [...new Set((r.data.configs || []).filter(c => c.is_active !== false && c.name).map(c => c.name))];
       setDispositions(names);
@@ -598,10 +615,35 @@ const DataAnalyzer = () => {
     };
   }, [dataset, dispositions, fields]);
 
-  // Status + Disposition are always present (dataset-specific); before form_fields.
+  // Agent filters — pick the closer and/or fronter whose data to see. Options
+  // are active users (scoped to the selected companies when any are chosen),
+  // filtering the dataset's real person columns. closer_id/fronter_id on sales;
+  // assigned_closer_id/created_by on transfers — all typed columns the backend
+  // already accepts.
+  const agentOpts = useMemo(() => {
+    const list = companyIds.length ? agents.filter(a => companyIds.includes(a.company_id)) : agents;
+    const seen = new Set(), out = [];
+    list.forEach(a => {
+      if (seen.has(a.user_id)) return;
+      seen.add(a.user_id);
+      out.push({ value: a.user_id, label: `${a.name}${a.role ? ' · ' + String(a.role).replace(/_/g, ' ') : ''}` });
+    });
+    return out.sort((x, y) => x.label.localeCompare(y.label));
+  }, [agents, companyIds]);
+
+  const agentFields = useMemo(() => {
+    const closerCol  = dataset === 'sales' ? 'closer_id'  : 'assigned_closer_id';
+    const fronterCol = dataset === 'sales' ? 'fronter_id' : 'created_by';
+    return [
+      { name: closerCol,  label: 'Closer',  field_type: 'agent', options: agentOpts },
+      { name: fronterCol, label: 'Fronter', field_type: 'agent', options: agentOpts },
+    ];
+  }, [dataset, agentOpts]);
+
+  // Status + Disposition + Agents are always present (dataset-specific); before form_fields.
   const allFilterFields = useMemo(
-    () => [cfg.statusField, dispositionField, ...fields],
-    [cfg, dispositionField, fields],
+    () => [cfg.statusField, dispositionField, ...agentFields, ...fields],
+    [cfg, dispositionField, agentFields, fields],
   );
 
   // Apply the saved drag-and-drop order; new/unordered fields fall to the end.
