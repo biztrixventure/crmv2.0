@@ -39,7 +39,7 @@ export default function ClientPortal() {
   const loadSales = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await client.get('portal/sales', { params: { closer_id: closer || undefined, scan: 200 } });
+      const r = await client.get('portal/sales', { params: { closer_id: closer || undefined, scan: 120 } });
       setSales(r.data.sales || []);
     } catch { setSales([]); } finally { setLoading(false); }
   }, [closer]);

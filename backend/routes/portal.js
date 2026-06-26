@@ -186,11 +186,14 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   const scanLimit = Math.min(parseInt(req.query.scan, 10) || 150, 400);   // how many recent sales to probe
   const offset = parseInt(req.query.offset, 10) || 0;
 
+  // Order by sale_date (the call date) — NOT created_at, which surfaces
+  // bulk-imported historical rows (old call, no recording) before the recent
+  // sales that actually have recordings.
   let q = supabaseAdmin
     .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, status, closer_id, transfer_id, created_at')
+    .select('id, customer_name, customer_phone, sale_date, status, closer_id, transfer_id')
     .in('closer_id', closerFilter)
-    .order('created_at', { ascending: false })
+    .order('sale_date', { ascending: false })
     .range(offset, offset + scanLimit - 1);
   if (req.query.date_from) q = q.gte('sale_date', req.query.date_from);
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
@@ -203,7 +206,7 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   const trs = await fetchIn('transfers', 'id, vicidial_vendor_code', 'id', sales.map(s => s.transfer_id));
   const codeByTr = Object.fromEntries(trs.map(t => [t.id, t.vicidial_vendor_code]));
 
-  const probed = await mapLimit(sales, 6, async (s) => {
+  const probed = await mapLimit(sales, 10, async (s) => {
     const prof = profById[s.closer_id];
     const rec = await findSaleRecording({
       code: codeByTr[s.transfer_id],
