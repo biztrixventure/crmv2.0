@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Building2 } from 'lucide-react';
 import client from '../../api/client';
-import DateRangePicker from '../UI/DateRangePicker';
+import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { TabHeader, Spinner, Empty } from './shared';
 
 // Overview of every company with live KPI counts. The date range filters the
@@ -10,7 +10,8 @@ import { TabHeader, Spinner, Empty } from './shared';
 // companyList prop (used for dropdowns elsewhere) is never mutated — when a
 // range is active we fetch our own date-scoped copy.
 const CompaniesTab = ({ companyList, loading, onRefresh, onNavigate }) => {
-  const [range, setRange]       = useState({ date_from: '', date_to: '' });
+  // Default to THIS MONTH (first of month → today) instead of all-time.
+  const [range, setRange]       = useState(() => { const m = getPresetRange('month'); return { date_from: m.date_from || '', date_to: m.date_to || '' }; });
   const [rows, setRows]         = useState(null);   // date-filtered copy (null = use companyList)
   const [fetching, setFetching] = useState(false);
 
@@ -39,7 +40,7 @@ const CompaniesTab = ({ companyList, loading, onRefresh, onNavigate }) => {
         extra={
           <DateRangePicker
             value={range}
-            defaultPreset="all"
+            defaultPreset="month"
             onChange={(r) => setRange({ date_from: r.date_from || '', date_to: r.date_to || '' })}
             onClear={() => setRange({ date_from: '', date_to: '' })}
           />
