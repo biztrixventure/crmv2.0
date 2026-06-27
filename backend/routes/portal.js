@@ -13,6 +13,7 @@ const { authMiddleware } = require('../middleware/authMiddleware');
 const { isSuperAdmin } = require('../models/helpers');
 const { findSaleRecording } = require('../utils/dialerBoxes');
 const { getConfig, setConfig } = require('../utils/businessConfig');
+const { getPseudoNames } = require('../utils/pseudonym');
 const logger = require('../utils/logger');
 
 const TEST_AUDIO_KEY = 'portal.test_audio';
@@ -97,11 +98,21 @@ router.get('/admin/closers', authMiddleware, superOnly, asyncHandler(async (req,
     .eq('is_active', true)
     .in('custom_roles.level', ['closer', 'closer_manager']);
   const ids = [...new Set((roles || []).map(r => r.user_id))];
-  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name', 'user_id', ids);
+  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name, display_alias', 'user_id', ids);
   const closers = profs
-    .map(p => ({ id: p.user_id, name: fullName(p) || '(unnamed)' }))
+    .map(p => ({ id: p.user_id, name: fullName(p) || '(unnamed)', alias: p.display_alias || '' }))
     .sort((a, b) => a.name.localeCompare(b.name));
   res.json({ closers });
+}));
+
+// Set a closer's pseudonym (alias) — shown to clients + guests instead of the
+// real name. Blank → falls back to a stable "Agent XXXX".
+router.patch('/admin/closers/:id/alias', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const alias = String(req.body.alias || '').trim().slice(0, 60);
+  const { error } = await supabaseAdmin
+    .from('user_profiles').update({ display_alias: alias || null }).eq('user_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, alias });
 }));
 
 // list client logins (+ assigned closer names + listen count)
@@ -300,9 +311,9 @@ router.patch('/admin/test-audio', authMiddleware, superOnly, asyncHandler(async 
 // who am I + which closers I may see
 router.get('/me', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const ids = req.portalClient.closer_ids || [];
-  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name', 'user_id', ids);
+  const pseudo = await getPseudoNames(ids);   // clients see pseudonyms, never real names
   const closers = ids
-    .map(id => { const p = profs.find(x => x.user_id === id); return { id, name: p ? (fullName(p) || '(unnamed)') : id }; })
+    .map(id => ({ id, name: pseudo.get(id) || 'Agent' }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const ta = await getTestAudio();
   res.json({
@@ -327,15 +338,14 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   if (!allowed.length) return res.json({ sales: [] });
 
   const closerFilter = req.query.closer_id && allowed.includes(req.query.closer_id) ? [req.query.closer_id] : allowed;
-  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name', 'user_id', closerFilter);
-  const profById = Object.fromEntries(profs.map(p => [p.user_id, p]));
+  const pseudo = await getPseudoNames(closerFilter);   // clients see pseudonyms only
   const shape = (rows) => (rows || []).map(s => ({
     id: s.id,
     customer_name: s.customer_name || '—',
     phone: s.customer_phone || '',
     sale_date: s.sale_date,
     closer_id: s.closer_id,
-    closer_name: fullName(profById[s.closer_id]) || '(unnamed)',
+    closer_name: pseudo.get(s.closer_id) || 'Agent',
   }));
   const cols = 'id, customer_name, customer_phone, sale_date, closer_id';
 

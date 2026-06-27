@@ -9,7 +9,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { getUserCards } = require('../utils/chatService');
+const { getPseudoNames } = require('../utils/pseudonym');
 
 const router = express.Router();
 const MAX_BODY = 4000;
@@ -36,7 +36,8 @@ async function guestMessages(guest, { after } = {}) {
 
   const userIds  = [...new Set(rows.map(m => m.sender_id).filter(Boolean))];
   const guestIds = [...new Set(rows.map(m => m.guest_id).filter(Boolean))];
-  const cards = await getUserCards(userIds);
+  // Pseudonyms only — guests never see a real closer/agent name.
+  const pseudo = await getPseudoNames(userIds);
   const guestNames = {};
   if (guestIds.length) {
     const { data: gs } = await supabaseAdmin.from('chat_guests').select('id, name').in('id', guestIds);
@@ -44,7 +45,7 @@ async function guestMessages(guest, { after } = {}) {
   }
   return rows.map(m => ({
     id: m.id,
-    sender_name: m.guest_id ? (guestNames[m.guest_id] || 'Guest') : (cards.get(m.sender_id)?.name || 'User'),
+    sender_name: m.guest_id ? (guestNames[m.guest_id] || 'Guest') : (pseudo.get(m.sender_id) || 'Agent'),
     is_guest: !!m.guest_id,
     is_me: m.guest_id === guest.id,
     body: m.deleted_at ? null : m.body,

@@ -37,6 +37,16 @@ export default function ClientPortalTab() {
 
   const [ta, setTa] = useState({ enabled: false, url: '', label: 'Visualizer demo' });
   const [taBusy, setTaBusy] = useState(false);
+  const [showAlias, setShowAlias] = useState(false);
+  const [aliasSearch, setAliasSearch] = useState('');
+
+  const autoAlias = (id) => 'Agent ' + String(id || '').replace(/[^a-f0-9]/gi, '').slice(0, 4).toUpperCase();
+  const saveAlias = async (id, alias) => {
+    try {
+      await client.patch(`portal/admin/closers/${id}/alias`, { alias });
+      setClosers(cs => cs.map(c => c.id === id ? { ...c, alias } : c));
+    } catch { toast.error('Could not save alias'); }
+  };
 
   const load = useCallback(async () => {
     const [c, cl, t] = await Promise.all([
@@ -170,6 +180,41 @@ export default function ClientPortalTab() {
             {taBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Save audio
           </Button>
         </div>
+      </div>
+
+      {/* Closer pseudonyms — shown to clients + guest links instead of real names */}
+      <div className="rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <button onClick={() => setShowAlias(v => !v)} className="w-full flex items-center justify-between p-4">
+          <div className="flex items-center gap-2 text-left">
+            <Pencil size={15} style={{ color: 'var(--color-primary-500)' }} />
+            <div>
+              <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Closer pseudonyms</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Clients + guest links see these aliases, never real names. Blank = auto "Agent XXXX".</div>
+            </div>
+          </div>
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>{showAlias ? 'Hide' : 'Edit'}</span>
+        </button>
+        {showAlias && (
+          <div className="px-4 pb-4 space-y-2">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+              <input value={aliasSearch} onChange={e => setAliasSearch(e.target.value)} placeholder="Filter closers…" className="input text-sm pl-8" />
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+              {closers.filter(c => !aliasSearch.trim() || c.name.toLowerCase().includes(aliasSearch.trim().toLowerCase())).map(c => (
+                <div key={c.id} className="flex items-center gap-2">
+                  <span className="text-sm flex-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>{c.name}</span>
+                  <input
+                    defaultValue={c.alias || ''}
+                    placeholder={autoAlias(c.id)}
+                    onBlur={e => { const v = e.target.value.trim(); if (v !== (c.alias || '')) saveAlias(c.id, v); }}
+                    className="input text-sm" style={{ maxWidth: 200 }} />
+                </div>
+              ))}
+              {closers.length === 0 && <p className="text-xs italic py-2" style={{ color: 'var(--color-text-tertiary)' }}>No closers found.</p>}
+            </div>
+          </div>
+        )}
       </div>
 
       {clients === null ? (
