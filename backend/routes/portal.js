@@ -12,7 +12,34 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { isSuperAdmin } = require('../models/helpers');
 const { findSaleRecording } = require('../utils/dialerBoxes');
+const { getConfig, setConfig } = require('../utils/businessConfig');
 const logger = require('../utils/logger');
+
+const TEST_AUDIO_KEY = 'portal.test_audio';
+const getTestAudio = async () => (await getConfig(null, TEST_AUDIO_KEY, { enabled: false, url: '', label: 'Visualizer demo' })) || {};
+
+// Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
+// by the recording proxy and the test-audio proxy.
+async function pipeAudio(req, res, url) {
+  try {
+    const upstream = await axios.get(url, {
+      responseType: 'stream', timeout: 30000,
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+      validateStatus: s => s >= 200 && s < 400,
+    });
+    res.status(upstream.status === 206 ? 206 : 200);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+    if (upstream.headers['content-range'])  res.setHeader('Content-Range', upstream.headers['content-range']);
+    upstream.data.pipe(res);
+    upstream.data.on('error', () => { try { res.end(); } catch { /* noop */ } });
+  } catch (e) {
+    logger.warn('PORTAL', `stream failed: ${e.message}`);
+    if (!res.headersSent) res.status(502).json({ error: 'Could not load audio' });
+  }
+}
 
 const router = express.Router();
 
@@ -210,6 +237,22 @@ router.get('/admin/clients/:id/listens', authMiddleware, superOnly, asyncHandler
   res.json({ listens: data || [] });
 }));
 
+// Test audio — a demo clip the superadmin can broadcast to ALL portal clients
+// (so they can see the visualizer). Stored in global business_config.
+router.get('/admin/test-audio', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  res.json(await getTestAudio());
+}));
+router.patch('/admin/test-audio', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const cur = await getTestAudio();
+  const next = {
+    enabled: req.body.enabled !== undefined ? !!req.body.enabled : !!cur.enabled,
+    url:     req.body.url !== undefined ? String(req.body.url).trim() : (cur.url || ''),
+    label:   req.body.label !== undefined ? String(req.body.label).trim() : (cur.label || 'Visualizer demo'),
+  };
+  await setConfig('global', TEST_AUDIO_KEY, next, req.user.id);
+  res.json(next);
+}));
+
 // ════════════════════════════════════════════════════════════════════════════
 // CLIENT (portal login)
 // ════════════════════════════════════════════════════════════════════════════
@@ -221,7 +264,19 @@ router.get('/me', authMiddleware, requirePortalClient, asyncHandler(async (req, 
   const closers = ids
     .map(id => { const p = profs.find(x => x.user_id === id); return { id, name: p ? (fullName(p) || '(unnamed)') : id }; })
     .sort((a, b) => a.name.localeCompare(b.name));
-  res.json({ name: req.portalClient.name, closers });
+  const ta = await getTestAudio();
+  res.json({
+    name: req.portalClient.name,
+    closers,
+    test_audio: (ta.enabled && ta.url) ? { enabled: true, label: ta.label || 'Visualizer demo' } : { enabled: false },
+  });
+}));
+
+// stream the test-audio clip (proxied, source hidden) — for the visualizer demo
+router.get('/test-audio', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
+  const ta = await getTestAudio();
+  if (!ta.enabled || !ta.url) return res.status(404).json({ error: 'No test audio' });
+  return pipeAudio(req, res, ta.url);
 }));
 
 // Assigned closers' sales — INSTANT (pure DB, zero dialer calls). The recording
@@ -309,26 +364,8 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     }).then(() => {}, () => {});
   }
 
-  // Proxy the upstream MP3 → client. Forward Range for seek; never reveal the URL.
-  try {
-    const upstream = await axios.get(rec.location, {
-      responseType: 'stream',
-      timeout: 30000,
-      headers: req.headers.range ? { Range: req.headers.range } : {},
-      validateStatus: s => s >= 200 && s < 400,
-    });
-    res.status(upstream.status === 206 ? 206 : 200);
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, no-store');
-    if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
-    if (upstream.headers['content-range'])  res.setHeader('Content-Range', upstream.headers['content-range']);
-    upstream.data.pipe(res);
-    upstream.data.on('error', () => { try { res.end(); } catch { /* noop */ } });
-  } catch (e) {
-    logger.warn('PORTAL', `stream failed sale=${sale.id}: ${e.message}`);
-    if (!res.headersSent) res.status(502).json({ error: 'Could not load recording' });
-  }
+  // Proxy the upstream MP3 → client (Range-aware), never revealing the URL.
+  return pipeAudio(req, res, rec.location);
 }));
 
 module.exports = router;

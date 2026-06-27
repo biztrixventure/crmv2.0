@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search, Wifi } from 'lucide-react';
+import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search, Wifi, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -22,15 +22,28 @@ export default function ClientPortalTab() {
     finally { setDiagBusy(false); }
   };
 
+  const [ta, setTa] = useState({ enabled: false, url: '', label: 'Visualizer demo' });
+  const [taBusy, setTaBusy] = useState(false);
+
   const load = useCallback(async () => {
-    const [c, cl] = await Promise.all([
+    const [c, cl, t] = await Promise.all([
       client.get('portal/admin/clients').catch(() => ({ data: { clients: [] } })),
       client.get('portal/admin/closers').catch(() => ({ data: { closers: [] } })),
+      client.get('portal/admin/test-audio').catch(() => ({ data: { enabled: false, url: '', label: 'Visualizer demo' } })),
     ]);
     setClients(c.data.clients || []);
     setClosers(cl.data.closers || []);
+    setTa(t.data || { enabled: false, url: '', label: 'Visualizer demo' });
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const saveTa = async (patch) => {
+    const next = { ...ta, ...patch };
+    setTa(next); setTaBusy(true);
+    try { const r = await client.patch('portal/admin/test-audio', next); setTa(r.data); toast.success('Test audio saved'); }
+    catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+    finally { setTaBusy(false); }
+  };
 
   const del = async (c) => {
     if (!window.confirm(`Delete client login "${c.name}"? Their access is removed immediately.`)) return;
@@ -96,6 +109,33 @@ export default function ClientPortalTab() {
           )}
         </div>
       )}
+
+      {/* Test audio — broadcast a demo clip to ALL clients (for the visualizer) */}
+      <div className="rounded-xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} style={{ color: 'var(--color-primary-500)' }} />
+            <div>
+              <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Test audio (visualizer demo)</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>When on, every client sees a demo clip at the top of their portal to preview the visualizer.</div>
+            </div>
+          </div>
+          <button onClick={() => saveTa({ enabled: !ta.enabled })} disabled={taBusy || (!ta.url && !ta.enabled)}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5"
+            style={{ background: ta.enabled ? 'var(--color-success-500)' : 'var(--color-bg-secondary)', color: ta.enabled ? '#fff' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+            <Power size={13} /> {ta.enabled ? 'On' : 'Off'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+          <input value={ta.url} onChange={e => setTa({ ...ta, url: e.target.value })} placeholder="Audio URL (mp3)…" className="input text-sm sm:col-span-2" />
+          <input value={ta.label} onChange={e => setTa({ ...ta, label: e.target.value })} placeholder="Label" className="input text-sm" />
+        </div>
+        <div className="flex justify-end mt-2">
+          <Button onClick={() => saveTa({})} disabled={taBusy} variant="primary" className="text-sm">
+            {taBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null} Save audio
+          </Button>
+        </div>
+      </div>
 
       {clients === null ? (
         <div className="flex justify-center py-10"><Loader2 className="animate-spin" style={{ color: 'var(--color-primary-500)' }} /></div>
