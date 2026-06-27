@@ -28,6 +28,7 @@ export function useBulkSaleUpload() {
   const [progress, setProgress] = useState(null);
   const [results, setResults]   = useState(empty);
   const [decisions, setDecisions] = useState({});      // update index -> include
+  const [excludedNew, setExcludedNew] = useState({});  // newSale index -> excluded (skip on apply)
   const [summary, setSummary]   = useState(null);
   const [reference, setReference] = useState({ companies: [], closers: [] });
   const [formFields, setFormFields] = useState([]);
@@ -123,6 +124,7 @@ export function useBulkSaleUpload() {
     setProgress(null);
     setResults(agg);
     setDecisions({}); // updates default to excluded — superadmin opts in
+    setExcludedNew({}); // new sales default to included — can be deselected per row
     setStep('review');
     if (failed) toast.error(`${failed} row(s) couldn't be validated and are listed under unmatched — re-run to re-check them.`);
     else if (invalid.length) toast.warning(`${invalid.length} row(s) are missing required fields — see the review screen.`);
@@ -155,6 +157,9 @@ export function useBulkSaleUpload() {
 
   const toggleUpdate  = useCallback((i) => setDecisions(d => ({ ...d, [i]: !d[i] })), []);
   const setAllUpdates = useCallback((val) => setDecisions(() => { const d = {}; results.updates.forEach((_, i) => { d[i] = val; }); return d; }), [results.updates]);
+
+  // Include/exclude a single auto-matched NEW sale before applying.
+  const toggleNewSale = useCallback((i) => setExcludedNew(d => ({ ...d, [i]: !d[i] })), []);
 
   // Change which transfer an auto-matched NEW sale attaches to (from candidates).
   const setNewSaleTransfer = useCallback((idx, transferId) => {
@@ -192,7 +197,7 @@ export function useBulkSaleUpload() {
 
   const confirmInsert = useCallback(async () => {
     setError('');
-    const newRows = results.newSales;
+    const newRows = results.newSales.filter((_, i) => !excludedNew[i]);   // honor per-row deselect
     const updateRows = results.updates.filter((_, i) => decisions[i]);
     if (!newRows.length && !updateRows.length) { setError('Nothing selected to insert or update.'); return; }
     setBusy(true);
@@ -227,11 +232,11 @@ export function useBulkSaleUpload() {
     setStep('done');
     loadBatches();
     toast.success(`Done — ${inserted} sale(s) created${updated ? `, ${updated} updated` : ''}.`);
-  }, [results, decisions, fileName, loadBatches]);
+  }, [results, decisions, excludedNew, fileName, loadBatches]);
 
   const reset = useCallback(() => {
     setStep('guide'); setFileName(''); setHeaders([]); setRawRows([]); setMapping({});
-    setError(''); setProgress(null); setResults(empty); setDecisions({}); setSummary(null);
+    setError(''); setProgress(null); setResults(empty); setDecisions({}); setExcludedNew({}); setSummary(null);
   }, []);
 
   const deleteBatch = useCallback(async (id) => { await client.delete(`sale-uploads/batches/${id}`); loadBatches(); }, [loadBatches]);
@@ -250,8 +255,8 @@ export function useBulkSaleUpload() {
   }, [formFields]);
 
   return {
-    step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, formFields, fields, phoneKey, batches,
-    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, confirmInsert, reset, deleteBatch, downloadBatch, setStep,
+    step, fileName, headers, mapping, error, busy, progress, results, decisions, excludedNew, summary, reference, formFields, fields, phoneKey, batches,
+    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, toggleNewSale, confirmInsert, reset, deleteBatch, downloadBatch, setStep,
     setNewSaleTransfer, createTransferForRow,
   };
 }

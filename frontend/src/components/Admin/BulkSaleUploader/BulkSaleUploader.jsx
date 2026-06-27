@@ -48,6 +48,7 @@ const BulkSaleUploader = () => {
 
       {u.step === 'review' && (
         <SaleValidationSummary results={u.results} decisions={u.decisions}
+          excludedNew={u.excludedNew} toggleNewSale={u.toggleNewSale}
           toggleUpdate={u.toggleUpdate} setAllUpdates={u.setAllUpdates}
           onChangeTransfer={u.setNewSaleTransfer} onCreateTransfer={u.createTransferForRow}
           onConfirm={u.confirmInsert} onBack={() => u.setStep('mapping')} busy={u.busy} />

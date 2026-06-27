@@ -46,13 +46,13 @@ const CollapsibleSection = ({ icon: Icon, color, title, count, defaultOpen = tru
 
 // Cards for auto-matched NEW sales: show the picked transfer + let the user
 // switch to another candidate (duplicate transfers for the same phone).
-const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
+const AutoMatchedReview = ({ newSales, onChangeTransfer, excludedNew = {}, onToggleNewSale }) => {
   const items = newSales.map((r, idx) => ({ r, idx })).filter(x => x.r.match_note || x.r.resell_of || x.r.client_switch || (x.r.candidate_transfers || []).length > 1);
   // Rows whose vehicle didn't match any transfer go first — they need a human look.
   items.sort((a, b) => (b.r.match_warning ? 1 : 0) - (a.r.match_warning ? 1 : 0));
   const warnCount = items.filter(x => x.r.match_warning).length;
   const resellCount = items.filter(x => x.r.resell_of).length;
-  const [open, setOpen] = useState(warnCount > 0);   // auto-expand when something needs attention
+  const [open, setOpen] = useState(false);   // default collapsed (badges below still flag attention)
   if (!items.length) return null;
 
   return (
@@ -77,10 +77,11 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
       {open && (
         <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
           {items.map(({ r, idx }) => (
-            <div key={idx} className="rounded-xl p-3" style={r.match_warning
+            <div key={idx} className="rounded-xl p-3" style={{ opacity: excludedNew[idx] ? 0.5 : 1, ...(r.match_warning
               ? { backgroundColor: '#fffbeb', border: '1px solid #fbbf24' }
-              : { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <p className="text-sm font-semibold flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>
+              : { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }) }}>
+              <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-semibold flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)', textDecoration: excludedNew[idx] ? 'line-through' : 'none' }}>
                 {r.match_warning && <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0 }} />}
                 {r.customer_name || '—'} <span className="font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {rowLabel(r)}</span>
                 {r.resell_of && !r.is_renewal && (
@@ -106,6 +107,13 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
                   </span>
                 )}
               </p>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold cursor-pointer flex-shrink-0 select-none"
+                style={{ color: excludedNew[idx] ? 'var(--color-error-600)' : 'var(--color-success-700)' }}
+                title="Include or exclude this sale from the upload">
+                <input type="checkbox" checked={!excludedNew[idx]} onChange={() => onToggleNewSale(idx)} />
+                {excludedNew[idx] ? 'Excluded' : 'Include'}
+              </label>
+              </div>
               {r.match_note && <p className="text-xs mt-0.5" style={{ color: r.match_warning ? '#b45309' : '#7c3aed' }}>{r.match_note}</p>}
               <div className="flex items-center gap-2 mt-2 text-xs">
                 <ArrowRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -134,7 +142,7 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer }) => {
 // offer to create the transfer inline; name-resolution errors get a hint.
 const UnmatchedFixer = ({ unmatched, onCreateTransfer }) => {
   const [busyIdx, setBusyIdx] = useState(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);   // default collapsed
   if (!unmatched.length) return null;
 
   const run = async (idx) => { setBusyIdx(idx); try { await onCreateTransfer(idx); } finally { setBusyIdx(null); } };
@@ -172,10 +180,12 @@ const UnmatchedFixer = ({ unmatched, onCreateTransfer }) => {
   );
 };
 
-const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates, onChangeTransfer, onCreateTransfer, onConfirm, onBack, busy }) => {
+const SaleValidationSummary = ({ results, decisions, excludedNew = {}, toggleNewSale, toggleUpdate, setAllUpdates, onChangeTransfer, onCreateTransfer, onConfirm, onBack, busy }) => {
   const { newSales, updates, skipped, unmatched, ambiguous, invalid } = results;
   const includedUpdates = updates.filter((_, i) => decisions[i]).length;
-  const total = newSales.length + includedUpdates;
+  const includedNew = newSales.filter((_, i) => !excludedNew[i]).length;
+  const excludedCount = newSales.length - includedNew;
+  const total = includedNew + includedUpdates;
 
   return (
     <div className="space-y-4">
@@ -184,7 +194,9 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
         <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl px-4 py-3"
           style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-md)' }}>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            <strong style={{ color: 'var(--color-text)' }}>{newSales.length}</strong> new + <strong style={{ color: 'var(--color-text)' }}>{includedUpdates}</strong> update{includedUpdates !== 1 ? 's' : ''} will be applied
+            <strong style={{ color: 'var(--color-text)' }}>{includedNew}</strong> new
+            {excludedCount > 0 && <span style={{ color: 'var(--color-error-600)' }}> ({excludedCount} excluded)</span>}
+            {' + '}<strong style={{ color: 'var(--color-text)' }}>{includedUpdates}</strong> update{includedUpdates !== 1 ? 's' : ''} will be applied
           </p>
           <div className="flex gap-3">
             <Button variant="secondary" onClick={onBack}>Back</Button>
@@ -203,10 +215,10 @@ const SaleValidationSummary = ({ results, decisions, toggleUpdate, setAllUpdates
         <Stat icon={Ban} color="var(--color-text-tertiary)" count={unmatched.length + (invalid?.length || 0)} label="Unmatched / invalid" />
       </div>
 
-      <AutoMatchedReview newSales={newSales} onChangeTransfer={onChangeTransfer} />
+      <AutoMatchedReview newSales={newSales} onChangeTransfer={onChangeTransfer} excludedNew={excludedNew} onToggleNewSale={toggleNewSale} />
 
       {updates.length > 0 && (
-        <CollapsibleSection icon={RefreshCw} color="#2563eb" title="Existing sales — review each update" count={updates.length}>
+        <CollapsibleSection icon={RefreshCw} color="#2563eb" title="Existing sales — review each update" count={updates.length} defaultOpen={false}>
           <SaleUpdateReviewer updates={updates} decisions={decisions} toggleUpdate={toggleUpdate} setAllUpdates={setAllUpdates} />
         </CollapsibleSection>
       )}
