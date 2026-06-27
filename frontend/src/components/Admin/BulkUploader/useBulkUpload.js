@@ -338,11 +338,37 @@ export function useBulkUpload() {
     await client.delete('uploads/bulk'); loadBatches();
   }, [loadBatches]);
 
+  // Download every uploaded batch as its own re-uploadable CSV (one file each).
+  const downloadAllBatches = useCallback(async () => {
+    if (!batches.length) { toast.warning('No batches to download.'); return; }
+    let ok = 0;
+    for (const batch of batches) {
+      try {
+        const { data } = await client.get(`uploads/batches/${batch.id}/export`);
+        const transfers = data.transfers || [];
+        if (!transfers.length) continue;
+        const SKIP = new Set(['cli_number', 'transfer_date']);
+        const fdKeys = [], seen = new Set();
+        transfers.forEach(t => Object.keys(t.form_data || {}).forEach(k => { if (!SKIP.has(k) && !seen.has(k)) { seen.add(k); fdKeys.push(k); } }));
+        const cols = [
+          { key: 'fronter_name', control: true }, { key: 'company_name', control: true },
+          { key: 'transfer_date', control: true }, { key: 'status', control: true }, { key: 'created_at', control: true },
+          ...fdKeys.map(k => ({ key: k, control: false })),
+        ];
+        const rows = transfers.map(t => transferToRow(t, cols));
+        downloadCsv(toCsv(cols.map(c => c.key), rows), exportFileName(batch.file_name || data.file_name));
+        ok++;
+        await new Promise(r => setTimeout(r, 300));
+      } catch { /* skip this batch */ }
+    }
+    toast[ok ? 'success' : 'warning'](ok ? `Downloaded ${ok} batch file${ok !== 1 ? 's' : ''}.` : 'Nothing to download.');
+  }, [batches]);
+
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, summary, reference, batches,
     formFields, fields, phoneKey, duplicates,
     updateDecisions, allowUpdates, setAllowUpdates, toggleUpdate, setAllUpdates,
     loadReference, loadBatches, onFile, setMap, confirmMapping, toggleConflict, setAllConflicts,
-    confirmInsert, reset, deleteBatch, deleteAllBatches, downloadBatch, setStep, loadDuplicates, mergeDuplicates,
+    confirmInsert, reset, deleteBatch, deleteAllBatches, downloadBatch, downloadAllBatches, setStep, loadDuplicates, mergeDuplicates,
   };
 }

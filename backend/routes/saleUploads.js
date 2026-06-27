@@ -130,4 +130,11 @@ router.delete('/batches/:id', asyncHandler(async (req, res) => {
   res.json({ message: 'Batch deleted' });
 }));
 
+// DELETE /sale-uploads/bulk — delete ALL bulk-uploaded sale batches (sales cascade)
+router.delete('/bulk', asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('upload_batches').delete().eq('kind', 'sale');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'All bulk-uploaded sale data deleted' });
+}));
+
 module.exports = router;

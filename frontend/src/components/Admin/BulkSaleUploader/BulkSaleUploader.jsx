@@ -67,7 +67,7 @@ const BulkSaleUploader = () => {
         </div>
       )}
 
-      <BatchManager batches={u.batches} loadBatches={u.loadBatches} deleteBatch={u.deleteBatch} downloadBatch={u.downloadBatch} />
+      <BatchManager batches={u.batches} loadBatches={u.loadBatches} deleteBatch={u.deleteBatch} deleteAllBatches={u.deleteAllBatches} downloadBatch={u.downloadBatch} downloadAllBatches={u.downloadAllBatches} />
     </div>
   );
 };

@@ -241,6 +241,25 @@ export function useBulkSaleUpload() {
 
   const deleteBatch = useCallback(async (id) => { await client.delete(`sale-uploads/batches/${id}`); loadBatches(); }, [loadBatches]);
 
+  const deleteAllBatches = useCallback(async () => { await client.delete('sale-uploads/bulk'); loadBatches(); }, [loadBatches]);
+
+  // Download every uploaded batch as its own re-uploadable CSV (one file each).
+  const downloadAllBatches = useCallback(async () => {
+    if (!batches.length) { toast.warning('No batches to download.'); return; }
+    const cols = saleExportColumns(formFields);
+    const headers = cols.map(c => c.key);
+    let ok = 0;
+    for (const b of batches) {
+      try {
+        const { data } = await client.get(`sale-uploads/batches/${b.id}/export`);
+        const rows = (data.sales || []).map(s => saleToRow(s, cols));
+        if (rows.length) { downloadCsv(toCsv(headers, rows), exportFileName(b.file_name || data.file_name)); ok++; }
+        await new Promise(r => setTimeout(r, 300));   // gap so the browser allows multiple downloads
+      } catch { /* skip this batch, keep going */ }
+    }
+    toast[ok ? 'success' : 'warning'](ok ? `Downloaded ${ok} batch file${ok !== 1 ? 's' : ''}.` : 'Nothing to download.');
+  }, [batches, formFields]);
+
   // Export a sale batch back to a re-uploadable CSV in the canonical sale shape.
   const downloadBatch = useCallback(async (batch) => {
     try {
@@ -256,7 +275,7 @@ export function useBulkSaleUpload() {
 
   return {
     step, fileName, headers, mapping, error, busy, progress, results, decisions, excludedNew, summary, reference, formFields, fields, phoneKey, batches,
-    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, toggleNewSale, confirmInsert, reset, deleteBatch, downloadBatch, setStep,
+    loadReference, loadBatches, onFile, setMap, confirmMapping, toggleUpdate, setAllUpdates, toggleNewSale, confirmInsert, reset, deleteBatch, deleteAllBatches, downloadBatch, downloadAllBatches, setStep,
     setNewSaleTransfer, createTransferForRow,
   };
 }
