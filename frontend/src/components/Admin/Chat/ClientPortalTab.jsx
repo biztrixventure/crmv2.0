@@ -16,10 +16,23 @@ export default function ClientPortalTab() {
   const [diagBusy, setDiagBusy] = useState(false);
 
   const runDiag = async () => {
-    setDiagBusy(true); setDiag(null);
+    setDiagBusy(true); setDiag(null); setVal(null);
     try { const r = await client.get('portal/admin/diag'); setDiag(r.data); }
     catch (e) { setDiag({ error: e.response?.data?.error || 'Diagnostic failed' }); }
     finally { setDiagBusy(false); }
+  };
+
+  const [val, setVal] = useState(null);
+  const [valBusy, setValBusy] = useState(false);
+  const runValidate = async () => {
+    setValBusy(true); setVal(null);
+    try {
+      const r = await client.post('portal/admin/validate-ip', {});
+      setVal(r.data);
+      if ((r.data.results || []).some(x => x.api_open)) { toast.success('Server IP validated — dialer reachable'); runDiag(); }
+      else toast.message('Submitted to the validation portal — re-test in a moment');
+    } catch (e) { setVal({ error: e.response?.data?.error || 'Validation failed' }); }
+    finally { setValBusy(false); }
   };
 
   const [ta, setTa] = useState({ enabled: false, url: '', label: 'Visualizer demo' });
@@ -66,7 +79,10 @@ export default function ClientPortalTab() {
             External logins that only see assigned closers' sales + play the actual sale-call recording. They never see the CRM.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button onClick={runValidate} disabled={valBusy} variant="secondary" className="text-sm">
+            {valBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Check size={14} className="inline mr-1" />} Validate server IP
+          </Button>
           <Button onClick={runDiag} disabled={diagBusy} variant="secondary" className="text-sm">
             {diagBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Wifi size={14} className="inline mr-1" />} Test dialer access
           </Button>
@@ -75,6 +91,25 @@ export default function ClientPortalTab() {
           </Button>
         </div>
       </div>
+
+      {val && (
+        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {val.error ? <span style={{ color: 'var(--color-error-600)' }}>{val.error}</span> : (
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Submitted this server's IP to each dialer's :81 validation portal</div>
+              {(val.results || []).map(r => (
+                <div key={r.box} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ background: r.api_open ? 'var(--color-success-500)' : r.submitted ? 'var(--color-warning-500)' : 'var(--color-error-500)' }} />
+                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.box}</span>
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    {r.error ? r.error : r.api_open ? 'validated — API reachable ✓' : r.submitted ? 'submitted (re-test in a moment)' : 'could not reach portal'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {diag && (
         <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

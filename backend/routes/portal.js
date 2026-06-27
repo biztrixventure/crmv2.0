@@ -227,6 +227,46 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
   res.json({ server_ip, boxes, sale });
 }));
 
+// Validate THIS server's IP on the dialer by submitting the dialer's :81 "IP
+// Validation Portal" form from the server (so the dialer whitelists Coolify's
+// IP). Then re-probe the API to confirm it opened. Per box.
+router.post('/admin/validate-ip', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const { BOXES } = require('../utils/dialerBoxes');
+  const qsBody = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const targets = req.body.box ? BOXES.filter(b => b.id === req.body.box) : BOXES;
+
+  const validate = async (box) => {
+    const host = box.base.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    const portal = `http://${host}:81`;
+    const userid = req.body.userid || box.user;
+    const password = req.body.password || box.pass;
+    try {
+      // 1. GET the form → read the (obfuscated) password field name
+      const g = await axios.get(portal + '/', { timeout: 15000, responseType: 'text', validateStatus: () => true });
+      const pm = String(g.data || '').match(/<input[^>]*type="password"[^>]*>/i);
+      const field = (pm && pm[0].match(/name="([^"]+)"/)) ? pm[0].match(/name="([^"]+)"/)[1] : 'password';
+      // 2. POST credentials → the portal whitelists the submitting (server) IP
+      const post = await axios.post(portal + '/index.php',
+        qsBody({ userid, password: '', [field]: password, submit: 'SUBMIT' }),
+        { timeout: 15000, responseType: 'text', maxRedirects: 0, validateStatus: () => true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      const said = /success/i.test(String(post.data || ''));
+      // 3. confirm: does the API (443) answer now?
+      let apiOpen = false;
+      try {
+        const t = await axios.get(`${box.base}/vicidial/non_agent_api.php`,
+          { params: { source: 'crm', user: box.user, pass: box.pass, function: 'recording_lookup', stage: 'pipe', lead_id: '1' }, timeout: 12000, responseType: 'text' });
+        apiOpen = /NO RECORDINGS|^\d{4}-|PERMISSION/i.test(String(t.data || '').trim());
+      } catch { /* still blocked */ }
+      return { box: box.id, portal, submitted: post.status < 400, said_success: said, api_open: apiOpen };
+    } catch (e) {
+      return { box: box.id, portal, error: e.code || e.message };
+    }
+  };
+
+  const results = await Promise.all(targets.map(validate));
+  res.json({ results });
+}));
+
 // listen audit for one client
 router.get('/admin/clients/:id/listens', authMiddleware, superOnly, asyncHandler(async (req, res) => {
   const { data } = await supabaseAdmin
