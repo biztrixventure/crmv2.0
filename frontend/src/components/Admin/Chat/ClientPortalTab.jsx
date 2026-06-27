@@ -48,15 +48,19 @@ export default function ClientPortalTab() {
     } catch { toast.error('Could not save alias'); }
   };
 
+  const [saleClients, setSaleClients] = useState([]);
+
   const load = useCallback(async () => {
-    const [c, cl, t] = await Promise.all([
+    const [c, cl, t, sc] = await Promise.all([
       client.get('portal/admin/clients').catch(() => ({ data: { clients: [] } })),
       client.get('portal/admin/closers').catch(() => ({ data: { closers: [] } })),
       client.get('portal/admin/test-audio').catch(() => ({ data: { enabled: false, url: '', label: 'Visualizer demo' } })),
+      client.get('portal/admin/sale-clients').catch(() => ({ data: { clients: [] } })),
     ]);
     setClients(c.data.clients || []);
     setClosers(cl.data.closers || []);
     setTa(t.data || { enabled: false, url: '', label: 'Visualizer demo' });
+    setSaleClients(sc.data.clients || []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -238,7 +242,9 @@ export default function ClientPortalTab() {
                 </div>
                 <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{c.login_email}</div>
                 <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {c.closers.map(x => x.name).join(', ') || 'No closers'} · {c.listen_count} listen{c.listen_count === 1 ? '' : 's'}
+                  {c.closers.map(x => x.name).join(', ') || 'No closers'}
+                  {(c.client_names || []).length ? ` · clients: ${c.client_names.join(', ')}` : ''}
+                  {' · '}{c.listen_count} listen{c.listen_count === 1 ? '' : 's'}
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -252,34 +258,38 @@ export default function ClientPortalTab() {
         </div>
       )}
 
-      {editing && <ClientEditor client={editing === 'new' ? null : editing} closers={closers} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <ClientEditor client={editing === 'new' ? null : editing} closers={closers} saleClients={saleClients} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {auditFor && <AuditModal client={auditFor} onClose={() => setAuditFor(null)} />}
     </div>
   );
 }
 
 // ── create / edit ────────────────────────────────────────────────────────────
-function ClientEditor({ client: c, closers, onClose, onSaved }) {
+function ClientEditor({ client: c, closers, saleClients, onClose, onSaved }) {
   const [name, setName] = useState(c?.name || '');
   const [email, setEmail] = useState(c?.login_email || '');
   const [password, setPassword] = useState('');
   const [picked, setPicked] = useState(new Set(c?.closer_ids || []));
+  const [pickedClients, setPickedClients] = useState(new Set(c?.client_names || []));
   const [q, setQ] = useState('');
+  const [cq, setCq] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const isNew = !c;
 
   const togglePick = (id) => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleClient = (name) => setPickedClients(p => { const n = new Set(p); n.has(name) ? n.delete(name) : n.add(name); return n; });
 
   const save = async () => {
     setErr(''); setBusy(true);
     try {
       const closer_ids = [...picked];
+      const client_names = [...pickedClients];
       if (isNew) {
-        await client.post('portal/admin/clients', { name, email, password, closer_ids });
+        await client.post('portal/admin/clients', { name, email, password, closer_ids, client_names });
         toast.success('Client created');
       } else {
-        const body = { name, closer_ids };
+        const body = { name, closer_ids, client_names };
         if (password) body.password = password;
         await client.patch(`portal/admin/clients/${c.id}`, body);
         toast.success('Client updated');
@@ -289,6 +299,7 @@ function ClientEditor({ client: c, closers, onClose, onSaved }) {
   };
 
   const shown = closers.filter(x => !q.trim() || x.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const shownClients = (saleClients || []).filter(x => !cq.trim() || x.toLowerCase().includes(cq.trim().toLowerCase()));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
@@ -335,10 +346,35 @@ function ClientEditor({ client: c, closers, onClose, onSaved }) {
               {shown.length === 0 && <p className="text-xs italic py-2 px-2" style={{ color: 'var(--color-text-tertiary)' }}>No closers match.</p>}
             </div>
           </div>
+
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+              Clients this login can see ({pickedClients.size}) <span className="font-normal normal-case">— optional; limits to these clients' sales</span>
+            </label>
+            <div className="relative mt-1 mb-1">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+              <input value={cq} onChange={e => setCq(e.target.value)} placeholder="Filter clients…" className="input text-sm pl-8" />
+            </div>
+            <div className="max-h-44 overflow-y-auto space-y-1 rounded-lg p-1" style={{ border: '1px solid var(--color-border)' }}>
+              {shownClients.map(x => {
+                const on = pickedClients.has(x);
+                return (
+                  <button key={x} onClick={() => toggleClient(x)} className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left text-sm"
+                    style={{ background: on ? 'var(--color-primary-100)' : 'transparent', color: 'var(--color-text)' }}>
+                    <span className="w-4 h-4 rounded flex items-center justify-center" style={{ background: on ? 'var(--color-primary-500)' : 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      {on && <Check size={11} className="text-white" />}
+                    </span>
+                    {x}
+                  </button>
+                );
+              })}
+              {shownClients.length === 0 && <p className="text-xs italic py-2 px-2" style={{ color: 'var(--color-text-tertiary)' }}>No clients match.</p>}
+            </div>
+          </div>
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <Button onClick={onClose} variant="secondary" className="text-sm">Cancel</Button>
-          <Button onClick={save} disabled={busy || !name || (isNew && (!email || password.length < 6)) || picked.size === 0} variant="primary" className="text-sm">
+          <Button onClick={save} disabled={busy || !name || (isNew && (!email || password.length < 6)) || (picked.size === 0 && pickedClients.size === 0)} variant="primary" className="text-sm">
             {busy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}{isNew ? 'Create' : 'Save'}
           </Button>
         </div>

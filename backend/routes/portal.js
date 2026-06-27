@@ -78,7 +78,7 @@ const superOnly = asyncHandler(async (req, res, next) => {
 const requirePortalClient = asyncHandler(async (req, res, next) => {
   const { data: pc } = await supabaseAdmin
     .from('portal_clients')
-    .select('id, name, closer_ids, is_active')
+    .select('id, name, closer_ids, client_names, is_active')
     .eq('auth_user_id', req.user.id)
     .maybeSingle();
   if (!pc || !pc.is_active) return res.status(403).json({ error: 'Not a portal client' });
@@ -115,6 +115,20 @@ router.patch('/admin/closers/:id/alias', authMiddleware, superOnly, asyncHandler
   res.json({ ok: true, alias });
 }));
 
+// Selectable clients (sales.client_name) — configured sale_client options merged
+// with the distinct values actually on sales, so a selection always matches.
+router.get('/admin/sale-clients', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const set = new Set();
+  const { data: ff } = await supabaseAdmin.from('form_fields').select('options').eq('field_type', 'sale_client');
+  for (const f of (ff || [])) for (const o of (f.options || [])) {
+    const c = typeof o === 'string' ? o : (o?.client || o?.value || o?.label);
+    if (c && String(c).trim()) set.add(String(c).trim());
+  }
+  const { data: rows } = await supabaseAdmin.from('sales').select('client_name').not('client_name', 'is', null).limit(8000);
+  for (const r of (rows || [])) { const c = (r.client_name || '').trim(); if (c && c !== '-') set.add(c); }
+  res.json({ clients: [...set].sort((a, b) => a.localeCompare(b)) });
+}));
+
 // list client logins (+ assigned closer names + listen count)
 router.get('/admin/clients', authMiddleware, superOnly, asyncHandler(async (req, res) => {
   const { data: clients } = await supabaseAdmin
@@ -133,6 +147,7 @@ router.get('/admin/clients', authMiddleware, superOnly, asyncHandler(async (req,
     out.push({
       id: c.id, name: c.name, login_email: c.login_email, is_active: c.is_active,
       closer_ids: c.closer_ids || [], closers: (c.closer_ids || []).map(id => ({ id, name: nameOf(id) })),
+      client_names: c.client_names || [],
       listen_count: count || 0, created_at: c.created_at,
     });
   }
@@ -145,8 +160,9 @@ router.post('/admin/clients', authMiddleware, superOnly, asyncHandler(async (req
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
   const closerIds = Array.isArray(req.body.closer_ids) ? req.body.closer_ids.filter(Boolean) : [];
+  const clientNames = Array.isArray(req.body.client_names) ? req.body.client_names.map(s => String(s).trim()).filter(Boolean) : [];
   if (!name || !email || password.length < 6) return res.status(400).json({ error: 'name, email and a 6+ char password are required' });
-  if (!closerIds.length) return res.status(400).json({ error: 'Assign at least one closer' });
+  if (!closerIds.length && !clientNames.length) return res.status(400).json({ error: 'Assign at least one closer or client' });
 
   const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
     email, password, email_confirm: true, app_metadata: { portal_client: true },
@@ -154,11 +170,11 @@ router.post('/admin/clients', authMiddleware, superOnly, asyncHandler(async (req
   if (authErr || !authData?.user) return res.status(400).json({ error: authErr?.message || 'Could not create login' });
 
   const { data: row, error: insErr } = await supabaseAdmin.from('portal_clients').insert({
-    auth_user_id: authData.user.id, name, login_email: email, closer_ids: closerIds, created_by: req.user.id,
+    auth_user_id: authData.user.id, name, login_email: email, closer_ids: closerIds, client_names: clientNames, created_by: req.user.id,
   }).select().single();
   if (insErr) { await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch(() => {}); return res.status(500).json({ error: insErr.message }); }
 
-  logger.success('PORTAL', `client created: ${email} (${closerIds.length} closers)`);
+  logger.success('PORTAL', `client created: ${email} (${closerIds.length} closers, ${clientNames.length} clients)`);
   res.json({ client: row });
 }));
 
@@ -170,6 +186,7 @@ router.patch('/admin/clients/:id', authMiddleware, superOnly, asyncHandler(async
   const patch = { updated_at: new Date().toISOString() };
   if (req.body.name !== undefined) patch.name = String(req.body.name).trim();
   if (Array.isArray(req.body.closer_ids)) patch.closer_ids = req.body.closer_ids.filter(Boolean);
+  if (Array.isArray(req.body.client_names)) patch.client_names = req.body.client_names.map(s => String(s).trim()).filter(Boolean);
   if (req.body.is_active !== undefined) patch.is_active = !!req.body.is_active;
 
   if (req.body.password) {
@@ -334,45 +351,54 @@ router.get('/test-audio', authMiddleware, requirePortalClient, asyncHandler(asyn
 // is resolved only when a call is played (/sales/:id/recording). Browse = recent
 // by call date; ?phone= matches by customer phone across ALL the client's sales.
 router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
-  const allowed = req.portalClient.closer_ids || [];
-  if (!allowed.length) return res.json({ sales: [] });
+  const closers = req.portalClient.closer_ids || [];
+  const clients = req.portalClient.client_names || [];
+  if (!closers.length && !clients.length) return res.json({ sales: [] });
 
-  const closerFilter = req.query.closer_id && allowed.includes(req.query.closer_id) ? [req.query.closer_id] : allowed;
-  const pseudo = await getPseudoNames(closerFilter);   // clients see pseudonyms only
-  const shape = (rows) => (rows || []).map(s => ({
-    id: s.id,
-    customer_name: s.customer_name || '—',
-    phone: s.customer_phone || '',
-    sale_date: s.sale_date,
-    closer_id: s.closer_id,
-    closer_name: pseudo.get(s.closer_id) || 'Agent',
-  }));
-  const cols = 'id, customer_name, customer_phone, sale_date, closer_id';
+  const closerFilter = req.query.closer_id && closers.includes(req.query.closer_id) ? [req.query.closer_id] : closers;
+  const cols = 'id, customer_name, customer_phone, sale_date, closer_id, client_name';
+
+  // Scope every query to this portal's closers AND/OR clients.
+  const scope = (q) => {
+    if (closerFilter.length) q = q.in('closer_id', closerFilter);
+    if (clients.length)      q = q.in('client_name', clients);
+    return q;
+  };
+  // Pseudonyms for whichever closers actually appear in the results.
+  const respond = async (rows, extra) => {
+    const ids = [...new Set((rows || []).map(r => r.closer_id).filter(Boolean))];
+    const pseudo = await getPseudoNames(ids);
+    const sales = (rows || []).map(s => ({
+      id: s.id,
+      customer_name: s.customer_name || '—',
+      phone: s.customer_phone || '',
+      sale_date: s.sale_date,
+      closer_id: s.closer_id,
+      closer_name: pseudo.get(s.closer_id) || 'Agent',
+    }));
+    res.json({ sales, ...extra });
+  };
 
   // ── phone search ──
   const phoneQ = String(req.query.phone || '').replace(/\D/g, '');
   if (phoneQ.length >= 4) {
-    const { data } = await supabaseAdmin
-      .from('sales').select(cols)
-      .in('closer_id', closerFilter)
+    const { data } = await scope(supabaseAdmin.from('sales').select(cols))
       .or(`customer_phone.ilike.%${phoneQ}%,customer_phone_2.ilike.%${phoneQ}%`)
       .order('sale_date', { ascending: false })
       .limit(60);
-    return res.json({ sales: shape(data), phone_search: true });
+    return respond(data, { phone_search: true });
   }
 
   // ── browse (recent) ──
   const limit = Math.min(parseInt(req.query.scan, 10) || 100, 300);
   const offset = parseInt(req.query.offset, 10) || 0;
-  let q = supabaseAdmin
-    .from('sales').select(cols)
-    .in('closer_id', closerFilter)
+  let q = scope(supabaseAdmin.from('sales').select(cols))
     .order('sale_date', { ascending: false })   // call date, not bulk-import created_at
     .range(offset, offset + limit - 1);
   if (req.query.date_from) q = q.gte('sale_date', req.query.date_from);
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
   const { data } = await q;
-  res.json({ sales: shape(data), next_offset: (data?.length === limit) ? offset + limit : null });
+  return respond(data, { next_offset: (data?.length === limit) ? offset + limit : null });
 }));
 
 // stream the actual sale recording (source hidden, nothing stored) + audit
