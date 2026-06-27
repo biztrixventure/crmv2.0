@@ -123,6 +123,7 @@ app.use(helmet({
       scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc:    ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc:      ["'self'", "data:", "blob:", "https:"],
+      mediaSrc:    ["'self'", "blob:"],   // client portal plays proxied recordings as blob: audio
       fontSrc:     ["'self'", "data:", "https://fonts.gstatic.com"],
       connectSrc:  [
         "'self'",
