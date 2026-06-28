@@ -767,7 +767,7 @@ api.get('/pending', asyncHandler(async (req, res) => {
 // ── API: fill remaining fields + confirm → becomes a normal transfer ─────────
 api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, created_by, form_data, vicidial_pending, assigned_closer_id').eq('id', req.params.id).maybeSingle();
+    .from('transfers').select('id, created_by, company_id, form_data, vicidial_pending, vicidial_vendor_code, assigned_closer_id').eq('id', req.params.id).maybeSingle();
   if (!tr || tr.created_by !== req.user.id || !tr.vicidial_pending) {
     return res.status(404).json({ error: 'Pending transfer not found' });
   }
@@ -775,6 +775,34 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   const incoming = (req.body.form_data && typeof req.body.form_data === 'object') ? req.body.form_data : {};
   const merged = { ...(tr.form_data || {}), ...titleCaseFormData(expandStateInFormData(incoming)) };
   const norm = normPhone(merged.cli_number || merged.Phone || merged.customer_phone || '');
+
+  // DEDUP (the "I hand-typed it AND clicked Confirm" double): if a real
+  // (non-pending) transfer for this same phone + company already exists — the
+  // fronter created it manually instead of confirming — don't make a second one.
+  // Fold this pending row's dialer code into that transfer and drop the pending.
+  if (norm) {
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const { data: dupe } = await supabaseAdmin
+      .from('transfers')
+      .select('id, vicidial_vendor_code')
+      .eq('company_id', tr.company_id)
+      .eq('normalized_phone', norm)
+      .neq('vicidial_pending', true)
+      .neq('id', tr.id)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(1).maybeSingle();
+    if (dupe) {
+      if (!dupe.vicidial_vendor_code && tr.vicidial_vendor_code) {
+        await supabaseAdmin.from('transfers')
+          .update({ vicidial_vendor_code: tr.vicidial_vendor_code }).eq('id', dupe.id);
+        await reconcileQueuedDispoForTransfer({ id: dupe.id, company_id: tr.company_id }, norm);
+      }
+      await supabaseAdmin.from('transfers').delete().eq('id', tr.id);
+      logger.success('VICIDIAL_XFER', `Confirm merged pending ${tr.id} into existing manual transfer ${dupe.id} (no duplicate)`);
+      return res.json({ transfer: { id: dupe.id }, merged: true, message: 'Merged with the transfer you already created — no duplicate.' });
+    }
+  }
 
   const { data, error } = await supabaseAdmin.from('transfers').update({
     vicidial_pending: false,

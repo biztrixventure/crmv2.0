@@ -268,6 +268,21 @@ const StaffShell = () => {
   const [pendingDialer, setPendingDialer] = useState(null);
   const [dialerRefresh, setDialerRefresh] = useState(0);
   const [dupOpen, setDupOpen] = useState(false);
+
+  // Near-instant Confirm button: the dialer XFER fires a realtime
+  // 'pending_transfer' notification — the moment one lands, refresh the pending
+  // banner so the fronter sees the Confirm without waiting for the poll.
+  const seenPendingNotif = useRef(new Set());
+  useEffect(() => {
+    let fresh = false;
+    for (const n of (notifHook.notifications || [])) {
+      if (n.type === 'pending_transfer' && !seenPendingNotif.current.has(n.id)) {
+        seenPendingNotif.current.add(n.id);
+        fresh = true;
+      }
+    }
+    if (fresh) setDialerRefresh(x => x + 1);
+  }, [notifHook.notifications]);
   const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
 
   // Notification deep-link → jump to the right tab/section so the record shows
@@ -645,8 +660,10 @@ const StaffShell = () => {
     try {
       if (pendingDialer) {
         // Fill the existing VICIdial pending row instead of creating a duplicate.
-        await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: clean });
-        toast.success('Transfer confirmed — sent to closer.');
+        const r = await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: clean });
+        toast.success(r?.data?.merged
+          ? (r.data.message || 'Merged with your existing transfer — no duplicate.')
+          : 'Transfer confirmed — sent to closer.');
         setDialerRefresh(x => x + 1);
       } else {
         const res = await createTransfer({ ...clean });

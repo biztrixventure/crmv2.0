@@ -13,9 +13,11 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
     client.get('vicidial/pending').then(r => setItems(r.data.pending || [])).catch(() => {});
   }, []);
   // Poll only while the tab is visible; refresh on return so it's never stale.
+  // Tight 10s loop so the Confirm button shows up fast after an XFER — the
+  // realtime notification also bumps refreshSignal for a near-instant appearance.
   useEffect(() => {
     load();
-    const t = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    const t = setInterval(() => { if (!document.hidden) load(); }, 10000);
     const onVis = () => { if (!document.hidden) load(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
