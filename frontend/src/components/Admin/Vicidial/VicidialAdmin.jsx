@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info, Server } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -8,12 +8,81 @@ import client from '../../../api/client';
 // registry (makes the correlation code globally unique) and the VICIdial-agent
 // → CRM-user map (routes pending transfers + dispositions to the right person).
 const TABS = [
+  { k: 'boxes',    label: 'Dialer boxes',     icon: Server },
   { k: 'prefixes', label: 'Prefix registry',  icon: Hash },
   { k: 'agents',   label: 'Agent mapping',    icon: Users },
   { k: 'dispo',    label: 'Disposition map',  icon: ListChecks },
   { k: 'backfill', label: 'Backfill dispos',  icon: DownloadCloud },
   { k: 'setup',    label: 'Setup URLs',       icon: PhoneCall },
 ];
+
+// ── Dialer boxes (URL / API user+pass / prefix) ──────────────────────────────
+const Boxes = () => {
+  const [rows, setRows] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const load = useCallback(() => { client.get('vicidial/boxes').then(r => setRows(r.data.boxes || [])).catch(() => setRows([])); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (b) => { if (!window.confirm(`Delete dialer box "${b.name}" (${b.prefix})? Lookups for its leads will stop working.`)) return; try { await client.delete(`vicidial/boxes/${b.id}`); toast.success('Box deleted'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        The VICIdial servers the CRM talks to for dispositions + recordings. Change a <strong>URL</strong>, <strong>API user/password</strong>, or <strong>prefix</strong> here when a dialer changes — it takes effect within ~60s, no redeploy.
+      </p>
+      {rows === null ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div> : (
+        <div className="space-y-2">
+          {rows.map(b => <BoxRow key={b.id} box={b} onSaved={load} onDelete={() => del(b)} />)}
+          {adding
+            ? <BoxRow box={null} onSaved={() => { setAdding(false); load(); }} onDelete={() => setAdding(false)} />
+            : <Button onClick={() => setAdding(true)} variant="secondary" className="text-sm"><Plus size={14} className="inline mr-1" /> Add dialer box</Button>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const BoxRow = ({ box, onSaved, onDelete }) => {
+  const isNew = !box;
+  const [f, setF] = useState({ name: box?.name || '', prefix: box?.prefix || '', base_url: box?.base_url || '', api_user: box?.api_user || '', api_pass: box ? '' : '', is_active: box ? box.is_active : true });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const body = { ...f }; if (!isNew && !body.api_pass) delete body.api_pass;   // blank = keep
+      if (isNew) await client.post('vicidial/boxes', body); else await client.patch(`vicidial/boxes/${box.id}`, body);
+      toast.success(isNew ? 'Box added' : 'Box saved'); onSaved();
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: box && !box.is_active ? 0.6 : 1 }}>
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+        <Field label="Name (id)" v={f.name} onChange={v => set('name', v)} ph="tmc" disabled={!isNew} />
+        <Field label="Prefix" v={f.prefix} onChange={v => set('prefix', v.toUpperCase())} ph="TMC" />
+        <div className="sm:col-span-2"><Field label="Base URL" v={f.base_url} onChange={v => set('base_url', v)} ph="https://host.i5.tel" /></div>
+        <Field label="API user" v={f.api_user} onChange={v => set('api_user', v)} ph="apiuser" />
+        <Field label={isNew ? 'API pass' : 'API pass (blank=keep)'} v={f.api_pass} onChange={v => set('api_pass', v)} ph="••••" type="text" />
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+          <input type="checkbox" checked={f.is_active} onChange={e => set('is_active', e.target.checked)} /> Active
+        </label>
+        <div className="flex gap-1.5">
+          <Button onClick={save} disabled={busy} variant="primary" className="text-xs">{busy ? <Loader2 size={13} className="animate-spin inline" /> : <Save size={13} className="inline mr-1" />}{isNew ? 'Add' : 'Save'}</Button>
+          <button onClick={onDelete} className="p-2 rounded-lg hover:bg-error-50"><Trash2 size={14} style={{ color: 'var(--color-error-500)' }} /></button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Field = ({ label, v, onChange, ph, disabled, type = 'text' }) => (
+  <div>
+    <label className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
+    <input type={type} value={v} onChange={e => onChange(e.target.value)} placeholder={ph} disabled={disabled} className="input text-sm" />
+  </div>
+);
 
 // ── Prefix registry ──────────────────────────────────────────────────────────
 const Prefixes = () => {
@@ -638,7 +707,7 @@ const Backfill = () => {
 };
 
 const VicidialAdmin = () => {
-  const [tab, setTab] = useState('prefixes');
+  const [tab, setTab] = useState('boxes');
   return (
     <div className="space-y-5 max-w-4xl">
       <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -662,6 +731,7 @@ const VicidialAdmin = () => {
         ))}
       </div>
 
+      {tab === 'boxes'    && <Boxes />}
       {tab === 'prefixes' && <Prefixes />}
       {tab === 'agents'   && <Agents />}
       {tab === 'dispo'    && <DispoMap />}

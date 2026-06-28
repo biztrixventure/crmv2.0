@@ -3,11 +3,18 @@
  * "Fetch Dispo" button). Creds come from env; fall back to the known boxes.
  * Never used for writes — only call_log / status reads.
  */
-const BOXES = [
-  { id: 'wavetech', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechnew.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123' },
-  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo' },
-  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002' },
+// Hardcoded fallback — the seed values + what's used until the DB table loads
+// (or if migration 120 isn't applied). The live values are refreshed from the
+// vicidial_boxes table every 60s, so a superadmin can change a dialer's URL /
+// creds / prefix from Settings with no code change.
+const FALLBACK_BOXES = [
+  { id: 'wavetech', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechnew.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI' },
+  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo',        prefix: 'ETC' },
+  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002',       prefix: 'TMC' },
 ];
+// Mutable live copies (the functions below read these synchronously).
+let BOXES = FALLBACK_BOXES.map(b => ({ ...b }));
+let BOX_BY_PREFIX = Object.fromEntries(FALLBACK_BOXES.map(b => [b.prefix, b.id]));
 
 // Statuses that are NOT a closer outcome — no customer contact (A/N/DAIR…),
 // in-progress/system states, and the transfer event itself (XFER and friends).
@@ -47,8 +54,26 @@ async function phoneCallLog(box, phone) {
   } catch { return []; }
 }
 
-// Map a vendor-code prefix → the box that lead lives on.
-const BOX_BY_PREFIX = { WTI: 'wavetech', ETC: 'etc', TMC: 'tmc' };
+// Refresh the live BOXES + BOX_BY_PREFIX from the vicidial_boxes table so a
+// superadmin can change a dialer's URL / creds / prefix from Settings. Keeps the
+// current (hardcoded/seed) values if the table is missing or empty.
+async function refreshBoxes() {
+  try {
+    const { supabaseAdmin } = require('../config/database');
+    const { data, error } = await supabaseAdmin
+      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass')
+      .eq('is_active', true).order('sort_order', { ascending: true });
+    if (error || !data || !data.length) return;
+    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase() }));
+    BOX_BY_PREFIX = Object.fromEntries(BOXES.map(b => [b.prefix, b.id]));
+  } catch { /* keep current values */ }
+}
+// Load once on boot, then keep fresh (60s) — cheap single-row read.
+refreshBoxes();
+setInterval(refreshBoxes, 60 * 1000).unref?.();
+
+// The current vendor-code prefixes (for building dispo-match candidates).
+const boxPrefixes = () => Object.keys(BOX_BY_PREFIX);
 
 // The lead's CURRENT status persists in vicidial_list (NOT archived like the call
 // log), so for a coded transfer we can read the disposition directly by lead_id —
@@ -182,4 +207,11 @@ async function findSaleRecording({ code, phone, agentIds = [], date } = {}) {
   return cand[0];
 }
 
-module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording };
+// NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
+// get the LIVE list/prefixes, not a stale snapshot captured at require-time.
+module.exports = {
+  getBoxes: () => BOXES,
+  boxPrefixes,
+  refreshBoxes,
+  lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
+};

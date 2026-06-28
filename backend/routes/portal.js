@@ -213,7 +213,7 @@ router.delete('/admin/clients/:id', authMiddleware, superOnly, asyncHandler(asyn
 // sale resolves a recording from here. If boxes show "unreachable", the server's
 // IP is almost certainly not whitelisted on the dialer.
 router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, res) => {
-  const { BOXES } = require('../utils/dialerBoxes');
+  const BOXES = require('../utils/dialerBoxes').getBoxes();
   const probe = async (box) => {
     const t0 = Date.now();
     try {
@@ -259,7 +259,7 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
 // Validation Portal" form from the server (so the dialer whitelists Coolify's
 // IP). Then re-probe the API to confirm it opened. Per box.
 router.post('/admin/validate-ip', authMiddleware, superOnly, asyncHandler(async (req, res) => {
-  const { BOXES } = require('../utils/dialerBoxes');
+  const BOXES = require('../utils/dialerBoxes').getBoxes();
   const qsBody = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
   const targets = req.body.box ? BOXES.filter(b => b.id === req.body.box) : BOXES;
 

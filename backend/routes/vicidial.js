@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 
 const ingest = express.Router();
@@ -350,8 +350,9 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   // the webform so vendor_lead_code is empty and the dialer only sent the bare
   // lead_id. The bare id is NOT unique across boxes, so these are matched ONLY
   // together with the customer phone (below), never on their own.
+  const prefixes = boxPrefixes();   // live from vicidial_boxes (WTI/ETC/TMC/…)
   const prefixedCodes = [...new Set(
-    [inCode, inAlt].filter(v => /^\d+$/.test(v)).flatMap(v => ['WTI' + v, 'ETC' + v, 'TMC' + v])
+    [inCode, inAlt].filter(v => /^\d+$/.test(v)).flatMap(v => prefixes.map(pfx => pfx + v))
   )];
   const candidates = [...new Set([...exactCodes, ...prefixedCodes])];
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
@@ -1231,6 +1232,58 @@ api.delete('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('vicidial_dispo_map').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: 'deleted' });
+}));
+
+// ── superadmin: dialer boxes (URL / API user+pass / prefix) ──────────────────
+// Manage the dialers from Settings so a URL/cred/prefix change needs no redeploy.
+// Every write refreshes the in-memory box list so it takes effect immediately.
+api.get('/boxes', superOnly, asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin.from('vicidial_boxes').select('*').order('sort_order', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ boxes: data || [] });
+}));
+
+api.post('/boxes', superOnly, asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const row = {
+    name: String(b.name || '').trim().toLowerCase(),
+    prefix: String(b.prefix || '').trim().toUpperCase(),
+    base_url: String(b.base_url || '').trim().replace(/\/+$/, ''),
+    api_user: String(b.api_user || '').trim(),
+    api_pass: String(b.api_pass || '').trim(),
+    is_active: b.is_active !== false,
+    sort_order: parseInt(b.sort_order, 10) || 0,
+    note: b.note ? String(b.note).trim() : null,
+  };
+  if (!row.name || !row.prefix || !row.base_url || !row.api_user) return res.status(400).json({ error: 'name, prefix, base_url and api_user are required' });
+  const { data, error } = await supabaseAdmin.from('vicidial_boxes').insert(row).select().single();
+  if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'A box with that name already exists' : error.message });
+  await refreshBoxes();
+  res.json({ box: data });
+}));
+
+api.patch('/boxes/:id', superOnly, asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const patch = { updated_at: new Date().toISOString() };
+  if (b.name     !== undefined) patch.name = String(b.name).trim().toLowerCase();
+  if (b.prefix   !== undefined) patch.prefix = String(b.prefix).trim().toUpperCase();
+  if (b.base_url !== undefined) patch.base_url = String(b.base_url).trim().replace(/\/+$/, '');
+  if (b.api_user !== undefined) patch.api_user = String(b.api_user).trim();
+  if (b.api_pass !== undefined && b.api_pass !== '') patch.api_pass = String(b.api_pass).trim();
+  if (b.is_active !== undefined) patch.is_active = !!b.is_active;
+  if (b.sort_order !== undefined) patch.sort_order = parseInt(b.sort_order, 10) || 0;
+  if (b.note !== undefined) patch.note = b.note ? String(b.note).trim() : null;
+  const { data, error } = await supabaseAdmin.from('vicidial_boxes').update(patch).eq('id', req.params.id).select().single();
+  if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'A box with that name already exists' : error.message });
+  await refreshBoxes();
+  res.json({ box: data });
+}));
+
+api.delete('/boxes/:id', superOnly, asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('vicidial_boxes').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  await refreshBoxes();
+  res.json({ ok: true });
 }));
 
 // Exported so the CRM transfer-create / confirm paths can attach a closer
