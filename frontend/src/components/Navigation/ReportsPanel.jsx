@@ -7,6 +7,23 @@ import { Card } from '../UI';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import Tooltip from '../UI/Tooltip';
+import TeamPerformance from '../Manager/TeamPerformance';
+
+// Plain-English explanation for every metric shown on this page.
+const METRIC_TIP = {
+  Transfers: 'Leads handed to your team in this window',
+  Sales: 'Policies sold in this window',
+  Won: 'Sales approved by compliance (closed_won / sold)',
+  'In Review': 'Sales waiting on compliance approval',
+  connected: 'Transfers this fronter got connected (completed)',
+  converted: 'Transfers that turned into an approved sale',
+  rejected: 'Transfers the closer rejected',
+  'conv rate': 'Converted ÷ total leads — fronter lead quality',
+  won: 'Sales this closer got approved',
+  'down rev': 'Sum of upfront down payments on their won sales',
+  'win rate': 'Won ÷ total sales — closer close rate',
+};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const MEDAL      = ['#f59e0b', '#94a3b8', '#b45309'];
@@ -172,7 +189,7 @@ const ReportsPanel = ({ companyId }) => {
         ].map(({ label, value, icon: Icon, color }) => (
           <Card key={label} className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+              <Tooltip text={METRIC_TIP[label]}><p className="text-xs font-semibold uppercase tracking-wide cursor-help" style={{ color: 'var(--color-text-secondary)' }}>{label}</p></Tooltip>
               <div className={`p-1.5 rounded-lg bg-${color}-100 dark:bg-${color}-900`}>
                 <Icon size={13} className={`text-${color}-600`} />
               </div>
@@ -207,6 +224,9 @@ const ReportsPanel = ({ companyId }) => {
           </div>
         </Card>
       )}
+
+      {/* ── Daily trend charts + quick top agents (with hover tooltips) ── */}
+      <TeamPerformance />
 
       {/* ── Tab bar + Export ── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -309,21 +329,21 @@ const ReportsPanel = ({ companyId }) => {
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
                       <div>
                         <p className="text-xs font-bold text-info-600">{f.completed}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>connected</p>
+                        <Tooltip text={METRIC_TIP.connected}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>connected</p></Tooltip>
                       </div>
                       <div>
                         <p className="text-xs font-bold text-success-600">{f.converted}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>converted</p>
+                        <Tooltip text={METRIC_TIP.converted}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>converted</p></Tooltip>
                       </div>
                       <div>
                         <p className="text-xs font-bold text-error-600">{f.rejected}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>rejected</p>
+                        <Tooltip text={METRIC_TIP.rejected}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>rejected</p></Tooltip>
                       </div>
                     </div>
                     {/* Conv rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">
                       <p className="text-sm font-black" style={{ color: rateColor }}>{convPct}%</p>
-                      <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>conv rate</p>
+                      <Tooltip text={METRIC_TIP['conv rate']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>conv rate</p></Tooltip>
                     </div>
                   </div>
                 );
@@ -396,19 +416,19 @@ const ReportsPanel = ({ companyId }) => {
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
                       <div>
                         <p className="text-xs font-bold text-success-600">{c.won}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>won</p>
+                        <Tooltip text={METRIC_TIP.won}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>won</p></Tooltip>
                       </div>
                       {hasPermission('view_financial_data') && (
                         <div>
                           <p className="text-xs font-bold text-primary-600">${c.revenue.toLocaleString()}</p>
-                          <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>down rev</p>
+                          <Tooltip text={METRIC_TIP['down rev']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>down rev</p></Tooltip>
                         </div>
                       )}
                     </div>
                     {/* Win rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">
                       <p className="text-sm font-black" style={{ color: rateColor }}>{winPct}%</p>
-                      <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>win rate</p>
+                      <Tooltip text={METRIC_TIP['win rate']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>win rate</p></Tooltip>
                     </div>
                   </div>
                 );
