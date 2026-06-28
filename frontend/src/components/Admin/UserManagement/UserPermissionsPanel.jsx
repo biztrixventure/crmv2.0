@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers } from 'lucide-react';
+import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 import client from '../../../api/client';
@@ -66,6 +66,25 @@ const UserPermissionsPanel = ({ user }) => {
   };
 
   const clearAll = () => { setOverrides({}); setFeatOv({}); };
+
+  // Apply the CURRENT editor toggles to many other users at once.
+  const [applyOpen, setApplyOpen]       = useState(false);
+  const [applyTargets, setApplyTargets] = useState(() => new Set());
+  const [applySearch, setApplySearch]   = useState('');
+  const [applying, setApplying]         = useState(false);
+  const toggleTarget = (id) => setApplyTargets(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const applyToOthers = async () => {
+    if (!applyTargets.size) return;
+    setApplying(true);
+    try {
+      const permission_overrides = Object.entries(overrides).map(([permission_name, type]) => ({ permission_name, type }));
+      const feature_overrides    = Object.entries(featOv).map(([feature_key, is_enabled]) => ({ feature_key, is_enabled }));
+      const r = await client.post('users/apply-overrides', { target_assignment_ids: [...applyTargets], permission_overrides, feature_overrides });
+      setApplyOpen(false); setApplyTargets(new Set()); setApplySearch('');
+      setMsg({ type: 'success', text: `Applied this access to ${r.data.applied} user${r.data.applied !== 1 ? 's' : ''}.${r.data.feature_warning ? ' (' + r.data.feature_warning + ')' : ''}` });
+    } catch (e) { setMsg({ type: 'error', text: e.response?.data?.error || 'Apply failed' }); }
+    finally { setApplying(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -269,10 +288,63 @@ const UserPermissionsPanel = ({ user }) => {
         <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
           {(overrideCount + featOvCount) > 0 ? `${overrideCount + featOvCount} override${(overrideCount + featOvCount) !== 1 ? 's' : ''} — unsaved` : 'No overrides — all defaults'}
         </span>
-        <Button variant="primary" onClick={handleSave} loading={saving} disabled={saving} className="flex items-center gap-2">
-          <Save size={15} /> Save All
-        </Button>
+        <div className="flex items-center gap-2">
+          {peers.length > 0 && (
+            <button onClick={() => setApplyOpen(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title="Apply these toggles to several users at once">
+              <Users size={14} /> Apply to others…
+            </button>
+          )}
+          <Button variant="primary" onClick={handleSave} loading={saving} disabled={saving} className="flex items-center gap-2">
+            <Save size={15} /> Save All
+          </Button>
+        </div>
       </div>
+
+      {/* Apply-to-many modal */}
+      {applyOpen && (() => {
+        const aq = applySearch.trim().toLowerCase();
+        const list = peers.filter(p => !aq || `${p.first_name || ''} ${p.last_name || ''} ${p.email || ''}`.toLowerCase().includes(aq));
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setApplyOpen(false)}>
+            <div className="w-full max-w-md rounded-2xl border max-h-[85vh] flex flex-col" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }} onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                <h3 className="font-bold text-base" style={{ color: 'var(--color-text)' }}>Apply this access to other users</h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  Replaces each selected user's overrides with the <strong>{overrideCount}</strong> permission + <strong>{featOvCount}</strong> feature toggle{(overrideCount + featOvCount) !== 1 ? 's' : ''} shown here.
+                </p>
+              </div>
+              <div className="p-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border)' }}>
+                <input value={applySearch} onChange={e => setApplySearch(e.target.value)} placeholder="Search users…" className="input text-sm py-1.5 flex-1" />
+                <button onClick={() => setApplyTargets(new Set(list.map(p => p.id)))} className="text-xs font-semibold px-2 py-1.5 rounded-lg border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Select all</button>
+                {applyTargets.size > 0 && <button onClick={() => setApplyTargets(new Set())} className="text-xs font-semibold px-2 py-1.5 rounded-lg border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Clear</button>}
+              </div>
+              <div className="flex-1 overflow-y-auto p-2">
+                {list.length === 0 ? <p className="text-xs text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>No users</p> : list.map(p => {
+                  const sel = applyTargets.has(p.id);
+                  return (
+                    <button key={p.id} onClick={() => toggleTarget(p.id)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-bg-secondary">
+                      <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0" style={{ backgroundColor: sel ? 'var(--color-primary-600)' : 'transparent', border: `1.5px solid ${sel ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
+                        {sel && <Check size={11} color="#fff" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{[p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || 'User'}</span>
+                        <span className="block text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{(p.role_level || p.custom_roles?.level || p.role || '').replace(/_/g, ' ') || '—'}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="p-3 border-t flex gap-2" style={{ borderColor: 'var(--color-border)' }}>
+                <button onClick={() => setApplyOpen(false)} className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>Cancel</button>
+                <button onClick={applyToOthers} disabled={!applyTargets.size || applying} className="flex-1 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
+                  {applying ? 'Applying…' : `Apply to ${applyTargets.size} user${applyTargets.size !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

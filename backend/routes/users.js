@@ -1208,6 +1208,58 @@ router.put('/:id/feature-overrides',
 );
 
 // ============================================================================
+// POST /users/apply-overrides — apply ONE override set to MANY users at once.
+// Superadmin only. Body: {
+//   target_assignment_ids: [user_company_roles.id, …],
+//   permission_overrides:  [{ permission_name, type }],
+//   feature_overrides:     [{ feature_key, is_enabled }]
+// }  Replaces each target's overrides with the given set (empty arrays = clear).
+// ============================================================================
+router.post('/apply-overrides', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin' && !(await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  const { target_assignment_ids = [], permission_overrides = [], feature_overrides = [] } = req.body;
+  if (!Array.isArray(target_assignment_ids) || !target_assignment_ids.length) {
+    return res.status(400).json({ error: 'target_assignment_ids required' });
+  }
+
+  const { data: assignments } = await supabaseAdmin
+    .from('user_company_roles').select('id, user_id, company_id').in('id', target_assignment_ids);
+  if (!assignments?.length) return res.status(404).json({ error: 'No matching users' });
+
+  const permNames = [...new Set(permission_overrides.map(o => o.permission_name))];
+  const { data: perms } = permNames.length
+    ? await supabaseAdmin.from('permissions').select('id, name').in('name', permNames)
+    : { data: [] };
+  const permMap = Object.fromEntries((perms || []).map(p => [p.name, p.id]));
+
+  let applied = 0, featureWarn = false;
+  for (const a of assignments) {
+    // permissions
+    await supabaseAdmin.from('user_permission_overrides').delete().eq('user_id', a.user_id).eq('company_id', a.company_id);
+    const permRows = permission_overrides
+      .filter(o => permMap[o.permission_name] && ['grant', 'revoke'].includes(o.type))
+      .map(o => ({ user_id: a.user_id, company_id: a.company_id, permission_id: permMap[o.permission_name], override_type: o.type, set_by: req.user.id }));
+    if (permRows.length) await supabaseAdmin.from('user_permission_overrides').insert(permRows);
+
+    // features (graceful if migration 122 not applied)
+    await supabaseAdmin.from('user_feature_flags').delete().eq('user_id', a.user_id).eq('company_id', a.company_id);
+    const featRows = feature_overrides
+      .filter(o => o.feature_key && typeof o.is_enabled === 'boolean')
+      .map(o => ({ user_id: a.user_id, company_id: a.company_id, feature_key: o.feature_key, is_enabled: o.is_enabled, set_by: req.user.id }));
+    if (featRows.length) {
+      const { error } = await supabaseAdmin.from('user_feature_flags').insert(featRows);
+      if (error) featureWarn = true;
+    }
+    applied++;
+  }
+
+  logger.info('USER_OVERRIDES', `Applied override set to ${applied} users by ${req.user.id}`);
+  res.json({ applied, feature_warning: featureWarn ? 'Feature overrides skipped — apply migration 122.' : null });
+}));
+
+// ============================================================================
 // POST /users/:userId/impersonate — superadmin only
 // Generates a one-time magic link for any user; link is returned to the caller
 // (never sent by email) so the superadmin can open it directly in a browser.
