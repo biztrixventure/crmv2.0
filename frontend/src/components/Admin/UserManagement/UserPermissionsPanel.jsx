@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users } from 'lucide-react';
+import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users, Eye, BookmarkPlus, ChevronUp, ChevronDown } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 import client from '../../../api/client';
@@ -86,6 +86,50 @@ const UserPermissionsPanel = ({ user }) => {
     finally { setApplying(false); }
   };
 
+  // Templates (saved override sets) + preview-as-user.
+  const [templates, setTemplates] = useState([]);
+  const [previewLink, setPreviewLink] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => { client.get('users/access-templates').then(r => setTemplates(r.data.templates || [])).catch(() => {}); }, []);
+
+  const saveTemplate = async () => {
+    const name = window.prompt('Name this access template (e.g. "Fronter — no callbacks"):');
+    if (!name || !name.trim()) return;
+    try {
+      const permission_overrides = Object.entries(overrides).map(([permission_name, type]) => ({ permission_name, type }));
+      const feature_overrides    = Object.entries(featOv).map(([feature_key, is_enabled]) => ({ feature_key, is_enabled }));
+      const r = await client.post('users/access-templates', { name: name.trim(), permission_overrides, feature_overrides });
+      setTemplates(prev => [...prev, r.data.template]);
+      setMsg({ type: 'success', text: `Template “${r.data.template.name}” saved.` });
+    } catch { setMsg({ type: 'error', text: 'Failed to save template' }); }
+  };
+  const loadTemplate = (id) => {
+    const t = templates.find(x => x.id === id); if (!t) return;
+    const pm = {}; (t.permission_overrides || []).forEach(o => { pm[o.permission_name] = o.type; });
+    const fm = {}; (t.feature_overrides || []).forEach(o => { fm[o.feature_key] = o.is_enabled; });
+    setOverrides(pm); setFeatOv(fm);
+    setMsg({ type: 'success', text: `Loaded template “${t.name}” — review, then Save All (or Apply to others).` });
+  };
+  const deleteTemplate = async (id) => {
+    if (!window.confirm('Delete this template?')) return;
+    try { await client.delete(`users/access-templates/${id}`); setTemplates(prev => prev.filter(t => t.id !== id)); } catch {}
+  };
+  const previewAsUser = async () => {
+    setPreviewing(true);
+    try { const r = await client.post(`users/${user.user_id || user.id}/impersonate`); setPreviewLink({ link: r.data.link, email: r.data.email }); }
+    catch (e) { setMsg({ type: 'error', text: e.response?.data?.error || 'Preview failed' }); }
+    finally { setPreviewing(false); }
+  };
+
+  // Overview — who in this company already has custom access.
+  const [overview, setOverview] = useState([]);
+  const [showOverview, setShowOverview] = useState(false);
+  useEffect(() => {
+    if (!user.company_id) return;
+    client.get('users/access-overview', { params: { company_id: user.company_id } }).then(r => setOverview(r.data.users || [])).catch(() => {});
+  }, [user.company_id]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -171,6 +215,30 @@ const UserPermissionsPanel = ({ user }) => {
         </span>
       </div>
 
+      {/* Overview — who already has custom access */}
+      {overview.length > 0 && (
+        <div className="rounded-xl border border-border overflow-hidden">
+          <button onClick={() => setShowOverview(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+            <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{overview.length} user{overview.length !== 1 ? 's' : ''} in this company have custom access</span>
+            {showOverview ? <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
+          </button>
+          {showOverview && (
+            <div className="divide-y divide-border max-h-48 overflow-y-auto">
+              {overview.map(u => (
+                <div key={u.user_id} className="flex items-center justify-between px-4 py-2 text-sm">
+                  <span style={{ color: 'var(--color-text)' }}>{u.name}{u.user_id === user.user_id && <span style={{ color: 'var(--color-primary-600)' }}> · this user</span>}</span>
+                  <span className="flex gap-2 text-xs font-semibold">
+                    {u.grants > 0 && <span style={{ color: '#16a34a' }}>+{u.grants}</span>}
+                    {u.revokes > 0 && <span style={{ color: '#dc2626' }}>−{u.revokes}</span>}
+                    {u.features > 0 && <span style={{ color: '#7c3aed' }}>{u.features} feat</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {msg && <Alert type={msg.type} message={msg.text} dismissible onDismiss={() => setMsg(null)} />}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -193,6 +261,24 @@ const UserPermissionsPanel = ({ user }) => {
         <button onClick={() => bulkAll('on')}  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#bbf7d0', color: '#16a34a' }}><Check size={12} /> Grant all perms</button>
         <button onClick={() => bulkAll('off')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#fecaca', color: '#dc2626' }}><X size={12} /> Revoke all</button>
         <button onClick={clearAll}             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} title="Clear ALL overrides (perms + features) back to defaults"><RotateCcw size={12} /> Reset all</button>
+      </div>
+
+      {/* Templates row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={saveTemplate} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+          <BookmarkPlus size={13} /> Save as template
+        </button>
+        {templates.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Templates:</span>
+            {templates.map(t => (
+              <span key={t.id} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border" style={{ borderColor: 'var(--color-border)' }}>
+                <button onClick={() => loadTemplate(t.id)} className="font-semibold" style={{ color: 'var(--color-primary-600)' }} title="Load this template into the editor">{t.name}</button>
+                <button onClick={() => deleteTemplate(t.id)} title="Delete template"><X size={10} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">
@@ -289,6 +375,10 @@ const UserPermissionsPanel = ({ user }) => {
           {(overrideCount + featOvCount) > 0 ? `${overrideCount + featOvCount} override${(overrideCount + featOvCount) !== 1 ? 's' : ''} — unsaved` : 'No overrides — all defaults'}
         </span>
         <div className="flex items-center gap-2">
+          <button onClick={previewAsUser} disabled={previewing} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border disabled:opacity-50"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title="Open the app as this user (new tab) to see exactly their tabs">
+            <Eye size={14} /> {previewing ? 'Opening…' : 'Preview as user'}
+          </button>
           {peers.length > 0 && (
             <button onClick={() => setApplyOpen(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title="Apply these toggles to several users at once">
@@ -345,6 +435,23 @@ const UserPermissionsPanel = ({ user }) => {
           </div>
         );
       })()}
+
+      {/* Preview-as-user modal */}
+      {previewLink && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setPreviewLink(null)}>
+          <div className="w-full max-w-sm rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }} onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold text-base mb-1" style={{ color: 'var(--color-text)' }}>Preview as {previewLink.email}</h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+              Opens a one-time login as this user in a new tab — you'll see exactly their tabs and options. Tip: use a separate/incognito window so your own session stays put.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setPreviewLink(null)} className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>Close</button>
+              <a href={previewLink.link} target="_blank" rel="noopener noreferrer" onClick={() => setPreviewLink(null)}
+                className="flex-1 text-center py-2 rounded-xl text-sm font-bold text-white" style={{ background: 'var(--gradient-sidebar)' }}>Open as user ↗</a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

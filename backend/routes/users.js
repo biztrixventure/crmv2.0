@@ -1259,6 +1259,79 @@ router.post('/apply-overrides', asyncHandler(async (req, res) => {
   res.json({ applied, feature_warning: featureWarn ? 'Feature overrides skipped — apply migration 122.' : null });
 }));
 
+// ── Access templates (saved override sets) — stored in business_config global ──
+const saGuard = async (req) => req.user.role === 'superadmin' || await isSuperAdmin(req.user.id);
+
+router.get('/access-templates', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'access_templates', []);
+  res.json({ templates: Array.isArray(list) ? list : [] });
+}));
+
+router.post('/access-templates', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Template name is required' });
+  const { getConfig, setConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'access_templates', []);
+  const arr = Array.isArray(list) ? list : [];
+  const tpl = {
+    id: require('crypto').randomUUID(),
+    name, description: String(req.body.description || ''),
+    permission_overrides: Array.isArray(req.body.permission_overrides) ? req.body.permission_overrides : [],
+    feature_overrides: Array.isArray(req.body.feature_overrides) ? req.body.feature_overrides : [],
+    created_by: req.user.id, created_at: new Date().toISOString(),
+  };
+  arr.push(tpl);
+  await setConfig('global', 'access_templates', arr, req.user.id);
+  res.status(201).json({ template: tpl });
+}));
+
+router.delete('/access-templates/:templateId', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig, setConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'access_templates', []);
+  const arr = (Array.isArray(list) ? list : []).filter(t => t.id !== req.params.templateId);
+  await setConfig('global', 'access_templates', arr, req.user.id);
+  res.json({ ok: true });
+}));
+
+// GET /users/access-overview?company_id= — who has custom access (override counts)
+router.get('/access-overview', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const companyId = req.query.company_id;
+  let pq = supabaseAdmin.from('user_permission_overrides').select('user_id, company_id, override_type');
+  let fq = supabaseAdmin.from('user_feature_flags').select('user_id, company_id');
+  if (companyId) { pq = pq.eq('company_id', companyId); fq = fq.eq('company_id', companyId); }
+  const [{ data: po }, fRes] = await Promise.all([pq, fq.then(r => r, () => ({ data: [] }))]);
+  const fo = fRes?.data || [];
+
+  const map = {};
+  (po || []).forEach(o => {
+    const k = `${o.user_id}|${o.company_id}`;
+    map[k] = map[k] || { user_id: o.user_id, company_id: o.company_id, grants: 0, revokes: 0, features: 0 };
+    o.override_type === 'grant' ? map[k].grants++ : map[k].revokes++;
+  });
+  (fo || []).forEach(o => {
+    const k = `${o.user_id}|${o.company_id}`;
+    map[k] = map[k] || { user_id: o.user_id, company_id: o.company_id, grants: 0, revokes: 0, features: 0 };
+    map[k].features++;
+  });
+
+  const rows = Object.values(map);
+  const uids = [...new Set(rows.map(r => r.user_id))];
+  const names = {};
+  if (uids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    (profs || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'; });
+    // assignment id so the UI can open the editor
+    const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('id, user_id, company_id').in('user_id', uids);
+    (ucr || []).forEach(a => { const r = map[`${a.user_id}|${a.company_id}`]; if (r) r.assignment_id = a.id; });
+  }
+  res.json({ users: rows.map(r => ({ ...r, name: names[r.user_id] || 'Unknown' })).sort((a, b) => (b.grants + b.revokes + b.features) - (a.grants + a.revokes + a.features)) });
+}));
+
 // ============================================================================
 // POST /users/:userId/impersonate — superadmin only
 // Generates a one-time magic link for any user; link is returned to the caller
