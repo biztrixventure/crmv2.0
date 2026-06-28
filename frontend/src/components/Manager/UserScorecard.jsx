@@ -27,7 +27,9 @@ export default function UserScorecard({ user, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
-  const uid = user?.id || user?.user_id;
+  // The team list carries BOTH user_company_roles.id (role-row id) and the auth
+  // user_id — the stats endpoint keys on user_id, so prefer it.
+  const uid = user?.user_id || user?.id;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Agent';
 
   useEffect(() => {

@@ -491,8 +491,10 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
   const isGlobal = ['superadmin', 'readonly_admin'].includes(reqRole);
 
   if (!isGlobal) {
+    // limit(1) — a user can have more than one active role row in a company;
+    // maybeSingle() alone would error on that and wrongly 403.
     const { data: rel } = await supabaseAdmin.from('user_company_roles')
-      .select('user_id').eq('company_id', companyId).eq('user_id', targetId).eq('is_active', true).maybeSingle();
+      .select('user_id').eq('company_id', companyId).eq('user_id', targetId).eq('is_active', true).limit(1).maybeSingle();
     if (!rel) return res.status(403).json({ error: 'User is not in your team' });
   }
 

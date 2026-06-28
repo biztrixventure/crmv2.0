@@ -16,7 +16,7 @@ export default function Tooltip({ text, children, side = 'top', className = '', 
     <span className={`relative group/tt inline-flex items-center ${className}`}>
       {children}
       <span role="tooltip"
-        className={`pointer-events-none absolute ${pos} left-1/2 -translate-x-1/2 px-2 py-1 rounded-md text-[11px] font-medium leading-snug opacity-0 group-hover/tt:opacity-100 transition-opacity duration-150 z-50 shadow-lg`}
+        className={`pointer-events-none absolute ${pos} left-1/2 -translate-x-1/2 px-2 py-1 rounded-md text-[11px] font-medium leading-snug opacity-0 group-hover/tt:opacity-100 transition-opacity duration-150 z-[200] shadow-lg`}
         style={{
           backgroundColor: 'var(--color-text)', color: 'var(--color-surface)',
           whiteSpace: 'normal', width: 'max-content', maxWidth, textAlign: 'center',
