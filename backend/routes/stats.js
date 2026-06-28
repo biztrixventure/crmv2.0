@@ -409,9 +409,13 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     return companyId ? q.eq('company_id', companyId) : q;
   };
 
+  // Whose leaderboard matters: a fronter manager wants top fronters (by leads);
+  // closer-side wants top closers (by sales); operations/admin default to closers.
+  const side = role === 'fronter_manager' ? 'fronter' : (isCloserSide ? 'closer' : 'both');
+
   const [{ data: trs }, { data: sls }] = await Promise.all([
-    scopeT(supabaseAdmin.from('transfers').select('created_at').gte('created_at', sinceUtc)).limit(8000),
-    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id').gte('created_at', sinceUtc)).limit(8000),
+    scopeT(supabaseAdmin.from('transfers').select('created_at, created_by').gte('created_at', sinceUtc)).limit(8000),
+    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id').gte('created_at', sinceUtc)).limit(8000),
   ]);
 
   const dayOf = (d) => String(d || '').slice(0, 10);
@@ -426,14 +430,28 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     if (buckets[d]) { buckets[d].sales++; if (s.status === 'closed_won') buckets[d].approved++; }
   });
 
-  // Top agents by sales (closer side).
+  // Role-aware leaderboard. Fronter side ranks fronters by leads created;
+  // closer/both ranks closers by sales. `value` is the primary metric either way.
+  const agentMetric = side === 'fronter' ? 'leads' : 'sales';
   const byAgent = {};
-  (sls || []).forEach(s => {
-    if (!s.closer_id) return;
-    byAgent[s.closer_id] = byAgent[s.closer_id] || { sales: 0, approved: 0 };
-    byAgent[s.closer_id].sales++;
-    if (s.status === 'closed_won') byAgent[s.closer_id].approved++;
-  });
+  if (side === 'fronter') {
+    (trs || []).forEach(t => {
+      if (!t.created_by) return;
+      byAgent[t.created_by] = byAgent[t.created_by] || { value: 0, approved: 0 };
+      byAgent[t.created_by].value++;
+    });
+    (sls || []).forEach(s => {                       // credit approved sales they fronted
+      const f = s.fronter_id; if (!f || !byAgent[f]) return;
+      if (s.status === 'closed_won') byAgent[f].approved++;
+    });
+  } else {
+    (sls || []).forEach(s => {
+      if (!s.closer_id) return;
+      byAgent[s.closer_id] = byAgent[s.closer_id] || { value: 0, approved: 0 };
+      byAgent[s.closer_id].value++;
+      if (s.status === 'closed_won') byAgent[s.closer_id].approved++;
+    });
+  }
   const agentIds = Object.keys(byAgent);
   const names = {};
   if (agentIds.length) {
@@ -442,13 +460,15 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     (data || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'; });
   }
   const topAgents = agentIds
-    .map(id => ({ user_id: id, name: names[id] || 'Unknown', ...byAgent[id] }))
-    .sort((a, b) => b.sales - a.sales).slice(0, 8);
+    .map(id => ({ user_id: id, name: names[id] || 'Unknown', value: byAgent[id].value, sales: byAgent[id].value, approved: byAgent[id].approved }))
+    .sort((a, b) => b.value - a.value).slice(0, 8);
 
   const totalT = (trs || []).length, totalS = (sls || []).length;
   const totalApproved = (sls || []).filter(s => s.status === 'closed_won').length;
   res.json({
     days,
+    side,
+    agent_metric: agentMetric,
     daily: Object.values(buckets),
     top_agents: topAgents,
     // Cap at 100% — a conversion rate can't exceed 1:1. Bulk-imported sales with

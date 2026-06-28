@@ -53,14 +53,19 @@ function DailyBars({ daily }) {
   );
 }
 
-// ── agent leaderboard (horizontal bars) ──────────────────────────────────────
-function AgentBars({ agents }) {
-  if (!agents.length) return <p className="text-xs text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>No agent sales in this window</p>;
-  const max = Math.max(1, ...agents.map(a => a.sales));
+// ── agent leaderboard (horizontal bars) — role-aware (leads or sales) ─────────
+function AgentBars({ agents, metric = 'sales' }) {
+  if (!agents.length) return <p className="text-xs text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>No {metric} in this window</p>;
+  const val = (a) => (a.value != null ? a.value : a.sales);
+  const max = Math.max(1, ...agents.map(val));
   return (
     <div className="space-y-2">
       {agents.map((a, i) => {
-        const rate = a.sales ? Math.round((a.approved / a.sales) * 100) : 0;
+        const v = val(a);
+        const rate = v ? Math.round((a.approved / v) * 100) : 0;
+        const tip = metric === 'leads'
+          ? `${v} leads · ${a.approved} became approved sales`
+          : `${v} sales · ${a.approved} approved · ${rate}% approval`;
         return (
           <div key={a.user_id} className="flex items-center gap-2.5">
             <span className="w-4 text-[11px] font-bold text-center" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</span>
@@ -68,12 +73,12 @@ function AgentBars({ agents }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</span>
-                <Tooltip text={`${a.sales} sales · ${a.approved} approved · ${rate}% approval`}>
-                  <span className="text-[11px] font-bold cursor-help" style={{ color: 'var(--color-text-secondary)' }}>{a.sales}</span>
+                <Tooltip text={tip}>
+                  <span className="text-[11px] font-bold cursor-help" style={{ color: 'var(--color-text-secondary)' }}>{v}</span>
                 </Tooltip>
               </div>
               <div className="h-1.5 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                <div className="h-full rounded-full" style={{ width: `${(a.sales / max) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
+                <div className="h-full rounded-full" style={{ width: `${(v / max) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
               </div>
             </div>
           </div>
@@ -145,9 +150,9 @@ export default function TeamPerformance() {
             </div>
             <div>
               <div className="flex items-center gap-1.5 mb-3 text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
-                <Users size={13} /> Top Agents <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>· by sales</span>
+                <Users size={13} /> Top {data.side === 'fronter' ? 'Fronters' : 'Closers'} <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>· by {data.agent_metric || 'sales'}</span>
               </div>
-              <AgentBars agents={data.top_agents || []} />
+              <AgentBars agents={data.top_agents || []} metric={data.agent_metric || 'sales'} />
             </div>
           </div>
         </div>
