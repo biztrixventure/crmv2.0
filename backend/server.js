@@ -56,6 +56,7 @@ const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
+const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
 // On startup: stamp app_metadata.role='superadmin' for SUPERADMIN_EMAIL users.
@@ -357,6 +358,7 @@ const { warm: warmAuditCols } = require('./utils/auditColumnGuard');
 
 app.listen(PORT, () => {
   startCallbackScheduler();
+  startAutoFetchDispo();       // catch-up dispo fetch for manual-dial transfers
   syncSuperadminMetadata();    // Stamp JWT metadata for superadmins — no-op if already done
   syncReadonlyAdminMetadata(); // Same for readonly_admin
   warmAuditCols();          // Probe last_modified_by on tracked tables (mig 063)

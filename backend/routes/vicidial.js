@@ -1237,4 +1237,4 @@ api.delete('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
 // disposition that queued before the transfer existed (the fronter-xfer path
 // already reconciles; the manual/webform paths did not, leaving the dispo stuck
 // in the queue and the transfer showing no closer/disposition).
-module.exports = { ingest, api, reconcileQueuedDispoForTransfer };
+module.exports = { ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo };
