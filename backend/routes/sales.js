@@ -310,6 +310,11 @@ router.post(
       additional_cars,
     } = req.body;
 
+    // Fairness: the fronter who generated the lead must get credit even if the
+    // closer leaves the fronter field blank. Defaulted from transfer.created_by
+    // (the fronter who made/confirmed the transfer) below.
+    let transferFronterId = null;
+
     // If linked to a transfer, validate it. Multiple sales may now share one
     // transfer (one per vehicle), so the previous one-sale-per-transfer guard
     // is gone.
@@ -320,6 +325,8 @@ router.post(
 
       // Sale inherits the FRONTER company's company_id so it appears in their records
       if (transfer.company_id) companyId = transfer.company_id;
+      // The transfer's creator is the fronter — credit them when not overridden.
+      transferFronterId = transfer.created_by || null;
 
       // Auto-complete the transfer; if unassigned, claim it for the closer
       const transferUpdates = await stampActor('transfers', { status: 'completed', updated_at: new Date().toISOString() }, userId);
@@ -415,7 +422,8 @@ router.post(
       customer_email:   (customer_email && String(customer_email).trim()) ? customer_email : 'no@email.com',
       customer_address: customer_address || null,
       client_name: titleCase(client_name) || null,
-      fronter_id:  fronter_id  || null,
+      // Closer's explicit pick wins; otherwise credit the transfer's fronter.
+      fronter_id:  fronter_id  || transferFronterId || null,
       sale_date:   saleDate,
       // Scheduled charge for a post-dated sale (null for normal sales).
       charge_at:   charge_at || null,
