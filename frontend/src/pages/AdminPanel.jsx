@@ -12,6 +12,7 @@ import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import { useNotifications } from "../hooks/useNotifications";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
+import CustomerProfile from "../components/Admin/CustomerProfile/CustomerProfile";
 import NumbersIntelligence from "../components/Admin/NumbersIntelligence";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
@@ -97,6 +98,7 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
+    ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
     ...(isSAorRO                                       ? [{ id: "numbers",        label: "Numbers Intelligence" }] : []),
     ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
@@ -156,7 +158,7 @@ const AdminPanel = () => {
             // Form-style tabs (vehicles, clients-plans, faqs, scripts, etc.)
             // keep a comfortable reading width — wide forms feel awkward.
             (() => {
-              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff', 'business-rules']);
+              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'customer-profiles', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff', 'business-rules']);
               const wrap = WIDE.has(activeTab)
                 ? 'p-4 lg:p-6 w-full'
                 : 'p-4 lg:p-6 max-w-7xl mx-auto w-full';
@@ -165,6 +167,7 @@ const AdminPanel = () => {
                   {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
                   {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
                   {activeTab === "sale-search" && <LeadIntelligence />}
+                  {activeTab === "customer-profiles" && <CustomerProfile />}
                   {activeTab === "numbers"     && <NumbersIntelligence />}
                   {activeTab === "data-analyzer" && <DataAnalyzer />}
                   {activeTab === "data-cleanup" && <DataCleanup />}

@@ -54,6 +54,7 @@ const portalRoutes              = require('./routes/portal');
 const presenceRoutes            = require('./routes/presence');
 const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
+const customerProfileRoutes     = require('./routes/customerProfile');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
@@ -302,6 +303,10 @@ app.use('/api/portal',             portalRoutes);
 app.use('/api/events',             authMiddleware, readonlyGuard, eventsRoutes);
 // FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)
 app.use('/api/search',             authMiddleware, readonlyGuard, searchRoutes);
+// Customer profile (OOP domain layer) — Superadmin panel unified view. The
+// route guards itself (superadmin / readonly_admin); no readonlyGuard so the
+// readonly admin can still GET the profile.
+app.use('/api/customer-profile', authMiddleware, customerProfileRoutes);
 // Presence / last-seen / activity. Intentionally NO readonlyGuard — the
 // heartbeat is telemetry, not a business write, and readonly admins must be
 // able to register presence; the admin endpoint guards itself in-route.
