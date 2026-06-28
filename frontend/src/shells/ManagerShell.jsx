@@ -22,6 +22,7 @@ import { useFocus } from "../contexts/FocusContext";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
+import TeamPerformance from "../components/Manager/TeamPerformance";
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
@@ -597,6 +598,9 @@ const ManagerShell = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {MGR_CARD_ORDER.map(renderMgrCard)}
             </div>
+
+            {/* ── Team performance charts (trends + top agents, with tooltips) ── */}
+            <TeamPerformance />
 
             {/* ── Conversion funnel ── */}
             {!loading && overviewTotals.transfers > 0 && (

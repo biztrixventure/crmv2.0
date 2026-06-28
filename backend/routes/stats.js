@@ -377,4 +377,82 @@ router.get(
   })
 );
 
+// ============================================================================
+// GET /stats/team-trends?days=14 — daily activity + agent leaderboard for the
+// manager's team. Scoped exactly like /dashboard (company / closer-side). Feeds
+// the Team Performance charts in the Manager overview.
+// ============================================================================
+router.get('/team-trends', asyncHandler(async (req, res) => {
+  const userId = req.user.id, companyId = req.user.company_id, role = req.user.role;
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 7), 60);
+  const ZERO = '00000000-0000-0000-0000-000000000000';
+  const isCloserSide = ['closer_manager', 'compliance_manager'].includes(role);
+  const isGlobal = ['superadmin', 'readonly_admin'].includes(role);
+  const sinceUtc = new Date(Date.now() - days * 86400000).toISOString();
+
+  let coUserIds = [];
+  if (isCloserSide && companyId) {
+    const { data } = await supabaseAdmin
+      .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+    coUserIds = (data || []).map(u => u.user_id);
+  }
+
+  const scopeT = (q) => {
+    q = q.neq('vicidial_pending', true);
+    if (isGlobal) return q;
+    if (isCloserSide) return coUserIds.length ? q.in('assigned_closer_id', coUserIds) : q.eq('id', ZERO);
+    return companyId ? q.eq('company_id', companyId) : q;
+  };
+  const scopeS = (q) => {
+    if (isGlobal) return q;
+    if (isCloserSide) return coUserIds.length ? q.in('closer_id', coUserIds) : q.eq('id', ZERO);
+    return companyId ? q.eq('company_id', companyId) : q;
+  };
+
+  const [{ data: trs }, { data: sls }] = await Promise.all([
+    scopeT(supabaseAdmin.from('transfers').select('created_at').gte('created_at', sinceUtc)).limit(8000),
+    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id').gte('created_at', sinceUtc)).limit(8000),
+  ]);
+
+  const dayOf = (d) => String(d || '').slice(0, 10);
+  const buckets = {};
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    buckets[d] = { date: d, transfers: 0, sales: 0, approved: 0 };
+  }
+  (trs || []).forEach(t => { const d = dayOf(t.created_at); if (buckets[d]) buckets[d].transfers++; });
+  (sls || []).forEach(s => {
+    const d = dayOf(s.sale_date || s.created_at);
+    if (buckets[d]) { buckets[d].sales++; if (s.status === 'closed_won') buckets[d].approved++; }
+  });
+
+  // Top agents by sales (closer side).
+  const byAgent = {};
+  (sls || []).forEach(s => {
+    if (!s.closer_id) return;
+    byAgent[s.closer_id] = byAgent[s.closer_id] || { sales: 0, approved: 0 };
+    byAgent[s.closer_id].sales++;
+    if (s.status === 'closed_won') byAgent[s.closer_id].approved++;
+  });
+  const agentIds = Object.keys(byAgent);
+  const names = {};
+  if (agentIds.length) {
+    const { data } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', agentIds);
+    (data || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'; });
+  }
+  const topAgents = agentIds
+    .map(id => ({ user_id: id, name: names[id] || 'Unknown', ...byAgent[id] }))
+    .sort((a, b) => b.sales - a.sales).slice(0, 8);
+
+  const totalT = (trs || []).length, totalS = (sls || []).length;
+  const totalApproved = (sls || []).filter(s => s.status === 'closed_won').length;
+  res.json({
+    days,
+    daily: Object.values(buckets),
+    top_agents: topAgents,
+    totals: { transfers: totalT, sales: totalS, approved: totalApproved, conversion: totalT ? Math.round(totalS / totalT * 100) : 0 },
+  });
+}));
+
 module.exports = router;
