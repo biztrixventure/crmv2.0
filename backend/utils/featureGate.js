@@ -10,7 +10,19 @@ const { supabaseAdmin } = require('../config/database');
  * @param {string} featureKey
  * @param {string|null} companyId
  */
-async function isFeatureEnabled(featureKey, companyId) {
+async function isFeatureEnabled(featureKey, companyId, userId) {
+  // Per-USER override wins over the company override (migration 122).
+  if (userId && companyId) {
+    const { data: uo } = await supabaseAdmin
+      .from('user_feature_flags')
+      .select('is_enabled')
+      .eq('user_id', userId)
+      .eq('company_id', companyId)
+      .eq('feature_key', featureKey)
+      .maybeSingle();
+    if (uo) return uo.is_enabled;
+  }
+
   // Fetch override for this company
   if (companyId) {
     const { data: override } = await supabaseAdmin
@@ -44,7 +56,7 @@ function requireFeature(featureKey) {
       if (req.user?.role === 'superadmin') return next();
 
       const companyId = req.user?.company_id || null;
-      const enabled   = await isFeatureEnabled(featureKey, companyId);
+      const enabled   = await isFeatureEnabled(featureKey, companyId, req.user?.id);
       if (!enabled) {
         return res.status(403).json({ error: `Feature '${featureKey}' is not enabled for your company` });
       }

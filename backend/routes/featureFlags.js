@@ -49,12 +49,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const overrideMap = {};
   (overrides || []).forEach(o => { overrideMap[o.feature_key] = o.is_enabled; });
 
+  // Per-USER overrides win over the company override (migration 122). If the
+  // table isn't there yet, userOv is null and we fall through unchanged.
+  const { data: userOv } = await supabaseAdmin
+    .from('user_feature_flags')
+    .select('feature_key, is_enabled')
+    .eq('user_id', req.user.id)
+    .eq('company_id', companyId);
+  const userMap = {};
+  (userOv || []).forEach(o => { userMap[o.feature_key] = o.is_enabled; });
+
   const flags = {};
   (catalog || []).forEach(f => {
-    flags[f.key] = {
-      ...f,
-      is_enabled: overrideMap[f.key] !== undefined ? overrideMap[f.key] : f.default_enabled,
-    };
+    const resolved = userMap[f.key] !== undefined ? userMap[f.key]
+      : overrideMap[f.key] !== undefined ? overrideMap[f.key]
+      : f.default_enabled;
+    flags[f.key] = { ...f, is_enabled: resolved };
   });
 
   res.json({ flags });

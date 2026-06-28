@@ -1146,6 +1146,63 @@ router.put('/:id/overrides',
 );
 
 // ============================================================================
+// GET /users/:id/feature-overrides — per-user feature toggles for one user
+// (:id = user_company_roles.id). Returns the catalog, the company-effective
+// state, and this user's overrides so the editor can show 3-state per feature.
+// ============================================================================
+router.get('/:id/feature-overrides', asyncHandler(async (req, res) => {
+  const { data: a } = await supabaseAdmin
+    .from('user_company_roles').select('user_id, company_id').eq('id', req.params.id).single();
+  if (!a) return res.status(404).json({ error: 'User assignment not found' });
+
+  const hasPerm = await hasPermission(req.user.id, a.company_id, 'edit_user');
+  if (req.user.role !== 'superadmin' && !hasPerm) return res.status(403).json({ error: 'Permission denied' });
+
+  const [{ data: catalog }, { data: companyOv }, { data: userOv }] = await Promise.all([
+    supabaseAdmin.from('feature_flags').select('key, label, description, category, default_enabled, sort_order').order('sort_order'),
+    supabaseAdmin.from('company_feature_flags').select('feature_key, is_enabled').eq('company_id', a.company_id),
+    supabaseAdmin.from('user_feature_flags').select('feature_key, is_enabled').eq('user_id', a.user_id).eq('company_id', a.company_id),
+  ]);
+
+  const coMap = {}; (companyOv || []).forEach(o => { coMap[o.feature_key] = o.is_enabled; });
+  const company_effective = {};
+  (catalog || []).forEach(f => { company_effective[f.key] = coMap[f.key] !== undefined ? coMap[f.key] : f.default_enabled; });
+  const user_overrides = {}; (userOv || []).forEach(o => { user_overrides[o.feature_key] = o.is_enabled; });
+
+  res.json({ catalog: catalog || [], company_effective, user_overrides });
+}));
+
+// ============================================================================
+// PUT /users/:id/feature-overrides — replace this user's feature overrides
+// Body: { overrides: [{ feature_key, is_enabled: bool }] }  (omit = inherit)
+// ============================================================================
+router.put('/:id/feature-overrides',
+  [body('overrides').isArray()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+
+    const { data: a } = await supabaseAdmin
+      .from('user_company_roles').select('user_id, company_id').eq('id', req.params.id).single();
+    if (!a) return res.status(404).json({ error: 'User assignment not found' });
+
+    const hasPerm = await hasPermission(req.user.id, a.company_id, 'edit_user');
+    if (req.user.role !== 'superadmin' && !hasPerm) return res.status(403).json({ error: 'Permission denied' });
+
+    await supabaseAdmin.from('user_feature_flags')
+      .delete().eq('user_id', a.user_id).eq('company_id', a.company_id);
+
+    const rows = (req.body.overrides || [])
+      .filter(o => o.feature_key && typeof o.is_enabled === 'boolean')
+      .map(o => ({ user_id: a.user_id, company_id: a.company_id, feature_key: o.feature_key, is_enabled: o.is_enabled, set_by: req.user.id }));
+    if (rows.length) await supabaseAdmin.from('user_feature_flags').insert(rows);
+
+    logger.info('USER_FEATURE_OVERRIDES', `Saved ${rows.length} feature overrides for user ${a.user_id}`);
+    res.json({ message: 'Feature overrides saved', count: rows.length });
+  })
+);
+
+// ============================================================================
 // POST /users/:userId/impersonate — superadmin only
 // Generates a one-time magic link for any user; link is returned to the caller
 // (never sent by email) so the superadmin can open it directly in a browser.
