@@ -23,6 +23,29 @@ import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
 import TeamPerformance from "../components/Manager/TeamPerformance";
+import Tooltip from "../components/UI/Tooltip";
+
+// Column-header explanations — hover any header to learn what it means.
+const TRANSFER_COL_TIPS = {
+  Customer: 'Lead name captured on the transfer',
+  Phone: 'Customer phone number',
+  Fronter: 'Agent who generated the lead / created the transfer',
+  Closer: 'Agent the transfer was assigned to',
+  Status: 'Where the transfer is in the flow: pending → assigned → completed',
+  Disposition: "The closer's call outcome (from the dialer or set manually)",
+  Date: 'When the transfer was created',
+  Action: 'Rate the call, set a disposition, or delete the transfer',
+};
+const SALE_COL_TIPS = {
+  Customer: 'Customer the policy was sold to',
+  Reference: 'Policy reference / confirmation number',
+  Status: 'Compliance stage: Open → Pending Review → Approved (or Cancelled)',
+  Fronter: 'Agent who generated the lead',
+  Closer: 'Agent who made the sale',
+  Monthly: 'Monthly payment on the policy',
+  'Sale Date': 'The day the sale was made (not when the row was imported)',
+  Action: 'Delete this sale',
+};
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
@@ -865,7 +888,9 @@ const ManagerShell = () => {
                     <thead>
                       <tr className="border-b border-border">
                         {['Customer', 'Phone', 'Fronter', 'Closer', 'Status', 'Disposition', 'Date', 'Action'].map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                            <Tooltip text={TRANSFER_COL_TIPS[h]} side="bottom"><span className="cursor-help">{h}</span></Tooltip>
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -919,11 +944,13 @@ const ManagerShell = () => {
                                 </button>
                               )}
                               {hasPermission('delete_transfer') && (
-                                <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchXferTab()); } }}
-                                  className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
-                                  style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
-                                  <Trash2 size={11} className="inline" />
-                                </button>
+                                <Tooltip text="Delete this transfer">
+                                  <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this transfer?')) { client.delete(`transfers/${t.id}`).then(() => fetchXferTab()); } }}
+                                    className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
+                                    style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+                                    <Trash2 size={11} className="inline" />
+                                  </button>
+                                </Tooltip>
                               )}
                             </div>
                           </td>
@@ -981,7 +1008,9 @@ const ManagerShell = () => {
                     <thead>
                       <tr className="border-b border-border">
                         {['Customer', 'Reference', 'Status', 'Fronter', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Sale Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                            <Tooltip text={SALE_COL_TIPS[h]} side="bottom"><span className="cursor-help">{h}</span></Tooltip>
+                          </th>
                         ))}
                       </tr>
                     </thead>
