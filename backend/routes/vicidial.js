@@ -617,46 +617,70 @@ api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
   res.json(r);
 }));
 
-// Compliance/superadmin: BULK fetch dispositions for every undisposed transfer
-// across ALL companies in a window (default = today). Throttled. Returns a
-// per-company summary. Idempotent — a transfer that already has a dispo is skipped.
+// Friendly explanation for a transfer whose disposition couldn't be fetched.
+function notFoundReason(reason, tr) {
+  if (reason === 'no phone') return 'No phone number on the record';
+  if (reason === 'no disposition found') {
+    const oldish = tr.created_at && (Date.now() - new Date(tr.created_at).getTime()) > 20 * 3600000;
+    if (!tr.vicidial_vendor_code && oldish) return 'Call archived on the dialer (older than ~1 day) and no lead code to look up';
+    if (!tr.vicidial_vendor_code) return 'No disposition on the dialer yet (no lead code; closer may not have dispositioned)';
+    return 'Lead shows no real disposition yet (only no-connect/transfer states)';
+  }
+  return reason || 'Unknown';
+}
+
+// Compliance/superadmin: BULK fetch dispositions — ONE BATCH per call so the
+// frontend can pace it (15s gap) across ALL records in a window (default last 2
+// days) without a single giant request. Returns per-record results + reasons.
+// Idempotent — already-disposed records are reported as 'already', not refetched.
 api.post('/fetch-all-dispos', asyncHandler(async (req, res) => {
   const superadmin = await isSuperAdmin(req.user.id);
   if (!superadmin && req.user.role !== 'compliance_manager') return res.status(403).json({ error: 'Compliance only' });
 
-  const from = (req.body.date_from || new Date().toISOString().slice(0, 10)) + 'T00:00:00Z';
-  const to   = (req.body.date_to   || new Date().toISOString().slice(0, 10)) + 'T23:59:59Z';
+  const days   = Math.min(Math.max(parseInt(req.body.days, 10) || 2, 1), 7);
+  const from   = new Date(Date.now() - days * 86400000).toISOString();
+  const offset = Math.max(parseInt(req.body.offset, 10) || 0, 0);
+  const batch  = Math.min(Math.max(parseInt(req.body.batch, 10) || 20, 1), 50);
 
-  // Undisposed transfers with a phone, in-window, all companies.
-  const { data: trs } = await supabaseAdmin
-    .from('transfers')
-    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at')
-    .gte('created_at', from).lte('created_at', to)
-    .not('normalized_phone', 'is', null)
+  // Count once (the frontend passes it back so we don't recount every batch).
+  let total = (req.body.total != null) ? parseInt(req.body.total, 10) : null;
+  if (total == null) {
+    const { count } = await supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true })
+      .gte('created_at', from).not('normalized_phone', 'is', null);
+    total = count || 0;
+  }
+
+  const { data: rows } = await supabaseAdmin.from('transfers')
+    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, customer_name, form_data, created_at')
+    .gte('created_at', from).not('normalized_phone', 'is', null)
     .order('created_at', { ascending: false })
-    .limit(2000);
-  const all = trs || [];
-  // skip transfers that already have a disposition_action
+    .range(offset, offset + batch - 1);
+  const list = rows || [];
+
   const have = new Set();
-  for (let i = 0; i < all.length; i += 200) {
-    const { data } = await supabaseAdmin.from('disposition_actions').select('transfer_id').in('transfer_id', all.slice(i, i + 200).map(t => t.id));
+  if (list.length) {
+    const { data } = await supabaseAdmin.from('disposition_actions').select('transfer_id').in('transfer_id', list.map(t => t.id));
     (data || []).forEach(a => have.add(a.transfer_id));
   }
-  const todo = all.filter(t => !have.has(t.id));
 
-  let fetched = 0; const byCompany = {};
-  // bounded concurrency so we don't flood the dialers
+  const results = [];
+  let fetched = 0, already = 0, notfound = 0;
+  // gentle concurrency within the batch; the 15s pacing is between batches (client)
   let idx = 0;
-  await Promise.all(Array.from({ length: Math.min(8, todo.length || 1) }, async () => {
-    while (idx < todo.length) {
-      const t = todo[idx++];
+  await Promise.all(Array.from({ length: Math.min(5, list.length || 1) }, async () => {
+    while (idx < list.length) {
+      const t = list[idx++];
+      const name = t.customer_name || t.form_data?.customer_name || '';
+      if (have.has(t.id)) { already++; results.push({ phone: t.normalized_phone, name, status: 'already' }); continue; }
       const r = await fetchAndApplyDispo(t);
-      if (r.ok) { fetched++; byCompany[t.company_id] = (byCompany[t.company_id] || 0) + 1; }
+      if (r.ok) { fetched++; results.push({ phone: t.normalized_phone, name, status: 'fetched', dispo: r.disposition_name, source: r.source }); }
+      else { notfound++; results.push({ phone: t.normalized_phone, name, status: 'not_found', reason: notFoundReason(r.reason, t) }); }
     }
   }));
 
-  logger.success('VICIDIAL_FETCH_ALL', `fetched ${fetched}/${todo.length} dispos (${all.length} in window)`);
-  res.json({ ok: true, in_window: all.length, undisposed: todo.length, fetched, by_company: byCompany });
+  const next_offset = (offset + batch < total) ? offset + batch : null;
+  logger.success('VICIDIAL_FETCH_ALL', `batch @${offset}/${total}: +${fetched} fetched, ${already} already, ${notfound} not-found`);
+  res.json({ ok: true, total, offset, processed: list.length, fetched, already, notfound, next_offset, results });
 }));
 
 // Attach a queued disposition to a chosen transfer.
