@@ -650,11 +650,12 @@ api.post('/fetch-all-dispos', asyncHandler(async (req, res) => {
     total = count || 0;
   }
 
-  const { data: rows } = await supabaseAdmin.from('transfers')
-    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, customer_name, form_data, created_at')
+  const { data: rows, error: qErr } = await supabaseAdmin.from('transfers')
+    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, form_data, created_at')
     .gte('created_at', from).not('normalized_phone', 'is', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + batch - 1);
+  if (qErr) return res.status(500).json({ error: qErr.message });
   const list = rows || [];
 
   const have = new Set();
@@ -670,7 +671,7 @@ api.post('/fetch-all-dispos', asyncHandler(async (req, res) => {
   await Promise.all(Array.from({ length: Math.min(5, list.length || 1) }, async () => {
     while (idx < list.length) {
       const t = list[idx++];
-      const name = t.customer_name || t.form_data?.customer_name || '';
+      const name = t.form_data?.customer_name || t.form_data?.FirstName || '';
       if (have.has(t.id)) { already++; results.push({ phone: t.normalized_phone, name, status: 'already' }); continue; }
       const r = await fetchAndApplyDispo(t);
       if (r.ok) { fetched++; results.push({ phone: t.normalized_phone, name, status: 'fetched', dispo: r.disposition_name, source: r.source }); }
