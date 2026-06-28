@@ -910,6 +910,11 @@ const ManagerShell = () => {
                               const d = t.latest_disposition;
                               const name  = d?.disposition_name || t.sale_closer_disposition;
                               const color = d?.color || '#6b7280';
+                              // Consistency: a dialer/fetch dispo carries setter_name; a dispo
+                              // derived from the linked sale has none — fall back to the
+                              // assigned closer so every row shows "by <closer>".
+                              const closerName = t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() : '';
+                              const setter = d?.setter_name || closerName || null;
                               return (
                                 <div className="flex flex-col gap-0.5">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold w-fit"
@@ -917,9 +922,9 @@ const ManagerShell = () => {
                                     <MessageSquare size={9} />
                                     {name}
                                   </span>
-                                  {d?.setter_name && (
+                                  {setter && (
                                     <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                                      by {d.setter_name}
+                                      by {setter}
                                     </span>
                                   )}
                                 </div>
