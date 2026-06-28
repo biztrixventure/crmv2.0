@@ -213,23 +213,34 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
     setSelectedF(''); setAssignErr(''); setParseErr(''); setFieldMapping({});
   };
 
-  const toggleList = async (name) => {
-    if (expandedList === name) { setExpandedList(null); setListSearch(''); return; }
-    setExpandedList(name); setListSearch('');
-    if (listNumbers[name]) return;
+  // A "list" is a UNIQUE assignment: list_name + fronter + day. Key every action
+  // on that composite (list.key) so same-named lists for different fronters/days
+  // stay separate — expanding/deleting one never touches another.
+  const toggleList = async (list) => {
+    const k = list.key;
+    if (expandedList === k) { setExpandedList(null); setListSearch(''); return; }
+    setExpandedList(k); setListSearch('');
+    if (listNumbers[k]) return;
     try {
-      const res = await client.get('number-lists', { params: { company_id: companyId, list_name: name } });
-      setListNumbers(prev => ({ ...prev, [name]: res.data.numbers || [] }));
+      const res = await client.get('number-lists', { params: {
+        company_id: companyId, list_name: list.list_name,
+        fronter_id: list.fronter_id || undefined, assignment_day: list.assignment_day || undefined,
+      } });
+      setListNumbers(prev => ({ ...prev, [k]: res.data.numbers || [] }));
     } catch { /* non-critical */ }
   };
 
-  const handleDeleteList = async (name) => {
-    if (!window.confirm(`Delete entire list "${name}"? This cannot be undone.`)) return;
-    setDeleting(name);
+  const handleDeleteList = async (list) => {
+    const who = list.fronter_name ? ` (${list.fronter_name}${list.assignment_day ? ', ' + list.assignment_day : ''})` : '';
+    if (!window.confirm(`Delete the list "${list.list_name}"${who}? This cannot be undone.`)) return;
+    setDeleting(list.key);
     try {
-      await client.delete('number-lists/batch', { data: { company_id: companyId, list_name: name } });
-      setLists(prev => prev.filter(l => l.list_name !== name));
-      setListNumbers(prev => { const n = {...prev}; delete n[name]; return n; });
+      await client.delete('number-lists/batch', { data: {
+        company_id: companyId, list_name: list.list_name,
+        fronter_id: list.fronter_id || undefined, assignment_day: list.assignment_day || undefined,
+      } });
+      setLists(prev => prev.filter(l => l.key !== list.key));
+      setListNumbers(prev => { const n = { ...prev }; delete n[list.key]; return n; });
     } catch { /* non-critical */ } finally { setDeleting(null); }
   };
 
@@ -551,12 +562,12 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
             {lists.map(list => (
-              <div key={list.list_name}>
+              <div key={list.key}>
                 <div
                   className="flex items-center justify-between px-5 py-3 hover:bg-bg-secondary transition-colors cursor-pointer group"
-                  onClick={() => toggleList(list.list_name)}>
+                  onClick={() => toggleList(list)}>
                   <div className="flex items-center gap-3 min-w-0">
-                    {expandedList === list.list_name
+                    {expandedList === list.key
                       ? <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                       : <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                     }
@@ -597,11 +608,11 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                       )}
                     </div>
                     <button
-                      onClick={e => { e.stopPropagation(); handleDeleteList(list.list_name); }}
-                      disabled={deleting === list.list_name}
+                      onClick={e => { e.stopPropagation(); handleDeleteList(list); }}
+                      disabled={deleting === list.key}
                       className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-red-100"
                       title="Delete list">
-                      {deleting === list.list_name
+                      {deleting === list.key
                         ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
                         : <Trash2 size={13} style={{ color: '#ef4444' }} />
                       }
@@ -609,15 +620,15 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                   </div>
                 </div>
 
-                {expandedList === list.list_name && (
+                {expandedList === list.key && (
                   <div className="px-4 pb-3 pt-1" style={{ backgroundColor: 'var(--color-bg)' }}>
-                    {listNumbers[list.list_name] ? (() => {
+                    {listNumbers[list.key] ? (() => {
                       const q = listSearch.trim().toLowerCase();
                       const filtered = q
-                        ? listNumbers[list.list_name].filter(n =>
+                        ? listNumbers[list.key].filter(n =>
                             n.phone_number?.toLowerCase().includes(q) ||
                             n.customer_name?.toLowerCase().includes(q))
-                        : listNumbers[list.list_name];
+                        : listNumbers[list.key];
                       const visible = filtered.slice(0, 25);
                       return (
                         <div className="space-y-2">

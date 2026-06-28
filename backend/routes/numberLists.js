@@ -152,30 +152,41 @@ router.get('/lists', asyncHandler(async (req, res) => {
   if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
 
   const companyId = req.query.company_id || req.user.company_id;
+  const { fronter_id, assignment_day, status } = req.query;
 
-  let query = supabaseAdmin
-    .from('number_lists')
-    .select('list_name, fronter_id, status, id, assignment_day, company_id')
-    .order('list_name');
-
-  if (isSuperAdmin(req.user.role)) {
-    if (companyId) query = query.eq('company_id', companyId);
-    // else all companies
-  } else {
-    if (!companyId) return res.status(400).json({ error: 'company_id required' });
-    query = query.eq('company_id', companyId);
+  if (!isSuperAdmin(req.user.role) && !companyId) {
+    return res.status(400).json({ error: 'company_id required' });
   }
 
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  // Fetch ALL rows (paginate past the 1000-row cap so big lists are never
+  // undercounted), then group by the UNIQUE assignment — list_name + fronter +
+  // day. Grouping on list_name ALONE collapsed same-named lists for different
+  // fronters/days into one, which hid assignments from the manager.
+  const buildBase = () => {
+    let q = supabaseAdmin.from('number_lists')
+      .select('list_name, fronter_id, status, assignment_day, company_id')
+      .order('id', { ascending: true });
+    if (companyId) q = q.eq('company_id', companyId);
+    if (fronter_id) q = q.eq('fronter_id', fronter_id);
+    if (assignment_day) q = q.eq('assignment_day', assignment_day);
+    if (status) q = q.eq('status', status);
+    return q;
+  };
+  let all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await buildBase().range(from, from + 999);
+    if (error) return res.status(500).json({ error: error.message });
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
 
-  // Group by list_name
   const grouped = {};
-  (data || []).forEach(r => {
-    const key = r.list_name;
+  all.forEach(r => {
+    const key = `${r.list_name}${r.fronter_id || ''}${r.assignment_day || ''}`;
     if (!grouped[key]) {
       grouped[key] = {
-        list_name:      key,
+        key,
+        list_name:      r.list_name,
         fronter_id:     r.fronter_id,
         company_id:     r.company_id,
         assignment_day: r.assignment_day,
@@ -372,7 +383,7 @@ router.delete('/batch', asyncHandler(async (req, res) => {
   if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
 
   const companyId = req.user.company_id || req.body.company_id;
-  const { list_name, ids } = req.body;
+  const { list_name, ids, fronter_id, assignment_day } = req.body;
 
   if (!list_name && (!ids || !ids.length)) {
     return res.status(400).json({ error: 'list_name or ids required' });
@@ -384,6 +395,10 @@ router.delete('/batch', asyncHandler(async (req, res) => {
 
   if (list_name) {
     query = query.eq('list_name', list_name);
+    // Scope to the exact assignment so deleting one list never wipes a
+    // same-named list for a different fronter or day.
+    if (fronter_id)     query = query.eq('fronter_id', fronter_id);
+    if (assignment_day) query = query.eq('assignment_day', assignment_day);
   } else {
     query = query.in('id', ids);
   }
