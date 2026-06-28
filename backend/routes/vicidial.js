@@ -44,16 +44,23 @@ async function resolveAgent(agentId) {
   if (!agentId) return { userId: null, companyId: null };
   const a = String(agentId).trim();
   // A user may have several dialer ids (one per box) in vicidial_agent_ids[];
-  // match any of them. Fall back to the legacy single column if the array isn't
-  // migrated yet (111) or wasn't populated.
+  // match any of them. CASE-INSENSITIVE: the dialer can send an id in a different
+  // case than was mapped (Tmc100789 vs TMC100789) — try the original + uppercase
+  // (CRM ids are stored uppercase by migration 121 + the save endpoint). Falls
+  // back to the legacy single column if the array isn't migrated (111).
+  const variants = [...new Set([a, a.toUpperCase()])];
   let prof = null;
-  const arr = await supabaseAdmin
-    .from('user_profiles').select('user_id').contains('vicidial_agent_ids', [a]).limit(1).maybeSingle();
-  if (arr.data?.user_id) prof = arr.data;
+  for (const v of variants) {
+    const arr = await supabaseAdmin
+      .from('user_profiles').select('user_id').contains('vicidial_agent_ids', [v]).limit(1).maybeSingle();
+    if (arr.data?.user_id) { prof = arr.data; break; }
+  }
   if (!prof) {
-    const one = await supabaseAdmin
-      .from('user_profiles').select('user_id').eq('vicidial_agent_id', a).maybeSingle();
-    prof = one.data || null;
+    for (const v of variants) {
+      const one = await supabaseAdmin
+        .from('user_profiles').select('user_id').eq('vicidial_agent_id', v).maybeSingle();
+      if (one.data) { prof = one.data; break; }
+    }
   }
   if (!prof?.user_id) return { userId: null, companyId: null };
   const { data: ucr } = await supabaseAdmin
@@ -1140,7 +1147,7 @@ api.get('/agents', superOnly, asyncHandler(async (req, res) => {
 api.post('/agents', superOnly, asyncHandler(async (req, res) => {
   if (!req.body.user_id) return res.status(400).json({ error: 'user_id required' });
   // Accept one id or a comma/space-separated list (a user can work several boxes).
-  const agentIds = [...new Set(String(req.body.agent_id || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean))];
+  const agentIds = [...new Set(String(req.body.agent_id || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
   const primary = agentIds[0] || null;
   if (agentIds.length) {  // reject ids already mapped to ANOTHER user (both columns)
     const list = agentIds.join(',');

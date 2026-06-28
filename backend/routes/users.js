@@ -19,7 +19,8 @@ const { validatePassword, generateSecurePassword } = require('../utils/passwordV
 // A user can have several dialer agent ids (one per box). Accept a single id or
 // a comma/space-separated list → { primary, ids[] } (trimmed, de-duped).
 function parseAgentIds(raw) {
-  const ids = [...new Set(String(raw || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean))];
+  // Uppercase so matching is case-consistent with the dialer (see migration 121).
+  const ids = [...new Set(String(raw || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
   return { primary: ids[0] || null, ids };
 }
 // Reject if any of these ids already belongs to ANOTHER user (checks the single
