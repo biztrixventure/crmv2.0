@@ -51,7 +51,13 @@ const Row = ({ children }) => (
     style={{ color: 'var(--color-text)' }}>{children}</div>
 );
 
-const AgentCard = ({ agent, icon: Icon, role }) => {
+// Linked fronter/closer. Name loads with the profile; their full stats
+// (customers/transfers/sales/cancellations) lazy-load on click from the agent
+// endpoint, so opening a customer stays fast.
+const AgentCard = ({ agent, icon: Icon, role, roleKey }) => {
+  const [stats, setStats] = useState(agent?.stats || null);
+  const [loading, setLoading] = useState(false);
+
   if (!agent) return (
     <div className="rounded-xl border p-3" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
       <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -60,22 +66,37 @@ const AgentCard = ({ agent, icon: Icon, role }) => {
       <p className="text-sm mt-1" style={{ color: 'var(--color-text-tertiary)' }}>—</p>
     </div>
   );
-  const s = agent.stats;
+
+  const loadStats = async () => {
+    if (stats || loading || !agent.user_id) return;
+    setLoading(true);
+    try {
+      const r = await client.get(`customer-profile/agent/${agent.user_id}`, { params: { role: roleKey } });
+      setStats(r.data?.stats || null);
+    } catch { /* best-effort */ } finally { setLoading(false); }
+  };
+
   return (
-    <div className="rounded-xl border p-3" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+    <button type="button" onClick={loadStats}
+      className="rounded-xl border p-3 text-left w-full transition-all duration-150 hover:shadow-md"
+      style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
       <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
         <Icon size={14} /> {role}
       </div>
       <p className="text-sm font-bold mt-1" style={{ color: 'var(--color-text)' }}>{agent.name}</p>
-      {s && (
+      {stats ? (
         <div className="flex gap-3 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-          <span><b style={{ color: 'var(--color-text)' }}>{s.customers}</b> cust</span>
-          <span><b style={{ color: 'var(--color-text)' }}>{s.transfers}</b> xfer</span>
-          <span><b style={{ color: 'var(--color-text)' }}>{s.sales}</b> sales</span>
-          <span><b style={{ color: 'var(--color-text)' }}>{s.cancellations}</b> canc</span>
+          <span><b style={{ color: 'var(--color-text)' }}>{stats.customers}</b> cust</span>
+          <span><b style={{ color: 'var(--color-text)' }}>{stats.transfers}</b> xfer</span>
+          <span><b style={{ color: 'var(--color-text)' }}>{stats.sales}</b> sales</span>
+          <span><b style={{ color: 'var(--color-text)' }}>{stats.cancellations}</b> canc</span>
         </div>
+      ) : (
+        <p className="text-[11px] mt-2" style={{ color: 'var(--color-primary-600)' }}>
+          {loading ? 'Loading…' : 'Click to load their stats'}
+        </p>
       )}
-    </div>
+    </button>
   );
 };
 
@@ -146,8 +167,8 @@ export default function CustomerProfile() {
 
         {/* links */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <AgentCard agent={links.fronter} icon={UserCheck} role="Fronter" />
-          <AgentCard agent={links.closer}  icon={Headphones} role="Closer" />
+          <AgentCard agent={links.fronter} icon={UserCheck} role="Fronter" roleKey="fronter" />
+          <AgentCard agent={links.closer}  icon={Headphones} role="Closer" roleKey="closer" />
           <div className="rounded-xl border p-3" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
               <Briefcase size={14} /> Client
