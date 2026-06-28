@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Upload, Users, ListChecks, Trash2, ChevronDown, ChevronUp,
   Phone, X, CheckCircle, Plus, RefreshCw, Calendar, Map,
-  ArrowRight, Link2,
+  ArrowRight, Link2, Search, UserCog,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -51,6 +51,50 @@ const parseXLSX = async (file) => {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// ── Reassign Modal — move a whole list to another fronter / day ───────────────
+const ReassignModal = ({ list, fronters, companyId, onClose, onDone }) => {
+  const [newF,   setNewF]   = useState(list.fronter_id || '');
+  const [newDay, setNewDay] = useState(list.assignment_day || '');
+  const [busy,   setBusy]   = useState(false);
+  const [err,    setErr]    = useState('');
+  const submit = async () => {
+    const fChanged = newF !== (list.fronter_id || '');
+    const dChanged = newDay !== (list.assignment_day || '');
+    if (!fChanged && !dChanged) { setErr('Pick a different fronter or day.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const r = await client.put('number-lists/reassign', {
+        company_id: companyId, list_name: list.list_name,
+        fronter_id: list.fronter_id || undefined, assignment_day: list.assignment_day || undefined,
+        new_fronter_id: fChanged ? newF : undefined,
+        new_assignment_day: dChanged ? newDay : undefined,
+      });
+      onDone(r.data?.moved || 0);
+    } catch (e) { setErr(e.response?.data?.error || 'Failed to reassign'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-base mb-1" style={{ color: 'var(--color-text)' }}>Reassign “{list.list_name}”</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+          {list.total} numbers · currently {list.fronter_name || '—'}{list.assignment_day ? ` · ${list.assignment_day}` : ''}
+        </p>
+        <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Move to fronter</label>
+        <select value={newF} onChange={e => setNewF(e.target.value)} className="input text-sm w-full mb-3">
+          {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
+        <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Change day (optional)</label>
+        <input type="date" value={newDay} onChange={e => setNewDay(e.target.value)} className="input text-sm w-full mb-4" />
+        {err && <p className="text-xs text-red-600 mb-2">{err}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>Cancel</button>
+          <button onClick={submit} disabled={busy} className="flex-1 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>{busy ? 'Moving…' : 'Reassign'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
   const fileInputRef = useRef(null);
@@ -87,6 +131,13 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
   const [expandedList, setExpandedList] = useState(null);
   const [listNumbers,  setListNumbers]  = useState({});
   const [listSearch,   setListSearch]   = useState('');
+  // List filters (managers couldn't sift big sets) — fronter/day/status server-
+  // side, list-name search client-side.
+  const [fFronter,   setFFronter]   = useState('');
+  const [fDay,       setFDay]       = useState('');
+  const [fStatus,    setFStatus]    = useState('');
+  const [nameSearch, setNameSearch] = useState('');
+  const [reassign,   setReassign]   = useState(null);   // the list being moved
 
   const loadFronters = useCallback(async () => {
     if (!companyId) return;
@@ -100,10 +151,14 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
     if (!companyId) return;
     setListsLoad(true);
     try {
-      const res = await client.get('number-lists/lists', { params: { company_id: companyId } });
+      const params = { company_id: companyId };
+      if (fFronter) params.fronter_id     = fFronter;
+      if (fDay)     params.assignment_day = fDay;
+      if (fStatus)  params.status         = fStatus;
+      const res = await client.get('number-lists/lists', { params });
       setLists(res.data.lists || []);
     } catch { /* non-critical */ } finally { setListsLoad(false); }
-  }, [companyId]);
+  }, [companyId, fFronter, fDay, fStatus]);
 
   const loadFormFields = useCallback(async () => {
     try {
@@ -551,6 +606,28 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
           </button>
         </div>
 
+        {/* Filters — fronter/day/status (server) + list-name search (client) */}
+        <div className="flex flex-wrap items-center gap-2 px-5 py-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <select value={fFronter} onChange={e => setFFronter(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 150 }}>
+            <option value="">All fronters</option>
+            {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <input type="date" value={fDay} onChange={e => setFDay(e.target.value)} className="input text-xs py-1.5" style={{ width: 150 }} />
+          <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 120 }}>
+            <option value="">Any status</option>
+            <option value="new">New</option><option value="called">Called</option>
+            <option value="callback">Callback</option><option value="completed">Done</option><option value="skip">Skip</option>
+          </select>
+          <div className="relative flex-1 min-w-[160px]">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input value={nameSearch} onChange={e => setNameSearch(e.target.value)} placeholder="Search list name…" className="input text-xs py-1.5 pl-7 w-full" />
+          </div>
+          {(fFronter || fDay || fStatus || nameSearch) && (
+            <button onClick={() => { setFFronter(''); setFDay(''); setFStatus(''); setNameSearch(''); }}
+              className="text-xs font-semibold px-2 py-1.5 rounded-lg hover:bg-bg-secondary" style={{ color: 'var(--color-text-secondary)' }}>Clear</button>
+          )}
+        </div>
+
         {listsLoad ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" />
@@ -561,7 +638,9 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
           </p>
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-            {lists.map(list => (
+            {lists
+              .filter(list => !nameSearch.trim() || (list.list_name || '').toLowerCase().includes(nameSearch.trim().toLowerCase()))
+              .map(list => (
               <div key={list.key}>
                 <div
                   className="flex items-center justify-between px-5 py-3 hover:bg-bg-secondary transition-colors cursor-pointer group"
@@ -607,6 +686,12 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                         </span>
                       )}
                     </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); setReassign(list); }}
+                      className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-bg-secondary"
+                      title="Reassign to another fronter / day">
+                      <UserCog size={13} style={{ color: 'var(--color-primary-600)' }} />
+                    </button>
                     <button
                       onClick={e => { e.stopPropagation(); handleDeleteList(list); }}
                       disabled={deleting === list.key}
@@ -688,6 +773,16 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
           </div>
         )}
       </div>
+
+      {reassign && (
+        <ReassignModal
+          list={reassign}
+          fronters={fronters}
+          companyId={companyId}
+          onClose={() => setReassign(null)}
+          onDone={() => { setReassign(null); loadLists(); }}
+        />
+      )}
     </div>
   );
 };

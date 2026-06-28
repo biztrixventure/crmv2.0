@@ -316,6 +316,34 @@ router.post('/bulk', [
 }));
 
 // ============================================================================
+// PUT /number-lists/reassign — bulk-move a list (list_name + fronter + day) to a
+// different fronter and/or day. Managers only. (Declared before /:id so the
+// literal path isn't captured by the :id param route.)
+// ============================================================================
+router.put('/reassign', asyncHandler(async (req, res) => {
+  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  const companyId = req.body.company_id || req.user.company_id;
+  const { list_name, fronter_id, assignment_day, new_fronter_id, new_assignment_day } = req.body;
+  if (!list_name) return res.status(400).json({ error: 'list_name required' });
+  if (!new_fronter_id && !new_assignment_day) {
+    return res.status(400).json({ error: 'new_fronter_id or new_assignment_day required' });
+  }
+
+  const patch = { assigned_by: req.user.id, updated_at: new Date().toISOString() };
+  if (new_fronter_id)     patch.fronter_id     = new_fronter_id;
+  if (new_assignment_day) patch.assignment_day = new_assignment_day;
+
+  let q = supabaseAdmin.from('number_lists').update(patch).eq('list_name', list_name);
+  if (!isSuperAdmin(req.user.role) && companyId) q = q.eq('company_id', companyId);
+  if (fronter_id)     q = q.eq('fronter_id', fronter_id);
+  if (assignment_day) q = q.eq('assignment_day', assignment_day);
+
+  const { data, error } = await q.select('id');
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ moved: (data || []).length });
+}));
+
+// ============================================================================
 // PUT /number-lists/:id — update status / notes
 // ============================================================================
 router.put('/:id', [
