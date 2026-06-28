@@ -25,14 +25,16 @@ const fmtDateShort = (iso) => {
 };
 
 // ── Status configs ────────────────────────────────────────────────────────────
+// Labels match the canonical compliance.status_catalog so this tab reads the
+// same as every other shell (Approved = closed_won, etc.).
 const SALE_STATUS = {
-  open:           { label: 'Pending',   bg: '#dbeafe', color: '#2563eb' },
-  pending_review: { label: 'In Review', bg: '#fef3c7', color: '#d97706' },
-  needs_revision: { label: 'Revision',  bg: '#fee2e2', color: '#dc2626' },
-  closed_won:     { label: 'Won',       bg: '#dcfce7', color: '#16a34a' },
-  closed_lost:    { label: 'Lost',      bg: '#fee2e2', color: '#dc2626' },
-  sold:           { label: 'Sold',      bg: '#dcfce7', color: '#16a34a' },
-  cancelled:      { label: 'Cancelled', bg: '#fee2e2', color: '#dc2626' },
+  open:           { label: 'Open',           bg: '#dbeafe', color: '#2563eb' },
+  pending_review: { label: 'Pending Review', bg: '#fef3c7', color: '#d97706' },
+  needs_revision: { label: 'Needs Revision', bg: '#fee2e2', color: '#dc2626' },
+  closed_won:     { label: 'Approved',       bg: '#dcfce7', color: '#16a34a' },
+  closed_lost:    { label: 'Lost',           bg: '#fee2e2', color: '#dc2626' },
+  sold:           { label: 'Sold',           bg: '#dcfce7', color: '#16a34a' },
+  cancelled:      { label: 'Cancelled',      bg: '#fee2e2', color: '#dc2626' },
 };
 const TRANSFER_STATUS = {
   pending:   { label: 'Pending',  bg: '#fef3c7', color: '#d97706' },

@@ -34,7 +34,7 @@ const SortIcon = ({ col, sort }) => {
 };
 
 const SALE_BADGE  = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', pending_review:'warning', needs_revision:'error' };
-const SALE_LABEL  = { open:'Open', sold:'Sold', cancelled:'Cancelled', follow_up:'Follow Up', closed_won:'Approved', closed_lost:'Lost', pending_review:'In Review', needs_revision:'Needs Revision' };
+const SALE_LABEL  = { open:'Open', sold:'Sold', cancelled:'Cancelled', follow_up:'Follow Up', closed_won:'Approved', closed_lost:'Lost', pending_review:'Pending Review', needs_revision:'Needs Revision' };
 const XFER_BADGE  = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
 const XFER_LABEL  = { pending:'Pending', assigned:'Assigned', completed:'Completed', cancelled:'Cancelled', rejected:'Rejected' };
 const CB_STATUS_BADGE  = { pending:'warning', completed:'success', cancelled:'error', no_answer:'secondary', answering_machine:'info' };
