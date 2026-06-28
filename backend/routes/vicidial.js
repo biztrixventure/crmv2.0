@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 
 const ingest = express.Router();
@@ -434,6 +434,18 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
 
   // ── matched a lead → apply straight away (scoped to the closer's company) ──
   if (tr) {
+    // If this matched a MANUAL lead (by phone, so no dialer code yet) and the
+    // closer's dispo carried a prefixed vendor_lead_code (WTI/ETC/TMC + id),
+    // stamp it — the lead is now fully coded + identical to the dialer, and the
+    // next fetch uses the reliable code path. Free (no extra dialer call).
+    if (!tr.vicidial_vendor_code) {
+      const pfxRe = new RegExp('^(' + boxPrefixes().join('|') + ')\\d+$', 'i');
+      const realCode = [inCode, inAlt].map(c => String(c || '').toUpperCase()).find(c => pfxRe.test(c));
+      if (realCode) {
+        await supabaseAdmin.from('transfers').update({ vicidial_vendor_code: realCode })
+          .eq('id', tr.id).is('vicidial_vendor_code', null).then(() => {}, () => {});
+      }
+    }
     const dispoCompanyId = closerCompanyId || tr.company_id;
     const mapped = await bumpDispoMap(dispoCompanyId, rawCode);
     const dispoName = mapped?.disposition_name || dispo || rawCode || null;
@@ -612,7 +624,25 @@ async function fetchAndApplyDispo(tr) {
     const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
     const { userId: closerUserId } = await resolveAgent(found.user);
     await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: found.code, talk: NaN });
-    return { ok: true, source: 'dialer', disposition_name: dispoName, agent: found.user, at: found.at };
+
+    // This manual lead had no dialer code → learn its lead_id + box from the
+    // recording (closer's agent + the call day, matched by phone in the filename)
+    // and stamp the proper vendor_lead_code. Now it's fully linked to the dialer:
+    // same lead id, and future fetches use the reliable code path. Best-effort —
+    // only stamps if a recording exists and the code slot is still empty.
+    let stampedCode = null;
+    if (!tr.vicidial_vendor_code && found.user && found.at) {
+      try {
+        const lead = await resolveLeadIdByAgentDate({ boxId: found.box, agent: found.user, date: found.at, phone: norm });
+        if (lead) {
+          stampedCode = `${lead.prefix}${lead.lead_id}`;
+          await supabaseAdmin.from('transfers')
+            .update({ vicidial_vendor_code: stampedCode })
+            .eq('id', tr.id).is('vicidial_vendor_code', null);
+        }
+      } catch { /* best-effort — never block the dispo */ }
+    }
+    return { ok: true, source: 'dialer', disposition_name: dispoName, agent: found.user, at: found.at, lead_code: stampedCode };
   } catch (e) {
     return { ok: false, reason: e.message };
   }

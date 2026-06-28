@@ -223,6 +223,22 @@ async function findSaleRecording({ code, phone, agentIds = [], date } = {}) {
   return cand[0];
 }
 
+// Resolve the dialer lead_id for an un-coded (manual) transfer: recording_lookup
+// by the closer's agent + the call date on that box, then match the customer
+// phone inside the recording filename. Returns { lead_id, box, prefix } or null.
+// Lets a manual lead get a proper vendor_lead_code (prefix+lead_id) so it becomes
+// fully linked to the dialer. Best-effort — needs a recording to exist.
+async function resolveLeadIdByAgentDate({ boxId, agent, date, phone }) {
+  if (!boxId || !agent || !date || !phone) return null;
+  const box = BOXES.find(b => b.id === boxId);
+  if (!box) return null;
+  const tail = phoneTail(phone);
+  if (!tail) return null;
+  const rows = await recordingLookup(box, { agent_user: agent, date: String(date).slice(0, 10) });
+  const hit = (rows || []).find(r => r.lead_id && onlyDigits(r.location).includes(tail));
+  return hit ? { lead_id: hit.lead_id, box: box.id, prefix: box.prefix } : null;
+}
+
 // NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
 // get the LIVE list/prefixes, not a stale snapshot captured at require-time.
 module.exports = {
@@ -230,4 +246,5 @@ module.exports = {
   boxPrefixes,
   refreshBoxes,
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
+  resolveLeadIdByAgentDate,
 };
