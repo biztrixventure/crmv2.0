@@ -307,6 +307,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     message: `A transfer just came in from the dialer (${phone}). Open it to complete.`,
     companyId,
     data: { transfer_id: data.id, phone, kind: 'vicidial_xfer' },
+    dedupBase: `pendingxfer_${data.id}`,   // one notification per transfer (guards create-race)
   }).catch(() => {});
   res.json({ ok: true, transfer_id: data.id });
 }));
