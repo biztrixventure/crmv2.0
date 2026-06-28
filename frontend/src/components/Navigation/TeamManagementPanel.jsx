@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, PlusCircle, Trash2, XCircle, CheckCircle, Edit2 } from 'lucide-react';
+import { Users, PlusCircle, Trash2, XCircle, CheckCircle, Edit2, BarChart3 } from 'lucide-react';
 import { Card, Badge, Button } from '../UI';
 import Modal from '../UI/Modal';
+import Tooltip from '../UI/Tooltip';
+import UserScorecard from '../Manager/UserScorecard';
 import CreateUserModal from '../Admin/UserManagement/CreateUserModal';
 import UserModal from '../Admin/UserManagement/UserModal';
 import client from '../../api/client';
@@ -13,6 +15,7 @@ const TeamManagementPanel = ({ companyId }) => {
   const [loading, setLoading]   = useState(false);
   const [showAdd, setShowAdd]   = useState(false);
   const [editUser, setEditUser] = useState(null);
+  const [scorecard, setScorecard] = useState(null);
   const [confirm, setConfirm]   = useState(null);
   const [actionErr, setActionErr] = useState('');
 
@@ -111,6 +114,12 @@ const TeamManagementPanel = ({ companyId }) => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
+                        <Tooltip text="View this user's performance scorecard">
+                          <button onClick={e => { e.stopPropagation(); setScorecard(u); }}
+                            className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                            <BarChart3 size={15} style={{ color: 'var(--color-success-600)' }} />
+                          </button>
+                        </Tooltip>
                         {hasPermission('edit_user') && (
                           <>
                             <button onClick={e => { e.stopPropagation(); setEditUser(u); }} title="Edit"
@@ -142,6 +151,8 @@ const TeamManagementPanel = ({ companyId }) => {
           </div>
         </Card>
       )}
+
+      {scorecard && <UserScorecard user={scorecard} onClose={() => setScorecard(null)} />}
 
       <CreateUserModal
         isOpen={showAdd}

@@ -451,7 +451,68 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     days,
     daily: Object.values(buckets),
     top_agents: topAgents,
-    totals: { transfers: totalT, sales: totalS, approved: totalApproved, conversion: totalT ? Math.round(totalS / totalT * 100) : 0 },
+    // Cap at 100% — a conversion rate can't exceed 1:1. Bulk-imported sales with
+    // no matching transfer would otherwise push it past 100%.
+    totals: { transfers: totalT, sales: totalS, approved: totalApproved, conversion: totalT ? Math.min(100, Math.round(totalS / totalT * 100)) : 0 },
+  });
+}));
+
+// ============================================================================
+// GET /stats/user-performance/:userId?days=30 — one teammate's scorecard.
+// A manager may only view a user in their own company (superadmin sees anyone).
+// Role-aware: fronter numbers use created transfers + fronted sales; closer
+// numbers use assigned transfers + closed sales.
+// ============================================================================
+router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
+  const reqRole = req.user.role, companyId = req.user.company_id, targetId = req.params.userId;
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 60);
+  const isGlobal = ['superadmin', 'readonly_admin'].includes(reqRole);
+
+  if (!isGlobal) {
+    const { data: rel } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id').eq('company_id', companyId).eq('user_id', targetId).eq('is_active', true).maybeSingle();
+    if (!rel) return res.status(403).json({ error: 'User is not in your team' });
+  }
+
+  const { data: prof } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, first_name, last_name').eq('user_id', targetId).maybeSingle();
+  if (!prof) return res.status(404).json({ error: 'User not found' });
+  const { data: roleRow } = await supabaseAdmin.from('user_company_roles')
+    .select('custom_roles(level)').eq('user_id', targetId).eq('is_active', true).limit(1).maybeSingle();
+  const level = roleRow?.custom_roles?.level || null;
+
+  const sinceUtc = new Date(Date.now() - days * 86400000).toISOString();
+  const [{ data: closerSales }, { data: fronterSales }, { data: xCreated }, { data: xAssigned }] = await Promise.all([
+    supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('closer_id', targetId).gte('created_at', sinceUtc).limit(8000),
+    supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('fronter_id', targetId).gte('created_at', sinceUtc).limit(8000),
+    supabaseAdmin.from('transfers').select('created_at').eq('created_by', targetId).neq('vicidial_pending', true).gte('created_at', sinceUtc).limit(8000),
+    supabaseAdmin.from('transfers').select('created_at').eq('assigned_closer_id', targetId).neq('vicidial_pending', true).gte('created_at', sinceUtc).limit(8000),
+  ]);
+
+  const isFronterRole = !!(level && level.includes('fronter'));
+  const sales = isFronterRole ? (fronterSales || []) : (closerSales || []);
+  const xfers = isFronterRole ? (xCreated || []) : (xAssigned || []);
+  const TERMINAL = ['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback'];
+  const won = sales.filter(s => s.status === 'closed_won').length;
+  const cancellations = sales.filter(s => s.cancellation_date || TERMINAL.includes(s.status)).length;
+
+  const dayOf = (d) => String(d || '').slice(0, 10);
+  const buckets = {};
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    buckets[d] = { date: d, transfers: 0, sales: 0 };
+  }
+  xfers.forEach(t => { const d = dayOf(t.created_at); if (buckets[d]) buckets[d].transfers++; });
+  sales.forEach(s => { const d = dayOf(s.sale_date || s.created_at); if (buckets[d]) buckets[d].sales++; });
+
+  const totalX = xfers.length, totalS = sales.length;
+  res.json({
+    user: { user_id: targetId, name: [prof.first_name, prof.last_name].filter(Boolean).join(' ') || 'Unknown', role: level },
+    days,
+    side: isFronterRole ? 'fronter' : 'closer',
+    // Cap at 100% (bulk-imported sales without a transfer would inflate it).
+    totals: { transfers: totalX, sales: totalS, won, cancellations, conversion: totalX ? Math.min(100, Math.round(totalS / totalX * 100)) : 0 },
+    daily: Object.values(buckets),
   });
 }));
 
