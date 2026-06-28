@@ -19,6 +19,14 @@ const NO_CONNECT = new Set([
   'XFER', 'TRANSFER', 'XDROP', 'IVRXFR', 'RQXFER',
 ]);
 
+// In-progress / non-final system states that are NEVER a real disposition. Unlike
+// NO_CONNECT, this does NOT exclude call-outcome codes (A/N/DAIR/B/DC…) — for a
+// transferred lead those ARE the closer's recorded outcome, so the lead's STATUS
+// field should surface them (the call-log path keeps the stricter NO_CONNECT).
+const SYSTEM_SKIP = new Set([
+  '', '-', 'INCALL', 'QUEUE', 'CH', 'DISPO', 'NEW', 'XFER', 'TRANSFER', 'XDROP', 'IVRXFR', 'RQXFER',
+]);
+
 const axios = require('axios');
 
 // phone_number_log on one box for a phone → parsed call rows (any order). Uses
@@ -61,7 +69,10 @@ async function leadStatusByCode(code) {
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (!text || /^ERROR|^NOTICE/m.test(text)) return null;
     const status = text.split(/\r?\n/)[0].trim();
-    return (status && !NO_CONNECT.has(status.toUpperCase())) ? status : null;
+    // Surface the lead's real disposition INCLUDING call-outcome codes (A/N/DAIR…)
+    // — only true in-progress/system states are skipped. This is the closer's
+    // recorded outcome on a transferred lead; "no record without a dispo".
+    return (status && !SYSTEM_SKIP.has(status.toUpperCase())) ? status : null;
   } catch { return null; }
 }
 
