@@ -403,13 +403,21 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
 
 // stream the actual sale recording (source hidden, nothing stored) + audit
 router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
-  const allowed = req.portalClient.closer_ids || [];
+  // Mirror the /sales browse scope EXACTLY (closers AND/OR client_names), so a
+  // client can't fetch a recording outside their scope by guessing a sale id —
+  // and a client_name-only client (no closers) can still play recordings.
+  const closers = req.portalClient.closer_ids || [];
+  const clients = req.portalClient.client_names || [];
   const { data: sale } = await supabaseAdmin
     .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id')
+    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, transfer_id')
     .eq('id', req.params.id)
     .maybeSingle();
-  if (!sale || !allowed.includes(sale.closer_id)) return res.status(404).json({ error: 'Not available' });
+  const okCloser = !closers.length || closers.includes(sale?.closer_id);
+  const okClient = !clients.length || clients.includes(sale?.client_name);
+  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) {
+    return res.status(404).json({ error: 'Not available' });
+  }
 
   const [{ data: prof }, { data: tr }] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
