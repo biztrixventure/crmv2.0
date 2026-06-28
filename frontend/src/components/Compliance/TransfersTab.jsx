@@ -22,6 +22,7 @@ import TabStatsStrip from './TabStatsStrip';
 import FilterBar from '../UI/FilterBar';
 import TransferFormModal from '../Transfers/TransferFormModal';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
+import FetchAllDisposButton from '../Vicidial/FetchAllDisposButton';
 import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
@@ -187,6 +188,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         subtitle={isSuper ? 'Lead transfers across all companies — open a record to edit status or delete' : 'Read-only view of lead transfers across all companies'}
         onRefresh={() => { setPage(1); load(); }}
         onExport={() => setExportOpen(true)}
+        extra={<FetchAllDisposButton onDone={() => { setPage(1); load(); }} />}
       />
 
       {/* Today created chip */}

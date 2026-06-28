@@ -65,6 +65,28 @@ async function leadStatusByCode(code) {
   } catch { return null; }
 }
 
+// The lead's last agent (vicidial_list.user) by code — used to attribute a
+// fetched-by-lead-code disposition to a closer so their name shows. Persists in
+// vicidial_list like the status does, so it works for old leads too.
+async function leadAgentByCode(code) {
+  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
+  if (!m) return null;
+  const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
+  const leadId = m[2];
+  if (!box || !leadId) return null;
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'user', lead_id: leadId },
+      timeout: 15000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (!text || /^ERROR|^NOTICE/m.test(text)) return null;
+    const user = text.split(/\r?\n/)[0].trim();
+    // VICIdial's system/non-agent owners aren't real closers
+    return (user && !/^(VDAD|VDCL|admin|-+)$/i.test(user)) ? user : null;
+  } catch { return null; }
+}
+
 // Pull every call for a phone across all boxes, newest first.
 async function lookupCallsByPhone(phone) {
   const all = (await Promise.all(BOXES.map(b => phoneCallLog(b, phone)))).flat();
@@ -149,4 +171,4 @@ async function findSaleRecording({ code, phone, agentIds = [], date } = {}) {
   return cand[0];
 }
 
-module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode, findSaleRecording };
+module.exports = { BOXES, lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording };

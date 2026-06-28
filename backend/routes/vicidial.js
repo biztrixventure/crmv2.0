@@ -25,7 +25,8 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode } = require('../utils/dialerBoxes');
+const notifications = require('../utils/notificationService');
 
 const ingest = express.Router();
 const api = express.Router();
@@ -297,6 +298,16 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code})`);
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
   xdbg.outcome = `created transfer ${data.id}`;
+
+  // Ping the fronter instantly (notification row → Supabase realtime + web push)
+  // so they know a dialer transfer is waiting to be completed.
+  notifications.notifyUsers([userId], {
+    type: 'pending_transfer',
+    title: 'New transfer to complete',
+    message: `A transfer just came in from the dialer (${phone}). Open it to complete.`,
+    companyId,
+    data: { transfer_id: data.id, phone, kind: 'vicidial_xfer' },
+  }).catch(() => {});
   res.json({ ok: true, transfer_id: data.id });
 }));
 
@@ -543,47 +554,103 @@ api.get('/closer-assignable', asyncHandler(async (req, res) => {
 // attaches a closer disposition already sitting in the CRM queue (the common
 // case); if none, it asks the dialer for the latest real disposition on that
 // phone and attaches that. Idempotent-ish: re-running just re-applies the latest.
+// Core fetch-dispo for ONE transfer: queue → lead-code(+agent) → dialer call log.
+// Always tries to resolve the CLOSER so their name shows on the card. Returns a
+// small result; never throws (so the bulk run can't be derailed by one row).
+async function fetchAndApplyDispo(tr) {
+  const norm = tr.normalized_phone;
+  if (!norm) return { ok: false, reason: 'no phone' };
+  try {
+    // 1) Queue-first — a closer disposition already queued (dialer fired it but
+    //    it was unattached because the transfer was created the manual way).
+    const { data: q } = await supabaseAdmin
+      .from('vicidial_closer_dispo_queue').select('*')
+      .eq('normalized_phone', norm).eq('status', 'pending').is('transfer_id', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (q) {
+      const dispoName = q.disposition_name || await lookupDispoName(q.company_id || tr.company_id, q.vici_code);
+      await applyCloserDispo({ transfer: tr, dispoCompanyId: q.company_id || tr.company_id, closerUserId: q.closer_user_id, dispoName, rawDispo: q.raw_dispo, talk: NaN });
+      await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ status: 'applied', transfer_id: tr.id }).eq('id', q.id);
+      return { ok: true, source: 'queue', disposition_name: dispoName || q.vici_code };
+    }
+
+    // 2) By lead code — status persists in vicidial_list even after the call log
+    //    archives. Also pull the lead's agent so the CLOSER's name is attributed.
+    if (tr.vicidial_vendor_code) {
+      const code = await leadStatusByCode(tr.vicidial_vendor_code);
+      if (code) {
+        const dispoName = await lookupDispoName(tr.company_id, code) || code;
+        const agentUser = await leadAgentByCode(tr.vicidial_vendor_code);
+        const { userId: closerUserId } = agentUser ? await resolveAgent(agentUser) : { userId: null };
+        await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: code, talk: NaN });
+        return { ok: true, source: 'lead', disposition_name: dispoName, agent: agentUser || null };
+      }
+    }
+
+    // 3) Dialer call log — latest real disposition on this phone (same-day only).
+    const found = await latestDisposition(norm);
+    if (!found) return { ok: false, reason: 'no disposition found' };
+    const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
+    const { userId: closerUserId } = await resolveAgent(found.user);
+    await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: found.code, talk: NaN });
+    return { ok: true, source: 'dialer', disposition_name: dispoName, agent: found.user, at: found.at };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
 api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
     .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code').eq('id', req.params.transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
-  const norm = tr.normalized_phone;
-  if (!norm) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
+  if (!tr.normalized_phone) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
+  const r = await fetchAndApplyDispo(tr);
+  if (!r.ok) return res.json({ ok: false, message: r.reason === 'no disposition found'
+    ? 'No disposition found yet — the call may have archived (old) and this transfer has no dialer code to look up.'
+    : r.reason });
+  res.json(r);
+}));
 
-  // 1) Queue-first — a closer disposition may already be queued (fired by the
-  //    dialer but unattached because the transfer was created the manual way).
-  const { data: q } = await supabaseAdmin
-    .from('vicidial_closer_dispo_queue').select('*')
-    .eq('normalized_phone', norm).eq('status', 'pending').is('transfer_id', null)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (q) {
-    const dispoName = q.disposition_name || await lookupDispoName(q.company_id || tr.company_id, q.vici_code);
-    await applyCloserDispo({ transfer: tr, dispoCompanyId: q.company_id || tr.company_id, closerUserId: q.closer_user_id, dispoName, rawDispo: q.raw_dispo, talk: NaN });
-    await supabaseAdmin.from('vicidial_closer_dispo_queue').update({ status: 'applied', transfer_id: tr.id }).eq('id', q.id);
-    return res.json({ ok: true, source: 'queue', disposition_name: dispoName || q.vici_code });
+// Compliance/superadmin: BULK fetch dispositions for every undisposed transfer
+// across ALL companies in a window (default = today). Throttled. Returns a
+// per-company summary. Idempotent — a transfer that already has a dispo is skipped.
+api.post('/fetch-all-dispos', asyncHandler(async (req, res) => {
+  const superadmin = await isSuperAdmin(req.user.id);
+  if (!superadmin && req.user.role !== 'compliance_manager') return res.status(403).json({ error: 'Compliance only' });
+
+  const from = (req.body.date_from || new Date().toISOString().slice(0, 10)) + 'T00:00:00Z';
+  const to   = (req.body.date_to   || new Date().toISOString().slice(0, 10)) + 'T23:59:59Z';
+
+  // Undisposed transfers with a phone, in-window, all companies.
+  const { data: trs } = await supabaseAdmin
+    .from('transfers')
+    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at')
+    .gte('created_at', from).lte('created_at', to)
+    .not('normalized_phone', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(2000);
+  const all = trs || [];
+  // skip transfers that already have a disposition_action
+  const have = new Set();
+  for (let i = 0; i < all.length; i += 200) {
+    const { data } = await supabaseAdmin.from('disposition_actions').select('transfer_id').in('transfer_id', all.slice(i, i + 200).map(t => t.id));
+    (data || []).forEach(a => have.add(a.transfer_id));
   }
+  const todo = all.filter(t => !have.has(t.id));
 
-  // 2) By lead code — the lead's STATUS persists in vicidial_list even after the
-  //    call log archives, so a coded transfer can fetch an OLD disposition by its
-  //    lead_id (no-connect/XFER are filtered out inside leadStatusByCode).
-  if (tr.vicidial_vendor_code) {
-    const code = await leadStatusByCode(tr.vicidial_vendor_code);
-    if (code) {
-      const dispoName = await lookupDispoName(tr.company_id, code) || code;
-      await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: code, talk: NaN });
-      return res.json({ ok: true, source: 'lead', disposition_name: dispoName });
+  let fetched = 0; const byCompany = {};
+  // bounded concurrency so we don't flood the dialers
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(8, todo.length || 1) }, async () => {
+    while (idx < todo.length) {
+      const t = todo[idx++];
+      const r = await fetchAndApplyDispo(t);
+      if (r.ok) { fetched++; byCompany[t.company_id] = (byCompany[t.company_id] || 0) + 1; }
     }
-  }
+  }));
 
-  // 3) Dialer call log — latest real disposition on this phone. Only sees the
-  //    ACTIVE log (the dialer archives old calls), so this is a same-day backstop.
-  const found = await latestDisposition(norm);
-  if (!found) return res.json({ ok: false, message: 'No disposition found yet — the call may have archived (old) and this transfer has no dialer code to look up.' });
-
-  const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
-  const { userId: closerUserId } = await resolveAgent(found.user);
-  await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: found.code, talk: NaN });
-  res.json({ ok: true, source: 'dialer', disposition_name: dispoName, agent: found.user, at: found.at });
+  logger.success('VICIDIAL_FETCH_ALL', `fetched ${fetched}/${todo.length} dispos (${all.length} in window)`);
+  res.json({ ok: true, in_window: all.length, undisposed: todo.length, fetched, by_company: byCompany });
 }));
 
 // Attach a queued disposition to a chosen transfer.
