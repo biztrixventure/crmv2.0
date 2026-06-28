@@ -1195,7 +1195,12 @@ router.put('/:id/feature-overrides',
     const rows = (req.body.overrides || [])
       .filter(o => o.feature_key && typeof o.is_enabled === 'boolean')
       .map(o => ({ user_id: a.user_id, company_id: a.company_id, feature_key: o.feature_key, is_enabled: o.is_enabled, set_by: req.user.id }));
-    if (rows.length) await supabaseAdmin.from('user_feature_flags').insert(rows);
+    if (rows.length) {
+      const { error } = await supabaseAdmin.from('user_feature_flags').insert(rows);
+      // Surface a real failure (e.g. migration 122 not applied yet) instead of
+      // silently reporting success.
+      if (error) return res.status(400).json({ error: /relation .*does not exist|user_feature_flags/i.test(error.message) ? 'Per-user feature overrides need migration 122 applied first.' : error.message });
+    }
 
     logger.info('USER_FEATURE_OVERRIDES', `Saved ${rows.length} feature overrides for user ${a.user_id}`);
     res.json({ message: 'Feature overrides saved', count: rows.length });

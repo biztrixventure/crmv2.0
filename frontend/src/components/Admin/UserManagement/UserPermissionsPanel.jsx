@@ -40,6 +40,32 @@ const UserPermissionsPanel = ({ user }) => {
   const [saving, setSaving]   = useState(false);
   const [msg, setMsg]   = useState(null);
   const [search, setSearch] = useState('');
+  const [peers, setPeers]   = useState([]);   // same-company users, for "copy from"
+
+  // Load same-company users so the superadmin can copy one user's access onto another.
+  useEffect(() => {
+    if (!user.company_id) return;
+    client.get('users', { params: { company_id: user.company_id } })
+      .then(r => setPeers((r.data.users || []).filter(u => u.id && u.id !== user.id)))
+      .catch(() => {});
+  }, [user.company_id, user.id]);
+
+  const copyFrom = async (srcId) => {
+    if (!srcId) return;
+    try {
+      const [p, f] = await Promise.all([
+        client.get(`users/${srcId}/overrides`),
+        client.get(`users/${srcId}/feature-overrides`).catch(() => ({ data: { user_overrides: {} } })),
+      ]);
+      const pm = {}; (p.data.overrides || []).forEach(o => { pm[o.permission_name] = o.type; });
+      setOverrides(pm);
+      setFeatOv(f.data.user_overrides || {});
+      const src = peers.find(x => x.id === srcId);
+      setMsg({ type: 'success', text: `Loaded access from ${[src?.first_name, src?.last_name].filter(Boolean).join(' ') || 'that user'} — review, then click Save All to apply.` });
+    } catch { setMsg({ type: 'error', text: 'Failed to copy access' }); }
+  };
+
+  const clearAll = () => { setOverrides({}); setFeatOv({}); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,9 +159,21 @@ const UserPermissionsPanel = ({ user }) => {
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search tabs, features, options…" className="input text-sm py-1.5 pl-8 w-full" />
         </div>
-        <button onClick={() => bulkAll('on')}      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#bbf7d0', color: '#16a34a' }}><Check size={12} /> Grant all perms</button>
-        <button onClick={() => bulkAll('off')}     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#fecaca', color: '#dc2626' }}><X size={12} /> Revoke all</button>
-        <button onClick={() => bulkAll('default')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}><RotateCcw size={12} /> Reset</button>
+        {peers.length > 0 && (
+          <select onChange={e => { copyFrom(e.target.value); e.target.value = ''; }} defaultValue=""
+            className="input text-xs py-1.5" style={{ maxWidth: 210 }} title="Copy another user's access into the editor">
+            <option value="">Copy access from…</option>
+            {peers.map(p => (
+              <option key={p.id} value={p.id}>
+                {[p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || 'User'}
+                {` · ${(p.role_level || p.custom_roles?.level || p.role || '').replace(/_/g, ' ') || '—'}`}
+              </option>
+            ))}
+          </select>
+        )}
+        <button onClick={() => bulkAll('on')}  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#bbf7d0', color: '#16a34a' }}><Check size={12} /> Grant all perms</button>
+        <button onClick={() => bulkAll('off')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#fecaca', color: '#dc2626' }}><X size={12} /> Revoke all</button>
+        <button onClick={clearAll}             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} title="Clear ALL overrides (perms + features) back to defaults"><RotateCcw size={12} /> Reset all</button>
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">
