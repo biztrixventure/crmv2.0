@@ -39,8 +39,12 @@ class Sale extends Entity {
       plan: this.plan, sale_date: this.saleDate, company_id: this.companyId,
       client_name: this.clientName, is_resell: this.isResell,
       cancelled: this.cancelled, active: this.active,
+      cancellation_date: this.cancellationDate,   // SaleStatusBadge reads this
+      down_payment: this.get('down_payment'),
+      monthly_payment: this.get('monthly_payment'),
       vehicle: [this.get('car_year'), this.get('car_make'), this.get('car_model')]
         .filter(Boolean).join(' ') || null,
+      vin: this.get('car_vin'),
     };
   }
 }

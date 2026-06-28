@@ -67,6 +67,30 @@ class Customer extends Entity {
   activePolicyCount() { return this.#plans.filter(p => p.active).length; }
   companies()         { return [...new Set(this.#sales.map(s => s.companyId).filter(Boolean))]; }
 
+  /** Company ids resolved to names (the repository fills the company_names map). */
+  companiesDetailed() {
+    const names = this.get('company_names') || {};
+    return this.companies().map(id => ({ id, name: names[id] || null }));
+  }
+
+  /** Real money: upfront collected + the still-recurring monthly on active policies. */
+  financials() {
+    const num = (x) => (Number(x) || 0);
+    return {
+      total_down_payment: this.#sales.reduce((a, s) => a + num(s.get('down_payment')), 0),
+      monthly_recurring:  this.#plans.filter(p => p.active).reduce((a, p) => a + num(p.get('monthly_payment')), 0),
+    };
+  }
+
+  /** First/last time we saw this customer (across leads + sales). */
+  activityWindow() {
+    const dates = [
+      ...this.#transfers.map(t => t.get('created_at')),
+      ...this.#sales.map(s => s.get('sale_date') || s.get('created_at')),
+    ].filter(Boolean).sort();
+    return { first_seen: dates[0] || null, last_activity: dates[dates.length - 1] || null };
+  }
+
   stats() {
     return {
       transfers: this.transferCount(),
@@ -98,6 +122,9 @@ class Customer extends Entity {
       transfers:     this.#transfers.map(t => t.serialize()),
       sales:         this.#sales.map(s => s.serialize()),
       cancellations: this.#cancellations.map(c => c.serialize()),
+      companies:     this.companiesDetailed(),
+      financials:    this.financials(),
+      activity:      this.activityWindow(),
       stats: this.stats(),
     };
   }

@@ -149,6 +149,13 @@ class CustomerProfileRepository {
       }));
     }
 
+    // Resolve company ids → names so the profile shows real company names.
+    const coIds = customer.companies();
+    if (coIds.length) {
+      const { data: cos } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds);
+      customer.set('company_names', Object.fromEntries((cos || []).map(c => [c.id, c.name])));
+    }
+
     return customer;
   }
 
