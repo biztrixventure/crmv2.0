@@ -137,7 +137,7 @@ export default function TeamPerformance() {
             <Stat icon={Send} label="Transfers" value={totals.transfers} accent="#3b82f6" tip={`Transfers your team received in the last ${days} days`} />
             <Stat icon={DollarSign} label="Sales" value={totals.sales} accent="#16a34a" tip={`Sales made in the last ${days} days`} />
             <Stat icon={CheckCircle} label="Approved" value={totals.approved} accent="#10b981" tip="Sales approved by compliance (closed_won)" />
-            <Stat icon={Percent} label="Conversion" value={`${totals.conversion}%`} accent="#7c3aed" tip="Sales ÷ transfers — how many leads became a sale" />
+            <Stat icon={Percent} label="Conversion" value={totals.conversion == null ? '—' : `${totals.conversion}%`} accent="#7c3aed" tip={totals.conversion == null ? 'Not computable here — more sales than transfers (bulk-imported sales have no transfer to convert from)' : 'Sales ÷ transfers — how many leads became a sale'} />
           </div>
 
           {/* charts */}

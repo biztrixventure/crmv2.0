@@ -471,9 +471,11 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     agent_metric: agentMetric,
     daily: Object.values(buckets),
     top_agents: topAgents,
-    // Cap at 100% — a conversion rate can't exceed 1:1. Bulk-imported sales with
-    // no matching transfer would otherwise push it past 100%.
-    totals: { transfers: totalT, sales: totalS, approved: totalApproved, conversion: totalT ? Math.min(100, Math.round(totalS / totalT * 100)) : 0 },
+    // Conversion is only meaningful when sales came from transfers (sales ≤
+    // transfers). More sales than transfers means bulk-imported rows with no
+    // transfer link → the rate is undefined, so return null (UI shows "—")
+    // rather than a misleading capped 100%.
+    totals: { transfers: totalT, sales: totalS, approved: totalApproved, conversion: (totalT > 0 && totalS <= totalT) ? Math.round(totalS / totalT * 100) : null },
   });
 }));
 
@@ -530,8 +532,9 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
     user: { user_id: targetId, name: [prof.first_name, prof.last_name].filter(Boolean).join(' ') || 'Unknown', role: level },
     days,
     side: isFronterRole ? 'fronter' : 'closer',
-    // Cap at 100% (bulk-imported sales without a transfer would inflate it).
-    totals: { transfers: totalX, sales: totalS, won, cancellations, conversion: totalX ? Math.min(100, Math.round(totalS / totalX * 100)) : 0 },
+    // null (UI shows "—") when not meaningful — more sales than transfers means
+    // bulk-imported rows with no transfer link, so the rate is undefined.
+    totals: { transfers: totalX, sales: totalS, won, cancellations, conversion: (totalX > 0 && totalS <= totalX) ? Math.round(totalS / totalX * 100) : null },
     daily: Object.values(buckets),
   });
 }));

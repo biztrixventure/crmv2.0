@@ -86,7 +86,7 @@ export default function UserScorecard({ user, onClose }) {
                   tip={side === 'fronter' ? 'Sales this fronter is credited on' : 'Sales this closer made'} />
                 <Kpi icon={CheckCircle} label="Approved" value={t.won} accent="#10b981" tip="Of those, approved by compliance" />
                 <Kpi icon={XCircle} label="Cancelled" value={t.cancellations} accent="#dc2626" tip="Of those, later cancelled" />
-                <Kpi icon={Percent} label="Conversion" value={`${t.conversion}%`} accent="#7c3aed" tip="Sales ÷ transfers for this user" />
+                <Kpi icon={Percent} label="Conversion" value={t.conversion == null ? '—' : `${t.conversion}%`} accent="#7c3aed" tip={t.conversion == null ? 'Not computable — more sales than transfers (e.g. bulk-imported sales)' : 'Sales ÷ transfers for this user'} />
               </div>
 
               <div>
