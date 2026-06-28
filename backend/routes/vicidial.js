@@ -1247,7 +1247,10 @@ api.delete('/dispo-map/:id', superOnly, asyncHandler(async (req, res) => {
 api.get('/boxes', superOnly, asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin.from('vicidial_boxes').select('*').order('sort_order', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ boxes: data || [] });
+  // Never ship the API password to the client — the edit form leaves it blank
+  // (blank = keep). Just signal whether one is set.
+  const boxes = (data || []).map(b => ({ ...b, api_pass: undefined, has_pass: !!b.api_pass }));
+  res.json({ boxes });
 }));
 
 api.post('/boxes', superOnly, asyncHandler(async (req, res) => {
