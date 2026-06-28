@@ -618,7 +618,7 @@ const ManagerShell = () => {
                 Today + Month come from useDashboardStats; Total uses the
                 pre-existing overviewTotals so the manager's company-scoped
                 aggregate stays correct even before stats hook loads. */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {MGR_CARD_ORDER.map(renderMgrCard)}
             </div>
 

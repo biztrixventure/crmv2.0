@@ -1,30 +1,22 @@
 import { Card } from './index';
 
-/* StatCardTriple — three-segment stat card used across all dashboards.
+/* StatCardTriple — compact three-segment stat card used across all dashboards.
  *
- * Each segment is independently clickable so a closer/fronter/manager can
- * click Today, MTD (this month), or Total to drill into that exact range.
- * Layout:
- *   ┌───────────────────────────────────────┐
- *   │ LABEL                          [icon] │
- *   │ ┌──────────┬──────────┬─────────────┐ │
- *   │ │ TODAY    │   MTD    │   TOTAL     │ │
- *   │ │  12      │   45     │   248       │ │
- *   │ └──────────┴──────────┴─────────────┘ │
- *   └───────────────────────────────────────┘
+ * Each segment is independently clickable so a closer/fronter/manager can click
+ * Today, MTD (this month), or Total to drill into that exact range. Modern,
+ * dense layout — number on top (primary tinted), label beneath:
+ *   ┌──────────────────────────────┐
+ *   │ LABEL                  [icon] │
+ *   │   0   │   866   │    0        │
+ *   │ TODAY │  MONTH  │  TOTAL      │
+ *   └──────────────────────────────┘
  *
- * Each segment has its own onClick + title for hover/aria, so the click is
- * fully discoverable and a screen reader user can announce each value.
- *
- * Props:
- *   label, icon (lucide), color (Tailwind family: success, info, primary,
- *   warning, error), loading (bool), tints (optional accent + gradient),
- *   today / month / total = { value, onClick, title? }
- *
- *   segments (optional) — when provided, drives a fully admin-configurable card:
- *     an ordered array (1–3) of { label, value, onClick?, title?, isPrimary? }.
- *     Overrides the today/month/total trio so SuperAdmin can choose how many
- *     numbers show and what each represents. Falls back to the trio when absent.
+ * Props (unchanged — drop-in):
+ *   label, icon (lucide), color (Tailwind family: success/info/primary/warning/
+ *   error), loading, today/month/total = { value, onClick, title? }, caption,
+ *   accent, gradientFrom (kept for API compat; gradient is now a subtle tint).
+ *   segments (optional) — ordered array (1–3) of { label, value, onClick?,
+ *   title?, isPrimary? } that overrides the today/month/total trio.
  */
 const StatCardTriple = ({
   label,
@@ -37,13 +29,13 @@ const StatCardTriple = ({
   segments,
   caption,
   accent,
-  gradientFrom,
+  gradientFrom, // eslint-disable-line no-unused-vars
 }) => {
-  const stripe = accent || `var(--color-${color}-500, #6366f1)`;
-  const tint  = gradientFrom || `var(--color-${color}-50, #f5f3ff)`;
+  const stripe   = accent || `var(--color-${color}-500, #6366f1)`;
+  const chipBg   = `var(--color-${color}-100, #ede9fe)`;
+  const iconClr  = `var(--color-${color}-600, #4f46e5)`;
+  const primClr  = `var(--color-${color}-600, #4f46e5)`;
 
-  // Resolve the segments to render: explicit `segments` config wins, otherwise
-  // build the classic Today / Current Month / Total trio from the legacy props.
   const resolved = Array.isArray(segments)
     ? segments.filter(Boolean)
     : [
@@ -52,7 +44,7 @@ const StatCardTriple = ({
         total && { label: 'Total',         ...total, isPrimary: !today && !month },
       ].filter(Boolean);
 
-  const Segment = ({ data, isPrimary }) => {
+  const Segment = ({ data, isPrimary, first }) => {
     const segLabel = data?.label ?? '';
     const value = loading ? '—' : (data?.value ?? 0);
     const clickable = !!data?.onClick;
@@ -63,22 +55,23 @@ const StatCardTriple = ({
         disabled={!clickable}
         title={data?.title || `${segLabel}: ${value}`}
         aria-label={`${label} ${segLabel} ${value}${clickable ? ', click to filter' : ''}`}
-        className={`flex-1 flex flex-col items-center justify-center py-2.5 px-2 transition-colors text-center ${clickable ? 'cursor-pointer hover:bg-white/40 dark:hover:bg-white/5' : 'cursor-default'}`}
-        style={{ minHeight: 64, minWidth: 0 }}
+        className={`flex-1 min-w-0 flex flex-col items-center justify-center py-1.5 px-1.5 rounded-lg transition-colors ${clickable ? 'cursor-pointer hover:bg-bg-secondary' : 'cursor-default'}`}
+        style={{ borderLeft: first ? 'none' : '1px solid var(--color-border)' }}
       >
-        <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary mb-0.5">
-          {segLabel}
-        </span>
         <span
-          className={`font-bold leading-none ${isPrimary ? 'text-2xl' : 'text-xl'}`}
+          className="font-extrabold leading-none"
           style={{
-            color: `var(--color-${color}-600, #4f46e5)`,
+            fontSize: isPrimary ? '1.4rem' : '1.05rem',
+            color: isPrimary ? primClr : 'var(--color-text)',
             fontFamily: 'var(--font-display)',
-            letterSpacing: '-0.03em',
+            letterSpacing: '-0.02em',
             fontVariantNumeric: 'tabular-nums',
           }}
         >
           {value}
+        </span>
+        <span className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary mt-1 truncate max-w-full">
+          {segLabel}
         </span>
       </button>
     );
@@ -86,46 +79,29 @@ const StatCardTriple = ({
 
   return (
     <Card
-      className="p-4 min-h-[140px] flex flex-col justify-between transition-all hover:shadow-lg"
-      style={{
-        background: `linear-gradient(135deg, ${tint} 0%, var(--color-surface) 60%)`,
-        borderTop: `3px solid ${stripe}`,
-      }}
+      className="p-3.5 flex flex-col gap-2.5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+      style={{ borderTop: `2px solid ${stripe}` }}
     >
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary truncate">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-text-secondary truncate">
           {label}
         </p>
         {Icon && (
-          <div
-            className="p-2 rounded-xl shrink-0"
-            style={{ backgroundColor: `var(--color-${color}-100, #ede9fe)` }}
-          >
-            <Icon size={16} style={{ color: `var(--color-${color}-600, #4f46e5)` }} />
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: chipBg }}>
+            <Icon size={14} style={{ color: iconClr }} />
           </div>
         )}
       </div>
 
       {resolved.length > 0 && (
-        <div
-          className="flex rounded-xl divide-x overflow-hidden"
-          style={{
-            backgroundColor: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            // divide-x uses border-color; tailwind sets a CSS var fallback
-          }}
-          role="group"
-          aria-label={`${label} stats`}
-        >
+        <div className="flex items-stretch" role="group" aria-label={`${label} stats`}>
           {resolved.map((seg, i) => (
-            <Segment key={seg.key || seg.label || i} data={seg} isPrimary={seg.isPrimary} />
+            <Segment key={seg.key || seg.label || i} data={seg} isPrimary={seg.isPrimary} first={i === 0} />
           ))}
         </div>
       )}
 
-      {caption && (
-        <p className="text-[10px] text-text-tertiary mt-1.5">{caption}</p>
-      )}
+      {caption && <p className="text-[10px] text-text-tertiary leading-tight">{caption}</p>}
     </Card>
   );
 };
