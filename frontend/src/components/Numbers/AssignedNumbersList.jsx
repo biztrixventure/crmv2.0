@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Phone, CheckCircle, RefreshCw, Clock, SkipForward, PhoneCall,
   RotateCcw, Filter, Search, X, Calendar, Send, ChevronDown,
-  ChevronUp, Link2, ArrowRight,
+  ChevronUp, Link2, ArrowRight, Copy, Check,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -215,7 +215,16 @@ const AssignedNumbersList = ({ user }) => {
   const [updatingId,   setUpdatingId]   = useState(null);
   const [transferNum,  setTransferNum]  = useState(null);
   const [expandedList, setExpandedList] = useState(null);
+  const [copiedId,     setCopiedId]     = useState(null);
   const searchRef = useRef(null);
+
+  const copyNumber = (e, num) => {
+    e.stopPropagation();
+    const digits = String(num || '').replace(/\D/g, '');
+    navigator.clipboard?.writeText(digits).catch(() => {});
+    setCopiedId(num);
+    setTimeout(() => setCopiedId(c => (c === num ? null : c)), 1200);
+  };
 
   const fetchNumbers = useCallback(async () => {
     if (!user?.company_id) return;
@@ -244,7 +253,14 @@ const AssignedNumbersList = ({ user }) => {
     setUpdatingId(id);
     try {
       const res = await client.put(`number-lists/${id}`, { status });
-      setNumbers(prev => prev.map(n => n.id === id ? { ...n, ...res.data.number } : n));
+      // Mark + advance: when a status filter is active and the new status no
+      // longer matches it, drop the row so the fronter is left with the next
+      // one to work (e.g. working "New", each marked number disappears).
+      if (statusFilter !== 'all' && status !== statusFilter) {
+        setNumbers(prev => prev.filter(n => n.id !== id));
+      } else {
+        setNumbers(prev => prev.map(n => n.id === id ? { ...n, ...res.data.number } : n));
+      }
     } catch { /* non-critical */ } finally { setUpdatingId(null); }
   };
 
@@ -449,9 +465,18 @@ const AssignedNumbersList = ({ user }) => {
                       <div key={n.id} className="flex items-center justify-between px-4 py-3 group hover:bg-bg-secondary transition-colors gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono font-semibold text-sm" style={{ color: 'var(--color-text)' }}>
+                            {/* Click number to copy; phone icon to dial (tel:) */}
+                            <button onClick={(e) => copyNumber(e, n.phone_number)} title="Click to copy"
+                              className="font-mono font-semibold text-sm hover:underline" style={{ color: 'var(--color-text)' }}>
                               {n.phone_number}
-                            </span>
+                            </button>
+                            <a href={`tel:${String(n.phone_number || '').replace(/\D/g, '')}`} onClick={e => e.stopPropagation()}
+                              title="Dial" className="p-1 rounded-lg hover:bg-bg-secondary transition-colors">
+                              <PhoneCall size={12} style={{ color: 'var(--color-primary-600)' }} />
+                            </a>
+                            {copiedId === n.phone_number
+                              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-bold" style={{ color: '#059669' }}><Check size={9} /> copied</span>
+                              : <button onClick={(e) => copyNumber(e, n.phone_number)} title="Copy" className="p-1 rounded-lg hover:bg-bg-secondary transition-colors opacity-0 group-hover:opacity-100"><Copy size={11} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
                             <StatusBadge status={n.status} />
                             {n.transfer_id && (
                               <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-full"
