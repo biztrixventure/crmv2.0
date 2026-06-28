@@ -601,8 +601,13 @@ async function fetchAndApplyDispo(tr) {
       }
     }
 
-    // 3) Dialer call log — latest real disposition on this phone (same-day only).
-    const found = await latestDisposition(norm);
+    // 3) Dialer call log — latest real disposition on this phone, bounded to the
+    //    transfer's dialer day (EDT = UTC-4) so a repeat customer's later call is
+    //    never misapplied to this transfer.
+    const onDate = tr.created_at
+      ? new Date(new Date(tr.created_at).getTime() - 4 * 3600000).toISOString().slice(0, 10)
+      : null;
+    const found = await latestDisposition(norm, { onDate });
     if (!found) return { ok: false, reason: 'no disposition found' };
     const dispoName = await lookupDispoName(tr.company_id, found.code) || found.code;
     const { userId: closerUserId } = await resolveAgent(found.user);
@@ -615,7 +620,7 @@ async function fetchAndApplyDispo(tr) {
 
 api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code').eq('id', req.params.transferId).maybeSingle();
+    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at').eq('id', req.params.transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
   if (!tr.normalized_phone) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
   const r = await fetchAndApplyDispo(tr);

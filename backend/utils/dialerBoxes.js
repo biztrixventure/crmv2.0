@@ -131,9 +131,25 @@ async function lookupCallsByPhone(phone) {
 
 // Best guess at the closer's disposition for a phone: the most recent call whose
 // status is a real outcome (not a no-connect). Returns { code, user, box, at }.
-async function latestDisposition(phone) {
+//
+// onDate ('YYYY-MM-DD', the transfer's dialer day) bounds the search to ±1 day so
+// a REPEAT customer's later call never gets applied to an older transfer. When a
+// day is given and nothing real falls in the window, returns null (no dispo yet)
+// rather than reaching back to a different day's call. The returned `user` is the
+// agent on that call — for a transferred lead that's the CLOSER (their dispo is
+// the latest real outcome on the day, after the fronter's XFER).
+async function latestDisposition(phone, { onDate } = {}) {
   const calls = await lookupCallsByPhone(phone);
-  const real = calls.find(c => {
+  let pool = calls;
+  if (onDate) {
+    const center = new Date(onDate + 'T00:00:00').getTime();
+    pool = calls.filter(c => {
+      const day = String(c.call_date || '').slice(0, 10);
+      if (!day) return false;
+      return Math.abs(new Date(day + 'T00:00:00').getTime() - center) <= 86400000; // ±1 day (TZ slack)
+    });
+  }
+  const real = pool.find(c => {
     const s = (c.call_status || c.lead_status || '').toUpperCase();
     return s && !NO_CONNECT.has(s);
   });
