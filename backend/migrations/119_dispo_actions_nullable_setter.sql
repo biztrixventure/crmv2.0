@@ -1,0 +1,11 @@
+-- ============================================================================
+-- 119_dispo_actions_nullable_setter.sql
+-- A dialer-fetched disposition may have no resolvable closer (agent unmapped, or
+-- pulled by lead status which has no agent). The NOT NULL on user_id made that
+-- insert fail SILENTLY (applyCloserDispo swallowed it) → the dispo "fetched" but
+-- never displayed (no disposition_actions row → no transfers.latest_disposition).
+-- Allow a null setter so the disposition still records + shows (setter_name just
+-- renders blank). Code also now defaults color to grey so its NOT NULL can't bite.
+-- Apply in Supabase SQL editor. Idempotent.
+-- ============================================================================
+ALTER TABLE disposition_actions ALTER COLUMN user_id DROP NOT NULL;

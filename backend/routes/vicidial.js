@@ -183,12 +183,17 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
         .select('id, color').eq('name', dispoName).eq('is_active', true)
         .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
         .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
-      await supabaseAdmin.from('disposition_actions').insert({
-        transfer_id: transfer.id, company_id: dispoCompanyId, user_id: closerUserId || null,
+      // NEVER send a null color (column is NOT NULL → silent insert failure = the
+      // dispo "fetched" but never shows). Default to grey. user_id falls back to
+      // the transfer's closer; genuinely-unknown setter needs migration 119.
+      const { error: insErr } = await supabaseAdmin.from('disposition_actions').insert({
+        transfer_id: transfer.id, company_id: dispoCompanyId,
+        user_id: closerUserId || transfer.assigned_closer_id || null,
         disposition_config_id: cfg?.id || null, disposition_name: dispoName,
-        color: cfg?.color || null, note: `From dialer (${rawDispo})`, setter_role: 'closer',
+        color: cfg?.color || '#6b7280', note: `From dialer (${rawDispo})`, setter_role: 'closer',
       });
-    } catch { /* non-critical */ }
+      if (insErr) logger.warn('VICIDIAL_DISPO', `disposition_actions insert failed for ${transfer.id}: ${insErr.message}`);
+    } catch (e) { logger.warn('VICIDIAL_DISPO', `dispo insert error ${transfer.id}: ${e.message}`); }
   }
 }
 
