@@ -87,6 +87,7 @@ import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 import CallChecklistWidget from "../components/Closer/CallChecklistWidget";
+import FronterNumbersWidget from "../components/Numbers/FronterNumbersWidget";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 
@@ -2002,6 +2003,8 @@ const StaffShell = () => {
 
       {/* Closers only — floating call-checklist mini-panel */}
       {isCloser && <CallChecklistWidget />}
+      {/* Fronters only — floating "My Numbers" PiP (copy + work numbers over the dialer) */}
+      {isFronter && <FronterNumbersWidget user={user} />}
     </div>
   );
 };

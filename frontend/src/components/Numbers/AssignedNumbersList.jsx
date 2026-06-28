@@ -465,15 +465,11 @@ const AssignedNumbersList = ({ user }) => {
                       <div key={n.id} className="flex items-center justify-between px-4 py-3 group hover:bg-bg-secondary transition-colors gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {/* Click number to copy; phone icon to dial (tel:) */}
+                            {/* Tap the number to copy (paste into the dialer's manual-dial) */}
                             <button onClick={(e) => copyNumber(e, n.phone_number)} title="Click to copy"
                               className="font-mono font-semibold text-sm hover:underline" style={{ color: 'var(--color-text)' }}>
                               {n.phone_number}
                             </button>
-                            <a href={`tel:${String(n.phone_number || '').replace(/\D/g, '')}`} onClick={e => e.stopPropagation()}
-                              title="Dial" className="p-1 rounded-lg hover:bg-bg-secondary transition-colors">
-                              <PhoneCall size={12} style={{ color: 'var(--color-primary-600)' }} />
-                            </a>
                             {copiedId === n.phone_number
                               ? <span className="inline-flex items-center gap-0.5 text-[10px] font-bold" style={{ color: '#059669' }}><Check size={9} /> copied</span>
                               : <button onClick={(e) => copyNumber(e, n.phone_number)} title="Copy" className="p-1 rounded-lg hover:bg-bg-secondary transition-colors opacity-0 group-hover:opacity-100"><Copy size={11} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
