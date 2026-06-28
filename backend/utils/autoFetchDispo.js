@@ -22,6 +22,16 @@ const EVERY_MS  = 30 * 60 * 1000;   // run every 30 minutes
 const WINDOW_H  = 12;               // only transfers from the last 12h (pre-archive)
 const CONC      = 4;                // gentle on the dialers
 const MAX_ROWS  = 1500;
+const BACKOFF_MS = 2 * 60 * 60 * 1000;   // don't re-poll a no-dispo transfer for 2h
+
+// In-memory back-off: a transfer with no disposition yet (closer hasn't worked
+// it) would otherwise be re-checked every 30 min for its whole 12h window. Skip
+// ones we checked recently → ~4× fewer futile dialer calls under a surge.
+const checkedAt = new Map();   // transfer_id → last-checked ts
+function pruneChecked() {
+  const cut = Date.now() - BACKOFF_MS;
+  for (const [id, ts] of checkedAt) if (ts < cut) checkedAt.delete(id);
+}
 
 async function tick() {
   if (running) return;
@@ -50,14 +60,21 @@ async function tick() {
         .select('transfer_id').in('transfer_id', all.slice(i, i + 200).map(t => t.id));
       (data || []).forEach(a => have.add(a.transfer_id));
     }
-    const todo = all.filter(t => !have.has(t.id));
+    pruneChecked();
+    const now = Date.now();
+    // undisposed AND not checked in the last 2h (back-off on persistent no-dispo)
+    const todo = all.filter(t => !have.has(t.id) && !(checkedAt.get(t.id) > now - BACKOFF_MS));
     if (!todo.length) return;
 
     let fetched = 0, idx = 0;
     await Promise.all(Array.from({ length: Math.min(CONC, todo.length) }, async () => {
       while (idx < todo.length) {
         const t = todo[idx++];
-        try { const r = await fetchAndApplyDispo(t); if (r.ok) fetched++; } catch { /* skip one, keep going */ }
+        try {
+          const r = await fetchAndApplyDispo(t);
+          if (r.ok) fetched++;
+          else checkedAt.set(t.id, Date.now());   // no dispo yet → back off for 2h
+        } catch { /* skip one, keep going */ }
       }
     }));
 
