@@ -163,7 +163,7 @@ router.get('/companies', asyncHandler(async (req, res) => {
     const [usersData, salesData, transfersData] = await Promise.all([
       fetchAll(() => supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids)),
       fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids))),
-      fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').in('company_id', ids))),
+      fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').neq('vicidial_pending', true).in('company_id', ids))),
     ]);
     usersData.forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
     salesData.forEach(s => {
@@ -421,6 +421,12 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
+    // Hide UNCONFIRMED pending-from-dialer rows (lead_id + phone only) — they are
+    // not real transfers until the fronter confirms. Mirrors transfers.js. The
+    // view exposes the flag after migration 142; before that, the view query
+    // errors on the missing column and falls back to the bare table (which has
+    // it), so unconfirmed rows are hidden either way.
+    q = q.neq('vicidial_pending', true);
     return q.range(offset, offset + parseInt(limit) - 1);
   };
 
@@ -434,6 +440,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
+    q = q.neq('vicidial_pending', true);   // exclude unconfirmed pending-from-dialer
     return q.limit(20000);
   };
 
