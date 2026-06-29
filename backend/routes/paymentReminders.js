@@ -49,7 +49,24 @@ router.get('/upcoming', asyncHandler(async (req, res) => {
 
   const { data, error } = await q.limit(500);
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ followups: data || [], window_days: cfg.windowDays, today });
+
+  // Attach the responsible closer's name + the company name (no FK from
+  // payment_followups, so resolve in two batched lookups).
+  const rows = data || [];
+  const closerIds  = [...new Set(rows.map(r => r.closer_id).filter(Boolean))];
+  const companyIds = [...new Set(rows.map(r => r.company_id).filter(Boolean))];
+  const [closers, companies] = await Promise.all([
+    closerIds.length  ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', closerIds)  : Promise.resolve({ data: [] }),
+    companyIds.length ? supabaseAdmin.from('companies').select('id, name, slug').in('id', companyIds)                          : Promise.resolve({ data: [] }),
+  ]);
+  const closerName = new Map((closers.data || []).map(u => [u.user_id, [u.first_name, u.last_name].filter(Boolean).join(' ') || null]));
+  const compName   = new Map((companies.data || []).map(c => [c.id, c.name || c.slug || null]));
+  rows.forEach(r => {
+    r.closer_name  = r.closer_id  ? (closerName.get(r.closer_id) || null) : null;
+    r.company_name = r.company_id ? (compName.get(r.company_id)  || null) : null;
+  });
+
+  res.json({ followups: rows, window_days: cfg.windowDays, today });
 }));
 
 // ── PATCH /:id — log outcome ──────────────────────────────────────────────────

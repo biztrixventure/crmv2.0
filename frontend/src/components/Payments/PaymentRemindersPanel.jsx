@@ -111,6 +111,7 @@ export default function PaymentRemindersPanel() {
                       <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</div>
                       {s.customer_phone && <CopyableNumber value={s.customer_phone} className="text-xs" />}
                       {(s.client_name || s.plan) && <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{[s.client_name, s.plan].filter(Boolean).join(' · ')}</div>}
+                      {(r.closer_name || r.company_name) && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{[r.closer_name && `Closer: ${r.closer_name}`, r.company_name].filter(Boolean).join(' · ')}</div>}
                       {s.reference_no && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Ref {s.reference_no}</div>}
                     </td>
                     <td className="px-4 py-3">
@@ -182,6 +183,8 @@ export default function PaymentRemindersPanel() {
 
               <div className="rounded-xl border p-3 text-sm space-y-1.5" style={{ borderColor: 'var(--color-border)' }}>
                 <Row label="Payment due"   value={`${selected.due_date} · ${d < 0 ? `${-d}d overdue` : d === 0 ? 'today' : `in ${d}d`}`} />
+                <Row label="Closer"        value={selected.closer_name || '—'} />
+                {selected.company_name && <Row label="Company" value={selected.company_name} />}
                 {s.payment_due_note && <Row label="Billing note" value={s.payment_due_note} />}
                 <Row label="Monthly"       value={money(s.monthly_payment)} />
                 {s.down_payment != null && <Row label="Down payment" value={money(s.down_payment)} />}
