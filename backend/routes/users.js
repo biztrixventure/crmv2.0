@@ -77,23 +77,25 @@ router.get(
       if (!includeInactive) query = query.eq("is_active", true);
 
       if (targetCompanyId) {
-        // A non-superadmin may only list users of a company they belong to —
-        // otherwise any user could enumerate another tenant's roster by passing
-        // its company_id.
-        const superadmin = await isSuperAdmin(userId);
-        if (!superadmin) {
-          const { data: member } = await supabaseAdmin
-            .from("user_company_roles")
-            .select("id")
-            .eq("user_id", userId)
-            .eq("company_id", targetCompanyId)
-            .eq("is_active", true)
-            .limit(1)
-            .maybeSingle();
-          // Not a member of the requested company → scope to their OWN company
-          // instead of 403. Never leaks another tenant, never silently empties a
-          // legitimate member's list because of a stale/mismatched company_id.
-          if (!member) targetCompanyId = req.user.company_id;
+        // Fast path: requesting your OWN company — you're a member by definition,
+        // so skip the superadmin + membership lookups entirely.
+        if (targetCompanyId !== req.user.company_id) {
+          // A non-superadmin may only list users of a company they belong to —
+          // otherwise any user could enumerate another tenant's roster. A
+          // foreign company they aren't in falls back to their own (no leak, no
+          // silent-empty over a stale company_id).
+          const superadmin = await isSuperAdmin(userId);
+          if (!superadmin) {
+            const { data: member } = await supabaseAdmin
+              .from("user_company_roles")
+              .select("id")
+              .eq("user_id", userId)
+              .eq("company_id", targetCompanyId)
+              .eq("is_active", true)
+              .limit(1)
+              .maybeSingle();
+            if (!member) targetCompanyId = req.user.company_id;
+          }
         }
         query = query.eq("company_id", targetCompanyId);
       } else {
