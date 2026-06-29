@@ -360,6 +360,11 @@ router.post('/bulk-by-id', asyncHandler(async (req, res) => {
   const results = [], snapshot = [];
   let updated = 0, notFound = 0, errored = 0, geoFilled = 0, noChange = 0;
 
+  // ── Phase 1: build every row's patch + column set + before-snapshot in memory
+  // (no DB writes here). fd = the merged form_data, used for geo + city/state key
+  // detection. Nothing here awaits, so 4000 rows are prepared instantly.
+  const prepared = [];          // { id, fd, patch, cols, before, changed }
+  const geoNeed  = [];          // { entry, zip }
   for (const raw of rows) {
     const id = String(raw.id || '').trim();
     const values = Array.isArray(raw.values) ? raw.values : [];
@@ -369,42 +374,78 @@ router.post('/bulk-by-id', asyncHandler(async (req, res) => {
 
     const fd = { ...(rec.form_data || {}) };
     const before = { form: {}, col: {} };
-    const changed = {};
-    const colUpdate = {};
-
+    const changed = {}, patch = {}, cols = {};
     fields.forEach((f, i) => {
       const v = values[i];
       if (v == null || String(v).trim() === '') return;        // empty cell → unchanged
       const val = String(v).trim();
       before.form[f.name] = rec.form_data ? (rec.form_data[f.name] ?? null) : null;
-      fd[f.name] = val; changed[f.name] = val;
+      fd[f.name] = val; patch[f.name] = val; changed[f.name] = val;
       const col = table === 'sales' ? saleColumnFor(f.name, f.field_type) : null;
-      if (col) { before.col[col] = rec[col] ?? null; colUpdate[col] = val; }
+      if (col) { before.col[col] = rec[col] ?? null; cols[col] = val; }
     });
 
-    if (fillGeo) {
-      const zipVal = firstZip(fd);
-      if (zipVal) {
-        const geo = await lookupZip(zipVal);
-        if (geo && geo.city && geo.state) {
-          const cityKey = CITY_KEYS.find(k => k in fd) || 'City';
-          const stKey   = STATE_KEYS.find(k => k in fd) || 'State';
-          if (!(cityKey in before.form)) before.form[cityKey] = rec.form_data ? (rec.form_data[cityKey] ?? null) : null;
-          if (!(stKey in before.form))   before.form[stKey]   = rec.form_data ? (rec.form_data[stKey] ?? null) : null;
-          fd[cityKey] = geo.city; fd[stKey] = geo.state;
-          changed[cityKey] = geo.city; changed[stKey] = geo.state; geoFilled++;
-        }
+    const entry = { id, fd, patch, cols, before, changed };
+    prepared.push(entry);
+    if (fillGeo) { const z = firstZip(fd); if (z) geoNeed.push({ entry, zip: z }); }
+  }
+
+  // ── Phase 2: geo — look up each DISTINCT zip once, in parallel (the util caches
+  // repeats), then stamp city/state onto each row's patch. 4000 rows sharing a
+  // few hundred zips = a few hundred lookups, batched, not one-per-row serial.
+  if (fillGeo && geoNeed.length) {
+    const distinct = [...new Set(geoNeed.map(g => g.zip))];
+    const geoMap = new Map();
+    const CONC = 12;
+    for (let i = 0; i < distinct.length; i += CONC) {
+      const slice = distinct.slice(i, i + CONC);
+      const got = await Promise.all(slice.map(z => lookupZip(z).catch(() => null)));
+      slice.forEach((z, k) => geoMap.set(z, got[k]));
+    }
+    for (const { entry, zip } of geoNeed) {
+      const geo = geoMap.get(zip);
+      if (!geo || !geo.city || !geo.state) continue;
+      const cityKey = CITY_KEYS.find(k => k in entry.fd) || 'City';
+      const stKey   = STATE_KEYS.find(k => k in entry.fd) || 'State';
+      if (!(cityKey in entry.before.form)) entry.before.form[cityKey] = entry.fd[cityKey] ?? null;
+      if (!(stKey in entry.before.form))   entry.before.form[stKey]   = entry.fd[stKey] ?? null;
+      entry.fd[cityKey] = geo.city; entry.fd[stKey] = geo.state;
+      entry.patch[cityKey] = geo.city; entry.patch[stKey] = geo.state;
+      entry.changed[cityKey] = geo.city; entry.changed[stKey] = geo.state;
+      geoFilled++;
+    }
+  }
+
+  // ── Phase 3: finalize. Skip no-change rows; collect the rest for one bulk write.
+  const toWrite = [];
+  for (const e of prepared) {
+    if (!Object.keys(e.changed).length) { results.push({ id: e.id, status: 'no_change' }); noChange++; continue; }
+    if (dryRun) { results.push({ id: e.id, status: 'would_update', changed: e.changed }); updated++; continue; }
+    toWrite.push(e);
+    results.push({ id: e.id, status: 'updated', changed: e.changed });
+    updated++;
+  }
+
+  // ── Phase 4: ONE bulk UPDATE per chunk via the RPC (thousands of rows in <1s).
+  // Falls back to per-row updates if migration 143 isn't applied yet.
+  if (!dryRun && toWrite.length) {
+    const rpcRows = toWrite.map(e => table === 'sales' ? { id: e.id, patch: e.patch, cols: e.cols } : { id: e.id, patch: e.patch });
+    let rpcMissing = false;
+    for (let i = 0; i < rpcRows.length; i += 1000) {
+      const chunk = rpcRows.slice(i, i + 1000);
+      const { error } = await supabaseAdmin.rpc('app_bulk_update_by_id', { p_table: table, p_rows: chunk });
+      if (error) {
+        if (/function .* does not exist/i.test(error.message) || error.code === 'PGRST202') { rpcMissing = true; break; }
+        return res.status(500).json({ error: `Bulk update failed: ${error.message}` });
       }
     }
-
-    if (!Object.keys(changed).length) { results.push({ id, status: 'no_change' }); noChange++; continue; }
-    if (dryRun) { results.push({ id, status: 'would_update', changed }); updated++; continue; }
-
-    const { error } = await supabaseAdmin.from(table).update({ form_data: fd, ...colUpdate }).eq('id', id);
-    if (error) { results.push({ id, status: 'error', message: error.message }); errored++; continue; }
-    snapshot.push({ table, id, before });
-    results.push({ id, status: 'updated', changed });
-    updated++;
+    if (rpcMissing) {
+      // Legacy path (slow) — only hit before migration 143 is applied.
+      for (const e of toWrite) {
+        await supabaseAdmin.from(table).update({ form_data: e.fd, ...e.cols }).eq('id', e.id).then(() => {}, () => {});
+      }
+    }
+    toWrite.forEach(e => snapshot.push({ table, id: e.id, before: e.before }));
   }
 
   let opId = null;
