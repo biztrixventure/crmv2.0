@@ -11,6 +11,7 @@ import EventsCalendar from '../Calendar/EventsCalendar';
 const CustomerProfile = lazy(() => import('../Admin/CustomerProfile/CustomerProfile'));
 const DataAnalyzer    = lazy(() => import('../Admin/DataAnalyzer/DataAnalyzer'));
 const ChatAdmin       = lazy(() => import('../Admin/Chat/ChatAdmin'));
+const PaymentRemindersPanel = lazy(() => import('../Payments/PaymentRemindersPanel'));
 
 const ToolFallback = () => (
   <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
@@ -32,6 +33,7 @@ const CrossRoleContent = ({ section, user }) => {
   if (section === 'tool_customer_profiles') return <Suspense fallback={<ToolFallback />}><CustomerProfile /></Suspense>;
   if (section === 'tool_data_analyzer')     return <Suspense fallback={<ToolFallback />}><DataAnalyzer /></Suspense>;
   if (section === 'tool_chat_control')      return <Suspense fallback={<ToolFallback />}><ChatAdmin /></Suspense>;
+  if (section === 'payments')               return <Suspense fallback={<ToolFallback />}><PaymentRemindersPanel /></Suspense>;
 
   return null;
 };

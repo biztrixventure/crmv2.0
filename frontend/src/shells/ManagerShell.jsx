@@ -187,6 +187,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
     ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+    // Monthly-payment reminders — team view of due policies.
+    ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales'))
+      ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

@@ -189,6 +189,10 @@ const StaffShell = () => {
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+    // Monthly-payment reminders — closers (and anyone who can see sales) get
+    // their due policies to call + confirm payment.
+    ...((isCloser || hasPermission('view_team_sales') || hasPermission('view_own_sales'))
+      ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
     // Delegated superadmin tools — STRICT gate: shown only when a superadmin
     // grants the flag to this user (default-off, never shown by accident).
     ...(isEnabledStrict('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),

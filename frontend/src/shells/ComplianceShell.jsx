@@ -15,7 +15,8 @@ import { useFocus } from '../contexts/FocusContext';
 import { dispositionTabs, isPostDateDispo } from '../utils/dispositions';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
-import { CalendarClock } from 'lucide-react';
+import { CalendarClock, AlertTriangle } from 'lucide-react';
+import PaymentRemindersPanel from '../components/Payments/PaymentRemindersPanel';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
 import QueueTab            from '../components/Compliance/QueueTab';
@@ -35,6 +36,7 @@ const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
   { key: 'calendar',    label: 'Calendar',           icon: CalendarDays },
   { key: 'queue',       label: 'Review Queue',       icon: Clock },
+  { key: 'payments',    label: 'Payments at Risk',   icon: AlertTriangle },
   { key: 'sales',       label: 'All Sales',          icon: FileText },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
@@ -225,6 +227,7 @@ const ComplianceShell = () => {
             isPostDate={isPostDateDispo(activeTab.slice(6))}
           />
         )}
+        {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab
