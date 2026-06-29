@@ -12,6 +12,10 @@
 --   active policy = status='closed_won' AND superseded_by IS NULL
 --   cancellation  = cancellation_date set OR status in the terminal set
 -- ============================================================================
+-- Drop first: CREATE OR REPLACE can't change an existing view's columns
+-- (Postgres 42P16) if 125's score-version is already in place. Safe — nothing in
+-- the DB depends on this view (the route reads it at runtime).
+DROP VIEW IF EXISTS v_customer_segments;
 CREATE OR REPLACE VIEW v_customer_segments AS
 WITH s AS (
   SELECT

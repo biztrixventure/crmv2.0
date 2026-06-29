@@ -9,6 +9,9 @@
 --   cancellations, and a hard floor of 0 for "chased a lot, never bought".
 -- Read-only view, idempotent. The browse endpoint orders by score by default.
 -- ============================================================================
+-- Drop first so re-running in any order can't hit Postgres 42P16 ("cannot drop
+-- columns from view"). Safe — nothing in the DB depends on this view.
+DROP VIEW IF EXISTS v_customer_segments;
 CREATE OR REPLACE VIEW v_customer_segments AS
 SELECT
   base.*,
