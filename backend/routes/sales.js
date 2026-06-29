@@ -306,6 +306,13 @@ router.post(
       return res.status(400).json({ error: 'Company ID is required' });
     }
 
+    // Toggleable: create_sale. Checked against the user's OWN company (not the
+    // sale's, which can be the fronter company). Migration 136 grants create_sale
+    // to the roles that create sales today, so this only bites when revoked.
+    if (req.user.role !== 'superadmin' && !(await hasPermission(userId, req.user.company_id, 'create_sale'))) {
+      return res.status(403).json({ error: 'You do not have permission to create sales' });
+    }
+
     logger.info('CREATE_SALE', `user=${userId}, company=${companyId}`);
 
     const {

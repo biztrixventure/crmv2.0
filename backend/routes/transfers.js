@@ -870,6 +870,12 @@ router.post('/', [
 
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
+  // Toggleable: create_transfer (migration 136 grants it to the roles that create
+  // transfers today, so this only bites when a superadmin revokes it).
+  if (req.user.role !== 'superadmin' && !(await hasPermission(userId, companyId, 'create_transfer'))) {
+    return res.status(403).json({ error: 'You do not have permission to create transfers' });
+  }
+
   const hasCloser = !!assigned_closer_id;
   const norm = normPhone(phoneFromFD(form_data));
 
