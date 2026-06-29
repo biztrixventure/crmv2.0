@@ -173,6 +173,11 @@ router.put('/companies/:companyId/:key',
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
 
     const { companyId, key } = req.params;
+    // Cross-tenant guard: a non-superadmin delegate may only toggle features for
+    // their OWN company, never another tenant's.
+    if (req.user.role !== 'superadmin' && companyId !== req.user.company_id) {
+      return res.status(403).json({ error: 'You can only manage features for your own company.' });
+    }
     const { is_enabled } = req.body;
     const now     = new Date().toISOString();
     const actorId = req.user.id;

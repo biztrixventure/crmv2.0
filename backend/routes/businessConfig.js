@@ -30,8 +30,8 @@ const SENSITIVE_KEY = (key) =>
 
 // May this request write business-config for `key`? superadmin always; a
 // tool_business_rules holder may write non-sensitive keys only.
-const canWriteConfig = async (req, key) => {
-  if (await isSuperAdmin(req.user.id)) return true;
+const canWriteConfig = async (req, key, sa) => {
+  if (sa) return true;
   if (SENSITIVE_KEY(key)) return false;
   const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_business_rules').maybeSingle();
   if (!flagRow) return false;
@@ -54,7 +54,14 @@ router.put('/', asyncHandler(async (req, res) => {
   if (typeof scope !== 'string' || (scope !== 'global' && !/^company:[0-9a-f-]{36}$/i.test(scope))) {
     return res.status(400).json({ error: 'scope must be "global" or "company:<uuid>".' });
   }
-  if (!(await canWriteConfig(req, key))) {
+  const sa = await isSuperAdmin(req.user.id);
+  // Cross-tenant guard: a non-superadmin delegate must never write ANOTHER
+  // company's per-company override. (Global + their own company only.)
+  if (!sa && /^company:/i.test(scope)
+      && scope.slice(8).toLowerCase() !== String(req.user.company_id || '').toLowerCase()) {
+    return res.status(403).json({ error: 'You can only change settings for your own company.' });
+  }
+  if (!(await canWriteConfig(req, key, sa))) {
     return res.status(403).json({ error: 'You do not have permission to change this setting.' });
   }
   await setConfig(scope, key, value, req.user.id);
