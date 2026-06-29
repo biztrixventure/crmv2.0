@@ -22,6 +22,7 @@ const clearCache = () => {
 const FeatureFlagsContext = createContext({
   flags: {},
   isEnabled: () => false,
+  isEnabledStrict: () => false,
   loading: false,
   refresh: () => {},
 });
@@ -63,8 +64,12 @@ export const FeatureFlagsProvider = ({ children }) => {
     return flags[key]?.is_enabled ?? false;
   };
 
+  // STRICT: an unknown flag is OFF. Use for sensitive / default-off gates (e.g.
+  // delegated admin tools) so a not-yet-catalogued flag never shows by accident.
+  const isEnabledStrict = (key) => (key in flags) && flags[key]?.is_enabled === true;
+
   return (
-    <FeatureFlagsContext.Provider value={{ flags, isEnabled, loading, refresh }}>
+    <FeatureFlagsContext.Provider value={{ flags, isEnabled, isEnabledStrict, loading, refresh }}>
       {children}
     </FeatureFlagsContext.Provider>
   );

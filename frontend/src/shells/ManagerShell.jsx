@@ -152,7 +152,7 @@ const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 're
 const ManagerShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isEnabled } = useFeatureFlags();
+  const { isEnabled, isEnabledStrict } = useFeatureFlags();
   const navigate = useNavigate();
   const notifHook = useNotifications();
   const { stats, fetchStats } = useDashboardStats();
@@ -215,10 +215,11 @@ const ManagerShell = () => {
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
-    // Delegated superadmin tools — only when a superadmin grants the flag.
-    ...(isEnabled('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
-    ...(isEnabled('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
-    ...(isEnabled('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
+    // Delegated superadmin tools — STRICT gate: hidden unless the flag is
+    // catalogued AND enabled for this user (default-off, never shown by accident).
+    ...(isEnabledStrict('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
+    ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
+    ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
   ];
   const {
     applyTabs: applyManagerLayout,
@@ -1215,17 +1216,17 @@ const ManagerShell = () => {
           </Suspense>
         )}
         {/* Delegated superadmin tools — gated by the tool flag on the nav side. */}
-        {activeTab === 'tool_customer_profiles' && isEnabled('tool_customer_profiles') && (
+        {activeTab === 'tool_customer_profiles' && isEnabledStrict('tool_customer_profiles') && (
           <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
             <CustomerProfile />
           </Suspense>
         )}
-        {activeTab === 'tool_data_analyzer' && isEnabled('tool_data_analyzer') && (
+        {activeTab === 'tool_data_analyzer' && isEnabledStrict('tool_data_analyzer') && (
           <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
             <DataAnalyzer />
           </Suspense>
         )}
-        {activeTab === 'tool_chat_control' && isEnabled('tool_chat_control') && (
+        {activeTab === 'tool_chat_control' && isEnabledStrict('tool_chat_control') && (
           <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
             <ChatAdmin />
           </Suspense>
