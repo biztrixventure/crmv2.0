@@ -250,8 +250,8 @@ router.post(
 
     try {
       // Check permission to manage roles
-      logger.debug('CREATE_ROLE', 'Checking manage_roles permission', { userId, targetCompanyId });
-      const hasPerm = await hasPermission(userId, targetCompanyId, "manage_roles");
+      logger.debug('CREATE_ROLE', 'Checking create_role permission', { userId, targetCompanyId });
+      const hasPerm = await hasPermission(userId, targetCompanyId, "create_role");
       logger.success('CREATE_ROLE', `Permission check: ${hasPerm}`, { userRole: req.user.role });
 
       if (!hasPerm && req.user.role !== 'superadmin') {
@@ -358,9 +358,9 @@ router.put(
           return res.status(403).json({ error: 'System-level roles can only be modified by SuperAdmin' });
         }
       } else {
-        const hasPerm = await hasPermission(userId, role.company_id, 'manage_roles');
+        const hasPerm = await hasPermission(userId, role.company_id, 'update_role');
         if (!hasPerm && req.user.role !== 'superadmin') {
-          logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
+          logger.error('UPDATE_ROLE', 'Permission denied', new Error('User lacks update_role permission'));
           return res.status(403).json({ error: "You don't have permission to update roles" });
         }
       }
@@ -448,9 +448,9 @@ router.delete(
           return res.status(403).json({ error: 'System-level roles can only be deleted by SuperAdmin' });
         }
       } else {
-        const hasPerm = await hasPermission(userId, role.company_id, 'manage_roles');
+        const hasPerm = await hasPermission(userId, role.company_id, 'delete_role');
         if (!hasPerm && req.user.role !== 'superadmin') {
-          logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks manage_roles permission'));
+          logger.error('DELETE_ROLE', 'Permission denied', new Error('User lacks delete_role permission'));
           return res.status(403).json({ error: "You don't have permission to delete roles" });
         }
       }
