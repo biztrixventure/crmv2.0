@@ -1,5 +1,6 @@
 import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { ET_ZONE } from '../../utils/timezone';
+import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import client from '../../api/client';
 
 // Fetch EVERY page of a paginated compliance list for export — no 5,000 cap.
@@ -164,34 +165,37 @@ export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
   </th>
 );
 
-export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => (
-  <div className="flex items-start justify-between mb-5 gap-4">
-    <div>
-      <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
-        {title}
-      </h2>
-      {subtitle && (
-        <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
-      )}
+export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => {
+  const { isEnabled } = useFeatureFlags();
+  return (
+    <div className="flex items-start justify-between mb-5 gap-4">
+      <div>
+        <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {extra}
+        {onExport && isEnabled('exports') && (
+          <button onClick={onExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <Download size={13} /> Export CSV
+          </button>
+        )}
+        {onRefresh && (
+          <button onClick={onRefresh} className="p-2 rounded-lg transition-colors hover:opacity-80"
+            style={{ color: 'var(--color-text-secondary)' }}>
+            <RefreshCw size={15} />
+          </button>
+        )}
+      </div>
     </div>
-    <div className="flex items-center gap-2 flex-shrink-0">
-      {extra}
-      {onExport && (
-        <button onClick={onExport}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-          <Download size={13} /> Export CSV
-        </button>
-      )}
-      {onRefresh && (
-        <button onClick={onRefresh} className="p-2 rounded-lg transition-colors hover:opacity-80"
-          style={{ color: 'var(--color-text-secondary)' }}>
-          <RefreshCw size={15} />
-        </button>
-      )}
-    </div>
-  </div>
-);
+  );
+};
 
 export const Filters = ({ onSubmit, children }) => (
   <div className="rounded-xl p-4 mb-5"

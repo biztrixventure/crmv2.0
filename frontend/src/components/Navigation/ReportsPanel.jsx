@@ -7,6 +7,7 @@ import { Card } from '../UI';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import Tooltip from '../UI/Tooltip';
 import TeamPerformance from '../Manager/TeamPerformance';
 
@@ -64,6 +65,7 @@ const SkeletonRow = () => (
 // ── main component ────────────────────────────────────────────────────────────
 const ReportsPanel = ({ companyId }) => {
   const { hasPermission } = useAuth();
+  const { isEnabled } = useFeatureFlags();
 
   const [fronters,   setFronters]   = useState([]);
   const [closers,    setClosers]    = useState([]);
@@ -258,12 +260,14 @@ const ReportsPanel = ({ companyId }) => {
           ))}
         </div>
 
-        <button onClick={handleExport} disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
-          style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
-          <Download size={14} />
-          Export CSV
-        </button>
+        {isEnabled('exports') && (
+          <button onClick={handleExport} disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
+            style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+            <Download size={14} />
+            Export CSV
+          </button>
+        )}
       </div>
 
       {/* ── Fronters table ── */}
