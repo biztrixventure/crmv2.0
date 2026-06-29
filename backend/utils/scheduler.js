@@ -12,10 +12,13 @@
 const { supabaseAdmin } = require('../config/database');
 const cache = require('./cache');
 const logger = require('./logger');
+const { runPaymentReminderScan } = require('./paymentReminders');
 
-const REFRESH_SEGMENTS_MS = 10 * 60 * 1000; // every 10 min
-const CACHE_SWEEP_MS      = 5  * 60 * 1000; // every 5 min
-const INITIAL_REFRESH_MS  = 60 * 1000;      // one refresh ~1 min after boot
+const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
+const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
+const INITIAL_REFRESH_MS  = 60 * 1000;          // one refresh ~1 min after boot
+const PAYMENT_SCAN_MS     = 3 * 60 * 60 * 1000; // monthly-payment scan every 3h
+const PAYMENT_SCAN_INIT   = 90 * 1000;          // first scan ~90s after boot
 
 let _timers = [];
 
@@ -47,7 +50,14 @@ function startBackgroundJobs() {
     } catch (e) { logger.warn('JOBS', `cache sweep error: ${e.message}`); }
   }, CACHE_SWEEP_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m`);
+  // Monthly-payment retention scan — upserts follow-ups + fires reminder
+  // notifications at the configured offsets. Idempotent (dedupKey), so the 3h
+  // cadence is safe. Honors payment_reminder.enabled.
+  const scan = () => runPaymentReminderScan().catch(e => logger.warn('JOBS', `payment scan error: ${e.message}`));
+  _timers.push(setTimeout(scan, PAYMENT_SCAN_INIT));
+  _timers.push(setInterval(scan, PAYMENT_SCAN_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
