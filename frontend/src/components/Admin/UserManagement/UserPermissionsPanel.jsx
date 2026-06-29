@@ -261,6 +261,7 @@ const UserPermissionsPanel = ({ user }) => {
                     {u.grants > 0 && <span style={{ color: '#16a34a' }}>+{u.grants}</span>}
                     {u.revokes > 0 && <span style={{ color: '#dc2626' }}>−{u.revokes}</span>}
                     {u.features > 0 && <span style={{ color: '#7c3aed' }}>{u.features} feat</span>}
+                    {u.record_views > 0 && <span style={{ color: '#6366f1' }}>{u.record_views} view{u.record_views !== 1 ? 's' : ''}</span>}
                   </span>
                 </div>
               ))}

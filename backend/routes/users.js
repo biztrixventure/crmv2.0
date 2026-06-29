@@ -1373,29 +1373,53 @@ router.get('/access-overview', asyncHandler(async (req, res) => {
   const [{ data: po }, fRes] = await Promise.all([pq, fq.then(r => r, () => ({ data: [] }))]);
   const fo = fRes?.data || [];
 
+  const mk = (user_id, company_id) => ({ user_id, company_id, grants: 0, revokes: 0, features: 0, record_views: 0 });
   const map = {};
   (po || []).forEach(o => {
     const k = `${o.user_id}|${o.company_id}`;
-    map[k] = map[k] || { user_id: o.user_id, company_id: o.company_id, grants: 0, revokes: 0, features: 0 };
+    map[k] = map[k] || mk(o.user_id, o.company_id);
     o.override_type === 'grant' ? map[k].grants++ : map[k].revokes++;
   });
   (fo || []).forEach(o => {
     const k = `${o.user_id}|${o.company_id}`;
-    map[k] = map[k] || { user_id: o.user_id, company_id: o.company_id, grants: 0, revokes: 0, features: 0 };
+    map[k] = map[k] || mk(o.user_id, o.company_id);
     map[k].features++;
   });
 
-  const rows = Object.values(map);
-  const uids = [...new Set(rows.map(r => r.user_id))];
+  // Record-view overrides live in business_config global keys
+  // drawer.layout.<type>.user.<uid> — count distinct drawers customized per user.
+  const { data: rvCfg } = await supabaseAdmin
+    .from('business_config').select('key')
+    .eq('scope', 'global').like('key', 'drawer.layout.%.user.%');
+  const rvByUser = {};
+  (rvCfg || []).forEach(r => {
+    const m = /^drawer\.layout\.[^.]+\.user\.(.+)$/.exec(r.key || '');
+    if (m) rvByUser[m[1]] = (rvByUser[m[1]] || 0) + 1;
+  });
+
+  // Resolve names + assignments for override users AND record-view-only users.
+  const uids = [...new Set([...Object.values(map).map(r => r.user_id), ...Object.keys(rvByUser)])];
   const names = {};
   if (uids.length) {
     const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
     (profs || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'; });
-    // assignment id so the UI can open the editor
-    const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('id, user_id, company_id').in('user_id', uids);
-    (ucr || []).forEach(a => { const r = map[`${a.user_id}|${a.company_id}`]; if (r) r.assignment_id = a.id; });
+
+    let ucrQ = supabaseAdmin.from('user_company_roles').select('id, user_id, company_id').in('user_id', uids);
+    if (companyId) ucrQ = ucrQ.eq('company_id', companyId);
+    const { data: ucr } = await ucrQ;
+    (ucr || []).forEach(a => {
+      const k = `${a.user_id}|${a.company_id}`;
+      // A record-view-only user has no perm/feature row yet — add one so they list.
+      if (!map[k] && rvByUser[a.user_id]) map[k] = { ...mk(a.user_id, a.company_id), assignment_id: a.id };
+      if (map[k]) map[k].assignment_id = a.id;
+    });
   }
-  res.json({ users: rows.map(r => ({ ...r, name: names[r.user_id] || 'Unknown' })).sort((a, b) => (b.grants + b.revokes + b.features) - (a.grants + a.revokes + a.features)) });
+  // Stamp the record-view count onto every row (global per user).
+  Object.values(map).forEach(r => { r.record_views = rvByUser[r.user_id] || 0; });
+
+  const rows = Object.values(map);
+  res.json({ users: rows.map(r => ({ ...r, name: names[r.user_id] || 'Unknown' }))
+    .sort((a, b) => (b.grants + b.revokes + b.features + b.record_views) - (a.grants + a.revokes + a.features + a.record_views)) });
 }));
 
 // ============================================================================
