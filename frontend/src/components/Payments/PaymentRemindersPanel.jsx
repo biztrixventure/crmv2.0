@@ -31,6 +31,8 @@ export default function PaymentRemindersPanel() {
   const [msg, setMsg]         = useState(null);
   const [windowDays, setWindowDays] = useState(7);
   const [busy, setBusy]       = useState(null);
+  const [selected, setSelected] = useState(null);   // row open in the detail drawer
+  const [noteText, setNoteText] = useState('');
 
   const load = useCallback(() => {
     setLoading(true); setMsg(null);
@@ -41,12 +43,17 @@ export default function PaymentRemindersPanel() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const act = async (id, status) => {
+  const act = async (id, status, note) => {
     setBusy(id);
-    try { await client.patch(`payment-reminders/${id}`, { status }); await load(); }
-    catch (e) { setMsg({ type: 'err', text: e.response?.data?.error || 'Action failed' }); }
+    try {
+      await client.patch(`payment-reminders/${id}`, { status, ...(note !== undefined ? { note } : {}) });
+      setSelected(null);
+      await load();
+    } catch (e) { setMsg({ type: 'err', text: e.response?.data?.error || 'Action failed' }); }
     finally { setBusy(null); }
   };
+
+  const openDetail = (r) => { setSelected(r); setNoteText(r.note || ''); };
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-4 animate-fade-in">
@@ -97,7 +104,9 @@ export default function PaymentRemindersPanel() {
                 const st = STATUS[r.status] || STATUS.pending;
                 const d = daysUntil(r.due_date);
                 return (
-                  <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <tr key={r.id} onClick={() => openDetail(r)}
+                    className="cursor-pointer transition-colors hover:bg-bg-secondary"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td className="px-4 py-3">
                       <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</div>
                       {s.customer_phone && <CopyableNumber number={s.customer_phone} className="text-xs" />}
@@ -114,7 +123,7 @@ export default function PaymentRemindersPanel() {
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold"
                         style={{ backgroundColor: st.bg, color: st.color, border: `1px solid ${st.color}44` }}>{st.label}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5 justify-end flex-wrap">
                         {!isCompliance && r.status !== 'cancelled' && (
                           <>
@@ -137,6 +146,7 @@ export default function PaymentRemindersPanel() {
                             <XCircle size={12} /> Cancel policy
                           </button>
                         )}
+                        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Details ›</span>
                       </div>
                     </td>
                   </tr>
@@ -146,9 +156,82 @@ export default function PaymentRemindersPanel() {
           </table>
         </div>
       )}
+
+      {/* Detail drawer — click a row to see the full record + act with a note */}
+      {selected && (() => {
+        const s = selected.sales || {};
+        const st = STATUS[selected.status] || STATUS.pending;
+        const d = daysUntil(selected.due_date);
+        const canAct = selected.status !== 'cancelled';
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setSelected(null)}>
+            <div className="w-full max-w-md h-full overflow-y-auto p-5 space-y-4" onClick={e => e.stopPropagation()}
+              style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{s.customer_name || 'Customer'}</h3>
+                  {s.customer_phone && <CopyableNumber number={s.customer_phone} className="text-sm" />}
+                </div>
+                <button onClick={() => setSelected(null)} className="p-1 rounded hover:bg-bg-secondary"><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+              </div>
+
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold"
+                style={{ backgroundColor: st.bg, color: st.color, border: `1px solid ${st.color}44` }}>{st.label}</span>
+
+              <div className="rounded-xl border p-3 text-sm space-y-1.5" style={{ borderColor: 'var(--color-border)' }}>
+                <Row label="Payment due"   value={`${selected.due_date} · ${d < 0 ? `${-d}d overdue` : d === 0 ? 'today' : `in ${d}d`}`} />
+                <Row label="Monthly"       value={money(s.monthly_payment)} />
+                <Row label="Reference"     value={s.reference_no || '—'} />
+                <Row label="Plan / sold"   value={s.sale_date ? `sold ${String(s.sale_date).slice(0,10)}` : '—'} />
+                {selected.handled_at && <Row label="Last action" value={new Date(selected.handled_at).toLocaleString()} />}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Note (call outcome)</label>
+                <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={3}
+                  placeholder="What happened on the call?" className="input resize-none w-full text-sm" />
+              </div>
+
+              {canAct && (
+                <div className="flex flex-wrap gap-2">
+                  {!isCompliance && (
+                    <>
+                      <button disabled={busy === selected.id} onClick={() => act(selected.id, 'collected', noteText)}
+                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: '#16a34a' }}>
+                        <CheckCircle size={14} /> Payment collected
+                      </button>
+                      <button disabled={busy === selected.id} onClick={() => act(selected.id, 'at_risk', noteText)}
+                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 border disabled:opacity-50" style={{ borderColor: '#dc2626', color: '#dc2626' }}>
+                        <AlertTriangle size={14} /> Couldn't collect
+                      </button>
+                    </>
+                  )}
+                  {(isCompliance || isSuper) && (
+                    <button disabled={busy === selected.id} onClick={() => act(selected.id, 'cancelled', noteText)}
+                      className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: '#dc2626' }}>
+                      <XCircle size={14} /> Cancel policy
+                    </button>
+                  )}
+                  <button disabled={busy === selected.id} onClick={() => act(selected.id, undefined, noteText)}
+                    className="text-sm font-semibold px-3 py-2 rounded-lg border disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    Save note
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
+
+const Row = ({ label, value }) => (
+  <div className="flex items-center justify-between gap-3">
+    <span style={{ color: 'var(--color-text-tertiary)' }}>{label}</span>
+    <span className="font-semibold text-right" style={{ color: 'var(--color-text)' }}>{value}</span>
+  </div>
+);
 
 // ── Superadmin settings (window / offsets / notify roles / enable) ───────────
 function SuperSettings({ onSaved }) {
