@@ -964,15 +964,18 @@ router.put(
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
     const isCreator  = existing.created_by === userId || existing.closer_id === userId;
-    const isManager  = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager'].includes(userRole);
+    const superadmin = userRole === 'superadmin';
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
-    // compliance_manager isn't in the isManager list above, so include the
-    // isCompliance flag here — otherwise a compliance user editing a sale they
-    // didn't create is wrongly 403'd before the compliance-specific paths below.
-    if (!isCreator && !isManager && !isCompliance) return res.status(403).json({ error: 'Permission denied' });
+    // Toggleable per user: update_sale (role grant honored; per-user override
+    // wins). Creators always edit their own; compliance/superadmin always pass.
+    // Migration 131 grants update_sale to the roles that had role access, so this
+    // changes nothing for them.
+    const canEdit = superadmin || isCreator || isCompliance || await hasPermission(userId, req.user.company_id, 'update_sale');
+    if (!canEdit) return res.status(403).json({ error: 'Permission denied' });
 
-    // Company scope: managers can only edit sales in their own company (compliance sees all)
-    if (isManager && !isCompliance && existing.company_id !== req.user.company_id) {
+    // Company scope: a non-creator, non-compliance editor can only edit sales in
+    // their own company (compliance/superadmin see all).
+    if (!isCreator && !isCompliance && existing.company_id !== req.user.company_id) {
       return res.status(403).json({ error: 'Sale not within your company scope' });
     }
 
@@ -1605,13 +1608,17 @@ router.delete(
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
     const isCreator = existing.created_by === userId || existing.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
+    const superadmin = userRole === 'superadmin';
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
-    if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
+    // Toggleable per user: delete_sale (role grant honored; per-user override
+    // wins). Creators may delete their own; compliance/superadmin always pass.
+    // Migration 131 keeps current role access intact.
+    const canDelete = superadmin || isCreator || isCompliance || await hasPermission(userId, req.user.company_id, 'delete_sale');
+    if (!canDelete) return res.status(403).json({ error: 'Permission denied' });
 
-    // Company scope guard: managers can only delete sales in their own company
-    // (compliance + superadmin see all). Mirrors the PUT handler's scope check.
-    if (isManager && !isCompliance && !isCreator && existing.company_id !== req.user.company_id) {
+    // Company scope guard: a non-creator, non-compliance deleter can only delete
+    // sales in their own company (compliance + superadmin see all).
+    if (!isCreator && !isCompliance && existing.company_id !== req.user.company_id) {
       return res.status(403).json({ error: 'Sale not within your company scope' });
     }
 
