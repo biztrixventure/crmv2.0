@@ -10,7 +10,7 @@ const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { getConfig } = require('../utils/businessConfig');
-const { isCompanyMember } = require('../models/helpers');
+const { isCompanyMember, hasPermission } = require('../models/helpers');
 
 // Global master switch for duplicate handling. When OFF, the CRM stops detecting
 // /flagging duplicates entirely — transfers are created plainly, no dup warnings,
@@ -1066,16 +1066,20 @@ router.put('/:id', asyncHandler(async (req, res) => {
   if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
   const isCreator  = existing.created_by === userId;
-  const isManager  = MANAGER_ROLES.includes(userRole);
-
-  if (!isCreator && !isManager) {
+  const superadmin = userRole === 'superadmin';
+  const isManager  = MANAGER_ROLES.includes(userRole);   // still drives the reason + date-change rules below
+  // Toggleable per user: update_transfer (role grant honored; per-user override
+  // wins). Creators always edit their own. Migration 130 grants the perm to the
+  // roles that had role-based access, so this changes nothing for them.
+  const canEdit = superadmin || isCreator || await hasPermission(userId, req.user.company_id, 'update_transfer');
+  if (!canEdit) {
     return res.status(403).json({ error: 'Permission denied' });
   }
 
-  // Company scope guard for non-superadmin managers. compliance_manager is
-  // explicitly global — they review every company by design (same as
-  // superadmin / readonly_admin), so the scope predicate is skipped for them.
-  if (isManager && userRole !== 'superadmin' && userRole !== 'readonly_admin' && userRole !== 'compliance_manager') {
+  // Company scope guard for non-creator, non-superadmin editors. compliance_manager
+  // is explicitly global — they review every company by design — so the scope
+  // predicate is skipped for them (and for readonly_admin, blocked from writes).
+  if (!isCreator && !superadmin && userRole !== 'readonly_admin' && userRole !== 'compliance_manager') {
     const userCompanyId = req.user.company_id;
     const isCloserSide = userRole === 'closer_manager';
     if (isCloserSide) {
@@ -1292,13 +1296,16 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
   const isCreator = existing.created_by === userId;
-  const isManager = MANAGER_ROLES.includes(userRole);
+  const superadmin = userRole === 'superadmin';
+  // Toggleable per user: delete_transfer (role grant honored; per-user override
+  // wins). Creators may always delete their own. Migration 130 keeps current
+  // role access intact.
+  const canDelete = superadmin || isCreator || await hasPermission(userId, req.user.company_id, 'delete_transfer');
+  if (!canDelete) return res.status(403).json({ error: 'Permission denied' });
 
-  if (!isCreator && !isManager) return res.status(403).json({ error: 'Permission denied' });
-
-  // Company scope guard for non-superadmin managers (mirrors PUT handler).
-  // Prevents a manager in one company from deleting another company's transfer by id.
-  if (isManager && !isCreator && userRole !== 'superadmin') {
+  // Company scope guard for non-creator, non-superadmin deleters (mirrors PUT).
+  // Prevents deleting another company's transfer by id.
+  if (!isCreator && !superadmin) {
     const userCompanyId = req.user.company_id;
     const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole);
     if (isCloserSide) {
