@@ -13,6 +13,13 @@ const AREA_LABEL = {
 const areaLabel = (c) => AREA_LABEL[c] || (c || 'other').replace(/_/g, ' ');
 const pretty = (name) => name.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
 
+// Logical order: day-to-day work first, then insights, then administration.
+const CATEGORY_ORDER = [
+  'sales', 'transfers', 'callbacks', 'reports', 'reviews',
+  'forms', 'user_management', 'users', 'company_management', 'companies', 'notifications',
+];
+const catRank = (c) => { const i = CATEGORY_ORDER.indexOf(c); return i === -1 ? 99 : i; };
+
 // Generic 3-state pill.
 const TriPill = ({ value, options, onChange }) => {
   const btn = (label, active, color, onClick) => (
@@ -41,6 +48,8 @@ const UserPermissionsPanel = ({ user }) => {
   const [msg, setMsg]   = useState(null);
   const [search, setSearch] = useState('');
   const [peers, setPeers]   = useState([]);   // same-company users, for "copy from"
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleCat = (c) => setCollapsed(prev => { const n = new Set(prev); n.has(c) ? n.delete(c) : n.add(c); return n; });
 
   // Load same-company users so the superadmin can copy one user's access onto another.
   useEffect(() => {
@@ -348,20 +357,27 @@ const UserPermissionsPanel = ({ user }) => {
       )}
 
       {/* ── PERMISSIONS ── */}
-      {Object.entries(allPerms).map(([category, perms]) => {
+      {Object.entries(allPerms).sort((a, b) => catRank(a[0]) - catRank(b[0])).map(([category, perms]) => {
         const visible = perms.filter(matchP);
         if (!visible.length) return null;
+        const isCollapsed = collapsed.has(category) && !q;
+        const ovc = perms.filter(p => overrides[p.name] != null).length;
         return (
           <div key={category} className="rounded-xl border border-border overflow-hidden">
             <div className="px-4 py-2 flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-              <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{areaLabel(category)}</span>
+              <button onClick={() => toggleCat(category)} className="flex items-center gap-2 min-w-0">
+                {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
+                <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{areaLabel(category)}</span>
+                <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{visible.length}</span>
+                {ovc > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: '#ede9fe', color: '#5b21b6' }}>{ovc}</span>}
+              </button>
               <div className="flex items-center gap-1">
                 <button onClick={() => bulkGroup(perms, 'on')}      className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: '#16a34a' }}>Grant all</button>
                 <button onClick={() => bulkGroup(perms, 'off')}     className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: '#dc2626' }}>Revoke all</button>
                 <button onClick={() => bulkGroup(perms, 'default')} className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: 'var(--color-text-secondary)' }}>Reset</button>
               </div>
             </div>
-            <div className="divide-y divide-border">
+            {!isCollapsed && <div className="divide-y divide-border">
               {visible.map(perm => {
                 const hasRole = rolePerms.has(perm.name);
                 const on = effPerm(perm.name);
@@ -386,7 +402,7 @@ const UserPermissionsPanel = ({ user }) => {
                   </div>
                 );
               })}
-            </div>
+            </div>}
           </div>
         );
       })}
