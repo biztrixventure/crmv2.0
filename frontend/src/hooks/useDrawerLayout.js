@@ -51,7 +51,9 @@ const FALLBACK = {
 export function useDrawerLayout(drawerType) {
   const { user } = useAuth();
   const role = user?.role || 'closer';
-  const cacheKey = `${drawerType}|${role}`;
+  const uid  = user?.id || '';
+  // Per-user layout (set by a superadmin) wins over the per-role layout.
+  const cacheKey = `${drawerType}|${role}|${uid}`;
   const [sections, setSections] = useState(() => {
     const hit = _cache.get(cacheKey);
     return hit ? hit.value : (FALLBACK[drawerType] || []);
@@ -68,8 +70,10 @@ export function useDrawerLayout(drawerType) {
       .then(r => {
         if (cancelled) return;
         const cfg = r.data?.config || {};
-        const key = `drawer.layout.${drawerType}.${role}`;
-        const raw = cfg[key] || FALLBACK[drawerType] || [];
+        const userKey = uid ? `drawer.layout.${drawerType}.user.${uid}` : null;
+        const roleKey = `drawer.layout.${drawerType}.${role}`;
+        const userLayout = userKey && Array.isArray(cfg[userKey]) && cfg[userKey].length ? cfg[userKey] : null;
+        const raw = userLayout || cfg[roleKey] || FALLBACK[drawerType] || [];
         const sorted = [...raw].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         _cache.set(cacheKey, { value: sorted, at: Date.now() });
         setSections(sorted);
@@ -79,7 +83,7 @@ export function useDrawerLayout(drawerType) {
         setSections(FALLBACK[drawerType] || []);
       });
     return () => { cancelled = true; };
-  }, [cacheKey, drawerType, role]);
+  }, [cacheKey, drawerType, role, uid]);
 
   const isVisible = (id) => {
     const s = sections.find(x => x.id === id);

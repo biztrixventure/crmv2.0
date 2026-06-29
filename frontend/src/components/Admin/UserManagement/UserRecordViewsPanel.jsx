@@ -1,0 +1,54 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Info } from 'lucide-react';
+import client from '../../../api/client';
+import DrawerLayoutRules from '../BusinessRules/DrawerLayoutRules';
+
+// Per-user record-view layout. Reuses the rich per-role drawer editor, but
+// targets drawer.layout.<type>.user.<userId> (which useDrawerLayout resolves
+// BEFORE the role layout). Superadmin-only — the save hits business-config.
+export default function UserRecordViewsPanel({ user }) {
+  const [config, setConfig] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    client.get('business-config')
+      .then(r => setConfig(r.data?.config || {}))
+      .catch(() => setConfig({}))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (key, value) => {
+    setConfig(prev => ({ ...prev, [key]: value }));   // optimistic so the editor reflects it
+    try {
+      await client.put('business-config', { scope: 'global', key, value });
+      setMsg({ type: 'ok', text: 'Saved' }); setTimeout(() => setMsg(null), 1400);
+    } catch (e) {
+      setMsg({ type: 'err', text: e.response?.data?.error || 'Save failed' });
+    }
+  };
+
+  if (loading) {
+    return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>;
+  }
+
+  const userName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email || 'this user';
+  const uid = user.user_id || user.id;
+  const userRole = (user.role_level || user.custom_roles?.level || user.role || '').toLowerCase() || null;
+
+  return (
+    <div>
+      <div className="rounded-xl p-3 mb-3 text-sm flex items-start gap-2"
+        style={{ backgroundColor: 'var(--color-primary-50, rgba(99,102,241,0.06))', border: '1px solid var(--color-primary-200, rgba(99,102,241,0.2))' }}>
+        <Info size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
+        <span style={{ color: 'var(--color-text-secondary)' }}>
+          Control exactly what <strong style={{ color: 'var(--color-text)' }}>{userName}</strong> sees inside the Sale / Transfer / Callback record drawers — hide whole sections or individual fields (Down Payment, VIN, …), reorder them, and move fields between sections. This overrides their role layout; untouched drawers keep the role default.
+        </span>
+      </div>
+      {msg && <p className="text-xs mb-2 font-semibold" style={{ color: msg.type === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.text}</p>}
+      <DrawerLayoutRules config={config} scope="global" userId={uid} userName={userName} userRole={userRole} onSave={save} />
+    </div>
+  );
+}

@@ -314,7 +314,7 @@ const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggl
 // ─────────────────────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────────────────────
-const DrawerLayoutRules = ({ config, scope, onSave }) => {
+const DrawerLayoutRules = ({ config, scope, onSave, userId = null, userName = '', userRole = null }) => {
   const [drawerType, setDrawerType] = useState('sale');
   const [role,       setRole]       = useState('closer');
   const [expanded,   setExpanded]   = useState({});       // sectionId -> bool
@@ -325,8 +325,16 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
   const { fields: formFields, fetchFields } = useFormFields();
   useEffect(() => { fetchFields(); }, [fetchFields]);
 
-  const key      = `drawer.layout.${drawerType}.${role}`;
-  const accent   = ROLES.find(r => r.key === role)?.accent || '#6366f1';
+  // Per-user mode: edit one user's layout (wins over their role); otherwise edit
+  // a role's layout. The key is the only difference — all editing logic is shared.
+  const key      = userId
+    ? `drawer.layout.${drawerType}.user.${userId}`
+    : `drawer.layout.${drawerType}.${role}`;
+  // In user mode, before any user override exists, seed the editor from the
+  // user's role layout (what they see today) instead of a blank catalog — so the
+  // superadmin tweaks from reality. Display-only: nothing persists until a change.
+  const roleSeedKey = userId && userRole ? `drawer.layout.${drawerType}.${userRole}` : null;
+  const accent   = userId ? '#6366f1' : (ROLES.find(r => r.key === role)?.accent || '#6366f1');
 
   // Dynamic (form-builder) fields that aren't core/column-mapped — these belong
   // to the catch-all section by default and can be dragged into any section.
@@ -369,7 +377,8 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
   // Resolve current sections, merging with the catalog so new sections appear
   // at the bottom hidden + new fields appear at the bottom hidden too.
   const sections = useMemo(() => {
-    const stored = config?.[key];
+    // User mode with no override yet → seed from the role layout if one exists.
+    const stored = config?.[key] || (roleSeedKey ? config?.[roleSeedKey] : null);
     if (Array.isArray(stored) && stored.length) {
       const known = new Set(stored.map(s => s.id));
       const extraSections = catalog.filter(c => !known.has(c.id))
@@ -401,7 +410,7 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
       id: c.id, label: c.label, visible: true, order: i + 1,
       fields: (c.fields || []).map((f, j) => ({ id: f.id, label: f.label, visible: true, order: j + 1 })),
     }));
-  }, [config, key, catalog, formFields, allValidFieldIds]);
+  }, [config, key, roleSeedKey, catalog, formFields, allValidFieldIds]);
 
   const persist = (next) => {
     const renumbered = next.map((s, i) => ({
@@ -467,7 +476,7 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
   };
 
   const resetToDefault = () => {
-    if (!window.confirm('Reset this drawer + role to the default catalog (all sections + all fields visible)?')) return;
+    if (!window.confirm('Reset this drawer to the default catalog (all sections + all fields visible)?')) return;
     persist(catalog.map((c, i) => ({
       id: c.id, label: c.label, visible: true, order: i + 1,
       fields: (c.fields || []).map((f, j) => ({ id: f.id, label: f.label, visible: true, order: j + 1 })),
@@ -531,27 +540,37 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
               {DRAWER_TYPES.find(d => d.key === drawerType)?.desc}
             </p>
           </div>
-          <div>
-            <label htmlFor="drawer-role" className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1.5 block">
-              Role
-            </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {ROLES.map(r => (
-                <button key={r.key} type="button" onClick={() => setRole(r.key)}
-                  className="text-xs font-semibold px-2 py-2 rounded-lg transition-all flex items-center gap-1.5"
-                  style={{
-                    border: '1px solid',
-                    borderColor: role === r.key ? r.accent : 'var(--color-border)',
-                    background: role === r.key ? `${r.accent}15` : 'transparent',
-                    color: role === r.key ? r.accent : 'var(--color-text-secondary)',
-                    minHeight: 32,
-                  }}>
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: r.accent }} />
-                  <span className="truncate">{r.label}</span>
-                </button>
-              ))}
+          {userId ? (
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1.5 block">Editing for</label>
+              <div className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ border: `1px solid ${accent}`, background: `${accent}15`, color: accent }}>
+                {userName || 'this user'}
+              </div>
+              <p className="text-[11px] text-text-tertiary mt-1.5 leading-relaxed">Only this user is affected — overrides their role's layout. Leave a drawer untouched and they keep the role default.</p>
             </div>
-          </div>
+          ) : (
+            <div>
+              <label htmlFor="drawer-role" className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1.5 block">
+                Role
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {ROLES.map(r => (
+                  <button key={r.key} type="button" onClick={() => setRole(r.key)}
+                    className="text-xs font-semibold px-2 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                    style={{
+                      border: '1px solid',
+                      borderColor: role === r.key ? r.accent : 'var(--color-border)',
+                      background: role === r.key ? `${r.accent}15` : 'transparent',
+                      color: role === r.key ? r.accent : 'var(--color-text-secondary)',
+                      minHeight: 32,
+                    }}>
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: r.accent }} />
+                    <span className="truncate">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -559,7 +578,9 @@ const DrawerLayoutRules = ({ config, scope, onSave }) => {
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-2 text-xs text-text-tertiary">
           <Layers size={12} />
-          <span>{visibleCount} of {sections.length} sections visible · Editing as <strong style={{ color: accent }}>{ROLES.find(r => r.key === role)?.label}</strong></span>
+          <span>{visibleCount} of {sections.length} sections visible · Editing {userId
+            ? <>for <strong style={{ color: accent }}>{userName || 'this user'}</strong></>
+            : <>as <strong style={{ color: accent }}>{ROLES.find(r => r.key === role)?.label}</strong></>}</span>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           <button type="button" onClick={expandAll}

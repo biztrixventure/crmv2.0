@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { UserCog, ShieldCheck } from 'lucide-react';
+import { UserCog, ShieldCheck, LayoutTemplate } from 'lucide-react';
 import { Modal } from '../../../components/UI';
+import { useAuth } from '../../../contexts/AuthContext';
 import UserForm from './UserForm';
 import UserPermissionsPanel from './UserPermissionsPanel';
+import UserRecordViewsPanel from './UserRecordViewsPanel';
 import client from '../../../api/client';
 
-const TABS = [
-  { id: 'details',     label: 'Details',     icon: UserCog },
-  { id: 'permissions', label: 'Permissions',  icon: ShieldCheck },
-];
-
 const UserModal = ({ user = null, onClose, onSave }) => {
+  const { user: viewer } = useAuth();
+  const isSuperadmin = viewer?.role === 'superadmin';
+  const TABS = [
+    { id: 'details',      label: 'Details',      icon: UserCog },
+    { id: 'permissions',  label: 'Permissions',  icon: ShieldCheck },
+    // Per-user record-view layout writes global business-config → superadmin only.
+    ...(isSuperadmin ? [{ id: 'record_views', label: 'Record Views', icon: LayoutTemplate }] : []),
+  ];
   const [tab, setTab]           = useState('details');
   const [isLoading, setIsLoading] = useState(false);
   const [roles, setRoles]       = useState([]);
@@ -82,6 +87,8 @@ const UserModal = ({ user = null, onClose, onSave }) => {
           isLoading={isLoading}
           roles={roles}
         />
+      ) : tab === 'record_views' ? (
+        <UserRecordViewsPanel user={user} />
       ) : (
         <UserPermissionsPanel user={user} />
       )}
