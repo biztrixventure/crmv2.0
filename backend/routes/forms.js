@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { hasPermission } = require('../models/helpers');
 
 const router = express.Router();
 
@@ -12,12 +13,17 @@ const ALLOWED_TYPES = [
   'sale_fronter', 'sale_date', 'sale_status', 'sale_disposition', 'sale_call_review',
 ];
 
-const superadminOnly = (req, res, next) => {
-  if (req.user.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Only SuperAdmin can manage form fields' });
+// Form editing is now TOGGLEABLE: superadmin always, or any user granted the
+// manage_forms permission (which the Form Builder UI already gates on). Purely
+// additive — superadmin still passes; nobody else gains access until a superadmin
+// grants manage_forms, so no migration/backfill is needed. Kept the name
+// `superadminOnly` so the route wiring is unchanged.
+const superadminOnly = asyncHandler(async (req, res, next) => {
+  if (req.user.role === 'superadmin' || await hasPermission(req.user.id, req.user.company_id, 'manage_forms')) {
+    return next();
   }
-  next();
-};
+  return res.status(403).json({ error: 'You do not have permission to manage form fields' });
+});
 
 // ============================================================================
 // GET /forms  (alias → same as /forms/fields)
