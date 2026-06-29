@@ -26,8 +26,10 @@ const TransferFormModal = ({
   const [formData, setFormData]         = useState({});
   const [selectedCloser, setSelectedCloser] = useState('');
   const [editReason, setEditReason]     = useState('');
+  const [transferDate, setTransferDate] = useState('');   // edit mode: the real created_at (Transfer Date)
   const [error, setError]               = useState('');
   const isEdit = !!existingTransfer;
+  const origDate = existingTransfer?.created_at ? existingTransfer.created_at.slice(0, 10) : '';
   const { years: vehicleYears } = useVehicleYearRange();
   const { colorFor } = useUserColors();
 
@@ -38,6 +40,7 @@ const TransferFormModal = ({
       setFormData(existingTransfer.form_data || {});
       if (existingTransfer.assigned_closer_id) setSelectedCloser(existingTransfer.assigned_closer_id);
       setEditReason('');
+      setTransferDate(existingTransfer.created_at ? existingTransfer.created_at.slice(0, 10) : '');
     }
   }, [isOpen, existingTransfer]);
 
@@ -107,7 +110,12 @@ const TransferFormModal = ({
     const clean = canonicalizeFormData(formData, fields);
     try {
       const payload = isEdit
-        ? { form_data: clean, ...(editReason.trim() ? { reason: editReason.trim() } : {}) }
+        ? {
+            form_data: clean,
+            ...(editReason.trim() ? { reason: editReason.trim() } : {}),
+            // Only send when the date actually changed — moves the real created_at.
+            ...(transferDate && transferDate !== origDate ? { transfer_date: transferDate } : {}),
+          }
         : { ...clean, assigned_closer_id: selectedCloser };
       await onSubmit(payload);
       setFormData({});
@@ -296,6 +304,23 @@ const TransferFormModal = ({
                   {closers.length === 0 && (
                     <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
                       No closers linked to this company yet.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Transfer Date — edit mode only. Writes the real created_at, so
+                  the record actually moves to that day in every list/filter. */}
+              {isEdit && (
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Transfer Date
+                  </label>
+                  <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+                    className="input" />
+                  {transferDate && transferDate !== origDate && (
+                    <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
+                      Moves this transfer to {transferDate} everywhere (was {origDate || 'unknown'}).
                     </p>
                   )}
                 </div>

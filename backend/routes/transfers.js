@@ -1130,6 +1130,27 @@ router.put('/:id', asyncHandler(async (req, res) => {
     updates.edit_history = [...currentHistory, historyEntry];
   }
 
+  // Manager/compliance can move the transfer's date. "Transfer Date" in every
+  // view is the created_at column (it's what the lists sort + filter by), so we
+  // write the real column — the record actually moves to that day everywhere.
+  if (req.body.transfer_date !== undefined && req.body.transfer_date !== null && req.body.transfer_date !== '' && isManager) {
+    // A bare YYYY-MM-DD lands at NOON UTC so the calendar day is stable in every
+    // display timezone (ET lists won't roll it to the previous day).
+    let dateStr = String(req.body.transfer_date);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) dateStr += 'T12:00:00Z';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid transfer_date' });
+    updates.created_at = d.toISOString();
+    const baseHist = Array.isArray(updates.edit_history)
+      ? updates.edit_history
+      : (Array.isArray(existing.edit_history) ? existing.edit_history : []);
+    updates.edit_history = [...baseHist, {
+      editor_id: userId,
+      reason: `Transfer date moved to ${d.toISOString().slice(0, 10)}${reason ? ` — ${reason}` : ''}`,
+      edited_at: new Date().toISOString(),
+    }];
+  }
+
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('transfers')
     .update(updates)
