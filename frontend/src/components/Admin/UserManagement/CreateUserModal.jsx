@@ -79,6 +79,8 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templateId, setTemplateId] = useState('');
 
   useEffect(() => {
     if (!isOpen || !companyId) return;
@@ -87,12 +89,15 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
       .then(r => setRoles(r.data.roles || []))
       .catch(() => setRoles([]))
       .finally(() => setRolesLoading(false));
+    // Access templates — let the superadmin apply a saved access set at creation.
+    client.get('users/access-templates').then(r => setTemplates(r.data.templates || [])).catch(() => {});
   }, [isOpen, companyId]);
 
   const reset = () => {
     setForm({ full_name: '', email: '', password: '', role_id: '', vicidial_agent_id: '' });
     setError('');
     setShowPassword(false);
+    setTemplateId('');
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -105,6 +110,15 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
     setSubmitting(true);
     try {
       const { data } = await client.post('users', { ...form, company_id: companyId, require_verification: false });
+      // Optionally apply a saved access template to the new user right away.
+      const tpl = templateId ? templates.find(t => t.id === templateId) : null;
+      if (tpl && data.user?.assignment_id) {
+        await client.post('users/apply-overrides', {
+          target_assignment_ids: [data.user.assignment_id],
+          permission_overrides: tpl.permission_overrides || [],
+          feature_overrides: tpl.feature_overrides || [],
+        }).catch(() => {});
+      }
       reset();
       onCreated?.(data.user);
       onClose();
@@ -194,6 +208,22 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
               onChange={roleId => setForm(f => ({ ...f, role_id: roleId }))}
             />
           </div>
+
+          {/* Optional access template — apply a saved override set at creation */}
+          {templates.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-text-secondary mb-1">
+                Access template <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>(optional)</span>
+              </label>
+              <select className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}>
+                <option value="">None — use role defaults</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                Applies a saved permission + feature set on top of the role. Fine-tune later in the user's Permissions tab.
+              </p>
+            </div>
+          )}
 
           {error && (
             <p className="text-sm px-3 py-2 rounded-lg"

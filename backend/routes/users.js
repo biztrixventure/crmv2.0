@@ -594,6 +594,7 @@ router.post(
       logger.success('CREATE_USER', `User profile created`, { user_id: authUser.user.id });
 
       // Assign user to company with role (only if role_id provided)
+      let assignmentId = null;   // surfaced in the response so the UI can set per-user access right after creation
       if (role_id && userCompanyId) {
         logger.debug('CREATE_USER', 'Assigning user to company', { user_id: authUser.user.id, company_id: userCompanyId, role_id });
         const { data: assignment, error: assignError } = await supabaseAdmin
@@ -612,6 +613,7 @@ router.post(
           logger.error('CREATE_USER', 'Failed to assign user to company', assignError);
           return res.status(400).json({ error: assignError.message });
         }
+        assignmentId = assignment.id;
 
         logger.success('CREATE_USER', `User created and assigned successfully`, { user_id: authUser.user.id, assignment_id: assignment.id, password_source: passwordSource });
       } else {
@@ -630,6 +632,7 @@ router.post(
           last_name,
           company_id: userCompanyId,
           role_id,
+          assignment_id: assignmentId,
         },
       });
     } catch (err) {
