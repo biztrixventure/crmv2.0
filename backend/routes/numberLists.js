@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
+const { hasPermission } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { titleCase } = require('../utils/titleCase');
 
@@ -17,6 +18,10 @@ const SUPERADMIN_LEVELS = ['superadmin', 'readonly_admin'];
 
 const isManager    = (role) => MANAGER_LEVELS.includes(role);
 const isSuperAdmin = (role) => SUPERADMIN_LEVELS.includes(role);
+// Toggleable number-list management: super/readonly always, else the
+// manage_callback_numbers permission (granted to manager roles by migration 134).
+const canManage = async (req) =>
+  isSuperAdmin(req.user.role) || await hasPermission(req.user.id, req.user.company_id, 'manage_callback_numbers');
 
 // Enrich rows with fronter + assigned_by names and company names
 const enrichWithNames = async (rows, includeCompany = false) => {
@@ -149,7 +154,7 @@ router.get('/summary', asyncHandler(async (req, res) => {
 // GET /number-lists/lists — grouped list summaries for managers / superadmin
 // ============================================================================
 router.get('/lists', asyncHandler(async (req, res) => {
-  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
 
   const companyId = req.query.company_id || req.user.company_id;
   const { fronter_id, assignment_day, status } = req.query;
@@ -225,7 +230,7 @@ router.get('/lists', asyncHandler(async (req, res) => {
 // GET /number-lists/fronters — fronters in company (for manager dropdown)
 // ============================================================================
 router.get('/fronters', asyncHandler(async (req, res) => {
-  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
   const companyId = req.query.company_id || req.user.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
@@ -283,7 +288,7 @@ router.post('/bulk', [
   body('list_name').trim().notEmpty().withMessage('list_name required'),
   body('numbers').isArray({ min: 1 }).withMessage('numbers array required'),
 ], asyncHandler(async (req, res) => {
-  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: errs.array()[0].msg });
@@ -321,7 +326,7 @@ router.post('/bulk', [
 // literal path isn't captured by the :id param route.)
 // ============================================================================
 router.put('/reassign', asyncHandler(async (req, res) => {
-  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
   const companyId = req.body.company_id || req.user.company_id;
   const { list_name, fronter_id, assignment_day, new_fronter_id, new_assignment_day } = req.body;
   if (!list_name) return res.status(400).json({ error: 'list_name required' });
@@ -359,7 +364,7 @@ router.put('/:id', [
 
   let query = supabaseAdmin.from('number_lists').update(updates).eq('id', id);
 
-  if (!isManager(req.user.role)) {
+  if (!(await canManage(req))) {
     query = query.eq('fronter_id', req.user.id);
   } else if (!isSuperAdmin(req.user.role)) {
     const companyId = req.user.company_id;
@@ -391,7 +396,7 @@ router.put('/:id/transfer', asyncHandler(async (req, res) => {
 
   let query = supabaseAdmin.from('number_lists').update(updates).eq('id', id);
 
-  if (!isManager(req.user.role)) {
+  if (!(await canManage(req))) {
     query = query.eq('fronter_id', req.user.id);
   } else if (!isSuperAdmin(req.user.role)) {
     if (req.user.company_id) query = query.eq('company_id', req.user.company_id);
@@ -408,7 +413,7 @@ router.put('/:id/transfer', asyncHandler(async (req, res) => {
 // DELETE /number-lists/batch — delete by list_name or ids (managers only)
 // ============================================================================
 router.delete('/batch', asyncHandler(async (req, res) => {
-  if (!isManager(req.user.role)) return res.status(403).json({ error: 'Managers only' });
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
 
   const companyId = req.user.company_id || req.body.company_id;
   const { list_name, ids, fronter_id, assignment_day } = req.body;
