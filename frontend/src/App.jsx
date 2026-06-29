@@ -31,22 +31,33 @@ const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistan
 // strand a white-on-white mark.
 const PageSpinner = () => <BrandedLoader />;
 
-// Protected Route — checks auth + role access
-const ProtectedRoute = ({ children, requiredRole = null }) => {
+// Protected Route — checks auth + role access (or a feature-flag grant).
+// requireFlag: access is granted purely by a strict feature flag, regardless of
+// role — used by the opt-in Custom Access workspace.
+const ProtectedRoute = ({ children, requiredRole = null, requireFlag = null }) => {
   const { user, isAuthenticated } = useAuth();
+  const { isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
   if (!isAuthenticated) return <Navigate to="/login" />;
+  if (requireFlag) {
+    if (flagsLoading) return <BrandedLoader />;
+    if (!isEnabledStrict(requireFlag)) return <Navigate to={getRoleRoute(user?.role)} />;
+    return children;
+  }
   if (requiredRole && !hasRoleAccess(user?.role, requiredRole)) {
     return <Navigate to={getRoleRoute(user?.role)} />;
   }
   return children;
 };
 
-// Smart redirect — waits for /auth/me before routing
+// Smart redirect — waits for /auth/me AND feature flags before routing, so a
+// Custom Access user lands in /workspace instead of their role shell.
 const DashboardRedirect = () => {
   const { user, isRefreshing } = useAuth();
+  const { isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
 
-  if (isRefreshing) return <BrandedLoader message="Loading your dashboard" />;
+  if (isRefreshing || flagsLoading) return <BrandedLoader message="Loading your dashboard" />;
 
+  if (isEnabledStrict('custom_workspace')) return <Navigate to="/workspace" replace />;
   return <Navigate to={getRoleRoute(user?.role)} replace />;
 };
 
@@ -83,6 +94,10 @@ const AppContent = () => {
           <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
           <Route path="/fronter/*" element={<ProtectedRoute requiredRole="fronter"><StaffShell /></ProtectedRoute>} />
           <Route path="/staff/*"   element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
+
+          {/* Custom Access workspace — opt-in unified shell, granted by flag (any
+              base role). Reuses ManagerShell; every tab/tool is permission-gated. */}
+          <Route path="/workspace/*" element={<ProtectedRoute requireFlag="custom_workspace"><ManagerShell /></ProtectedRoute>} />
 
           {/* Manager Shell — all manager roles + company_admin */}
           <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
