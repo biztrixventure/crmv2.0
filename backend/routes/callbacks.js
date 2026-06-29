@@ -200,6 +200,12 @@ router.post('/',
 
     if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
+    // Toggleable per user: create_callback (migration 132 grants it to every role,
+    // so creating still works for everyone until a superadmin revokes it).
+    if (!superadmin && !(await hasPermission(userId, req.user.company_id, 'create_callback'))) {
+      return res.status(403).json({ error: 'You do not have permission to create callbacks' });
+    }
+
     const { data, error } = await supabaseAdmin
       .from('callbacks')
       .insert(await stampActor('callbacks', {
@@ -260,7 +266,11 @@ router.put('/:id',
     Object.assign(updates, await stampActor('callbacks', {}, userId));
 
     const superadmin = await isSuperAdmin(userId);
-    const isManager  = superadmin || MANAGER_LEVELS.includes(req.user.role);
+    // Toggleable per user: edit_callback (replaces the role check). Migration 132
+    // grants it to the manager roles that could edit team callbacks, so nothing
+    // changes for them; a per-user override now takes effect. Owners always edit
+    // their own callback regardless.
+    const hasEdit = superadmin || await hasPermission(userId, req.user.company_id, 'edit_callback');
 
     // Fetch current record first (needed for audit log + access check)
     const { data: current } = await supabaseAdmin
@@ -271,14 +281,14 @@ router.put('/:id',
 
     if (!current) return res.status(404).json({ error: 'Callback not found' });
 
-    // Access: superadmin sees all; same-company manager; or callback owner
-    const companyMatch = isManager && current.company_id === req.user.company_id;
+    // Access: superadmin sees all; edit_callback holder in the same company; or owner
+    const companyMatch = hasEdit && current.company_id === req.user.company_id;
     if (!superadmin && !companyMatch && current.user_id !== userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // Build match condition for the update
-    const condition = superadmin ? { id } : isManager ? { id, company_id: req.user.company_id } : { id, user_id: userId };
+    const condition = superadmin ? { id } : companyMatch ? { id, company_id: req.user.company_id } : { id, user_id: userId };
 
     const { data, error } = await supabaseAdmin
       .from('callbacks')
@@ -398,8 +408,14 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const userId = req.user.id;
 
+  // Toggleable per user: delete_callback. Default (granted to nobody) keeps the
+  // original behaviour — only the owner or a superadmin can delete. Granting
+  // delete_callback lets that user delete any callback in their own company.
   const superadmin = await isSuperAdmin(userId);
-  const condition  = superadmin ? { id } : { id, user_id: userId };
+  let condition;
+  if (superadmin) condition = { id };
+  else if (await hasPermission(userId, req.user.company_id, 'delete_callback')) condition = { id, company_id: req.user.company_id };
+  else condition = { id, user_id: userId };
 
   const { error } = await supabaseAdmin.from('callbacks').delete().match(condition);
   if (error) return res.status(400).json({ error: error.message });
