@@ -20,6 +20,22 @@ router.get('/search', superOnly, asyncHandler(async (req, res) => {
   res.json({ results: await Repo.search(req.query.q || '', limit) });
 }));
 
+// GET /api/customer-profile/browse — filterable customer segments
+// query: segment, sort, dir, q, limit, min_transfers, min_policies, min_cancellations
+router.get('/browse', superOnly, asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+  res.json({ results: await Repo.browse({
+    segment: req.query.segment || 'all',
+    sort:    req.query.sort || 'activity',
+    dir:     req.query.dir === 'asc' ? 'asc' : 'desc',
+    q:       req.query.q || '',
+    limit,
+    minT: parseInt(req.query.min_transfers, 10)    || 0,
+    minP: parseInt(req.query.min_policies, 10)      || 0,
+    minC: parseInt(req.query.min_cancellations, 10) || 0,
+  }) });
+}));
+
 // GET /api/customer-profile/by-phone/:phone — resolve a customer by phone
 router.get('/by-phone/:phone', superOnly, asyncHandler(async (req, res) => {
   const customer = await Repo.loadByPhone(req.params.phone);

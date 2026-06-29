@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Search, User, Phone, Mail, MapPin, Car, Shield, ArrowLeftRight,
   FileText, XCircle, ChevronLeft, Building2, UserCheck, Headphones, Briefcase,
-  DollarSign, CalendarClock, Hash, RefreshCw,
+  DollarSign, CalendarClock, Hash, RefreshCw, Star, SlidersHorizontal,
 } from 'lucide-react';
 import client from '../../../api/client';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
@@ -26,6 +26,38 @@ const Tip = ({ text, children, className = '' }) => (
         {text}
       </span>
     )}
+  </span>
+);
+
+// ── customer-segment filters ────────────────────────────────────────────────
+const SEGMENTS = [
+  { key: 'all',            label: 'All' },
+  { key: 'star',           label: '★ Star' },
+  { key: 'loyal',          label: 'Loyal · 2+ policies' },
+  { key: 'chased_no_sale', label: 'Chased · no sale' },
+  { key: 'at_risk',        label: 'At-risk · cancels' },
+  { key: 'reseller',       label: 'Resellers' },
+  { key: 'one_and_done',   label: 'One policy' },
+];
+const SORTS = [
+  { key: 'activity',      label: 'Last activity' },
+  { key: 'transfers',     label: 'Most transfers' },
+  { key: 'policies',      label: 'Most policies' },
+  { key: 'cancellations', label: 'Most cancellations' },
+  { key: 'sales',         label: 'Most sales' },
+];
+const SEG_COLOR = {
+  'Star': '#f59e0b', 'Loyal': '#10b981', 'Customer': '#10b981', 'Reseller': '#8b5cf6',
+  'At-risk': '#ef4444', 'Lost': '#ef4444', 'Chased — no sale': '#f97316',
+  'Past customer': '#6b7280', 'Lead': '#6b7280',
+};
+
+const Stars = ({ n = 0 }) => (
+  <span className="inline-flex items-center" title={`${n}/5`}>
+    {[1, 2, 3, 4, 5].map(i => (
+      <Star key={i} size={11} style={{ color: i <= n ? '#f59e0b' : 'var(--color-border)' }}
+        fill={i <= n ? '#f59e0b' : 'none'} />
+    ))}
   </span>
 );
 
@@ -122,16 +154,18 @@ export default function CustomerProfile() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [segment, setSegment] = useState('all');
+  const [sort, setSort] = useState('activity');
 
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
 
   useEffect(() => {
     let alive = true;
-    client.get('customer-profile/search', { params: { q: debounced } })
+    client.get('customer-profile/browse', { params: { q: debounced, segment, sort } })
       .then(r => { if (alive) setResults(r.data.results || []); })
       .catch(() => { if (alive) setResults([]); });
     return () => { alive = false; };
-  }, [debounced]);
+  }, [debounced, segment, sort]);
 
   const open = useCallback(async (uuid) => {
     setLoading(true); setErr('');
@@ -311,31 +345,80 @@ export default function CustomerProfile() {
           style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
       </div>
 
+      {/* ── Segment filters + sort ───────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {SEGMENTS.map(s => {
+            const on = segment === s.key;
+            return (
+              <button key={s.key} type="button" onClick={() => setSegment(s.key)}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-all"
+                style={{
+                  borderColor: on ? 'var(--color-primary-500)' : 'var(--color-border)',
+                  background:  on ? 'var(--color-primary-500)' : 'var(--color-surface)',
+                  color:       on ? '#fff' : 'var(--color-text-secondary)',
+                }}>
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <SlidersHorizontal size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+          <select value={sort} onChange={e => setSort(e.target.value)}
+            className="text-xs font-semibold rounded-lg border px-2 py-1.5"
+            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+      </div>
+
       {err && <p className="text-sm text-red-600">{err}</p>}
       {loading && <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>}
 
       <div className="space-y-2">
-        {results.length === 0 && !loading && <Empty>No customers found</Empty>}
-        {results.map((r) => (
-          <button key={r.customer_uuid} onClick={() => open(r.customer_uuid)}
-            className="w-full text-left p-3 rounded-xl border transition-all duration-150 hover:shadow-md flex items-center justify-between gap-3"
-            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
-            <span className="flex items-center gap-3 min-w-0">
-              <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                <User size={16} style={{ color: 'var(--color-text-secondary)' }} />
+        {results.length === 0 && !loading && <Empty>No customers match these filters</Empty>}
+        {results.map((r) => {
+          const segColor = SEG_COLOR[r.segment_label] || '#6b7280';
+          return (
+            <button key={r.customer_uuid} onClick={() => open(r.customer_uuid)}
+              className="w-full text-left p-3 rounded-xl border transition-all duration-150 hover:shadow-md flex items-center justify-between gap-3"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+              <span className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                  <User size={16} style={{ color: 'var(--color-text-secondary)' }} />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-sm truncate" style={{ color: 'var(--color-text)' }}>{r.name || '—'}</span>
+                    {r.segment_label && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0"
+                        style={{ backgroundColor: `${segColor}22`, color: segColor, border: `1px solid ${segColor}44` }}>
+                        {r.segment_label}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>{r.phone || '—'}</span>
+                  {/* counts */}
+                  <span className="flex items-center gap-2.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <Tip text="Active policies" className="cursor-help"><span className="inline-flex items-center gap-0.5"><Shield size={11} /> {r.active_policies ?? 0}</span></Tip>
+                    <Tip text="Transfers (times chased)" className="cursor-help"><span className="inline-flex items-center gap-0.5"><ArrowLeftRight size={11} /> {r.transfers_total ?? 0}</span></Tip>
+                    <Tip text="Cancellations" className="cursor-help"><span className="inline-flex items-center gap-0.5"><XCircle size={11} /> {r.cancellations ?? 0}</span></Tip>
+                    {(r.resells ?? 0) > 0 && <Tip text="Resells" className="cursor-help"><span className="inline-flex items-center gap-0.5"><RefreshCw size={11} /> {r.resells}</span></Tip>}
+                  </span>
+                </span>
               </span>
-              <span className="min-w-0">
-                <span className="block font-bold text-sm truncate" style={{ color: 'var(--color-text)' }}>{r.name}</span>
-                <span className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.phone}</span>
+              <span className="flex flex-col items-end gap-1 flex-shrink-0">
+                {r.stars != null && <Stars n={r.stars} />}
+                <Tip text="Last activity" className="cursor-help">
+                  <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <CalendarClock size={12} /> {r.last_activity ? fmtSaleDate(r.last_activity) : (r.last_sale_date ? fmtSaleDate(r.last_sale_date) : '—')}
+                  </span>
+                </Tip>
               </span>
-            </span>
-            <Tip text="Most recent sale date" className="cursor-help">
-              <span className="text-[11px] flex items-center gap-1 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
-                <CalendarClock size={12} /> {r.last_sale_date ? fmtSaleDate(r.last_sale_date) : '—'}
-              </span>
-            </Tip>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

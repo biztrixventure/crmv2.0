@@ -38,6 +38,36 @@ function dedupeCustomers(rows, limit) {
   return [...seen.values()];
 }
 
+/** 1–5 star value rating from a v_customer_segments row. */
+function starRating(r) {
+  const active = r.active_policies || 0;
+  const canc   = r.cancellations   || 0;
+  const sales  = r.sales_total     || 0;
+  const xfers  = r.transfers_total || 0;
+  if (sales === 0 && xfers >= 2) return 1;          // chased a lot, never bought
+  let stars = 3;
+  if (active >= 1) stars += 1;
+  if (active >= 3) stars += 1;
+  if (canc >= 1)   stars -= 1;
+  if (canc >= 3)   stars -= 1;
+  return Math.max(1, Math.min(5, stars));
+}
+
+/** Human segment label for a row. */
+function segmentLabel(r) {
+  const a = r.active_policies || 0, c = r.cancellations || 0,
+        s = r.sales_total || 0, x = r.transfers_total || 0, re = r.resells || 0;
+  if (s === 0 && x >= 2) return 'Chased — no sale';
+  if (a >= 2 && c === 0) return 'Star';
+  if (re >= 1)           return 'Reseller';
+  if (c >= 1 && a === 0) return 'Lost';
+  if (c >= 1)            return 'At-risk';
+  if (a >= 2)            return 'Loyal';
+  if (a >= 1)            return 'Customer';
+  if (s >= 1)            return 'Past customer';
+  return 'Lead';
+}
+
 // Columns the profile needs — explicit (no select('*')) to keep egress tight.
 const SALE_COLS = [
   'id', 'reference_no', 'status', 'closer_disposition', 'plan', 'sale_date', 'created_at',
@@ -210,6 +240,50 @@ class CustomerProfileRepository {
     }
     const { data } = await q.order('sale_date', { ascending: false }).limit(400);
     return dedupeCustomers(data, limit);
+  }
+
+  /**
+   * Filterable browse over the per-customer rollup (v_customer_segments).
+   * segment presets + numeric floors + name/phone search + sort. Gracefully
+   * falls back to the simple search if the view isn't applied yet.
+   */
+  static async browse({ segment = 'all', sort = 'activity', dir = 'desc', q = '', limit = 50, minT = 0, minP = 0, minC = 0 } = {}) {
+    let qb = supabaseAdmin.from('v_customer_segments').select('*');
+
+    switch (segment) {
+      case 'chased_no_sale': qb = qb.gte('transfers_total', Math.max(minT, 2)).eq('sales_total', 0); break;
+      case 'star':           qb = qb.gte('active_policies', 2).eq('cancellations', 0); break;
+      case 'loyal':          qb = qb.gte('active_policies', 2); break;
+      case 'at_risk':        qb = qb.gte('cancellations', 1); break;
+      case 'reseller':       qb = qb.gte('resells', 1); break;
+      case 'one_and_done':   qb = qb.eq('active_policies', 1); break;
+      default: break;
+    }
+    if (minT) qb = qb.gte('transfers_total', minT);
+    if (minP) qb = qb.gte('active_policies', minP);
+    if (minC) qb = qb.gte('cancellations', minC);
+    if (q && q.trim()) {
+      const d = q.replace(/\D/g, '');
+      qb = d.length >= 4 ? qb.ilike('phone', `%${d}%`) : qb.ilike('name', `%${q.trim()}%`);
+    }
+
+    const sortCol = ({
+      transfers: 'transfers_total', policies: 'active_policies', cancellations: 'cancellations',
+      activity: 'last_activity', sales: 'sales_total', resells: 'resells',
+    })[sort] || 'last_activity';
+    qb = qb.order(sortCol, { ascending: dir === 'asc', nullsFirst: false }).limit(Math.min(limit, 100));
+
+    const { data, error } = await qb;
+    if (error) {
+      const rows = await this.search(q, limit);   // view missing → no breakdown
+      return rows.map(r => ({ ...r, _fallback: true }));
+    }
+    return (data || []).map(r => ({
+      ...r,
+      last_sale_date: r.last_sale_date || null,
+      stars: starRating(r),
+      segment_label: segmentLabel(r),
+    }));
   }
 }
 
