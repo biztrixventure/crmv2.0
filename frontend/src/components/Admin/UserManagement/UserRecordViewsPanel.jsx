@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Info } from 'lucide-react';
 import client from '../../../api/client';
 import DrawerLayoutRules from '../BusinessRules/DrawerLayoutRules';
+import RecordViewTemplates from './RecordViewTemplates';
 
 // Per-user record-view layout. Reuses the rich per-role drawer editor, but
 // targets drawer.layout.<type>.user.<userId> (which useDrawerLayout resolves
@@ -48,6 +49,7 @@ export default function UserRecordViewsPanel({ user }) {
         </span>
       </div>
       {msg && <p className="text-xs mb-2 font-semibold" style={{ color: msg.type === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.text}</p>}
+      <RecordViewTemplates uid={uid} userRole={userRole} userName={userName} companyId={user.company_id} config={config} onApplied={load} />
       <DrawerLayoutRules config={config} scope="global" userId={uid} userName={userName} userRole={userRole} onSave={save} />
     </div>
   );

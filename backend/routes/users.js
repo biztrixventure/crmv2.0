@@ -1300,6 +1300,69 @@ router.delete('/access-templates/:templateId', asyncHandler(async (req, res) => 
   res.json({ ok: true });
 }));
 
+// ── Record-view templates (saved drawer layouts) — business_config global ──────
+// A template stores up to three layouts { sale, transfer, callback }, each an
+// array of section objects (same shape DrawerLayoutRules edits). Applying writes
+// drawer.layout.<type>.user.<uid> for each layout present.
+const RV_TYPES = ['sale', 'transfer', 'callback'];
+
+router.get('/record-view-templates', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'record_view_templates', []);
+  res.json({ templates: Array.isArray(list) ? list : [] });
+}));
+
+router.post('/record-view-templates', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Template name is required' });
+  const layouts = req.body.layouts && typeof req.body.layouts === 'object' ? req.body.layouts : {};
+  const clean = {};
+  for (const t of RV_TYPES) if (Array.isArray(layouts[t]) && layouts[t].length) clean[t] = layouts[t];
+  if (!Object.keys(clean).length) return res.status(400).json({ error: 'Nothing to save — set at least one drawer layout first.' });
+  const { getConfig, setConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'record_view_templates', []);
+  const arr = Array.isArray(list) ? list : [];
+  const tpl = {
+    id: require('crypto').randomUUID(),
+    name, layouts: clean,
+    created_by: req.user.id, created_at: new Date().toISOString(),
+  };
+  arr.push(tpl);
+  await setConfig('global', 'record_view_templates', arr, req.user.id);
+  res.status(201).json({ template: tpl });
+}));
+
+router.delete('/record-view-templates/:templateId', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig, setConfig } = require('../utils/businessConfig');
+  const list = await getConfig(null, 'record_view_templates', []);
+  const arr = (Array.isArray(list) ? list : []).filter(t => t.id !== req.params.templateId);
+  await setConfig('global', 'record_view_templates', arr, req.user.id);
+  res.json({ ok: true });
+}));
+
+// POST /users/apply-record-views — write a layout set onto MANY users at once.
+// Body: { target_user_ids: [auth user id…], layouts: { sale?, transfer?, callback? } }
+// Only the layouts present are written; absent drawers keep the user's role default.
+router.post('/apply-record-views', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const ids = Array.isArray(req.body.target_user_ids) ? [...new Set(req.body.target_user_ids.filter(Boolean))] : [];
+  const layouts = req.body.layouts && typeof req.body.layouts === 'object' ? req.body.layouts : {};
+  if (!ids.length) return res.status(400).json({ error: 'target_user_ids required' });
+  const present = RV_TYPES.filter(t => Array.isArray(layouts[t]) && layouts[t].length);
+  if (!present.length) return res.status(400).json({ error: 'No layouts provided' });
+  const { setConfig } = require('../utils/businessConfig');
+  let applied = 0;
+  for (const uid of ids) {
+    for (const t of present) await setConfig('global', `drawer.layout.${t}.user.${uid}`, layouts[t], req.user.id);
+    applied++;
+  }
+  logger.info('RECORD_VIEWS', `Applied record-view layout to ${applied} users by ${req.user.id}`);
+  res.json({ applied });
+}));
+
 // GET /users/access-overview?company_id= — who has custom access (override counts)
 router.get('/access-overview', asyncHandler(async (req, res) => {
   if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
