@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
-const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels, getUserRole, ROLE_HIERARCHY } = require('../models/helpers');
+const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels, getUserRole, ROLE_HIERARCHY, clearPermissionCache } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -404,6 +404,7 @@ router.put(
         }
       }
 
+      clearPermissionCache();   // a role's permissions changed → drop all cached perms
       logger.success('UPDATE_ROLE', 'Role updated successfully', { id });
       res.json({ message: "Role updated successfully" });
     } catch (err) {
@@ -711,6 +712,7 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
     created.push(tpl.name);
   }
 
+  clearPermissionCache();   // role permission sets may have changed
   logger.success('SEED_ROLES', `Done: created=[${created}] updated=[${updated}] skipped=[${skipped}]`);
   res.json({ message: 'Default roles seeded', created, updated, skipped, company_type: company.company_type, reset });
 }));

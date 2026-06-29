@@ -1,4 +1,9 @@
 const { supabaseAdmin } = require('../config/database');
+const cache = require('../utils/cache');
+
+// Per-user effective-permission cache TTL. Short, so a missed invalidation
+// self-heals fast; write paths also invalidate explicitly for instant effect.
+const PERM_TTL_MS = 30_000;
 
 // Lower number = higher authority
 const ROLE_HIERARCHY = {
@@ -42,8 +47,13 @@ const getUserRole = async (userId, companyId) => {
 // Single embedded query + parallel override check (was 2 sequential queries).
 // Override table takes precedence over role permissions.
 // ============================================================================
-const hasPermission = async (userId, companyId, permissionName) => {
-  try {
+// Resolve a user's EFFECTIVE permission set for a company (role perms, with
+// per-user grants added + revokes removed) and the role level. Cached for
+// PERM_TTL_MS so hot paths (every mutation gate, polled list reads) don't re-hit
+// the DB. Returns { level, perms: [names] } — arrays so it caches cleanly.
+const getEffectivePerms = async (userId, companyId) => {
+  if (!userId || !companyId) return { level: null, perms: [] };
+  return cache.remember('perms', `${userId}|${companyId}`, PERM_TTL_MS, async () => {
     const [roleRes, overrideRes] = await Promise.all([
       supabaseAdmin
         .from('user_company_roles')
@@ -58,28 +68,40 @@ const hasPermission = async (userId, companyId, permissionName) => {
         .eq('user_id', userId)
         .eq('company_id', companyId),
     ]);
-
-    if (!roleRes.data?.custom_roles) return false;
-
+    if (!roleRes.data?.custom_roles) return { level: null, perms: [] };
     const level = roleRes.data.custom_roles.level;
-    if (level === 'superadmin') return true;
-
-    // Per-user override takes precedence over role assignment
-    const overrides = overrideRes.data || [];
-    const override = overrides.find(o => o.permissions?.name === permissionName);
-    if (override?.override_type === 'revoke') return false;
-    if (override?.override_type === 'grant')  return true;
-
-    const rolePerms = new Set(
-      (roleRes.data.custom_roles.role_permissions || [])
-        .map(rp => rp.permissions?.name)
-        .filter(Boolean)
+    const perms = new Set(
+      (roleRes.data.custom_roles.role_permissions || []).map(rp => rp.permissions?.name).filter(Boolean)
     );
-    return rolePerms.has(permissionName);
+    (overrideRes.data || []).forEach(o => {
+      const n = o.permissions?.name;
+      if (!n) return;
+      if (o.override_type === 'grant')  perms.add(n);
+      else if (o.override_type === 'revoke') perms.delete(n);
+    });
+    return { level, perms: [...perms] };
+  });
+};
+
+const hasPermission = async (userId, companyId, permissionName) => {
+  try {
+    const { level, perms } = await getEffectivePerms(userId, companyId);
+    if (level === 'superadmin') return true;
+    return perms.includes(permissionName);
   } catch {
     return false;
   }
 };
+
+// Invalidate the cached permissions for a user (call on any write that changes
+// their role/overrides). Without a company, clears the whole namespace (safe).
+const invalidateUserPerms = (userId, companyId) => {
+  if (userId && companyId) cache.invalidate('perms', `${userId}|${companyId}`);
+  else cache.invalidateNamespace('perms');
+};
+// Clear ALL cached permissions — use when a ROLE's permissions change (affects
+// every user holding that role).
+const clearPermissionCache = () => cache.invalidateNamespace('perms');
 
 // ============================================================================
 // Get All Permissions for User
@@ -293,6 +315,9 @@ const isCompanyMember = async (userId, companyId) => {
 module.exports = {
   getUserRole,
   hasPermission,
+  getEffectivePerms,
+  invalidateUserPerms,
+  clearPermissionCache,
   getUserPermissions,
   canAssignRole,
   getUserCompanies,

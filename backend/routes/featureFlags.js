@@ -28,7 +28,7 @@ const isSA = (user) => user?.role === 'superadmin';
 // superadmin, OR a user granted the per-company feature-flag matrix via the
 // 'tool_feature_admin' flag (Custom Access workspace). Catalog CRUD (create /
 // edit / delete flags) stays superadmin-only. Fail closed if flag uncatalogued.
-const { isFeatureEnabled } = require('../utils/featureGate');
+const { isFeatureEnabled, clearFeatureCache } = require('../utils/featureGate');
 const canFeatureAdmin = async (req) => {
   if (isSA(req.user)) return true;
   const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_feature_admin').maybeSingle();
@@ -201,6 +201,7 @@ router.put('/companies/:companyId/:key',
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+    clearFeatureCache();   // company toggle changed → drop cached resolutions
     res.json({ flag: data, company: companyRow.data });
   })
 );

@@ -4,13 +4,24 @@
  * Falls back to the feature's default_enabled if no company override exists.
  */
 const { supabaseAdmin } = require('../config/database');
+const cache = require('./cache');
+
+const FEAT_TTL_MS = 30_000;
 
 /**
- * Returns true if the feature is enabled for this company.
- * @param {string} featureKey
- * @param {string|null} companyId
+ * Returns true if the feature is enabled for this user/company. Cached for
+ * FEAT_TTL_MS (feature toggles are rare + read often on tool gates). Write paths
+ * call clearFeatureCache() for instant effect.
  */
 async function isFeatureEnabled(featureKey, companyId, userId) {
+  return cache.remember('feat', `${userId || '-'}|${companyId || '-'}|${featureKey}`, FEAT_TTL_MS,
+    () => resolveFeature(featureKey, companyId, userId));
+}
+
+// Drop all cached feature resolutions (call when any feature override changes).
+function clearFeatureCache() { cache.invalidateNamespace('feat'); }
+
+async function resolveFeature(featureKey, companyId, userId) {
   // Per-USER override wins over the company override (migration 122).
   // Company-TOLERANT: resolve by user_id, prefer the row matching this company
   // but accept any of the user's rows. Per-user flags (custom_workspace, tool_*)
@@ -103,4 +114,4 @@ function requireToolAccess(featureKey, { allowReadonly = true } = {}) {
   };
 }
 
-module.exports = { isFeatureEnabled, requireFeature, requireToolAccess };
+module.exports = { isFeatureEnabled, clearFeatureCache, requireFeature, requireToolAccess };

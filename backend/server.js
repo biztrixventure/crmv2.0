@@ -57,6 +57,7 @@ const searchRoutes              = require('./routes/search');
 const customerProfileRoutes     = require('./routes/customerProfile');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
+const { startBackgroundJobs } = require('./utils/scheduler');
 const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
@@ -363,6 +364,7 @@ const { warm: warmAuditCols } = require('./utils/auditColumnGuard');
 
 app.listen(PORT, () => {
   startCallbackScheduler();
+  startBackgroundJobs();       // matview refresh + cache sweep (utils/scheduler)
   startAutoFetchDispo();       // catch-up dispo fetch for manual-dial transfers
   syncSuperadminMetadata();    // Stamp JWT metadata for superadmins — no-op if already done
   syncReadonlyAdminMetadata(); // Same for readonly_admin

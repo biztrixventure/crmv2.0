@@ -13,7 +13,9 @@ const {
   isSuperAdmin,
   getCompanyTypeLevels,
   ROLE_HIERARCHY,
+  invalidateUserPerms,
 } = require('../models/helpers');
+const { clearFeatureCache } = require('../utils/featureGate');
 const { validatePassword, generateSecurePassword } = require('../utils/passwordValidator');
 
 // A user can have several dialer agent ids (one per box). Accept a single id or
@@ -819,6 +821,9 @@ router.put(
       if (Object.keys(updateData).length > 0) {
         logger.debug('UPDATE_USER', 'Updating user assignment', { id, updateData });
         await supabaseAdmin.from("user_company_roles").update(updateData).eq("id", id);
+        // Role/company/active change → drop the user's cached permissions.
+        invalidateUserPerms(targetAssignment.user_id, targetAssignment.company_id);
+        if (company_id && company_id !== targetAssignment.company_id) invalidateUserPerms(targetAssignment.user_id, company_id);
         logger.success('UPDATE_USER', `User assignment updated`, { updateData });
       } else {
         logger.info('UPDATE_USER', 'No assignment data to update');
@@ -1171,6 +1176,7 @@ router.put('/:id/overrides',
     if (insertRows.length) {
       await supabaseAdmin.from('user_permission_overrides').insert(insertRows);
     }
+    invalidateUserPerms(assignment.user_id, assignment.company_id);   // instant effect
 
     logger.info('USER_OVERRIDES', `Saved ${insertRows.length} overrides for user ${assignment.user_id}`);
     res.json({ message: 'Overrides saved', count: insertRows.length });
@@ -1234,6 +1240,7 @@ router.put('/:id/feature-overrides',
       if (error) return res.status(400).json({ error: /relation .*does not exist|user_feature_flags/i.test(error.message) ? 'Per-user feature overrides need migration 122 applied first.' : error.message });
     }
 
+    clearFeatureCache();   // feature resolution changed for this user
     logger.info('USER_FEATURE_OVERRIDES', `Saved ${rows.length} feature overrides for user ${a.user_id}`);
     res.json({ message: 'Feature overrides saved', count: rows.length });
   })
@@ -1284,8 +1291,10 @@ router.post('/apply-overrides', asyncHandler(async (req, res) => {
       const { error } = await supabaseAdmin.from('user_feature_flags').insert(featRows);
       if (error) featureWarn = true;
     }
+    invalidateUserPerms(a.user_id, a.company_id);   // instant effect per user
     applied++;
   }
+  clearFeatureCache();   // feature overrides changed for the targeted users
 
   logger.info('USER_OVERRIDES', `Applied override set to ${applied} users by ${req.user.id}`);
   res.json({ applied, feature_warning: featureWarn ? 'Feature overrides skipped — apply migration 122.' : null });
