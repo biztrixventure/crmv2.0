@@ -11,7 +11,7 @@ import {
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
-  UserCircle, Database, Settings2, Zap,
+  UserCircle, Database, Settings2, Zap, Building2,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -79,6 +79,7 @@ const ChatAdmin       = lazy(() => import("../components/Admin/Chat/ChatAdmin"))
 const ComplianceReviewPanel = lazy(() => import("../components/Workspace/ComplianceReviewPanel"));
 const BusinessRulesHub      = lazy(() => import("../components/Admin/BusinessRules/BusinessRulesHub"));
 const FeatureFlagsManager   = lazy(() => import("../components/Admin/FeatureFlagsManager"));
+const CompanyManagement     = lazy(() => import("../components/Admin/CompanyManagement").then(m => ({ default: m.CompanyManagement })));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
@@ -226,6 +227,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(isEnabledStrict('tool_compliance_review') ? [{ key: 'tool_compliance_review', label: 'Compliance Review', icon: Shield        }] : []),
     ...(isEnabledStrict('tool_business_rules')    ? [{ key: 'tool_business_rules',    label: 'Business Rules',    icon: Settings2     }] : []),
     ...(isEnabledStrict('tool_feature_admin')     ? [{ key: 'tool_feature_admin',     label: 'Feature Flags',     icon: Zap           }] : []),
+    ...(isEnabledStrict('tool_company_admin')     ? [{ key: 'tool_company_admin',     label: 'Companies',         icon: Building2     }] : []),
   ];
   const {
     applyTabs: applyManagerLayout,
@@ -1250,6 +1252,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'tool_feature_admin' && isEnabledStrict('tool_feature_admin') && (
           <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
             <FeatureFlagsManager />
+          </Suspense>
+        )}
+        {activeTab === 'tool_company_admin' && isEnabledStrict('tool_company_admin') && (
+          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <CompanyManagement />
           </Suspense>
         )}
         <DevCredit />
