@@ -45,6 +45,7 @@ const UserPermissionsPanel = ({ user }) => {
   const [featOv, setFeatOv]           = useState({});     // { key: bool } user overrides
   const [chatLimit, setChatLimit]     = useState(0);      // Chat Control: messages this user may read (0 = all)
   const [chatLimitMsg, setChatLimitMsg] = useState(null);
+  const [diag, setDiag]               = useState(null);   // workspace/flag diagnostic result
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
   const [msg, setMsg]   = useState(null);
@@ -174,6 +175,12 @@ const UserPermissionsPanel = ({ user }) => {
   const effPerm = (name) => { const o = overrides[name] ?? null; return o === 'grant' ? true : o === 'revoke' ? false : rolePerms.has(name); };
   const effFeat = (key) => (featOv[key] !== undefined ? featOv[key] : featCompany[key]);
 
+  const runDiag = async () => {
+    setDiag({ loading: true });
+    try { const r = await client.get(`users/${user.id}/access-debug`); setDiag(r.data); }
+    catch (e) { setDiag({ error: e.response?.data?.error || 'Diagnostic failed' }); }
+  };
+
   const saveChatLimit = async () => {
     const n = Math.max(0, parseInt(chatLimit, 10) || 0);
     try {
@@ -283,6 +290,47 @@ const UserPermissionsPanel = ({ user }) => {
           )}
         </div>
       )}
+
+      {/* Workspace / flag diagnostic — shows exactly what the server resolves */}
+      <div className="rounded-xl border border-border p-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            Workspace not showing for this user? Run a quick diagnostic.
+          </span>
+          <button type="button" onClick={runDiag}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border"
+            style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-700)' }}>
+            Diagnose access
+          </button>
+        </div>
+        {diag && !diag.loading && (
+          <div className="mt-2 text-xs space-y-1">
+            {diag.error ? (
+              <p style={{ color: '#dc2626' }}>{diag.error}</p>
+            ) : (
+              <>
+                {!diag.migrations_applied && (
+                  <p className="font-semibold" style={{ color: '#dc2626' }}>
+                    ✗ Missing flags in catalog: {diag.missing_flags?.join(', ')} — apply migrations 126–129 in Supabase.
+                  </p>
+                )}
+                <p style={{ color: diag.resolved?.custom_workspace === true ? '#16a34a' : '#dc2626' }}>
+                  custom_workspace resolves: <strong>{String(diag.resolved?.custom_workspace)}</strong>
+                </p>
+                <p style={{ color: 'var(--color-text-tertiary)' }}>{diag.hint}</p>
+                <p style={{ color: 'var(--color-text-tertiary)' }}>
+                  user_id {diag.assignment?.user_id?.slice(0, 8)}… · company {String(diag.assignment?.company_id || 'none').slice(0, 8)}… · {diag.grant_rows?.length || 0} grant row(s)
+                </p>
+                <details>
+                  <summary className="cursor-pointer" style={{ color: 'var(--color-text-tertiary)' }}>raw</summary>
+                  <pre className="text-[10px] overflow-x-auto mt-1 p-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>{JSON.stringify({ resolved: diag.resolved, grant_rows: diag.grant_rows }, null, 2)}</pre>
+                </details>
+              </>
+            )}
+          </div>
+        )}
+        {diag?.loading && <p className="text-xs mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Running…</p>}
+      </div>
 
       {msg && <Alert type={msg.type} message={msg.text} dismissible onDismiss={() => setMsg(null)} />}
 

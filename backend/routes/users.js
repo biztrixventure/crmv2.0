@@ -1404,6 +1404,49 @@ router.put('/chat-view-limit/:userId', asyncHandler(async (req, res) => {
   res.json({ ok: true, limit: n });
 }));
 
+// GET /users/:id/access-debug — why is/isn't the workspace showing for this user?
+// Returns catalog presence (migrations), the user's grant rows, and the resolved
+// values, so we can see exactly where the chain breaks. Superadmin only.
+router.get('/:id/access-debug', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { data: a } = await supabaseAdmin
+    .from('user_company_roles').select('id, user_id, company_id, role_id, custom_roles(level)').eq('id', req.params.id).single();
+  if (!a) return res.status(404).json({ error: 'User assignment not found' });
+
+  const KEYS = ['custom_workspace', 'tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control',
+    'tool_compliance_review', 'tool_business_rules', 'tool_feature_admin', 'tool_company_admin'];
+
+  const { data: cat } = await supabaseAdmin.from('feature_flags').select('key, default_enabled').in('key', KEYS);
+  const catalogued = (cat || []).map(c => c.key);
+  const missing = KEYS.filter(k => !catalogued.includes(k));
+
+  let grants = [];
+  try {
+    const { data } = await supabaseAdmin.from('user_feature_flags').select('feature_key, is_enabled, company_id').eq('user_id', a.user_id);
+    grants = data || [];
+  } catch { grants = []; }
+
+  // Same company-tolerant resolution the app now uses.
+  const resolve = (key) => {
+    const rows = grants.filter(g => g.feature_key === key);
+    if (!rows.length) { const c = (cat || []).find(x => x.key === key); return c ? !!c.default_enabled : '(NOT in catalog — apply migration)'; }
+    const match = rows.find(r => r.company_id === a.company_id);
+    return !!(match || rows[0]).is_enabled;
+  };
+  const resolved = {}; KEYS.forEach(k => { resolved[k] = resolve(k); });
+
+  res.json({
+    assignment: { assignment_id: a.id, user_id: a.user_id, company_id: a.company_id, role: a.custom_roles?.level || null },
+    migrations_applied: missing.length === 0,
+    missing_flags: missing,
+    grant_rows: grants,
+    resolved,
+    hint: missing.length ? 'Some flags are NOT in the catalog — apply migrations 126–129 in Supabase.'
+      : (resolved.custom_workspace === true ? 'custom_workspace resolves TRUE — the user should reach /workspace after a fresh login/hard-refresh.'
+      : 'custom_workspace resolves FALSE — it is not granted to this user (grant it in Tabs & Features and Save).'),
+  });
+}));
+
 // GET /users/access-overview?company_id= — who has custom access (override counts)
 router.get('/access-overview', asyncHandler(async (req, res) => {
   if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
