@@ -1,9 +1,20 @@
+import { lazy, Suspense } from 'react';
 import TeamManagementPanel from './TeamManagementPanel';
 import RoleManagementPanel from './RoleManagementPanel';
 import ReviewsPanel from './ReviewsPanel';
 import ReportsPanel from './ReportsPanel';
 import FormBuilder from '../Admin/FormBuilder/FormBuilder';
 import EventsCalendar from '../Calendar/EventsCalendar';
+
+// Delegated superadmin tools — only reachable when their nav item is shown
+// (strict feature-flag gate in the shell). Lazy so they never weigh down staff.
+const CustomerProfile = lazy(() => import('../Admin/CustomerProfile/CustomerProfile'));
+const DataAnalyzer    = lazy(() => import('../Admin/DataAnalyzer/DataAnalyzer'));
+const ChatAdmin       = lazy(() => import('../Admin/Chat/ChatAdmin'));
+
+const ToolFallback = () => (
+  <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+);
 
 const CrossRoleContent = ({ section, user }) => {
   const companyId = user?.company_id;
@@ -18,6 +29,9 @@ const CrossRoleContent = ({ section, user }) => {
       <FormBuilder />
     </div>
   );
+  if (section === 'tool_customer_profiles') return <Suspense fallback={<ToolFallback />}><CustomerProfile /></Suspense>;
+  if (section === 'tool_data_analyzer')     return <Suspense fallback={<ToolFallback />}><DataAnalyzer /></Suspense>;
+  if (section === 'tool_chat_control')      return <Suspense fallback={<ToolFallback />}><ChatAdmin /></Suspense>;
 
   return null;
 };

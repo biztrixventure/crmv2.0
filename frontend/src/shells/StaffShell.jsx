@@ -17,7 +17,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
-  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy,
+  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -151,7 +151,7 @@ const STAFF_FRONTER_CARDS = ['total_leads', 'fronter_approved', 'fronter_awaitin
 const StaffShell = () => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isEnabled } = useFeatureFlags();
+  const { isEnabled, isEnabledStrict } = useFeatureFlags();
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
 
@@ -189,6 +189,11 @@ const StaffShell = () => {
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+    // Delegated superadmin tools — STRICT gate: shown only when a superadmin
+    // grants the flag to this user (default-off, never shown by accident).
+    ...(isEnabledStrict('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
+    ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
+    ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
   ];
 
   // Sale modal
