@@ -9,6 +9,22 @@ const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffM
 
 const router = express.Router();
 
+const NO_MATCH = '00000000-0000-0000-0000-000000000000';
+
+// Resolve a search term to matching row ids via the app_record_search RPC
+// (matches the full record id, every form_data cell, and the key typed
+// columns). Returns an array of ids, or null when the RPC is unavailable
+// (migration 141 not applied yet) so callers fall back to the legacy column
+// search. Cached per (table,term) for the request's lifetime is unnecessary —
+// each handler calls it once.
+async function searchRecordIds(table, term, limit = 500) {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('app_record_search', { p_table: table, p_q: term, p_limit: limit });
+    if (error) return null;
+    return (data || []).map(r => (typeof r === 'string' ? r : (r && (r.id || Object.values(r)[0])))).filter(Boolean);
+  } catch { return null; }
+}
+
 // Client sort key -> real column. Name columns sort by underlying id so an
 // agent's records group together across pages.
 const SALE_SORT = {
@@ -219,6 +235,16 @@ router.get('/users', asyncHandler(async (req, res) => {
 router.get('/sales', asyncHandler(async (req, res) => {
   const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
 
+  // "Search anything": resolve the term to matching sale ids (full id + every
+  // form_data cell + key columns). null = RPC missing → legacy column search.
+  const saleSearchIds = search ? await searchRecordIds('sales', search) : null;
+  const applySaleSearch = (q) => {
+    if (!search) return q;
+    if (saleSearchIds) return q.in('id', saleSearchIds.length ? saleSearchIds : [NO_MATCH]);
+    const s = escapeOrValue(search);
+    return q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`);
+  };
+
   // Determine the company type up front so sales get scoped correctly. Sales
   // are stored under the CLOSER company; a fronter company owns transfers, not
   // sales, so we scope those by the LINKED transfer's company.
@@ -268,7 +294,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // because its created_at is the upload day, not the file's date.
   if (date_from) query = query.gte('sale_date', date_from);
   if (date_to)   query = query.lte('sale_date', date_to);
-  if (search) { const s = escapeOrValue(search); query = query.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
+  query = applySaleSearch(query);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -341,7 +367,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
       if (charge_to)   scq = scq.lte('charge_at', charge_to);
       if (date_from)   scq = scq.gte('sale_date', date_from);
       if (date_to)     scq = scq.lte('sale_date', date_to);
-      if (search) { const s = escapeOrValue(search); scq = scq.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
+      scq = applySaleSearch(scq);
       const { data: scRows } = await scq.limit(20000);
       if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
     } catch { status_counts = null; }
@@ -353,6 +379,16 @@ router.get('/sales', asyncHandler(async (req, res) => {
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
 router.get('/transfers', asyncHandler(async (req, res) => {
   const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+
+  // "Search anything" → matching transfer ids (full id + every form_data cell +
+  // normalized_phone). null = RPC missing → legacy column search.
+  const transferSearchIds = search ? await searchRecordIds('transfers', search) : null;
+  const applyTransferSearch = (q) => {
+    if (!search) return q;
+    if (transferSearchIds) return q.in('id', transferSearchIds.length ? transferSearchIds : [NO_MATCH]);
+    const s = escapeOrValue(search);
+    return q.or(`normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,form_data->>customer_phone.ilike.%${s}%,form_data->>Phone.ilike.%${s}%,form_data->>FirstName.ilike.%${s}%,form_data->>LastName.ilike.%${s}%`);
+  };
 
   // Compliance reconciliation: by default list from the view that also exposes
   // invisible 'refresh' duplicate attempts (migration 089), so every VICIDIAL
@@ -384,17 +420,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (status)    q = q.eq('status', status);
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
-    if (search) {
-      const s = escapeOrValue(search);
-      q = q.or(
-        `normalized_phone.ilike.%${s}%,` +
-        `form_data->>customer_name.ilike.%${s}%,` +
-        `form_data->>customer_phone.ilike.%${s}%,` +
-        `form_data->>Phone.ilike.%${s}%,` +
-        `form_data->>FirstName.ilike.%${s}%,` +
-        `form_data->>LastName.ilike.%${s}%`
-      );
-    }
+    q = applyTransferSearch(q);
     return q.range(offset, offset + parseInt(limit) - 1);
   };
 
@@ -407,14 +433,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (closer_id) q = q.eq('assigned_closer_id', closer_id);
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
-    if (search) {
-      const s = escapeOrValue(search);
-      q = q.or(
-        `normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,` +
-        `form_data->>customer_phone.ilike.%${s}%,form_data->>Phone.ilike.%${s}%,` +
-        `form_data->>FirstName.ilike.%${s}%,form_data->>LastName.ilike.%${s}%`
-      );
-    }
+    q = applyTransferSearch(q);
     return q.limit(20000);
   };
 
@@ -759,7 +778,13 @@ router.get('/callback-numbers', asyncHandler(async (req, res) => {
 
   if (company_id) query = query.eq('company_id', company_id);
   if (status)     query = query.eq('status', status);
-  if (search)     { const s = escapeOrValue(search); query = query.or(`phone_number.ilike.%${s}%,customer_name.ilike.%${s}%`); }
+  if (search) {
+    const s = escapeOrValue(search);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(search).trim());
+    query = query.or(
+      `phone_number.ilike.%${s}%,customer_name.ilike.%${s}%` + (isUuid ? `,id.eq.${String(search).trim()}` : '')
+    );
+  }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);

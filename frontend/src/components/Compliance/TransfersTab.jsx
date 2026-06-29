@@ -218,7 +218,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         search={{
           value: search,
           onChange: (v) => { setSearch(v); setPage(1); },
-          placeholder: 'Search name / phone / reference…',
+          placeholder: 'Search anything — record id, any field…',
         }}
         dateRange={{
           value: { date_from: dateFrom, date_to: dateTo },
