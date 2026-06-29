@@ -5,6 +5,7 @@ import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
@@ -245,6 +246,7 @@ const PriorityStatsBar = ({ callbacks }) => {
 
 // ── Audit Log sub-component ────────────────────────────────────────────────────
 const AuditLogView = ({ companyList }) => {
+  const { isEnabled } = useFeatureFlags();
   const [entries, setEntries]   = useState([]);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(false);
@@ -344,13 +346,15 @@ const AuditLogView = ({ companyList }) => {
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>
-      <div className="mt-3 flex justify-end">
-        <button onClick={handleExport}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-          Export CSV
-        </button>
-      </div>
+      {isEnabled('exports') && (
+        <div className="mt-3 flex justify-end">
+          <button onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            Export CSV
+          </button>
+        </div>
+      )}
     </div>
   );
 };
