@@ -45,6 +45,28 @@ router.get('/agent/:userId', superOnly, asyncHandler(async (req, res) => {
   res.json(agent.serialize());
 }));
 
+// GET /api/customer-profile/:uuid/timeline — unified activity feed (lazy).
+router.get('/:uuid/timeline', superOnly, asyncHandler(async (req, res) => {
+  res.json({ timeline: await Repo.loadTimeline(req.params.uuid) });
+}));
+
+// ── Customer notes (migration 140) ──────────────────────────────────────────
+router.get('/:uuid/notes', superOnly, asyncHandler(async (req, res) => {
+  res.json({ notes: await Repo.listNotes(req.params.uuid) });
+}));
+router.post('/:uuid/notes', superOnly, asyncHandler(async (req, res) => {
+  const body = String(req.body?.body || '').trim();
+  if (!body) return res.status(400).json({ error: 'Note text required' });
+  res.json({ note: await Repo.addNote(req.params.uuid, req.user.id, body, !!req.body?.pinned) });
+}));
+router.patch('/:uuid/notes/:id', superOnly, asyncHandler(async (req, res) => {
+  res.json({ note: await Repo.setNotePinned(req.params.id, !!req.body?.pinned) });
+}));
+router.delete('/:uuid/notes/:id', superOnly, asyncHandler(async (req, res) => {
+  await Repo.deleteNote(req.params.id);
+  res.json({ ok: true });
+}));
+
 // GET /api/customer-profile/:uuid — the unified profile (MUST stay last; it's a
 // catch-all on the first path segment).
 router.get('/:uuid', superOnly, asyncHandler(async (req, res) => {

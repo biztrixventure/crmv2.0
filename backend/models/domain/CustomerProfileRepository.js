@@ -289,6 +289,96 @@ class CustomerProfileRepository {
     });
   }
 
+  /**
+   * Unified chronological activity timeline for one customer — merges the typed
+   * policy lifecycle (policy_events 087), transfer creations, and lead
+   * reassignment hops (transfer_assignments 086) into one feed, newest first.
+   * Loaded on demand (its own endpoint) so the main profile payload stays light.
+   */
+  static async loadTimeline(customerUuid) {
+    if (!customerUuid) return [];
+    const [{ data: sales }, { data: transfers }] = await Promise.all([
+      supabaseAdmin.from('sales').select('id, reference_no, plan').eq('customer_uuid', customerUuid),
+      supabaseAdmin.from('transfers').select('id, created_at, status').eq('customer_uuid', customerUuid),
+    ]);
+    const saleIds  = (sales || []).map(s => s.id);
+    const xferIds  = (transfers || []).map(t => t.id);
+    const saleMeta = new Map((sales || []).map(s => [s.id, { ref: s.reference_no, plan: s.plan }]));
+
+    const [{ data: events }, { data: assigns }] = await Promise.all([
+      saleIds.length
+        ? supabaseAdmin.from('policy_events').select('sale_id, event_type, at, note, meta, actor_id')
+            .in('sale_id', saleIds).order('at', { ascending: false }).limit(500)
+        : Promise.resolve({ data: [] }),
+      xferIds.length
+        ? supabaseAdmin.from('transfer_assignments')
+            .select('from_closer_id, to_closer_id, assigned_by, assigned_at')
+            .in('transfer_id', xferIds).order('assigned_at', { ascending: false }).limit(500)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    // Resolve actor / closer names in one round-trip.
+    const ids = new Set();
+    (events  || []).forEach(e => e.actor_id && ids.add(e.actor_id));
+    (assigns || []).forEach(a => { [a.from_closer_id, a.to_closer_id, a.assigned_by].forEach(x => x && ids.add(x)); });
+    const nameById = new Map();
+    if (ids.size) {
+      const { data: us } = await supabaseAdmin.from('user_profiles')
+        .select('user_id, first_name, last_name').in('user_id', [...ids]);
+      (us || []).forEach(u => nameById.set(u.user_id, [u.first_name, u.last_name].filter(Boolean).join(' ') || null));
+    }
+    const nm = (id) => (id ? (nameById.get(id) || 'Unknown') : null);
+
+    const items = [];
+    (events || []).forEach(e => items.push({
+      kind: 'policy', at: e.at, event_type: e.event_type, note: e.note || null,
+      from_status: e.meta?.from_status || null, to_status: e.meta?.to_status || null,
+      reference_no: saleMeta.get(e.sale_id)?.ref || null, plan: saleMeta.get(e.sale_id)?.plan || null,
+      actor: nm(e.actor_id),
+    }));
+    (transfers || []).forEach(t => items.push({ kind: 'transfer', at: t.created_at, status: t.status }));
+    (assigns || []).forEach(a => items.push({
+      kind: 'reassign', at: a.assigned_at, from: nm(a.from_closer_id), to: nm(a.to_closer_id), by: nm(a.assigned_by),
+    }));
+    items.sort((x, y) => new Date(y.at) - new Date(x.at));
+    return items.slice(0, 300);
+  }
+
+  // ── Customer notes (migration 140) ───────────────────────────────────────
+  static async listNotes(customerUuid) {
+    if (!customerUuid) return [];
+    const { data } = await supabaseAdmin.from('customer_notes').select('*')
+      .eq('customer_uuid', customerUuid)
+      .order('pinned', { ascending: false }).order('created_at', { ascending: false });
+    const notes = data || [];
+    const ids = [...new Set(notes.map(n => n.author_id).filter(Boolean))];
+    const nameById = new Map();
+    if (ids.length) {
+      const { data: us } = await supabaseAdmin.from('user_profiles')
+        .select('user_id, first_name, last_name').in('user_id', ids);
+      (us || []).forEach(u => nameById.set(u.user_id, [u.first_name, u.last_name].filter(Boolean).join(' ') || 'Unknown'));
+    }
+    return notes.map(n => ({ ...n, author_name: n.author_id ? (nameById.get(n.author_id) || 'Unknown') : 'System' }));
+  }
+
+  static async addNote(customerUuid, authorId, body, pinned = false) {
+    const { data, error } = await supabaseAdmin.from('customer_notes')
+      .insert({ customer_uuid: customerUuid, author_id: authorId || null, body, pinned: !!pinned })
+      .select().single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
+  static async setNotePinned(id, pinned) {
+    const { data } = await supabaseAdmin.from('customer_notes')
+      .update({ pinned: !!pinned, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    return data;
+  }
+
+  static async deleteNote(id) {
+    await supabaseAdmin.from('customer_notes').delete().eq('id', id);
+  }
+
   /** Browse/search distinct customers for the panel (by phone digits or name). */
   static async search(term, limit = 25) {
     const t = String(term || '').trim();

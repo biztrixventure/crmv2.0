@@ -3,11 +3,67 @@ import {
   Search, User, Phone, Mail, MapPin, Car, Shield, ArrowLeftRight,
   FileText, XCircle, ChevronLeft, Building2, UserCheck, Headphones, Briefcase,
   DollarSign, CalendarClock, Hash, RefreshCw, Star, SlidersHorizontal,
+  History, StickyNote, Download, Pin, Trash2, AlertTriangle, Copy, Check, Plus,
 } from 'lucide-react';
 import client from '../../../api/client';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
 import CopyableNumber from '../../UI/CopyableNumber';
 import { fmtSaleDate, fmtDateTimeET } from '../../../utils/timezone';
+
+// ── CSV export of a customer's full record (client-side, no backend) ─────────
+const csvCell = (v) => {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const downloadProfileCSV = (p) => {
+  const lines = [['section', 'a', 'b', 'c', 'd', 'e'].join(',')];
+  lines.push(['identity', p.identity?.name, p.identity?.phone, p.identity?.email, p.identity?.address, p.customer_uuid].map(csvCell).join(','));
+  (p.sales || []).forEach(s => lines.push(['sale', s.plan, s.status, s.reference_no, s.sale_date, s.vehicle].map(csvCell).join(',')));
+  (p.transfers || []).forEach(t => lines.push(['transfer', t.status, t.disposition, t.vendor_code, t.created_at, ''].map(csvCell).join(',')));
+  (p.cancellations || []).forEach(c => lines.push(['cancellation', c.plan, c.reason_key, c.reference_no, c.date, ''].map(csvCell).join(',')));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `customer_${(p.identity?.name || p.customer_uuid || 'profile').replace(/\W+/g, '_')}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+};
+const buildSummary = (p) => {
+  const s = p.stats || {};
+  return [
+    `Customer: ${p.identity?.name || 'Unknown'}`,
+    p.identity?.phone && `Phone: ${p.identity.phone}`,
+    p.identity?.email && `Email: ${p.identity.email}`,
+    `Transfers ${s.transfers} · Sales ${s.sales} · Active ${s.active_policies} · Cancelled ${s.cancellations} · Vehicles ${s.vehicles}`,
+    `UUID: ${p.customer_uuid}`,
+  ].filter(Boolean).join('\n');
+};
+
+// Computed at-a-glance risk/value flags from the customer's rollup.
+const riskFlags = (stats = {}) => {
+  const f = [];
+  if ((stats.active_policies ?? 0) >= 2) f.push({ label: `${stats.active_policies} active`, color: '#10b981', tip: 'Holds multiple in-force policies — high value' });
+  if ((stats.cancellations ?? 0) >= 2) f.push({ label: 'Multiple cancels', color: '#dc2626', tip: 'Cancelled 2+ policies — chargeback / churn risk' });
+  else if ((stats.cancellations ?? 0) === 1) f.push({ label: 'At-risk', color: '#ef4444', tip: 'Has a cancellation on record' });
+  if ((stats.sales ?? 0) === 0 && (stats.transfers ?? 0) >= 2) f.push({ label: 'Chased · no sale', color: '#f97316', tip: 'Transferred repeatedly but never converted' });
+  if ((stats.companies ?? 0) >= 2) f.push({ label: `${stats.companies} companies`, color: '#2563eb', tip: 'Policies span multiple closer companies' });
+  return f;
+};
+
+// ── activity timeline rendering ──────────────────────────────────────────────
+const EVENT_META = {
+  sold:       { label: 'Sold',              color: '#16a34a' },
+  submitted:  { label: 'Submitted',         color: '#2563eb' },
+  approved:   { label: 'Approved',          color: '#16a34a' },
+  returned:   { label: 'Returned',          color: '#d97706' },
+  cancelled:  { label: 'Cancelled',         color: '#dc2626' },
+  superseded: { label: 'Superseded',        color: '#6b7280' },
+  chargeback: { label: 'Chargeback',        color: '#dc2626' },
+  charged:    { label: 'Charged',           color: '#16a34a' },
+  post_dated: { label: 'Post-dated',        color: '#7c3aed' },
+  dispute:    { label: 'Dispute',           color: '#dc2626' },
+  refunded:   { label: 'Refunded',          color: '#d97706' },
+  note:       { label: 'Note',              color: '#6b7280' },
+};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const money = (n) =>
@@ -147,6 +203,106 @@ const AgentCard = ({ agent, icon: Icon, role, roleKey, tip }) => {
   );
 };
 
+function TimelineItem({ it }) {
+  let color = '#6b7280', title = '', detail = null;
+  if (it.kind === 'policy') {
+    const m = EVENT_META[it.event_type] || { label: it.event_type, color: '#6b7280' };
+    color = m.color; title = m.label;
+    detail = (it.from_status && it.to_status) ? `${it.from_status} → ${it.to_status}` : (it.plan || null);
+  } else if (it.kind === 'transfer') { color = '#2563eb'; title = 'Transferred'; detail = it.status; }
+  else if (it.kind === 'reassign')   { color = '#7c3aed'; title = 'Reassigned'; detail = `${it.from || '—'} → ${it.to || '—'}`; }
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: color }} />
+        <span className="flex-1 w-px" style={{ backgroundColor: 'var(--color-border)' }} />
+      </div>
+      <div className="min-w-0 flex-1 pb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold" style={{ color }}>{title}</span>
+          {detail && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{detail}</span>}
+          {it.reference_no && <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{it.reference_no}</span>}
+        </div>
+        {it.note && <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{it.note}</p>}
+        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+          {fmtDateTimeET(it.at)}{it.actor ? ` · ${it.actor}` : ''}{it.by ? ` · by ${it.by}` : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TimelineSection({ uuid }) {
+  const [items, setItems] = useState(null);
+  useEffect(() => {
+    let on = true;
+    client.get(`customer-profile/${uuid}/timeline`).then(r => on && setItems(r.data.timeline || [])).catch(() => on && setItems([]));
+    return () => { on = false; };
+  }, [uuid]);
+  return (
+    <Section title="Activity Timeline" icon={History} count={items?.length} hint="Every policy lifecycle event, transfer, and reassignment — newest first">
+      {items == null ? <Empty>Loading…</Empty> : items.length === 0 ? <Empty>No recorded activity</Empty> : (
+        <div className="px-2 pt-1 max-h-96 overflow-y-auto">{items.map((it, i) => <TimelineItem key={i} it={it} />)}</div>
+      )}
+    </Section>
+  );
+}
+
+function NotesSection({ uuid }) {
+  const [notes, setNotes] = useState(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    client.get(`customer-profile/${uuid}/notes`).then(r => setNotes(r.data.notes || [])).catch(() => setNotes([]));
+  }, [uuid]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    const b = text.trim(); if (!b) return;
+    setBusy(true);
+    try { await client.post(`customer-profile/${uuid}/notes`, { body: b }); setText(''); load(); }
+    catch { /* ignore */ } finally { setBusy(false); }
+  };
+  const del = async (id) => { try { await client.delete(`customer-profile/${uuid}/notes/${id}`); load(); } catch { /* ignore */ } };
+  const pin = async (n) => { try { await client.patch(`customer-profile/${uuid}/notes/${n.id}`, { pinned: !n.pinned }); load(); } catch { /* ignore */ } };
+  return (
+    <Section title="Notes" icon={StickyNote} count={notes?.length} hint="Internal notes on this customer — anyone with profile access can read/add">
+      <div className="px-2 pb-2 flex gap-2">
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder="Add a note…" className="flex-1 input text-sm py-1.5" />
+        <button onClick={add} disabled={busy || !text.trim()}
+          className="text-xs font-bold px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
+          <Plus size={13} /> Add
+        </button>
+      </div>
+      {notes == null ? <Empty>Loading…</Empty> : notes.length === 0 ? <Empty>No notes yet</Empty> : notes.map(n => (
+        <div key={n.id} className="px-2 py-2 group" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm whitespace-pre-wrap min-w-0" style={{ color: 'var(--color-text)' }}>
+              {n.pinned && <Pin size={11} className="inline mr-1" style={{ color: '#f59e0b' }} />}{n.body}
+            </p>
+            <span className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button onClick={() => pin(n)} title={n.pinned ? 'Unpin' : 'Pin'}><Pin size={13} style={{ color: n.pinned ? '#f59e0b' : 'var(--color-text-tertiary)' }} /></button>
+              <button onClick={() => del(n.id)} title="Delete"><Trash2 size={13} style={{ color: '#dc2626' }} /></button>
+            </span>
+          </div>
+          <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{n.author_name} · {fmtDateTimeET(n.created_at)}</span>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+function CopyBtn({ text, label }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1400); } catch { /* ignore */ } }}
+      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5"
+      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+      {done ? <Check size={14} style={{ color: '#16a34a' }} /> : <Copy size={14} />} {done ? 'Copied' : label}
+    </button>
+  );
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 export default function CustomerProfile() {
   const [q, setQ] = useState('');
@@ -180,9 +336,19 @@ export default function CustomerProfile() {
     const { identity, links, stats, financials = {}, activity = {}, companies = [] } = profile;
     return (
       <div className="space-y-4">
-        <button onClick={() => setProfile(null)} className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--color-primary-600)' }}>
-          <ChevronLeft size={16} /> Back to search
-        </button>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <button onClick={() => setProfile(null)} className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--color-primary-600)' }}>
+            <ChevronLeft size={16} /> Back to search
+          </button>
+          <div className="flex items-center gap-2">
+            <CopyBtn text={buildSummary(profile)} label="Copy summary" />
+            <button onClick={() => downloadProfileCSV(profile)}
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <Download size={14} /> Export CSV
+            </button>
+          </div>
+        </div>
 
         {/* identity header */}
         <div className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
@@ -201,6 +367,12 @@ export default function CustomerProfile() {
             {identity.email && <span className="flex items-center gap-1.5"><Mail size={13} />{identity.email}</span>}
             {identity.address && <Tip text={identity.address} className="cursor-help max-w-full"><span className="flex items-center gap-1.5 truncate"><MapPin size={13} />{identity.address}</span></Tip>}
           </div>
+          {riskFlags(stats).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-3">
+              <AlertTriangle size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+              {riskFlags(stats).map((f, i) => <Pill key={i} color={f.color} tip={f.tip}>{f.label}</Pill>)}
+            </div>
+          )}
           {(activity.first_seen || activity.last_activity) && (
             <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
               <span className="flex items-center gap-1.5"><CalendarClock size={12} /> Customer since <DateTip value={activity.first_seen} /></span>
@@ -325,6 +497,12 @@ export default function CustomerProfile() {
             </Row>
           ))}
         </Section>
+
+        {/* activity timeline + notes */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <TimelineSection uuid={profile.customer_uuid} />
+          <NotesSection uuid={profile.customer_uuid} />
+        </div>
       </div>
     );
   }
