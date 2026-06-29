@@ -11,6 +11,7 @@ import {
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
+  UserCircle, Database,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -71,6 +72,10 @@ import ManagerExportModal from "../components/Manager/ManagerExportModal";
 import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
+// Delegatable superadmin tools (shown only when a superadmin grants the flag).
+const CustomerProfile = lazy(() => import("../components/Admin/CustomerProfile/CustomerProfile"));
+const DataAnalyzer    = lazy(() => import("../components/Admin/DataAnalyzer/DataAnalyzer"));
+const ChatAdmin       = lazy(() => import("../components/Admin/Chat/ChatAdmin"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
@@ -210,6 +215,10 @@ const ManagerShell = () => {
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
+    // Delegated superadmin tools — only when a superadmin grants the flag.
+    ...(isEnabled('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
+    ...(isEnabled('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
+    ...(isEnabled('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
   ];
   const {
     applyTabs: applyManagerLayout,
@@ -1203,6 +1212,22 @@ const ManagerShell = () => {
         {activeTab === 'spiffs'    && (
           <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
             <SpiffManager />
+          </Suspense>
+        )}
+        {/* Delegated superadmin tools — gated by the tool flag on the nav side. */}
+        {activeTab === 'tool_customer_profiles' && isEnabled('tool_customer_profiles') && (
+          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <CustomerProfile />
+          </Suspense>
+        )}
+        {activeTab === 'tool_data_analyzer' && isEnabled('tool_data_analyzer') && (
+          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <DataAnalyzer />
+          </Suspense>
+        )}
+        {activeTab === 'tool_chat_control' && isEnabled('tool_chat_control') && (
+          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <ChatAdmin />
           </Suspense>
         )}
         <DevCredit />

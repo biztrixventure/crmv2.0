@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users, Eye, BookmarkPlus, ChevronUp, ChevronDown } from 'lucide-react';
+import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users, Eye, BookmarkPlus, ChevronUp, ChevronDown, MessageSquare } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 import client from '../../../api/client';
@@ -43,6 +43,8 @@ const UserPermissionsPanel = ({ user }) => {
   const [featCatalog, setFeatCatalog] = useState([]);     // [{key,label,description,category,...}]
   const [featCompany, setFeatCompany] = useState({});     // { key: bool } company-effective
   const [featOv, setFeatOv]           = useState({});     // { key: bool } user overrides
+  const [chatLimit, setChatLimit]     = useState(0);      // Chat Control: messages this user may read (0 = all)
+  const [chatLimitMsg, setChatLimitMsg] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
   const [msg, setMsg]   = useState(null);
@@ -153,6 +155,8 @@ const UserPermissionsPanel = ({ user }) => {
       setFeatCatalog(featRes.data.catalog || []);
       setFeatCompany(featRes.data.company_effective || {});
       setFeatOv(featRes.data.user_overrides || {});
+      client.get(`users/chat-view-limit/${user.user_id || user.id}`)
+        .then(r => setChatLimit(r.data.limit || 0)).catch(() => {});
     } catch (err) {
       setMsg({ type: 'error', text: err.response?.data?.error || 'Failed to load access settings' });
     } finally { setLoading(false); }
@@ -169,6 +173,16 @@ const UserPermissionsPanel = ({ user }) => {
 
   const effPerm = (name) => { const o = overrides[name] ?? null; return o === 'grant' ? true : o === 'revoke' ? false : rolePerms.has(name); };
   const effFeat = (key) => (featOv[key] !== undefined ? featOv[key] : featCompany[key]);
+
+  const saveChatLimit = async () => {
+    const n = Math.max(0, parseInt(chatLimit, 10) || 0);
+    try {
+      await client.put(`users/chat-view-limit/${user.user_id || user.id}`, { limit: n });
+      setChatLimit(n);
+      setChatLimitMsg({ type: 'ok', text: n ? `Limited to last ${n} messages.` : 'Unlimited.' });
+    } catch (e) { setChatLimitMsg({ type: 'err', text: e.response?.data?.error || 'Save failed' }); }
+    setTimeout(() => setChatLimitMsg(null), 2200);
+  };
 
   const allPermList = useMemo(() => Object.values(allPerms || {}).flat(), [allPerms]);
   const bulkGroup = (perms, mode) => setOverrides(prev => {
@@ -353,6 +367,36 @@ const UserPermissionsPanel = ({ user }) => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── CHAT CONTROL view limit (only when Chat Control is granted) ── */}
+      {effFeat('tool_chat_control') && (
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="px-4 py-2 flex items-center gap-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+            <MessageSquare size={14} style={{ color: 'var(--color-primary-600)' }} />
+            <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Chat Control — history limit</span>
+          </div>
+          <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <p className="text-xs flex-1 min-w-[180px]" style={{ color: 'var(--color-text-secondary)' }}>
+              How many recent messages this user may read in any conversation. <strong>0 = unlimited.</strong> They can't page back beyond it.
+            </p>
+            <input type="number" min={0} value={chatLimit} onChange={e => setChatLimit(e.target.value)}
+              className="input text-sm py-1.5 w-24" />
+            <button type="button" onClick={saveChatLimit}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border"
+              style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-700)' }}>
+              Save limit
+            </button>
+            {[0, 5, 20, 50].map(n => (
+              <button key={n} type="button" onClick={() => setChatLimit(n)}
+                className="text-[11px] font-semibold px-2 py-1 rounded-full border"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                {n === 0 ? 'All' : `Last ${n}`}
+              </button>
+            ))}
+            {chatLimitMsg && <span className="text-xs font-semibold" style={{ color: chatLimitMsg.type === 'ok' ? '#16a34a' : '#dc2626' }}>{chatLimitMsg.text}</span>}
           </div>
         </div>
       )}

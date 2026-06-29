@@ -1363,6 +1363,23 @@ router.post('/apply-record-views', asyncHandler(async (req, res) => {
   res.json({ applied });
 }));
 
+// ── Chat Control view limit for a delegated user (business_config global) ─────
+// 0 = unlimited. Caps how many recent messages of any conversation the user can
+// read in Chat Control (enforced in chatAdmin's messages route).
+router.get('/chat-view-limit/:userId', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig } = require('../utils/businessConfig');
+  const limit = parseInt(await getConfig(null, `chat.view_limit.${req.params.userId}`, 0), 10) || 0;
+  res.json({ limit });
+}));
+router.put('/chat-view-limit/:userId', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const n = Math.max(0, Math.min(parseInt(req.body.limit, 10) || 0, 100000));
+  const { setConfig } = require('../utils/businessConfig');
+  await setConfig('global', `chat.view_limit.${req.params.userId}`, n, req.user.id);
+  res.json({ ok: true, limit: n });
+}));
+
 // GET /users/access-overview?company_id= — who has custom access (override counts)
 router.get('/access-overview', asyncHandler(async (req, res) => {
   if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });

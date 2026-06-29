@@ -12,14 +12,12 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
+const { requireToolAccess } = require('../utils/featureGate');
 
 const router = express.Router();
 
-router.use(asyncHandler(async (req, res, next) => {
-  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin access required' });
-  next();
-}));
+// superadmin/readonly always; others when granted the 'tool_data_analyzer' flag.
+router.use(requireToolAccess('tool_data_analyzer'));
 
 // Per-dataset config. Typed cols get direct PostgREST ops; anything else is
 // treated as a form_data JSONB key.

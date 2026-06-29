@@ -69,4 +69,26 @@ function requireFeature(featureKey) {
   };
 }
 
-module.exports = { isFeatureEnabled, requireFeature };
+/**
+ * Gate a superadmin tool so it can be DELEGATED via a feature flag.
+ * superadmin (and, by default, readonly_admin) always pass. Everyone else passes
+ * only when the tool's feature flag is enabled for their user/company.
+ * Usage: router.use(requireToolAccess('tool_customer_profiles'))
+ */
+function requireToolAccess(featureKey, { allowReadonly = true } = {}) {
+  return async (req, res, next) => {
+    try {
+      const role = req.user?.role;
+      if (role === 'superadmin' || (allowReadonly && role === 'readonly_admin')) return next();
+      const { isSuperAdmin } = require('../models/helpers');
+      if (await isSuperAdmin(req.user?.id)) return next();
+      const ok = await isFeatureEnabled(featureKey, req.user?.company_id || null, req.user?.id);
+      if (!ok) return res.status(403).json({ error: 'Access to this tool is not enabled for your account' });
+      next();
+    } catch (err) {
+      return res.status(503).json({ error: 'Access could not be verified' });
+    }
+  };
+}
+
+module.exports = { isFeatureEnabled, requireFeature, requireToolAccess };

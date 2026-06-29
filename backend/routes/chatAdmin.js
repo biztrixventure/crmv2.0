@@ -16,9 +16,20 @@ const { getUserCards, searchDirectory, logModeration, ensureMembers, pushNewMess
 
 const router = express.Router();
 
-// Gate the whole router.
+// Gate the whole router. Superadmin/readonly_admin get full Chat Control. A user
+// granted the 'tool_chat_control' flag gets DELEGATED access, and a superadmin
+// can cap how much of any conversation they can read (chat.view_limit.<uid>).
 router.use(asyncHandler(async (req, res, next) => {
-  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin access required' });
+  const role = req.user?.role;
+  if (role === 'superadmin' || role === 'readonly_admin' || await isSuperAdmin(req.user?.id)) return next();
+
+  const { isFeatureEnabled } = require('../utils/featureGate');
+  const ok = await isFeatureEnabled('tool_chat_control', req.user?.company_id || null, req.user?.id);
+  if (!ok) return res.status(403).json({ error: 'Chat Control access is not enabled for your account' });
+
+  req.chatDelegated = true;                    // limited viewer
+  const { getConfig } = require('../utils/businessConfig');
+  req.chatViewLimit = parseInt(await getConfig(null, `chat.view_limit.${req.user.id}`, 0), 10) || 0; // 0 = unlimited
   next();
 }));
 
@@ -200,17 +211,21 @@ router.get('/conversations', asyncHandler(async (req, res) => {
 
 // ── GET /conversations/:id/messages — read ANY history ────────────────────────
 router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 40, 100);
+  let limit = Math.min(parseInt(req.query.limit, 10) || 40, 100);
+  // Delegated viewer with a cap: clamp to the last N and refuse paging further back.
+  const capped = req.chatDelegated && req.chatViewLimit > 0;
+  if (capped) limit = Math.min(limit, req.chatViewLimit);
+
   let q = supabaseAdmin.from('messages')
     .select('id, conversation_id, sender_id, body, created_at, edited_at, deleted_at, deleted_by')
     .eq('conversation_id', req.params.id)
     .order('created_at', { ascending: false }).limit(limit + 1);
-  if (req.query.before) q = q.lt('created_at', req.query.before);
+  if (req.query.before && !capped) q = q.lt('created_at', req.query.before);
 
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
-  const hasMore = (data || []).length > limit;
+  const hasMore = !capped && (data || []).length > limit;
   const page = (data || []).slice(0, limit);
   const cards = await getUserCards(page.flatMap(m => [m.sender_id, m.deleted_by]));
 

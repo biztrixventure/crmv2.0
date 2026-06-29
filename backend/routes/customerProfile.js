@@ -1,18 +1,13 @@
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
 const { CustomerProfileRepository: Repo } = require('../models/domain');
+const { requireToolAccess } = require('../utils/featureGate');
 
 const router = express.Router();
 
-// Superadmin panel feature. readonly_admin may view (read-only); everyone else
-// 403s. Mirrors the access model of the other superadmin-only tools.
-const superOnly = asyncHandler(async (req, res, next) => {
-  if (req.user?.role === 'superadmin' || req.user?.role === 'readonly_admin' || await isSuperAdmin(req.user?.id)) {
-    return next();
-  }
-  return res.status(403).json({ error: 'Superadmin access required' });
-});
+// Superadmin / readonly_admin always; other users when a superadmin has granted
+// them the 'tool_customer_profiles' feature (per-user or per-company).
+const superOnly = requireToolAccess('tool_customer_profiles');
 
 // GET /api/customer-profile/search?q=&limit=  — browse/lookup distinct customers
 router.get('/search', superOnly, asyncHandler(async (req, res) => {
