@@ -40,6 +40,7 @@ const SEGMENTS = [
   { key: 'one_and_done',   label: 'One policy' },
 ];
 const SORTS = [
+  { key: 'score',         label: '★ Best customers' },
   { key: 'activity',      label: 'Last activity' },
   { key: 'transfers',     label: 'Most transfers' },
   { key: 'policies',      label: 'Most policies' },
@@ -155,7 +156,7 @@ export default function CustomerProfile() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [segment, setSegment] = useState('all');
-  const [sort, setSort] = useState('activity');
+  const [sort, setSort] = useState('score');
 
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
 

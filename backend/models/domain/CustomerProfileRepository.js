@@ -53,6 +53,43 @@ function starRating(r) {
   return Math.max(1, Math.min(5, stars));
 }
 
+/** VIN reduced to bare alphanumerics, uppercased (kills dashes/spaces/case). */
+function normVin(v) { return String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
+/** Year|make|model fingerprint, punctuation/spacing/case stripped. */
+function ymmKey(row) {
+  return [row.car_year, row.car_make, row.car_model]
+    .map(x => String(x ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()).filter(Boolean).join('|');
+}
+
+/**
+ * Map each sale row → a canonical vehicle key, de-duping a customer's cars.
+ * Rule: same VIN = same car. A VIN-less sale folds into a VIN car with the same
+ * year/make/model (a resell where the VIN was left blank), else groups with
+ * other VIN-less sales of that year/make/model. Two DIFFERENT VINs never merge,
+ * so genuinely distinct cars stay separate.
+ */
+function groupVehicleKeys(sales) {
+  const keyByRow  = new Map();
+  const vinKey    = new Map();   // vinNorm -> canonical key
+  const ymmToVin  = new Map();   // ymm -> a VIN group's key
+  for (const row of sales) {     // pass 1: VIN rows anchor the groups
+    const vin = normVin(row.car_vin); if (!vin) continue;
+    if (!vinKey.has(vin)) vinKey.set(vin, `vin:${vin}`);
+    const k = vinKey.get(vin);
+    const y = ymmKey(row); if (y && !ymmToVin.has(y)) ymmToVin.set(y, k);
+    keyByRow.set(row.id, k);
+  }
+  const ymmless = new Map();
+  for (const row of sales) {     // pass 2: VIN-less rows fold in by year/make/model
+    const vin = normVin(row.car_vin); if (vin) continue;
+    const y = ymmKey(row);
+    let k = (y && ymmToVin.get(y)) || (y && ymmless.get(y));
+    if (!k) { k = y ? `ymm:${y}` : `row:${row.id}`; if (y) ymmless.set(y, k); }
+    keyByRow.set(row.id, k);
+  }
+  return keyByRow;
+}
+
 /** Human segment label for a row. */
 function segmentLabel(r) {
   const a = r.active_policies || 0, c = r.cancellations || 0,
@@ -141,15 +178,23 @@ class CustomerProfileRepository {
     });
 
     // Sales → Sale + WarrantyPlan + Vehicle (de-duped) + Cancellation.
+    const vehKeyByRow = groupVehicleKeys(sales);   // robust same-car dedup
     const vehicleByKey = new Map();
     for (const row of sales) {
       customer.addSale(new Sale(row));
 
-      const vkey = Vehicle.keyOf(row);
+      const vkey = vehKeyByRow.get(row.id) || Vehicle.keyOf(row);
       if (vkey) {
         if (!vehicleByKey.has(vkey)) vehicleByKey.set(vkey, new Vehicle({ ...row, plan_count: 0 }));
         const v = vehicleByKey.get(vkey);
         v.set('plan_count', v.get('plan_count', 0) + 1);
+        // Keep the richest identity for the merged car (prefer a row with a VIN).
+        if (!normVin(v.get('car_vin')) && row.car_vin) {
+          v.set('car_vin', row.car_vin);
+          if (row.car_year)  v.set('car_year', row.car_year);
+          if (row.car_make)  v.set('car_make', row.car_make);
+          if (row.car_model) v.set('car_model', row.car_model);
+        }
       }
       if (row.plan) customer.addPlan(new WarrantyPlan({ ...row, vehicle_key: vkey }));
       if (row.cancellation_date || Sale.TERMINAL.includes(row.status)) {
@@ -247,41 +292,51 @@ class CustomerProfileRepository {
    * segment presets + numeric floors + name/phone search + sort. Gracefully
    * falls back to the simple search if the view isn't applied yet.
    */
-  static async browse({ segment = 'all', sort = 'activity', dir = 'desc', q = '', limit = 50, minT = 0, minP = 0, minC = 0 } = {}) {
-    let qb = supabaseAdmin.from('v_customer_segments').select('*');
+  static async browse({ segment = 'all', sort = 'score', dir = 'desc', q = '', limit = 50, minT = 0, minP = 0, minC = 0 } = {}) {
+    const cap = Math.min(limit, 100);
+    const asc = dir === 'asc';
 
-    switch (segment) {
-      case 'chased_no_sale': qb = qb.gte('transfers_total', Math.max(minT, 2)).eq('sales_total', 0); break;
-      case 'star':           qb = qb.gte('active_policies', 2).eq('cancellations', 0); break;
-      case 'loyal':          qb = qb.gte('active_policies', 2); break;
-      case 'at_risk':        qb = qb.gte('cancellations', 1); break;
-      case 'reseller':       qb = qb.gte('resells', 1); break;
-      case 'one_and_done':   qb = qb.eq('active_policies', 1); break;
-      default: break;
-    }
-    if (minT) qb = qb.gte('transfers_total', minT);
-    if (minP) qb = qb.gte('active_policies', minP);
-    if (minC) qb = qb.gte('cancellations', minC);
-    if (q && q.trim()) {
-      const d = q.replace(/\D/g, '');
-      qb = d.length >= 4 ? qb.ilike('phone', `%${d}%`) : qb.ilike('name', `%${q.trim()}%`);
-    }
+    // Build the filtered query for a given primary sort column. Secondary order
+    // by active policies keeps ranking stable when the primary ties.
+    const build = (col) => {
+      let qb = supabaseAdmin.from('v_customer_segments').select('*');
+      switch (segment) {
+        case 'chased_no_sale': qb = qb.gte('transfers_total', Math.max(minT, 2)).eq('sales_total', 0); break;
+        case 'star':           qb = qb.gte('active_policies', 2).eq('cancellations', 0); break;
+        case 'loyal':          qb = qb.gte('active_policies', 2); break;
+        case 'at_risk':        qb = qb.gte('cancellations', 1); break;
+        case 'reseller':       qb = qb.gte('resells', 1); break;
+        case 'one_and_done':   qb = qb.eq('active_policies', 1); break;
+        default: break;
+      }
+      if (minT) qb = qb.gte('transfers_total', minT);
+      if (minP) qb = qb.gte('active_policies', minP);
+      if (minC) qb = qb.gte('cancellations', minC);
+      if (q && q.trim()) {
+        const d = q.replace(/\D/g, '');
+        qb = d.length >= 4 ? qb.ilike('phone', `%${d}%`) : qb.ilike('name', `%${q.trim()}%`);
+      }
+      return qb.order(col, { ascending: asc, nullsFirst: false })
+               .order('active_policies', { ascending: false, nullsFirst: false })
+               .limit(cap);
+    };
 
     const sortCol = ({
       transfers: 'transfers_total', policies: 'active_policies', cancellations: 'cancellations',
-      activity: 'last_activity', sales: 'sales_total', resells: 'resells',
-    })[sort] || 'last_activity';
-    qb = qb.order(sortCol, { ascending: dir === 'asc', nullsFirst: false }).limit(Math.min(limit, 100));
+      activity: 'last_activity', sales: 'sales_total', resells: 'resells', score: 'score',
+    })[sort] || 'score';
 
-    const { data, error } = await qb;
+    let { data, error } = await build(sortCol);
+    // 'score' column needs migration 125 — if absent, re-run sorted by activity.
+    if (error && sortCol === 'score') ({ data, error } = await build('last_activity'));
     if (error) {
-      const rows = await this.search(q, limit);   // view missing → no breakdown
+      const rows = await this.search(q, limit);   // view missing entirely → no breakdown
       return rows.map(r => ({ ...r, _fallback: true }));
     }
     return (data || []).map(r => ({
       ...r,
       last_sale_date: r.last_sale_date || null,
-      stars: starRating(r),
+      stars: r.score != null ? r.score : starRating(r),
       segment_label: segmentLabel(r),
     }));
   }

@@ -26,7 +26,7 @@ router.get('/browse', superOnly, asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
   res.json({ results: await Repo.browse({
     segment: req.query.segment || 'all',
-    sort:    req.query.sort || 'activity',
+    sort:    req.query.sort || 'score',
     dir:     req.query.dir === 'asc' ? 'asc' : 'desc',
     q:       req.query.q || '',
     limit,
