@@ -32,6 +32,7 @@ import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
+import PaymentRemindersPanel from "../components/Payments/PaymentRemindersPanel";
 import ActivityPanel from "../components/Admin/ActivityPanel";
 import client from "../api/client";
 
@@ -110,6 +111,7 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "announcements",  label: "Announcements"        }] : []),
     ...(isSAorRO                                       ? [{ id: "marquee",        label: "Marquee"              }] : []),
     ...(isSAorRO                                       ? [{ id: "spiff",          label: "SPIFF"                }] : []),
+    ...(isSAorRO                                       ? [{ id: "payments",       label: "Payment Reminders"    }] : []),
     ...(isSAorRO                                       ? [{ id: "chat",           label: "Chat Control"         }] : []),
     ...(isSAorRO                                       ? [{ id: "features",       label: "Features"             }] : []),
     ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
@@ -180,6 +182,7 @@ const AdminPanel = () => {
                   {activeTab === "announcements" && <AnnouncementsManager />}
                   {activeTab === "marquee"       && <MarqueeManager />}
                   {activeTab === "spiff"         && <SpiffManager />}
+                  {activeTab === "payments"      && <PaymentRemindersPanel />}
                   {activeTab === "chat"          && <ChatAdmin />}
                   {activeTab === "features"    && <FeatureFlagsManager />}
                   {activeTab === "business-rules" && <BusinessRulesHub />}

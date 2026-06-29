@@ -222,8 +222,23 @@ async function searchDirectory({ q, limit = 50, excludeId, companyId, role } = {
     query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%`);
   }
   const { data: profiles } = await query;
-  const ids = (profiles || []).map(p => p.user_id).filter(id => id !== excludeId);
+  let ids = (profiles || []).map(p => p.user_id).filter(id => id !== excludeId);
   if (!ids.length) return [];
+
+  // Hide DEACTIVATED users from chat search: a user is inactive if they have
+  // company assignments but none is_active. Users with no assignments at all
+  // (e.g. env-level superadmin) stay searchable.
+  const { data: asn } = await supabaseAdmin
+    .from('user_company_roles').select('user_id, is_active').in('user_id', ids);
+  const state = new Map();
+  (asn || []).forEach(a => {
+    const s = state.get(a.user_id) || { any: false, active: false };
+    s.any = true; if (a.is_active) s.active = true;
+    state.set(a.user_id, s);
+  });
+  ids = ids.filter(id => { const s = state.get(id); return !s || !s.any || s.active; });
+  if (!ids.length) return [];
+
   const cards = await getUserCards(ids);
   return ids.map(id => cards.get(id)).filter(Boolean);
 }
