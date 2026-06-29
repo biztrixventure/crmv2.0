@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
+const { hasPermission } = require('../models/helpers');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { logActivity } = require('../utils/activityLogger');
 const router = express.Router();
@@ -42,6 +43,12 @@ router.post('/transfer/:id/review',
 
   if (tErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
   if (transfer.assigned_closer_id !== closerId) return res.status(403).json({ error: 'Only the assigned closer can review this transfer' });
+  // Toggleable per user: submit_call_review (checked against the closer's OWN
+  // company, not the transfer's fronter company). Migration 133 grants it to the
+  // closer roles, so this only takes effect when a superadmin revokes it.
+  if (req.user.role !== 'superadmin' && !(await hasPermission(closerId, req.user.company_id, 'submit_call_review'))) {
+    return res.status(403).json({ error: 'You do not have permission to submit call reviews' });
+  }
 
   // Upsert — one review per transfer per closer
   const { data: existing } = await supabaseAdmin
@@ -95,6 +102,12 @@ router.post('/transfer/:id/dispo',
   const isManager = MANAGER_ROLES.includes(actorRole);
   if (!isManager && transfer.assigned_closer_id !== actorId) {
     return res.status(403).json({ error: 'Only the assigned closer or a manager can set disposition' });
+  }
+  // Toggleable per user: submit_call_dispo (checked against the actor's OWN
+  // company). Migration 133 grants it to the closer + manager roles that set
+  // dispositions today, so this only bites when a superadmin revokes it.
+  if (actorRole !== 'superadmin' && !(await hasPermission(actorId, req.user.company_id, 'submit_call_dispo'))) {
+    return res.status(403).json({ error: 'You do not have permission to set call dispositions' });
   }
 
   // For closers, scope to their own record; for managers, scope to the assigned closer's record (or any)
