@@ -9,8 +9,10 @@ import CreateUserModal from '../Admin/UserManagement/CreateUserModal';
 import UserModal from '../Admin/UserManagement/UserModal';
 import client from '../../api/client';
 
-const TeamManagementPanel = ({ companyId }) => {
-  const { hasPermission } = useAuth();
+const TeamManagementPanel = ({ companyId: companyIdProp }) => {
+  const { hasPermission, user } = useAuth();
+  // Fall back to the signed-in user's company if the shell didn't pass one.
+  const companyId = companyIdProp || user?.company_id;
   const [members, setMembers]   = useState([]);
   const [loading, setLoading]   = useState(false);
   const [showAdd, setShowAdd]   = useState(false);
@@ -20,11 +22,12 @@ const TeamManagementPanel = ({ companyId }) => {
   const [actionErr, setActionErr] = useState('');
 
   const load = useCallback(() => {
-    if (!companyId) return;
+    if (!companyId) { setActionErr('No company is associated with your account — cannot load members.'); return; }
     setLoading(true);
+    setActionErr('');
     client.get('users', { params: { company_id: companyId, include_inactive: true } })
       .then(r => setMembers(r.data.users || []))
-      .catch(() => {})
+      .catch(err => setActionErr(err.response?.data?.error || 'Failed to load members.'))
       .finally(() => setLoading(false));
   }, [companyId]);
 

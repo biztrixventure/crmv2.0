@@ -60,7 +60,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { company_id, role_id, search, include_inactive } = req.query;
     const userId = req.user.id;
-    const targetCompanyId = company_id || req.user.company_id;
+    let targetCompanyId = company_id || req.user.company_id;
     // Management views pass include_inactive=true so deactivated users stay
     // visible (with a status badge). Dropdowns/pickers omit it and get active only.
     const includeInactive = include_inactive === 'true' || include_inactive === true;
@@ -90,7 +90,10 @@ router.get(
             .eq("is_active", true)
             .limit(1)
             .maybeSingle();
-          if (!member) return res.status(403).json({ error: 'Not a member of this company' });
+          // Not a member of the requested company → scope to their OWN company
+          // instead of 403. Never leaks another tenant, never silently empties a
+          // legitimate member's list because of a stale/mismatched company_id.
+          if (!member) targetCompanyId = req.user.company_id;
         }
         query = query.eq("company_id", targetCompanyId);
       } else {
