@@ -15,7 +15,7 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM custom_roles r
 CROSS JOIN permissions p
-WHERE lower(r.level) IN (
+WHERE r.level::text IN (
         'company_admin', 'operations_manager', 'closer_manager',
         'fronter_manager', 'manager', 'compliance_manager'
       )
