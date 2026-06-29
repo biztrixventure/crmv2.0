@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
+const { hasPermission } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { titleCase } = require('../utils/titleCase');
 const { stampActor } = require('../utils/auditColumnGuard');
@@ -502,7 +503,9 @@ router.put('/:id',
     const { id }   = req.params;
     const userId   = req.user.id;
 
-    const isManager = MANAGER_LEVELS.includes(req.user.role);
+    // Toggleable: manage_callback_numbers (migration 134 grants it to the manager
+    // roles that managed numbers before). Owners still edit their own number.
+    const isManager = req.user.role === 'superadmin' || await hasPermission(userId, req.user.company_id, 'manage_callback_numbers');
 
     const { data: existing } = await supabaseAdmin
       .from('callback_numbers')
@@ -553,8 +556,9 @@ router.put('/:id/reassign',
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
 
     const userId   = req.user.id;
-    const isManager = MANAGER_LEVELS.includes(req.user.role);
-    if (!isManager) return res.status(403).json({ error: 'Managers only' });
+    // Toggleable: reassign_callback_numbers (migration 134 grants it to managers).
+    const canReassign = req.user.role === 'superadmin' || await hasPermission(userId, req.user.company_id, 'reassign_callback_numbers');
+    if (!canReassign) return res.status(403).json({ error: 'You do not have permission to reassign numbers' });
 
     const { id }          = req.params;
     const { new_owner_id } = req.body;
@@ -613,7 +617,8 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const { id }   = req.params;
   const userId   = req.user.id;
 
-  const isManager = MANAGER_LEVELS.includes(req.user.role);
+  // Toggleable: manage_callback_numbers. Owners still delete/release their own.
+  const isManager = req.user.role === 'superadmin' || await hasPermission(userId, req.user.company_id, 'manage_callback_numbers');
 
   const { data: number } = await supabaseAdmin
     .from('callback_numbers')
@@ -653,8 +658,9 @@ router.get('/:id/team-members', asyncHandler(async (req, res) => {
   const userId   = req.user.id;
   const companyId = req.user.company_id;
 
-  const isManager = MANAGER_LEVELS.includes(req.user.role);
-  if (!isManager) return res.status(403).json({ error: 'Managers only' });
+  // Supports the reassign dropdown — gate it on the same permission as reassign.
+  const isManager = req.user.role === 'superadmin' || await hasPermission(userId, companyId, 'reassign_callback_numbers');
+  if (!isManager) return res.status(403).json({ error: 'You do not have permission to view team members' });
 
   const { data } = await supabaseAdmin
     .from('user_company_roles')
