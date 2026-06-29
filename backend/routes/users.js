@@ -77,6 +77,21 @@ router.get(
       if (!includeInactive) query = query.eq("is_active", true);
 
       if (targetCompanyId) {
+        // A non-superadmin may only list users of a company they belong to —
+        // otherwise any user could enumerate another tenant's roster by passing
+        // its company_id.
+        const superadmin = await isSuperAdmin(userId);
+        if (!superadmin) {
+          const { data: member } = await supabaseAdmin
+            .from("user_company_roles")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("company_id", targetCompanyId)
+            .eq("is_active", true)
+            .limit(1)
+            .maybeSingle();
+          if (!member) return res.status(403).json({ error: 'Not a member of this company' });
+        }
         query = query.eq("company_id", targetCompanyId);
       } else {
         // No company filter — only allow superadmin
@@ -717,6 +732,15 @@ router.put(
       if (req.user.role !== 'superadmin' && !hasEditPerm && userId !== targetAssignment.user_id) {
         logger.error('UPDATE_USER', 'Permission denied', new Error('User lacks edit_user permission and is not self'));
         return res.status(403).json({ error: "You don't have permission to edit this user" });
+      }
+
+      // Only a superadmin may move a user to a DIFFERENT company. Without this a
+      // non-superadmin — including via self-edit, which intentionally skips the
+      // edit_user check above — could set company_id to any tenant and carry
+      // their role's access into it (cross-tenant escalation).
+      if (company_id && company_id !== targetAssignment.company_id && req.user.role !== 'superadmin') {
+        logger.error('UPDATE_USER', 'Blocked cross-company move by non-superadmin', new Error('company_id change denied'));
+        return res.status(403).json({ error: 'Only a superadmin can move a user to a different company' });
       }
 
       // If changing role, verify hierarchy

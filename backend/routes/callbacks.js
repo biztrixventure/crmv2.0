@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin, hasPermission } = require('../models/helpers');
+const { isSuperAdmin, hasPermission, isCompanyMember } = require('../models/helpers');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
@@ -39,7 +39,14 @@ const MANAGER_LEVELS = [
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
-  const companyId = req.query.company_id || req.user.company_id;
+  let companyId   = req.query.company_id || req.user.company_id;
+  // Cross-tenant guard: a manager role-flag must not let a non-superadmin scope
+  // to a company they don't belong to. A foreign company_id falls back to own.
+  if (req.query.company_id && req.query.company_id !== req.user.company_id
+      && !['superadmin', 'readonly_admin'].includes(req.user.role)
+      && !(await isCompanyMember(userId, req.query.company_id))) {
+    companyId = req.user.company_id;
+  }
   const status        = req.query.status;
   const priority      = req.query.priority;
   const search        = req.query.search;

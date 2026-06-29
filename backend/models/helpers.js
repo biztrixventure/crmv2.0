@@ -275,12 +275,28 @@ const getCompanyTypeLevels = (companyType) =>
     ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin']
     : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
 
+// Is this user an ACTIVE member of this company? Used to stop a non-superadmin
+// from scoping a list to a company they don't belong to (cross-tenant leak).
+const isCompanyMember = async (userId, companyId) => {
+  if (!userId || !companyId) return false;
+  const { data } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('company_id', companyId)
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+};
+
 module.exports = {
   getUserRole,
   hasPermission,
   getUserPermissions,
   canAssignRole,
   getUserCompanies,
+  isCompanyMember,
   createRole,
   assignUserToCompany,
   isSuperAdmin,

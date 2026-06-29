@@ -10,6 +10,7 @@ const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { getConfig } = require('../utils/businessConfig');
+const { isCompanyMember } = require('../models/helpers');
 
 // Global master switch for duplicate handling. When OFF, the CRM stops detecting
 // /flagging duplicates entirely — transfers are created plainly, no dup warnings,
@@ -90,8 +91,15 @@ const TRANSFER_SORT = {
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
-  const companyId = req.query.company_id || req.user.company_id;
   const userRole  = req.user.role;
+  let companyId   = req.query.company_id || req.user.company_id;
+  // Cross-tenant guard: non-closer-side managers scope by company_id. A
+  // non-superadmin passing a company they don't belong to falls back to own.
+  if (req.query.company_id && req.query.company_id !== req.user.company_id
+      && !['superadmin', 'readonly_admin'].includes(userRole)
+      && !(await isCompanyMember(userId, req.query.company_id))) {
+    companyId = req.user.company_id;
+  }
   const { status, page = 1, limit = 50, search, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
 
   let query = applySort(

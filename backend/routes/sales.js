@@ -5,7 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
-const { hasPermission, isSuperAdmin } = require('../models/helpers');
+const { hasPermission, isSuperAdmin, isCompanyMember } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
@@ -111,8 +111,16 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const companyId = req.query.company_id || req.user.company_id;
     const userRole = req.user.role;
+    let companyId = req.query.company_id || req.user.company_id;
+    // Cross-tenant guard: a non-superadmin may only scope to a company they
+    // belong to. A foreign company_id falls back to their own — never another
+    // tenant's data. (Admins are handled explicitly in the branch below.)
+    if (req.query.company_id && req.query.company_id !== req.user.company_id
+        && !['superadmin', 'readonly_admin'].includes(userRole)
+        && !(await isCompanyMember(userId, req.query.company_id))) {
+      companyId = req.user.company_id;
+    }
     const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
