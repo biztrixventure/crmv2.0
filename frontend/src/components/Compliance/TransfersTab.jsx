@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useFocus } from '../../contexts/FocusContext';
 import { ArrowRight, AlertTriangle, CalendarDays, X, Copy } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
+import { transferPhone } from '../../utils/phone';
 import { todayET } from '../../utils/timezone';
 
 // Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
@@ -166,7 +167,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       'transfers');
     const dupCount = all.filter(t => t.is_duplicate).length;
     const rows = all.map(t => [
-      customerName(t), t.form_data?.Phone || '',
+      customerName(t), transferPhone(t),
       t.created_by_name || '', t.assigned_closer_name || '',
       t.latest_disposition?.disposition_name || '',
       t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
@@ -286,7 +287,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                     <td className="px-4 py-3">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t.form_data?.Phone || t.form_data?.customer_phone || ''}
+                        {transferPhone(t) || ''}
                       </p>
                       {t.is_duplicate && (
                         <button onClick={e => { e.stopPropagation(); setDetail(t); }}

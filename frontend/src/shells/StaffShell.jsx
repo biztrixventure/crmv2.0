@@ -13,6 +13,7 @@ import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../u
 import { isCarMake, isCarModel, normalize as normalizeField, maxLengthFor } from "../utils/formFieldNorm";
 import VehicleSelect from "../components/Form/VehicleSelect";
 import CopyableNumber from "../components/UI/CopyableNumber";
+import { transferPhone } from "../utils/phone";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -968,7 +969,7 @@ const StaffShell = () => {
                           <td className="py-3 px-3 font-semibold text-text">
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs"><CopyableNumber value={t.form_data?.customer_phone || t.form_data?.Phone || ''} /></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs"><CopyableNumber value={transferPhone(t)} /></td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="py-3 px-3">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
@@ -1205,7 +1206,7 @@ const StaffShell = () => {
                                 : t.form_data?.customer_name || 'Unknown'}
                             </p>
                             <p className="text-xs text-text-secondary mt-0.5">
-                              <CopyableNumber value={t.form_data?.Phone || t.form_data?.customer_phone || ''} size={10} />
+                              <CopyableNumber value={transferPhone(t)} size={10} />
                             </p>
                             {t.vicidial_vendor_code && (
                               <span className="text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
@@ -1773,7 +1774,7 @@ const StaffShell = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                     {transfers.map(t => {
                       const name = t.form_data?.customer_name || (t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim() : 'Lead');
-                      const phone = t.form_data?.Phone || t.form_data?.customer_phone || '';
+                      const phone = transferPhone(t);
                       const ds = getTransferDisplayStatus(t);
                       const d = t.latest_disposition;
                       const dispoName = d?.disposition_name || t.sale_closer_disposition;

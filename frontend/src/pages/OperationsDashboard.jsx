@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { transferPhone } from "../utils/phone";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
@@ -496,7 +497,7 @@ const OperationsDashboard = () => {
                               ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
                               : t.form_data?.customer_name || '—'}
                           </td>
-                          <td className="px-4 py-3 text-text-secondary">{t.form_data?.Phone || t.form_data?.customer_phone || '—'}</td>
+                          <td className="px-4 py-3 text-text-secondary">{transferPhone(t) || '—'}</td>
                           <td className="px-4 py-3"><Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm">{t.status}</Badge></td>
                           <td className="px-4 py-3 text-xs text-error-600">{t.rejection_reason || '—'}</td>
                           <td className="px-4 py-3 text-xs text-text-tertiary">{new Date(t.created_at).toLocaleDateString()}</td>

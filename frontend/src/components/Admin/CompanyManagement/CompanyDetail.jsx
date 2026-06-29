@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toastError } from '../../../utils/toast';
+import { transferPhone } from '../../../utils/phone';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
@@ -321,7 +322,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                       <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">
                         {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'—'}
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.form_data?.Phone||r.form_data?.customer_phone||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{transferPhone(r)||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.created_by_name||r.fronter_name||'—'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">
                         {r.assigned_closer_name || (r.closer ? `${r.closer.first_name||''} ${r.closer.last_name||''}`.trim() : '') || '—'}

@@ -8,6 +8,7 @@ import {
 import { Card, Badge, Button, Alert } from '../UI';
 import { useCallbackNumbers } from '../../hooks/useCallbackNumbers';
 import { ET_ZONE } from '../../utils/timezone';
+import { transferPhone } from '../../utils/phone';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -326,9 +327,9 @@ const NumberDetailModal = ({ numberId, isManager, onClose }) => {
                     <span className="font-semibold text-text">{transfer.form_data.FirstName} {transfer.form_data.LastName || ''}</span>
                   </div>
                 )}
-                {transfer.form_data?.Phone && (
+                {transferPhone(transfer) && (
                   <div><span className="text-text-tertiary">Phone: </span>
-                    <span className="font-semibold text-text">{transfer.form_data.Phone}</span>
+                    <span className="font-semibold text-text">{transferPhone(transfer)}</span>
                   </div>
                 )}
                 {(transfer.form_data?.car_year || transfer.form_data?.car_make) && (

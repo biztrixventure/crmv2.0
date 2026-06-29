@@ -63,6 +63,7 @@ import EngagementBanners from "../components/Engagement/EngagementBanners";
 import SpiffWidget from "../components/Engagement/SpiffWidget";
 import SaleModal from "../components/Closer/SaleModal";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
+import { transferPhone } from "../utils/phone";
 import TeamManagementPanel from "../components/Navigation/TeamManagementPanel";
 import RoleManagementPanel from "../components/Navigation/RoleManagementPanel";
 import ReviewsPanel from "../components/Navigation/ReviewsPanel";
@@ -922,7 +923,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           <td className="py-3 px-3 font-semibold text-text">
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.form_data?.customer_phone || t.form_data?.Phone || '—'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{transferPhone(t) || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.fronter_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || '—' : '—'}</td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>

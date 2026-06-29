@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { transferPhone } from "../utils/phone";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
@@ -487,7 +488,7 @@ const FronterManagerDashboard = () => {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-text truncate">{name}</p>
                               <p className="text-xs text-text-secondary mt-0.5">
-                                {t.form_data?.Phone || ''}
+                                {transferPhone(t) || ''}
                                 {closerName && <> · <strong>{closerName}</strong></>}
                               </p>
                               {t.status === 'rejected' && t.rejection_reason && (
@@ -531,7 +532,7 @@ const FronterManagerDashboard = () => {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-text truncate">{t.form_data?.customer_name || 'Customer'}</p>
                             <p className="text-xs text-text-secondary mt-0.5">
-                              {t.form_data?.customer_phone || t.form_data?.Phone || ''}
+                              {transferPhone(t) || ''}
                               {closerName && <> · Closer: <strong>{closerName}</strong></>}
                             </p>
                             {t.status === 'rejected' && t.rejection_reason && (

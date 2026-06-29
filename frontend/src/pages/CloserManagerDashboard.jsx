@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { transferPhone } from "../utils/phone";
 import SaleSearch from "../components/Sales/SaleSearch";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
@@ -360,7 +361,7 @@ const CloserManagerDashboard = () => {
                                 ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
                                 : t.form_data?.customer_name || 'Unknown'}
                             </p>
-                            <p className="text-xs text-text-secondary mt-0.5">{t.form_data?.Phone || t.form_data?.customer_phone || ''}</p>
+                            <p className="text-xs text-text-secondary mt-0.5">{transferPhone(t) || ''}</p>
                           </div>
                           <Badge variant={xferBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                         </div>
@@ -542,7 +543,7 @@ const CloserManagerDashboard = () => {
                         <div className="flex items-start justify-between mb-2">
                           <div>
                             <p className="text-sm font-semibold text-text">{t.form_data?.customer_name || 'Transfer'}</p>
-                            <p className="text-xs text-text-secondary mt-0.5">{t.form_data?.customer_phone || t.form_data?.customer_email || ''}</p>
+                            <p className="text-xs text-text-secondary mt-0.5">{transferPhone(t) || t.form_data?.customer_email || ''}</p>
                           </div>
                           <Badge variant="warning" size="sm">Pending</Badge>
                         </div>
@@ -588,7 +589,7 @@ const CloserManagerDashboard = () => {
                         <div className="flex items-start justify-between mb-1">
                           <div>
                             <p className="text-sm font-semibold text-text">{t.form_data?.customer_name || 'Transfer'}</p>
-                            <p className="text-xs text-text-secondary mt-0.5">{t.form_data?.customer_phone || t.form_data?.customer_email || ''}</p>
+                            <p className="text-xs text-text-secondary mt-0.5">{transferPhone(t) || t.form_data?.customer_email || ''}</p>
                           </div>
                           <Badge variant={xferBadge[t.status] || 'secondary'} size="sm">{t.status}</Badge>
                         </div>

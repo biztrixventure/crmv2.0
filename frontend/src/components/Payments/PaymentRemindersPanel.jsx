@@ -109,7 +109,7 @@ export default function PaymentRemindersPanel() {
                     style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td className="px-4 py-3">
                       <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</div>
-                      {s.customer_phone && <CopyableNumber number={s.customer_phone} className="text-xs" />}
+                      {s.customer_phone && <CopyableNumber value={s.customer_phone} className="text-xs" />}
                       {s.reference_no && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Ref {s.reference_no}</div>}
                     </td>
                     <td className="px-4 py-3">
@@ -170,7 +170,7 @@ export default function PaymentRemindersPanel() {
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{s.customer_name || 'Customer'}</h3>
-                  {s.customer_phone && <CopyableNumber number={s.customer_phone} className="text-sm" />}
+                  {s.customer_phone && <CopyableNumber value={s.customer_phone} className="text-sm" />}
                 </div>
                 <button onClick={() => setSelected(null)} className="p-1 rounded hover:bg-bg-secondary"><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
               </div>

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '../UI';
 import client from '../../api/client';
+import { transferPhone } from '../../utils/phone';
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const OUTCOME_META = {
@@ -522,7 +523,7 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
                         ? `${transfer.form_data.FirstName} ${transfer.form_data.LastName || ''}`.trim()
                         : transfer.form_data?.customer_name || '—'
                     } />
-                    <Row label="Phone"  value={transfer.form_data?.Phone || transfer.form_data?.customer_phone} />
+                    <Row label="Phone"  value={transferPhone(transfer)} />
                     <Row label="Status" value={transfer.status} />
                     <Row label="Date"   value={fmt(transfer.created_at)} />
                   </div>
