@@ -25,6 +25,17 @@ const router = express.Router();
 
 const isSA = (user) => user?.role === 'superadmin';
 
+// superadmin, OR a user granted the per-company feature-flag matrix via the
+// 'tool_feature_admin' flag (Custom Access workspace). Catalog CRUD (create /
+// edit / delete flags) stays superadmin-only. Fail closed if flag uncatalogued.
+const { isFeatureEnabled } = require('../utils/featureGate');
+const canFeatureAdmin = async (req) => {
+  if (isSA(req.user)) return true;
+  const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_feature_admin').maybeSingle();
+  if (!flagRow) return false;
+  return isFeatureEnabled('tool_feature_admin', req.user?.company_id || null, req.user?.id);
+};
+
 // ── GET /feature-flags — current user's company flag states (all roles) ──────
 router.get('/', asyncHandler(async (req, res) => {
   const companyId = req.user.company_id;
@@ -72,7 +83,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // ── GET /feature-flags/catalog — full catalog (superadmin) ───────────────────
 router.get('/catalog', asyncHandler(async (req, res) => {
-  if (!isSA(req.user)) return res.status(403).json({ error: 'Superadmin only' });
+  if (!(await canFeatureAdmin(req))) return res.status(403).json({ error: 'Feature-flag admin access required' });
 
   const { data, error } = await supabaseAdmin
     .from('feature_flags')
@@ -84,7 +95,7 @@ router.get('/catalog', asyncHandler(async (req, res) => {
 
 // ── GET /feature-flags/companies — all companies × all flags matrix ───────────
 router.get('/companies', asyncHandler(async (req, res) => {
-  if (!isSA(req.user)) return res.status(403).json({ error: 'Superadmin only' });
+  if (!(await canFeatureAdmin(req))) return res.status(403).json({ error: 'Feature-flag admin access required' });
 
   const [catalogRes, companiesRes, overridesRes] = await Promise.all([
     supabaseAdmin.from('feature_flags').select('key, label, description, category, default_enabled, sort_order').order('sort_order'),
@@ -124,7 +135,7 @@ router.get('/companies', asyncHandler(async (req, res) => {
 router.get('/companies/:companyId',
   param('companyId').isUUID(),
   asyncHandler(async (req, res) => {
-    if (!isSA(req.user)) return res.status(403).json({ error: 'Superadmin only' });
+    if (!(await canFeatureAdmin(req))) return res.status(403).json({ error: 'Feature-flag admin access required' });
 
     const { companyId } = req.params;
 
@@ -155,7 +166,7 @@ router.get('/companies/:companyId',
 router.put('/companies/:companyId/:key',
   [param('companyId').isUUID(), body('is_enabled').isBoolean()],
   asyncHandler(async (req, res) => {
-    if (!isSA(req.user)) return res.status(403).json({ error: 'Superadmin only' });
+    if (!(await canFeatureAdmin(req))) return res.status(403).json({ error: 'Feature-flag admin access required' });
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });

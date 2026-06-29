@@ -97,7 +97,7 @@ const AppContent = () => {
 
           {/* Custom Access workspace — opt-in unified shell, granted by flag (any
               base role). Reuses ManagerShell; every tab/tool is permission-gated. */}
-          <Route path="/workspace/*" element={<ProtectedRoute requireFlag="custom_workspace"><ManagerShell /></ProtectedRoute>} />
+          <Route path="/workspace/*" element={<ProtectedRoute requireFlag="custom_workspace"><ManagerShell workspaceMode /></ProtectedRoute>} />
 
           {/* Manager Shell — all manager roles + company_admin */}
           <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />

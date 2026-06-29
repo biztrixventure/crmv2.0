@@ -1,6 +1,8 @@
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
+const { isFeatureEnabled } = require('../utils/featureGate');
+const { supabaseAdmin } = require('../config/database');
 const { getAllConfig, setConfig, resetConfig } = require('../utils/businessConfig');
 
 const router = express.Router();
@@ -16,6 +18,26 @@ const requireSuperAdmin = asyncHandler(async (req, res, next) => {
   next();
 });
 
+// Keys a delegated Business Rules user (tool_business_rules) must NEVER write —
+// these are per-user / access-control config, not "business rules". They stay
+// superadmin-only even for a delegate.
+const SENSITIVE_KEY = (key) =>
+  /^drawer\.layout\.[^.]+\.user\./.test(key) ||      // per-user record-view layouts
+  key === 'access_templates' ||
+  key === 'record_view_templates' ||
+  /^chat\.view_limit\./.test(key) ||                 // delegated chat caps
+  /^readonly_admin\.nav\./.test(key);
+
+// May this request write business-config for `key`? superadmin always; a
+// tool_business_rules holder may write non-sensitive keys only.
+const canWriteConfig = async (req, key) => {
+  if (await isSuperAdmin(req.user.id)) return true;
+  if (SENSITIVE_KEY(key)) return false;
+  const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_business_rules').maybeSingle();
+  if (!flagRow) return false;
+  return isFeatureEnabled('tool_business_rules', req.user?.company_id || null, req.user?.id);
+};
+
 // GET /business-config?company_id=<uuid>   — resolved values (global + override)
 // Open to any authenticated user so the UI can render config-driven sections.
 router.get('/', asyncHandler(async (req, res) => {
@@ -25,12 +47,15 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // PUT /business-config — upsert a single key
 // Body: { scope: 'global'|'company:<uuid>', key, value }
-router.put('/', requireSuperAdmin, asyncHandler(async (req, res) => {
+router.put('/', asyncHandler(async (req, res) => {
   const { scope, key, value } = req.body || {};
   if (!scope || !key)   return res.status(400).json({ error: 'scope and key are required.' });
   if (value === undefined) return res.status(400).json({ error: 'value is required (null/false/0 are allowed but must be sent).' });
   if (typeof scope !== 'string' || (scope !== 'global' && !/^company:[0-9a-f-]{36}$/i.test(scope))) {
     return res.status(400).json({ error: 'scope must be "global" or "company:<uuid>".' });
+  }
+  if (!(await canWriteConfig(req, key))) {
+    return res.status(403).json({ error: 'You do not have permission to change this setting.' });
   }
   await setConfig(scope, key, value, req.user.id);
   res.json({ ok: true });

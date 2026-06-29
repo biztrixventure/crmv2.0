@@ -25,14 +25,21 @@ const CALLBACK_SORT = {
   created_at: 'created_at', status: 'status', fronter: 'user_id', closer: 'user_id',
 };
 
-// Only compliance_manager or superadmin may use these routes
-router.use((req, res, next) => {
+// compliance_manager / superadmin / readonly_admin always; plus any user a
+// superadmin has granted the 'tool_compliance_review' flag (Custom Access
+// workspace delegation). Fail closed if the flag isn't catalogued yet.
+const { isFeatureEnabled } = require('../utils/featureGate');
+router.use(asyncHandler(async (req, res, next) => {
   const r = req.user.role;
-  if (r !== 'compliance_manager' && r !== 'superadmin') {
-    return res.status(403).json({ error: 'Access denied' });
+  if (r === 'compliance_manager' || r === 'superadmin') return next();
+
+  const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_compliance_review').maybeSingle();
+  if (flagRow) {
+    const ok = await isFeatureEnabled('tool_compliance_review', req.user?.company_id || null, req.user?.id);
+    if (ok) return next();
   }
-  next();
-});
+  return res.status(403).json({ error: 'Access denied' });
+}));
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function profileName(map, id) {
