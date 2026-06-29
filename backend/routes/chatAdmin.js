@@ -23,6 +23,13 @@ router.use(asyncHandler(async (req, res, next) => {
   const role = req.user?.role;
   if (role === 'superadmin' || role === 'readonly_admin' || await isSuperAdmin(req.user?.id)) return next();
 
+  // Fail closed if the flag isn't catalogued yet (migration 126 not applied) —
+  // isFeatureEnabled() assumes-enabled for unknown keys, which would hand chat
+  // viewing to every user.
+  const { data: flagRow } = await supabaseAdmin
+    .from('feature_flags').select('key').eq('key', 'tool_chat_control').maybeSingle();
+  if (!flagRow) return res.status(403).json({ error: 'Chat Control delegation is not available' });
+
   const { isFeatureEnabled } = require('../utils/featureGate');
   const ok = await isFeatureEnabled('tool_chat_control', req.user?.company_id || null, req.user?.id);
   if (!ok) return res.status(403).json({ error: 'Chat Control access is not enabled for your account' });
@@ -30,6 +37,22 @@ router.use(asyncHandler(async (req, res, next) => {
   req.chatDelegated = true;                    // limited viewer
   const { getConfig } = require('../utils/businessConfig');
   req.chatViewLimit = parseInt(await getConfig(null, `chat.view_limit.${req.user.id}`, 0), 10) || 0; // 0 = unlimited
+
+  // Delegated = strictly READ-ONLY, and only the conversation-viewing endpoints.
+  // No moderation (ban/delete/lock/edit/broadcast/guests/styles/feature) and no
+  // global /messages/search (it returns bodies with no per-user cap → bypass).
+  if (req.method !== 'GET') {
+    return res.status(403).json({ error: 'Read-only Chat Control access' });
+  }
+  const p = req.path;
+  const allowed =
+    p === '/overview' ||
+    p === '/conversations' ||
+    /^\/conversations\/[^/]+$/.test(p) ||
+    /^\/conversations\/[^/]+\/messages$/.test(p);
+  if (!allowed) {
+    return res.status(403).json({ error: 'This Chat Control area is restricted for delegated access' });
+  }
   next();
 }));
 

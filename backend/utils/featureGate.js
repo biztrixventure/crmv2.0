@@ -82,6 +82,14 @@ function requireToolAccess(featureKey, { allowReadonly = true } = {}) {
       if (role === 'superadmin' || (allowReadonly && role === 'readonly_admin')) return next();
       const { isSuperAdmin } = require('../models/helpers');
       if (await isSuperAdmin(req.user?.id)) return next();
+
+      // Fail CLOSED if the flag isn't catalogued yet (migration not applied):
+      // isFeatureEnabled() assumes-enabled for unknown keys, which would hand
+      // every user these tools. A tool the catalog doesn't know = denied.
+      const { data: flagRow } = await supabaseAdmin
+        .from('feature_flags').select('key').eq('key', featureKey).maybeSingle();
+      if (!flagRow) return res.status(403).json({ error: 'This tool is not available' });
+
       const ok = await isFeatureEnabled(featureKey, req.user?.company_id || null, req.user?.id);
       if (!ok) return res.status(403).json({ error: 'Access to this tool is not enabled for your account' });
       next();
