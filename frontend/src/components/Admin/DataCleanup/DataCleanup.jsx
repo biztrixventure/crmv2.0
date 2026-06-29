@@ -1,11 +1,190 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X } from 'lucide-react';
+import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X, ListChecks, MapPin, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../UI';
 import client from '../../../api/client';
 import { useFormFields } from '../../../hooks/useFormFields';
 
 const fmt = (s) => { try { return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } };
+
+const STATUS_COLOR = {
+  updated: '#16a34a', would_update: '#2563eb', filled: '#16a34a', would_fill: '#2563eb',
+  not_found: '#dc2626', error: '#dc2626', zip_not_found: '#d97706', no_change: '#6b7280',
+};
+
+// ── Bulk update by record id ─────────────────────────────────────────────────
+// Paste lines of "id, value1, value2…" aligned to the selected fields. Each id
+// targets exactly ONE row in the chosen table. Dry-run first; mismatched ids are
+// surfaced as not_found. Optional geo-fill sets City/State from the ZIP.
+const BulkByIdPanel = ({ fields, onDone }) => {
+  const [table, setTable]   = useState('sales');
+  const [cols, setCols]     = useState([]);     // [{name, field_type, label}] in paste order
+  const [addPick, setAddPick] = useState('');
+  const [fillGeo, setFillGeo] = useState(false);
+  const [text, setText]     = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [res, setRes]       = useState(null);
+
+  const available = useMemo(() => (fields || []).filter(f => !cols.some(c => c.name === f.name)), [fields, cols]);
+  const addCol = (name) => { const f = (fields || []).find(x => x.name === name); if (f) setCols(c => [...c, { name: f.name, field_type: f.field_type, label: f.label || f.name }]); setAddPick(''); setRes(null); };
+  const rmCol  = (name) => { setCols(c => c.filter(x => x.name !== name)); setRes(null); };
+
+  // Parse pasted lines → [{id, values:[]}]. Tab-delimited if any tab present,
+  // else comma. First token is the id; the rest map to the selected fields.
+  const parseRows = () => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(s => s.trim());
+    return { id: parts[0], values: parts.slice(1) };
+  });
+
+  const run = async (dryRun) => {
+    const rows = parseRows();
+    if (!rows.length) return toast.error('Paste at least one "id, value…" line.');
+    if (!cols.length && !fillGeo) return toast.error('Pick the field(s) your columns map to.');
+    setBusy(true);
+    try {
+      const r = await client.post('data-cleanup/bulk-by-id', {
+        table, fields: cols.map(c => ({ name: c.name, field_type: c.field_type })),
+        rows, fill_geo: fillGeo, dry_run: dryRun,
+      });
+      setRes({ ...r.data, dry_run: dryRun });
+      if (!dryRun) { toast.success(`Updated ${r.data.summary.updated} record(s).`); onDone?.(); }
+    } catch (e) { toast.error(e.response?.data?.error || 'Bulk update failed'); }
+    finally { setBusy(false); }
+  };
+
+  const s = res?.summary;
+  const problems = (res?.results || []).filter(r => ['not_found', 'error'].includes(r.status));
+
+  return (
+    <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Update specific records by their id. Each id targets <strong>one</strong> row in the chosen table —
+        transfer and sale ids are different. Paste <code>id, value1, value2…</code> per line, aligned to the fields you pick.
+      </p>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          {['sales', 'transfers'].map(t => (
+            <button key={t} type="button" onClick={() => { setTable(t); setRes(null); }} className="px-3 py-1.5 text-xs font-bold capitalize transition-colors"
+              style={{ backgroundColor: table === t ? 'var(--color-primary-600)' : 'var(--color-surface)', color: table === t ? '#fff' : 'var(--color-text-secondary)' }}>{t}</button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text)' }}>
+          <input type="checkbox" checked={fillGeo} onChange={e => { setFillGeo(e.target.checked); setRes(null); }} />
+          Also fill City/State from ZIP
+        </label>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Columns after the id (in order)</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {cols.length === 0
+            ? <span className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Add fields in the same order as your pasted columns.</span>
+            : cols.map((c, i) => (
+              <span key={c.name} className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
+                <span className="opacity-60">{i + 1}.</span> {c.label} <span className="opacity-60">({c.name})</span>
+                <button type="button" onClick={() => rmCol(c.name)}><X size={12} /></button>
+              </span>
+            ))}
+        </div>
+        <select value={addPick} onChange={e => e.target.value && addCol(e.target.value)} className="input text-sm">
+          <option value="">+ Add a column…</option>
+          {available.map(f => <option key={f.id || f.name} value={f.name}>{f.label || f.name} ({f.name})</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Data (one record per line)</label>
+        <textarea value={text} onChange={e => { setText(e.target.value); setRes(null); }} rows={6}
+          placeholder={`e2b1…-id, 90210, Camry\n7c4a…-id, 33101, Civic`} className="input font-mono text-xs w-full resize-y" />
+        <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Comma or tab separated. Empty cell = leave that field unchanged. {parseRows().length} line(s).</p>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="secondary" onClick={() => run(true)} disabled={busy} className="flex items-center gap-1.5">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Preview (dry-run)
+        </Button>
+        <Button variant="primary" onClick={() => run(false)} disabled={busy || !res || res.dry_run === false} className="flex items-center gap-1.5" title={!res ? 'Preview first' : ''}>
+          <ListChecks size={15} /> Apply updates
+        </Button>
+      </div>
+
+      {s && (
+        <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            {res.dry_run ? 'Preview' : 'Done'}: {s.updated} {res.dry_run ? 'would update' : 'updated'}
+            {s.geo_filled ? ` · ${s.geo_filled} geo-filled` : ''} · {s.not_found} not found · {s.errored} error{s.errored === 1 ? '' : 's'}{s.no_change ? ` · ${s.no_change} no-change` : ''}
+          </p>
+          {problems.length > 0 && (
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {problems.map((p, i) => (
+                <div key={i} className="text-[11px] font-mono flex items-center gap-2">
+                  <span style={{ color: STATUS_COLOR[p.status] }}>● {p.status}</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{p.id || '(no id)'}{p.message ? ` — ${p.message}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Fill City/State from ZIP ─────────────────────────────────────────────────
+const GeoFillPanel = ({ onDone }) => {
+  const [table, setTable] = useState('sales');
+  const [busy, setBusy]   = useState(false);
+  const [res, setRes]     = useState(null);
+
+  const run = async (dryRun) => {
+    setBusy(true);
+    try {
+      const r = await client.post('data-cleanup/fill-geo', { table, dry_run: dryRun, limit: 200 });
+      setRes({ ...r.data, dry_run: dryRun });
+      if (!dryRun) { toast.success(`Filled ${r.data.summary.filled} record(s).`); onDone?.(); }
+    } catch (e) { toast.error(e.response?.data?.error || 'Geo-fill failed'); }
+    finally { setBusy(false); }
+  };
+
+  const s = res?.summary;
+  return (
+    <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Find records that have a <strong>ZIP</strong> but a blank <strong>City</strong> or <strong>State</strong>, and fill them from the ZIP lookup. Up to 200 per run.
+      </p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          {['sales', 'transfers'].map(t => (
+            <button key={t} type="button" onClick={() => { setTable(t); setRes(null); }} className="px-3 py-1.5 text-xs font-bold capitalize transition-colors"
+              style={{ backgroundColor: table === t ? 'var(--color-primary-600)' : 'var(--color-surface)', color: table === t ? '#fff' : 'var(--color-text-secondary)' }}>{t}</button>
+          ))}
+        </div>
+        <Button variant="secondary" onClick={() => run(true)} disabled={busy} className="flex items-center gap-1.5">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Scan
+        </Button>
+        <Button variant="primary" onClick={() => run(false)} disabled={busy} className="flex items-center gap-1.5">
+          <MapPin size={15} /> Fill now
+        </Button>
+      </div>
+      {s && (
+        <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            {res.dry_run ? 'Scan' : 'Done'}: {s.filled} {res.dry_run ? 'to fill' : 'filled'} · {s.failed} failed · {s.candidates} candidate(s) of {s.scanned} scanned
+          </p>
+          <div className="max-h-44 overflow-y-auto space-y-1">
+            {(res.results || []).slice(0, 60).map((r, i) => (
+              <div key={i} className="text-[11px] font-mono flex items-center gap-2">
+                <span style={{ color: STATUS_COLOR[r.status] || 'var(--color-text-tertiary)' }}>● {r.status}</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>{r.zip}{r.city ? ` → ${r.city}, ${r.state}` : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Superadmin batch find/replace. Search ONE or MANY form fields at once (great
 // for the same dirty value scattered across fields), see the distinct values per
@@ -33,6 +212,7 @@ const DataCleanup = () => {
   const [history, setHistory] = useState([]);
   const [revertId, setRevertId] = useState(null);
   const [addPick, setAddPick] = useState('');
+  const [tab, setTab] = useState('replace');   // 'replace' | 'bulk' | 'geo'
 
   const labelOf = useCallback((name) => (fields || []).find(f => f.name === name)?.label || name, [fields]);
   const available = useMemo(
@@ -112,7 +292,11 @@ const DataCleanup = () => {
   }); // re-bind each render so `execute` + `ack` + `busy` stay fresh
 
   const revert = async (op) => {
-    if (!window.confirm(`Revert this change? "${op.new_value}" will be set back to ${op.match_blank ? 'blank' : `"${op.old_value}"`} on the ${op.counts?.total} record(s) it changed.`)) return;
+    const isBulk = op.field_type === 'bulk_by_id' || op.field_type === 'fill_geo';
+    const msg = isBulk
+      ? `Revert "${op.field}"? Previous values will be restored on the ${op.counts?.total ?? 0} record(s) it changed.`
+      : `Revert this change? "${op.new_value}" will be set back to ${op.match_blank ? 'blank' : `"${op.old_value}"`} on the ${op.counts?.total} record(s) it changed.`;
+    if (!window.confirm(msg)) return;
     setRevertId(op.id);
     try {
       const r = await client.post(`data-cleanup/revert/${op.id}`);
@@ -162,19 +346,40 @@ const DataCleanup = () => {
 
   const fromLabel = target ? (target.matchBlank ? '(blank)' : `“${target.value === '' ? '(blank)' : target.value}”`) : '';
 
+  const TABS = [
+    { key: 'replace', label: 'Find & Replace', icon: Search },
+    { key: 'bulk',    label: 'Bulk update by ID', icon: ListChecks },
+    { key: 'geo',     label: 'Fill City/State', icon: MapPin },
+  ];
+
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-3xl space-y-5">
       {/* Header */}
       <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="relative z-10 flex items-center gap-2.5">
           <Eraser size={22} className="text-white" />
           <div>
             <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Data Cleanup</h2>
-            <p className="text-sm text-white/80">Search one or many fields for dirty values, then fix each precisely — every change is logged and revertible.</p>
+            <p className="text-sm text-white/80">Search & fix dirty values, bulk-update by record id, or fill City/State from ZIP — every change is logged and revertible.</p>
           </div>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1.5 flex-wrap">
+        {TABS.map(t => (
+          <button key={t.key} type="button" onClick={() => setTab(t.key)}
+            className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-xl transition-colors"
+            style={{ background: tab === t.key ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: tab === t.key ? '#fff' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'bulk' && <BulkByIdPanel fields={fields} onDone={loadHistory} />}
+      {tab === 'geo'  && <GeoFillPanel onDone={loadHistory} />}
+
+      {tab === 'replace' && (
       <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         {/* Field picker (multi) */}
         <div>
@@ -279,6 +484,7 @@ const DataCleanup = () => {
           </div>
         )}
       </div>
+      )}
 
       {/* History */}
       <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -293,7 +499,9 @@ const DataCleanup = () => {
               <div key={op.id} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
-                    {op.field}: {op.match_blank ? <em>blank</em> : `“${op.old_value}”`} → “{op.new_value}”
+                    {(op.field_type === 'bulk_by_id' || op.field_type === 'fill_geo')
+                      ? <>{op.field} — {op.new_value}</>
+                      : <>{op.field}: {op.match_blank ? <em>blank</em> : `“${op.old_value}”`} → “{op.new_value}”</>}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {op.counts?.total ?? 0} record(s) · {fmt(op.performed_at)} · {op.performed_by_name}

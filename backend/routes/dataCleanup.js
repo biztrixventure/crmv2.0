@@ -16,8 +16,16 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
+const { lookupZip } = require('../utils/zipLookup');
 
 const router = express.Router();
+
+// Field-name variants used by geo-fill (set/read city, state, zip in form_data).
+const CITY_KEYS  = ['City', 'city', 'customer_city'];
+const STATE_KEYS = ['State', 'state', 'customer_state'];
+const ZIP_KEYS   = ['Zip', 'zip', 'ZipCode', 'zip_code', 'customer_zip', 'PostalCode', 'Postal'];
+const firstZip   = (fd) => { for (const k of ZIP_KEYS) { const v = fd && fd[k]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
+const blankAll   = (fd, keys) => !keys.some(k => fd && fd[k] != null && String(fd[k]).trim() !== '');
 
 router.use(asyncHandler(async (req, res, next) => {
   if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin access required' });
@@ -271,6 +279,26 @@ router.post('/revert/:id', asyncHandler(async (req, res) => {
   if (op.reverted_at) return res.status(400).json({ error: 'This operation was already reverted' });
 
   const aff = op.affected || {};
+
+  // Bulk-by-id / geo-fill ops store a per-row before-snapshot — restore each.
+  if (Array.isArray(aff.bulk) && aff.bulk.length) {
+    let restoredBulk = 0;
+    for (const ent of aff.bulk) {
+      const tbl = ent.table === 'transfers' ? 'transfers' : 'sales';
+      const { data: cur } = await supabaseAdmin.from(tbl).select('form_data').eq('id', ent.id).maybeSingle();
+      if (!cur) continue;
+      const fd = { ...(cur.form_data || {}) };
+      Object.entries(ent.before?.form || {}).forEach(([k, v]) => { if (v == null) delete fd[k]; else fd[k] = v; });
+      const upd = { form_data: fd };
+      Object.entries(ent.before?.col || {}).forEach(([c, v]) => { upd[c] = v; });
+      const { error } = await supabaseAdmin.from(tbl).update(upd).eq('id', ent.id);
+      if (!error) restoredBulk++;
+    }
+    await supabaseAdmin.from('data_cleanup_operations')
+      .update({ reverted_at: new Date().toISOString(), reverted_by: req.user.id }).eq('id', op.id);
+    return res.json({ reverted: restoredBulk });
+  }
+
   let restored = 0;
 
   // Revert JSONB: set the field back to the old value, or unset it when the
@@ -299,6 +327,152 @@ router.post('/revert/:id', asyncHandler(async (req, res) => {
     .update({ reverted_at: new Date().toISOString(), reverted_by: req.user.id }).eq('id', op.id);
 
   res.json({ reverted: restored });
+}));
+
+// ── POST /bulk-by-id — update specific records by their id ───────────────────
+// Body: { table:'sales'|'transfers', fields:[{name,field_type}], rows:[{id,values:[]}],
+//         fill_geo?, dry_run? }. Each row's `values` line up positionally with
+// `fields`. Empty cell = leave that field unchanged. Reports per-row status
+// (updated / not_found / no_change / error) so mismatched ids are surfaced.
+router.post('/bulk-by-id', asyncHandler(async (req, res) => {
+  const table = req.body?.table === 'transfers' ? 'transfers' : (req.body?.table === 'sales' ? 'sales' : null);
+  if (!table) return res.status(400).json({ error: "table must be 'sales' or 'transfers'" });
+  const fields = Array.isArray(req.body?.fields)
+    ? req.body.fields.map(f => ({ name: String(f?.name || '').trim(), field_type: String(f?.field_type || '').trim() })).filter(f => f.name)
+    : [];
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const fillGeo = !!req.body?.fill_geo;
+  const dryRun = !!req.body?.dry_run;
+  if (!fields.length && !fillGeo) return res.status(400).json({ error: 'select at least one field to update' });
+  if (!rows.length) return res.status(400).json({ error: 'no rows provided' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'max 5000 rows per run' });
+
+  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(Boolean))];
+  const saleCols = ', customer_phone, customer_phone_2, customer_email, car_make, car_model, car_vin, plan, client_name, reference_no, payment_due_note';
+  const sel = 'id, form_data' + (table === 'sales' ? saleCols : '');
+  const existing = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabaseAdmin.from(table).select(sel).in('id', ids.slice(i, i + 200));
+    if (error) return res.status(500).json({ error: error.message });
+    (data || []).forEach(r => existing.set(r.id, r));
+  }
+
+  const results = [], snapshot = [];
+  let updated = 0, notFound = 0, errored = 0, geoFilled = 0, noChange = 0;
+
+  for (const raw of rows) {
+    const id = String(raw.id || '').trim();
+    const values = Array.isArray(raw.values) ? raw.values : [];
+    if (!id) { results.push({ id: '', status: 'error', message: 'missing id' }); errored++; continue; }
+    const rec = existing.get(id);
+    if (!rec) { results.push({ id, status: 'not_found' }); notFound++; continue; }
+
+    const fd = { ...(rec.form_data || {}) };
+    const before = { form: {}, col: {} };
+    const changed = {};
+    const colUpdate = {};
+
+    fields.forEach((f, i) => {
+      const v = values[i];
+      if (v == null || String(v).trim() === '') return;        // empty cell → unchanged
+      const val = String(v).trim();
+      before.form[f.name] = rec.form_data ? (rec.form_data[f.name] ?? null) : null;
+      fd[f.name] = val; changed[f.name] = val;
+      const col = table === 'sales' ? saleColumnFor(f.name, f.field_type) : null;
+      if (col) { before.col[col] = rec[col] ?? null; colUpdate[col] = val; }
+    });
+
+    if (fillGeo) {
+      const zipVal = firstZip(fd);
+      if (zipVal) {
+        const geo = await lookupZip(zipVal);
+        if (geo && geo.city && geo.state) {
+          const cityKey = CITY_KEYS.find(k => k in fd) || 'City';
+          const stKey   = STATE_KEYS.find(k => k in fd) || 'State';
+          if (!(cityKey in before.form)) before.form[cityKey] = rec.form_data ? (rec.form_data[cityKey] ?? null) : null;
+          if (!(stKey in before.form))   before.form[stKey]   = rec.form_data ? (rec.form_data[stKey] ?? null) : null;
+          fd[cityKey] = geo.city; fd[stKey] = geo.state;
+          changed[cityKey] = geo.city; changed[stKey] = geo.state; geoFilled++;
+        }
+      }
+    }
+
+    if (!Object.keys(changed).length) { results.push({ id, status: 'no_change' }); noChange++; continue; }
+    if (dryRun) { results.push({ id, status: 'would_update', changed }); updated++; continue; }
+
+    const { error } = await supabaseAdmin.from(table).update({ form_data: fd, ...colUpdate }).eq('id', id);
+    if (error) { results.push({ id, status: 'error', message: error.message }); errored++; continue; }
+    snapshot.push({ table, id, before });
+    results.push({ id, status: 'updated', changed });
+    updated++;
+  }
+
+  let opId = null;
+  if (!dryRun && snapshot.length) {
+    try {
+      const { data: op } = await supabaseAdmin.from('data_cleanup_operations').insert({
+        field: `(bulk by id: ${fields.map(f => f.name).join(', ') || 'geo'})`, field_type: 'bulk_by_id',
+        sale_column: null, match_blank: false, old_value: null, new_value: `${updated} row(s)`,
+        affected: { bulk: snapshot }, counts: { updated, not_found: notFound, errored, geo_filled: geoFilled, total: updated },
+        performed_by: req.user.id,
+      }).select('id').single();
+      opId = op?.id || null;
+    } catch { /* non-critical */ }
+  }
+
+  res.json({ summary: { updated, not_found: notFound, errored, geo_filled: geoFilled, no_change: noChange, dry_run: dryRun }, results, operation_id: opId });
+}));
+
+// ── POST /fill-geo — fetch + fill City/State from ZIP where missing ──────────
+// Body: { table, dry_run?, limit? }. Scans rows that have a ZIP but a blank
+// city or state and fills them from the ZIP lookup.
+router.post('/fill-geo', asyncHandler(async (req, res) => {
+  const table = req.body?.table === 'transfers' ? 'transfers' : (req.body?.table === 'sales' ? 'sales' : null);
+  if (!table) return res.status(400).json({ error: "table must be 'sales' or 'transfers'" });
+  const dryRun = !!req.body?.dry_run;
+  const limit = Math.min(parseInt(req.body?.limit, 10) || 200, 500);
+
+  const { data, error } = await supabaseAdmin.from(table)
+    .select('id, form_data').not('form_data->>Zip', 'is', null).limit(limit * 4);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const candidates = (data || []).filter(r => {
+    const fd = r.form_data || {};
+    return firstZip(fd) && (blankAll(fd, CITY_KEYS) || blankAll(fd, STATE_KEYS));
+  }).slice(0, limit);
+
+  const results = [], snapshot = [];
+  let filled = 0, failed = 0;
+  for (const r of candidates) {
+    const fd = { ...(r.form_data || {}) };
+    const zipVal = firstZip(fd);
+    const geo = await lookupZip(zipVal);
+    if (!geo || !geo.city || !geo.state) { results.push({ id: r.id, zip: zipVal, status: 'zip_not_found' }); failed++; continue; }
+    const cityKey = CITY_KEYS.find(k => k in fd) || 'City';
+    const stKey   = STATE_KEYS.find(k => k in fd) || 'State';
+    const before  = { form: { [cityKey]: fd[cityKey] ?? null, [stKey]: fd[stKey] ?? null }, col: {} };
+    if (!dryRun) {
+      fd[cityKey] = geo.city; fd[stKey] = geo.state;
+      const { error: uErr } = await supabaseAdmin.from(table).update({ form_data: fd }).eq('id', r.id);
+      if (uErr) { results.push({ id: r.id, zip: zipVal, status: 'error', message: uErr.message }); failed++; continue; }
+      snapshot.push({ table, id: r.id, before });
+    }
+    results.push({ id: r.id, zip: zipVal, city: geo.city, state: geo.state, status: dryRun ? 'would_fill' : 'filled' });
+    filled++;
+  }
+
+  let opId = null;
+  if (!dryRun && snapshot.length) {
+    try {
+      const { data: op } = await supabaseAdmin.from('data_cleanup_operations').insert({
+        field: `(geo-fill city/state: ${table})`, field_type: 'fill_geo', sale_column: null, match_blank: false,
+        old_value: null, new_value: `${filled} row(s)`, affected: { bulk: snapshot },
+        counts: { filled, failed, total: filled }, performed_by: req.user.id,
+      }).select('id').single();
+      opId = op?.id || null;
+    } catch { /* non-critical */ }
+  }
+  res.json({ summary: { filled, failed, scanned: (data || []).length, candidates: candidates.length, dry_run: dryRun }, results: results.slice(0, 200), operation_id: opId });
 }));
 
 module.exports = router;
