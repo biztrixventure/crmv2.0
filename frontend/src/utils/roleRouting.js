@@ -113,8 +113,18 @@ export const hasRoleAccess = (userRole, requiredRole) => {
     return normRequired === 'portalclient';
   }
 
+  // '/admin' is a shell name, NOT a hierarchy level. superadmin + readonly_admin
+  // are already allowed above; anyone reaching here for 'admin' is neither, so
+  // deny — otherwise the missing hierarchy key falls back to 999 and lets every
+  // role load the AdminPanel chrome.
+  if (normRequired === 'admin') return false;
+
+  // Likewise, never let an unknown required-role default to "allow". A required
+  // role we don't recognise is treated as out of reach (fail closed).
+  if (!(requiredRole.toLowerCase().trim() in ROLE_HIERARCHY)) return false;
+
   // Hierarchy check: can access routes at same or lower authority
   const userLevel     = ROLE_HIERARCHY[userRole.toLowerCase().trim()]     ?? 999;
-  const requiredLevel = ROLE_HIERARCHY[requiredRole.toLowerCase().trim()] ?? 999;
+  const requiredLevel = ROLE_HIERARCHY[requiredRole.toLowerCase().trim()];
   return userLevel <= requiredLevel;
 };
