@@ -184,6 +184,59 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     setFormData(prev => ({ ...prev, [fronterField.name]: transfer.created_by }));
   }, [transfer?.created_by, fronters, fields]);
 
+  // Edit population. Many sales (manual entry, bulk upload, dialer imports) keep
+  // their values in the sales COLUMNS while form_data is sparse — so the edit
+  // form rendered blank for those (esp. closer-made manual records). Seed any
+  // EMPTY field from its matching column ONCE, after fields load. Never clobbers
+  // a value already present in form_data, so normal edits are untouched.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !existingSale || !fields.length) return;
+    seededRef.current = true;
+    const colByType = {
+      sale_plan:             existingSale.plan,
+      sale_down_payment:     existingSale.down_payment,
+      sale_monthly_payment:  existingSale.monthly_payment,
+      sale_payment_due_note: existingSale.payment_due_note,
+      sale_reference_no:     existingSale.reference_no,
+      sale_client:           existingSale.client_name,
+      sale_fronter:          existingSale.fronter_id,
+      sale_date:             existingSale.sale_date,
+      sale_disposition:      existingSale.closer_disposition,
+      sale_status:           existingSale.closer_disposition,
+    };
+    const nameParts = String(existingSale.customer_name || '').trim().split(/\s+/);
+    const byName = (f) => {
+      const n = (f.name || '').toLowerCase();
+      if (['phone', 'customer_phone', 'phonenumber', 'mobile', 'cellphone', 'phone_number'].includes(n)) return existingSale.customer_phone;
+      if (['phone2', 'customer_phone_2'].includes(n)) return existingSale.customer_phone_2;
+      if (['email', 'customer_email', 'emailaddress'].includes(n)) return existingSale.customer_email;
+      if (['firstname', 'first_name'].includes(n)) return nameParts[0];
+      if (['lastname', 'last_name'].includes(n)) return nameParts.slice(1).join(' ');
+      if (['name', 'fullname', 'full_name', 'customer_name'].includes(n)) return existingSale.customer_name;
+      if (['address', 'customer_address'].includes(n)) return existingSale.customer_address;
+      if (['carmiles', 'car_miles', 'mileage', 'miles'].includes(n)) return existingSale.car_miles;
+      if (['carvin', 'car_vin', 'vin'].includes(n)) return existingSale.car_vin;
+      return undefined;
+    };
+    const isEmpty = (v) => v == null || String(v).trim() === '';
+    setFormData(prev => {
+      const next = { ...prev };
+      fields.forEach(f => {
+        if (!isEmpty(next[f.name])) return;
+        let v = colByType[f.field_type];
+        if (isEmpty(v)) {
+          if (isCarYear(f))       v = existingSale.car_year;
+          else if (isCarMake(f))  v = existingSale.car_make;
+          else if (isCarModel(f)) v = existingSale.car_model;
+          else                    v = byName(f);
+        }
+        if (!isEmpty(v)) next[f.name] = f.field_type === 'sale_date' ? String(v).slice(0, 10) : v;
+      });
+      return next;
+    });
+  }, [fields, existingSale]);
+
   // Additional vehicles for the same customer/transfer. Each entry holds only
   // the values for fields the superadmin marked repeats_per_car. The first car
   // always lives in `formData` (unchanged single-car behavior).

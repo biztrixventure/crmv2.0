@@ -32,7 +32,7 @@ router.get('/upcoming', asyncHandler(async (req, res) => {
   const endStr = isoDate(end);
 
   let q = supabaseAdmin.from('payment_followups')
-    .select('*, sales(customer_name, customer_phone, monthly_payment, reference_no, sale_date)')
+    .select('*, sales(customer_name, customer_phone, customer_email, monthly_payment, down_payment, reference_no, sale_date, plan, client_name, payment_due_note)')
     .gte('due_date', today)
     .order('due_date', { ascending: true });
 

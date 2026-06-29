@@ -37,16 +37,34 @@ function toDateOnly(value) {
 function daysInMonth(year, monthIdx) { return new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate(); }
 
 /**
- * Next monthly payment due date (UTC date-only) for a sale, on/after `from`.
- * Payment recurs on the sale's day-of-month, clamped to the target month's length
- * (sold on the 31st → bills on the 30th/28th in shorter months).
- * Returns a Date or null.
+ * Pull the billing day-of-month (1-31) the closer wrote in the payment-due note,
+ * e.g. "Monthly payments will be on the 3rd of each month" → 3. The note is the
+ * real monthly date; sale_date is only the fallback. Returns null if none found.
  */
-function nextPaymentDue(saleDate, from = new Date()) {
+function billingDayFromNote(note) {
+  if (!note) return null;
+  const s = String(note);
+  // 1) ordinal: "3rd", "15th"
+  let m = s.match(/\b([0-3]?\d)\s*(?:st|nd|rd|th)\b/i);
+  // 2) "on (the) 20"
+  if (!m) m = s.match(/\bon\s+(?:the\s+)?([0-3]?\d)\b/i);
+  // 3) any bare 1-31
+  if (!m) m = s.match(/\b([0-3]?\d)\b/);
+  const day = m ? parseInt(m[1], 10) : null;
+  return (day != null && day >= 1 && day <= 31) ? day : null;
+}
+
+/**
+ * Next monthly payment due date (UTC date-only) for a sale, on/after `from`.
+ * Bills on `billingDay` when given (the closer's stated monthly date), else the
+ * sale's day-of-month — clamped to the target month's length (the 31st → 30th/28th
+ * in shorter months). Returns a Date or null.
+ */
+function nextPaymentDue(saleDate, from = new Date(), billingDay = null) {
   const sd = toDateOnly(saleDate);
   if (!sd) return null;
   const today = toDateOnly(from.toISOString());
-  const day = sd.getUTCDate();
+  const day = (billingDay != null && billingDay >= 1 && billingDay <= 31) ? billingDay : sd.getUTCDate();
 
   for (let i = 0; i < 13; i++) {                       // this month + next 12
     const y = today.getUTCFullYear();
@@ -92,7 +110,7 @@ async function runPaymentReminderScan() {
   // Active sales with a sale_date + a monthly payment.
   const { data: sales, error } = await ACTIVE(
     supabaseAdmin.from('sales')
-      .select('id, company_id, closer_id, customer_uuid, customer_name, sale_date, monthly_payment')
+      .select('id, company_id, closer_id, customer_uuid, customer_name, sale_date, monthly_payment, payment_due_note')
   ).not('sale_date', 'is', null).limit(20000);
   if (error) { logger.warn('PAY_REMINDER', `scan query failed: ${error.message}`); return { error: error.message }; }
 
@@ -100,7 +118,7 @@ async function runPaymentReminderScan() {
   const offsets = (Array.isArray(cfg.offsets) ? cfg.offsets : [7, 3, 1]).map(Number).filter(n => n >= 0);
 
   for (const s of (sales || [])) {
-    const nextDue = nextPaymentDue(s.sale_date, today);
+    const nextDue = nextPaymentDue(s.sale_date, today, billingDayFromNote(s.payment_due_note));
     if (!nextDue) continue;
     const d = daysUntil(nextDue, today);
     if (d < 0 || d > horizon) continue;               // outside the look-ahead
@@ -140,6 +158,6 @@ async function runPaymentReminderScan() {
 }
 
 module.exports = {
-  toDateOnly, daysInMonth, nextPaymentDue, daysUntil, isoDate,
+  toDateOnly, daysInMonth, nextPaymentDue, billingDayFromNote, daysUntil, isoDate,
   settings, runPaymentReminderScan, ACTIVE, CFG,
 };

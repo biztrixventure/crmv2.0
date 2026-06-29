@@ -110,6 +110,7 @@ export default function PaymentRemindersPanel() {
                     <td className="px-4 py-3">
                       <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</div>
                       {s.customer_phone && <CopyableNumber value={s.customer_phone} className="text-xs" />}
+                      {(s.client_name || s.plan) && <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{[s.client_name, s.plan].filter(Boolean).join(' · ')}</div>}
                       {s.reference_no && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Ref {s.reference_no}</div>}
                     </td>
                     <td className="px-4 py-3">
@@ -117,6 +118,7 @@ export default function PaymentRemindersPanel() {
                       <div className="text-[11px] font-semibold" style={{ color: d <= 1 ? '#dc2626' : d <= 3 ? '#d97706' : 'var(--color-text-tertiary)' }}>
                         {d < 0 ? `${-d}d overdue` : d === 0 ? 'due today' : `in ${d}d`}
                       </div>
+                      {s.payment_due_note && <div className="text-[10px] mt-0.5 truncate max-w-[180px]" title={s.payment_due_note} style={{ color: 'var(--color-text-tertiary)' }}>{s.payment_due_note}</div>}
                     </td>
                     <td className="px-4 py-3" style={{ color: 'var(--color-text)' }}>{money(s.monthly_payment)}</td>
                     <td className="px-4 py-3">
@@ -180,9 +182,14 @@ export default function PaymentRemindersPanel() {
 
               <div className="rounded-xl border p-3 text-sm space-y-1.5" style={{ borderColor: 'var(--color-border)' }}>
                 <Row label="Payment due"   value={`${selected.due_date} · ${d < 0 ? `${-d}d overdue` : d === 0 ? 'today' : `in ${d}d`}`} />
+                {s.payment_due_note && <Row label="Billing note" value={s.payment_due_note} />}
                 <Row label="Monthly"       value={money(s.monthly_payment)} />
+                {s.down_payment != null && <Row label="Down payment" value={money(s.down_payment)} />}
+                <Row label="Client"        value={s.client_name || '—'} />
+                <Row label="Plan"          value={s.plan || '—'} />
                 <Row label="Reference"     value={s.reference_no || '—'} />
-                <Row label="Plan / sold"   value={s.sale_date ? `sold ${String(s.sale_date).slice(0,10)}` : '—'} />
+                {s.customer_email && <Row label="Email" value={s.customer_email} />}
+                <Row label="Sold"          value={s.sale_date ? String(s.sale_date).slice(0, 10) : '—'} />
                 {selected.handled_at && <Row label="Last action" value={new Date(selected.handled_at).toLocaleString()} />}
               </div>
 
