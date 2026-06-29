@@ -10,6 +10,7 @@ import {
   AlertTriangle, ArrowRight, MapPin, Globe,
 } from 'lucide-react';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../api/supabase';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { formatInTz, getTzAbbr, formatForInput, convertToUtc, nowInTz, ET_ZONE } from '../../utils/timezone';
@@ -597,6 +598,8 @@ const PushBanner = ({ onEnable, onDismiss, loading, alreadyGranted }) => (
 
 // ── Main CallbacksPage ───────────────────────────────────────────────────────
 const CallbacksPage = ({ user }) => {
+  const { hasPermission } = useAuth();
+  const canCreate = user?.role === 'superadmin' || hasPermission('create_callback');
   const [callbacks,    setCallbacks]    = useState([]);
   const [loading,      setLoading]      = useState(false);
   const [filter,       setFilter]       = useState('pending');
@@ -713,11 +716,13 @@ const CallbacksPage = ({ user }) => {
             Schedule and track customer callbacks. Click any row for details.
           </p>
         </div>
-        <button onClick={() => setModal('create')}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl font-bold text-xs text-white transition-all hover:-translate-y-0.5"
-          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
-          <Plus size={13} /> Schedule Callback
-        </button>
+        {canCreate && (
+          <button onClick={() => setModal('create')}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl font-bold text-xs text-white transition-all hover:-translate-y-0.5"
+            style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
+            <Plus size={13} /> Schedule Callback
+          </button>
+        )}
       </div>
 
       {showPushBanner && (

@@ -179,7 +179,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     { key: 'calendar', label: 'Calendar', icon: CalendarDays },
     ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
       ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
-    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles')
+    ...(hasPermission('manage_roles') || hasPermission('manage_company_roles') || hasPermission('create_role') || hasPermission('update_role') || hasPermission('delete_role')
       ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
     ...(hasPermission('manage_forms') && isEnabled('form_builder')
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),

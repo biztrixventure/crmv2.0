@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Shield, PlusCircle, Edit2, Trash2 } from 'lucide-react';
 import { Card, Badge, Button } from '../UI';
 import RoleModal from '../Admin/RoleManagement/RoleModal';
+import { useAuth } from '../../contexts/AuthContext';
 import client from '../../api/client';
 
 const LEVEL_COLORS = {
@@ -11,6 +12,11 @@ const LEVEL_COLORS = {
 };
 
 const RoleManagementPanel = ({ companyId }) => {
+  const { hasPermission, user } = useAuth();
+  const isSuper   = user?.role === 'superadmin';
+  const canCreate = isSuper || hasPermission('create_role') || hasPermission('manage_roles');
+  const canUpdate = isSuper || hasPermission('update_role') || hasPermission('manage_roles');
+  const canDelete = isSuper || hasPermission('delete_role') || hasPermission('manage_roles');
   const [roles, setRoles]           = useState([]);
   const [loading, setLoading]       = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -70,12 +76,16 @@ const RoleManagementPanel = ({ companyId }) => {
           <p className="text-text-secondary text-sm mt-0.5">{roles.length} role{roles.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={seedDefaults} loading={seeding} disabled={seeding}>
-            Seed Defaults
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
-            <PlusCircle size={15} /> Add Role
-          </Button>
+          {isSuper && (
+            <Button variant="secondary" size="sm" onClick={seedDefaults} loading={seeding} disabled={seeding}>
+              Seed Defaults
+            </Button>
+          )}
+          {canCreate && (
+            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} className="flex items-center gap-1.5">
+              <PlusCircle size={15} /> Add Role
+            </Button>
+          )}
         </div>
       </div>
 
@@ -88,8 +98,8 @@ const RoleManagementPanel = ({ companyId }) => {
       ) : roles.length === 0 ? (
         <Card className="p-16 text-center">
           <Shield size={48} className="mx-auto mb-4 text-text-tertiary" />
-          <p className="text-text-secondary mb-4">No roles yet. Seed defaults or add one manually.</p>
-          <Button variant="primary" onClick={seedDefaults} loading={seeding}>Seed Defaults</Button>
+          <p className="text-text-secondary mb-4">No roles yet.{isSuper ? ' Seed defaults or add one manually.' : ''}</p>
+          {isSuper && <Button variant="primary" onClick={seedDefaults} loading={seeding}>Seed Defaults</Button>}
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -106,14 +116,18 @@ const RoleManagementPanel = ({ companyId }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                  <button onClick={e => { e.stopPropagation(); setEditRole(r); }} title="Edit"
-                    className="p-1 rounded hover:bg-bg-secondary transition-colors">
-                    <Edit2 size={14} style={{ color: 'var(--color-primary-500)' }} />
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); deleteRole(r.id); }} title="Delete"
-                    className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
-                    <Trash2 size={14} className="text-error-500" />
-                  </button>
+                  {canUpdate && (
+                    <button onClick={e => { e.stopPropagation(); setEditRole(r); }} title="Edit"
+                      className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                      <Edit2 size={14} style={{ color: 'var(--color-primary-500)' }} />
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button onClick={e => { e.stopPropagation(); deleteRole(r.id); }} title="Delete"
+                      className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
+                      <Trash2 size={14} className="text-error-500" />
+                    </button>
+                  )}
                 </div>
               </div>
               {r.description && <p className="text-xs text-text-secondary mb-2">{r.description}</p>}
