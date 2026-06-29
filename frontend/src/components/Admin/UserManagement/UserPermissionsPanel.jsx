@@ -175,17 +175,24 @@ const UserPermissionsPanel = ({ user }) => {
 
   const handleSave = async () => {
     setSaving(true); setMsg(null);
-    try {
-      const permPayload = Object.entries(overrides).map(([permission_name, type]) => ({ permission_name, type }));
-      const featPayload = Object.entries(featOv).map(([feature_key, is_enabled]) => ({ feature_key, is_enabled }));
-      await Promise.all([
-        client.put(`users/${user.id}/overrides`, { overrides: permPayload }),
-        client.put(`users/${user.id}/feature-overrides`, { overrides: featPayload }),
-      ]);
-      setMsg({ type: 'success', text: `Saved — ${permPayload.length} permission + ${featPayload.length} feature override${(permPayload.length + featPayload.length) !== 1 ? 's' : ''} for ${user.first_name || 'this user'}.` });
-    } catch (err) {
-      setMsg({ type: 'error', text: err.response?.data?.error || 'Save failed' });
-    } finally { setSaving(false); }
+    const permPayload = Object.entries(overrides).map(([permission_name, type]) => ({ permission_name, type }));
+    const featPayload = Object.entries(featOv).map(([feature_key, is_enabled]) => ({ feature_key, is_enabled }));
+    // Save the two halves INDEPENDENTLY so a feature error (e.g. migration 122
+    // not applied) never makes a successful permission save look failed.
+    const [permRes, featRes] = await Promise.allSettled([
+      client.put(`users/${user.id}/overrides`, { overrides: permPayload }),
+      client.put(`users/${user.id}/feature-overrides`, { overrides: featPayload }),
+    ]);
+    setSaving(false);
+    const permOk = permRes.status === 'fulfilled';
+    const featOk = featRes.status === 'fulfilled';
+    if (permOk && featOk) {
+      setMsg({ type: 'success', text: `Saved — ${permPayload.length} permission + ${featPayload.length} feature override${(permPayload.length + featPayload.length) !== 1 ? 's' : ''}.` });
+    } else if (permOk && !featOk) {
+      setMsg({ type: 'error', text: `Permissions saved ✓ — feature toggles NOT saved: ${featRes.reason?.response?.data?.error || 'failed'}` });
+    } else {
+      setMsg({ type: 'error', text: permRes.reason?.response?.data?.error || 'Save failed' });
+    }
   };
 
   if (loading || permsLoading) {
@@ -202,6 +209,9 @@ const UserPermissionsPanel = ({ user }) => {
   const revokeCount   = Object.values(overrides).filter(v => v === 'revoke').length;
   const effGranted    = allPermList.filter(p => effPerm(p.name)).length;
   const visibleFeats  = featCatalog.filter(matchF);
+  const roleLevel = (user.role_level || user.custom_roles?.level || user.role || '').toLowerCase();
+  const bypassRole = roleLevel === 'superadmin';
+  const readonlyRole = roleLevel === 'readonly_admin';
 
   return (
     <div className="space-y-4">
@@ -214,6 +224,17 @@ const UserPermissionsPanel = ({ user }) => {
           “Default” inherits the role/company.
         </span>
       </div>
+
+      {(bypassRole || readonlyRole) && (
+        <div className="rounded-xl p-3 text-sm flex items-start gap-2" style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a' }}>
+          <ShieldX size={15} className="mt-0.5 flex-shrink-0" style={{ color: '#d97706' }} />
+          <span style={{ color: '#92400e' }}>
+            {bypassRole
+              ? 'This user is a Superadmin — they bypass all permission and feature checks, so overrides here have no effect.'
+              : 'This user is a Readonly Admin — they have broad read access by design; overrides may have limited effect.'}
+          </span>
+        </div>
+      )}
 
       {/* Overview — who already has custom access */}
       {overview.length > 0 && (
