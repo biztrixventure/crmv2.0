@@ -46,29 +46,30 @@ router.get('/', asyncHandler(async (req, res) => {
     .order('sort_order');
   if (catErr) return res.status(500).json({ error: catErr.message });
 
-  if (!companyId) {
-    const flags = {};
-    (catalog || []).forEach(f => { flags[f.key] = { ...f, is_enabled: f.default_enabled }; });
-    return res.json({ flags });
+  // Company overrides (only when the user has a company).
+  const overrideMap = {};
+  if (companyId) {
+    const { data: overrides } = await supabaseAdmin
+      .from('company_feature_flags')
+      .select('feature_key, is_enabled')
+      .eq('company_id', companyId);
+    (overrides || []).forEach(o => { overrideMap[o.feature_key] = o.is_enabled; });
   }
 
-  const { data: overrides } = await supabaseAdmin
-    .from('company_feature_flags')
-    .select('feature_key, is_enabled')
-    .eq('company_id', companyId);
-
-  const overrideMap = {};
-  (overrides || []).forEach(o => { overrideMap[o.feature_key] = o.is_enabled; });
-
-  // Per-USER overrides win over the company override (migration 122). If the
-  // table isn't there yet, userOv is null and we fall through unchanged.
+  // Per-USER overrides win (migration 122). These are resolved by user_id and
+  // are company-TOLERANT: prefer a row matching the current company, but fall
+  // back to ANY of the user's rows. Per-user flags (custom_workspace, tool_*)
+  // are about the person, not the company — and req.user.company_id can be null
+  // or differ from the grant's company, which previously hid the override.
+  const userMap = {};
   const { data: userOv } = await supabaseAdmin
     .from('user_feature_flags')
-    .select('feature_key, is_enabled')
-    .eq('user_id', req.user.id)
-    .eq('company_id', companyId);
-  const userMap = {};
-  (userOv || []).forEach(o => { userMap[o.feature_key] = o.is_enabled; });
+    .select('feature_key, is_enabled, company_id')
+    .eq('user_id', req.user.id);
+  (userOv || []).forEach(o => {
+    if (o.company_id === companyId) userMap[o.feature_key] = o.is_enabled;            // exact match wins
+    else if (userMap[o.feature_key] === undefined) userMap[o.feature_key] = o.is_enabled; // else first seen
+  });
 
   const flags = {};
   (catalog || []).forEach(f => {

@@ -12,15 +12,19 @@ const { supabaseAdmin } = require('../config/database');
  */
 async function isFeatureEnabled(featureKey, companyId, userId) {
   // Per-USER override wins over the company override (migration 122).
-  if (userId && companyId) {
-    const { data: uo } = await supabaseAdmin
+  // Company-TOLERANT: resolve by user_id, prefer the row matching this company
+  // but accept any of the user's rows. Per-user flags (custom_workspace, tool_*)
+  // are about the person, and companyId may be null or differ from the grant.
+  if (userId) {
+    const { data: uos } = await supabaseAdmin
       .from('user_feature_flags')
-      .select('is_enabled')
+      .select('is_enabled, company_id')
       .eq('user_id', userId)
-      .eq('company_id', companyId)
-      .eq('feature_key', featureKey)
-      .maybeSingle();
-    if (uo) return uo.is_enabled;
+      .eq('feature_key', featureKey);
+    if (uos && uos.length) {
+      const match = uos.find(u => u.company_id === companyId);
+      return (match || uos[0]).is_enabled;
+    }
   }
 
   // Fetch override for this company
