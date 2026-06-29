@@ -112,12 +112,31 @@ const SALE_COLS = [
   'customer_name', 'customer_phone', 'customer_phone_2', 'customer_email', 'customer_address',
   'car_vin', 'car_year', 'car_make', 'car_model', 'car_miles', 'miles_num',
   'down_payment', 'monthly_payment', 'cancellation_date', 'cancellation_reason_key',
-  'superseded_by', 'is_resell',
+  'superseded_by', 'is_resell', 'form_data',
 ].join(', ');
 const TRANSFER_COLS = [
   'id', 'status', 'created_at', 'company_id', 'created_by', 'assigned_closer_id',
   'latest_disposition', 'vicidial_vendor_code', 'form_data', 'customer_uuid', 'normalized_phone',
 ].join(', ');
+
+// Phone can live in the column OR inside form_data under any of these keys —
+// mirrors the customer_uuid trigger (079), so anything that produced a uuid has
+// a recoverable phone. Stops the profile showing a blank number when data exists.
+const PHONE_KEYS = ['Phone', 'phone', 'customer_phone', 'Mobile', 'CellPhone', 'cli_number', 'phone_number', 'PhoneNumber'];
+const fdPhone = (fd) => {
+  if (!fd || typeof fd !== 'object') return null;
+  for (const k of PHONE_KEYS) { const v = fd[k]; if (v != null && String(v).trim() !== '') return String(v).trim(); }
+  return null;
+};
+/** First recoverable phone across all sales then all transfers (column → form_data). */
+const pickPhone = (sales, transfers) => {
+  for (const s of sales)     if (s.customer_phone)   return s.customer_phone;
+  for (const s of sales)     { const p = fdPhone(s.form_data); if (p) return p; }
+  for (const t of transfers) if (t.normalized_phone) return t.normalized_phone;
+  for (const t of transfers) { const p = fdPhone(t.form_data); if (p) return p; }
+  for (const s of sales)     if (s.customer_phone_2) return s.customer_phone_2;
+  return null;
+};
 
 /**
  * CustomerProfileRepository — the ONLY place the profile talks to the database.
@@ -171,8 +190,8 @@ class CustomerProfileRepository {
       customer_uuid: customerUuid,
       name: topSale.customer_name
         || fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || fd.Name || null,
-      phone: topSale.customer_phone || fd.Phone || fd.phone || (transfers[0] || {}).normalized_phone || null,
-      phone_2: topSale.customer_phone_2 || null,
+      phone: pickPhone(sales, transfers),
+      phone_2: topSale.customer_phone_2 || fd.Phone2 || fd.phone_2 || null,
       email: topSale.customer_email || fd.Email || null,
       address: topSale.customer_address || null,
     });
