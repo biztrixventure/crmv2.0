@@ -168,7 +168,7 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) 
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
+              ? <MessageThread key={active.id} conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>

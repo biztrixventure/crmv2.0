@@ -406,13 +406,28 @@ const StaffShell = () => {
   // Debounce the fronter lead filter into a server-side search; reset to page 1.
   useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
   useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ, myLeadsStatus]);
+  // Params for the closer's sales fetch in the CURRENT section. Post-date sales
+  // carry a FUTURE sale_date, so the sale_date date window would hide them — the
+  // Post Date tab is fetched WITHOUT the date filter so every pending post-date
+  // shows (this is why they "disappeared" — the list keys on sale_date now).
+  // Every other section keeps the date window.
+  const closerSalesParams = useCallback((page = closerSalesPage) => {
+    const p = { page, limit: PAGE_SIZE };
+    if (closerSection.startsWith('dispo:')) {
+      const dispoVal = closerSection.slice(6);
+      p.disposition = dispoVal;
+      if (!isPostDateDispo(dispoVal)) { p.date_from = date_from; p.date_to = date_to; }
+    } else {
+      p.date_from = date_from; p.date_to = date_to;
+      if (salesStatus) p.status = salesStatus;
+    }
+    return p;
+  }, [closerSection, closerSalesPage, date_from, date_to, salesStatus]);
+
   useEffect(() => {
     if (!isCloser) return;
-    const base = { date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE };
-    if (closerSection.startsWith('dispo:')) base.disposition = closerSection.slice(6);  // dynamic disposition tab
-    else if (salesStatus) base.status = salesStatus;
-    fetchSales(base);
-  }, [fetchSales, date_from, date_to, isCloser, closerSalesPage, salesStatus, closerSection]);
+    fetchSales(closerSalesParams());
+  }, [fetchSales, isCloser, closerSalesParams]);
   // Keep page within range when the date filter narrows the dataset.
   useEffect(() => { setTransfersPage(1); setCloserSalesPage(1); }, [date_from, date_to]);
 
@@ -503,7 +518,7 @@ const StaffShell = () => {
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) });
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
+      fetchSales(closerSalesParams());
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
       setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
@@ -521,7 +536,7 @@ const StaffShell = () => {
       await client.put(`sales/${saleId}`, { closer_disposition: 'sale', charge_at: null });
       try { await client.post(`sales/${saleId}/submit-review`); } catch { /* already in review */ }
       setSaleSuccess('Charged — sent to compliance as a sale.');
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(dispoFilter ? { disposition: dispoFilter } : {}) });
+      fetchSales(closerSalesParams());
       fetchStats();
       setTimeout(() => setSaleSuccess(''), 4000);
     } catch (err) {
@@ -543,8 +558,7 @@ const StaffShell = () => {
       if (resubmit) await client.post(`sales/${editSale.id}/submit-review`);
       setEditSale(null);
       setSaleSuccess(nowPostDate ? 'Post-dated sale updated.' : (resubmit ? 'Sale resubmitted to compliance!' : 'Sale updated!'));
-      const dispoFilter = closerSection.startsWith('dispo:') ? closerSection.slice(6) : null;
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(dispoFilter ? { disposition: dispoFilter } : (salesStatus ? { status: salesStatus } : {})) });
+      fetchSales(closerSalesParams());
       fetchStats();
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
@@ -559,7 +573,7 @@ const StaffShell = () => {
     setSubmitMsg('');
     try {
       await client.post(`sales/${saleId}/submit-review`);
-      fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) });
+      fetchSales(closerSalesParams());
       setSubmitMsg('');
     } catch (err) {
       setSubmitMsg(err.response?.data?.error || 'Failed to submit');
@@ -1400,7 +1414,7 @@ const StaffShell = () => {
                         )}
                         {hasPermission('delete_sale') && (
                           <button
-                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales({ date_from, date_to, page: closerSalesPage, limit: PAGE_SIZE, ...(salesStatus ? { status: salesStatus } : {}) })); } }}
+                            onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales(closerSalesParams())); } }}
                             className="w-full mt-1 py-1.5 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1 transition-all hover:bg-error-50"
                             style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
                             <Trash2 size={11} /> Delete Sale
