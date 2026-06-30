@@ -299,6 +299,24 @@ router.post('/revert/:id', asyncHandler(async (req, res) => {
     return res.json({ reverted: restoredBulk });
   }
 
+  // Bulk-disposition ops: delete the actions this run inserted (the batch token
+  // in their note identifies them; trigger 100 re-syncs latest_disposition) and
+  // restore each transfer's closer + status.
+  if (aff.dispo && aff.dispo.batch_note) {
+    const { data: del } = await supabaseAdmin.from('disposition_actions')
+      .delete().eq('note', aff.dispo.batch_note).select('id');
+    for (const t of (aff.dispo.transfers || [])) {
+      await supabaseAdmin.from('transfers').update({
+        assigned_closer_id: t.before?.assigned_closer_id ?? null,
+        assigned_to:        t.before?.assigned_closer_id ?? null,
+        status:             t.before?.status ?? null,
+      }).eq('id', t.id).then(() => {}, () => {});
+    }
+    await supabaseAdmin.from('data_cleanup_operations')
+      .update({ reverted_at: new Date().toISOString(), reverted_by: req.user.id }).eq('id', op.id);
+    return res.json({ reverted: (del || []).length });
+  }
+
   let restored = 0;
 
   // Revert JSONB: set the field back to the old value, or unset it when the
@@ -514,6 +532,129 @@ router.post('/fill-geo', asyncHandler(async (req, res) => {
     } catch { /* non-critical */ }
   }
   res.json({ summary: { filled, failed, scanned: (data || []).length, candidates: candidates.length, dry_run: dryRun }, results: results.slice(0, 200), operation_id: opId });
+}));
+
+// ── GET /dispo-names — valid disposition names (so the operator pastes exact) ─
+router.get('/dispo-names', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('disposition_configs')
+    .select('name, company_id').eq('is_active', true);
+  const names = [...new Set((data || []).map(d => (d.name || '').trim()).filter(Boolean))].sort();
+  res.json({ names });
+}));
+
+// ── POST /bulk-disposition — set a transfer's disposition + closer by id ──────
+// Body: { rows:[{id, disposition, closer}], dry_run }. transfers only.
+// STRICT (foolproof): the disposition must match an active disposition_config
+// (company-specific or global); the closer must match EXACTLY ONE real closer's
+// full name. Anything else is reported per-row, never guessed. Revertible.
+router.post('/bulk-disposition', asyncHandler(async (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const dryRun = !!req.body?.dry_run;
+  if (!rows.length) return res.status(400).json({ error: 'no rows provided' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'max 5000 rows per run' });
+
+  // 1) Load the target transfers.
+  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(Boolean))];
+  const existing = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabaseAdmin.from('transfers')
+      .select('id, company_id, assigned_closer_id, status').in('id', ids.slice(i, i + 200));
+    if (error) return res.status(500).json({ error: error.message });
+    (data || []).forEach(t => existing.set(t.id, t));
+  }
+
+  // 2) Disposition configs → cfgFor(company, name) (company wins, else global).
+  const { data: cfgRows } = await supabaseAdmin.from('disposition_configs')
+    .select('id, name, color, company_id').eq('is_active', true);
+  const cfgByKey = new Map();
+  (cfgRows || []).forEach(c => cfgByKey.set(`${c.company_id || ''}|${String(c.name).trim().toLowerCase()}`, c));
+  const cfgFor = (co, name) => {
+    const ln = String(name || '').trim().toLowerCase();
+    if (!ln) return null;
+    return cfgByKey.get(`${co || ''}|${ln}`) || cfgByKey.get(`|${ln}`) || null;
+  };
+
+  // 3) Closer name → user id — ONLY real closers (closer / closer_manager role),
+  //    exact full-name match, case-insensitive. Ambiguous or unknown = error.
+  const wantCloser = rows.some(r => String(r.closer || '').trim());
+  const nameToIds = new Map();
+  if (wantCloser) {
+    const { data: roleRows } = await supabaseAdmin
+      .from('user_company_roles').select('user_id, custom_roles(level)').eq('is_active', true);
+    const closerIds = [...new Set((roleRows || [])
+      .filter(r => ['closer', 'closer_manager'].includes(r.custom_roles?.level))
+      .map(r => r.user_id))];
+    if (closerIds.length) {
+      const { data: profs } = await supabaseAdmin.from('user_profiles')
+        .select('user_id, first_name, last_name').in('user_id', closerIds);
+      (profs || []).forEach(p => {
+        const full = `${p.first_name || ''} ${p.last_name || ''}`.trim().toLowerCase();
+        if (!full) return;
+        if (!nameToIds.has(full)) nameToIds.set(full, []);
+        nameToIds.get(full).push(p.user_id);
+      });
+    }
+  }
+  const resolveCloser = (name) => {
+    const ln = String(name || '').trim().toLowerCase();
+    if (!ln) return { ok: true, id: null };
+    const arr = nameToIds.get(ln);
+    if (!arr || !arr.length) return { ok: false, reason: 'closer not found among active closers' };
+    if (arr.length > 1) return { ok: false, reason: 'closer name matches more than one user' };
+    return { ok: true, id: arr[0] };
+  };
+
+  // 4) Validate + build the apply rows.
+  const batchToken = (globalThis.crypto?.randomUUID?.() || require('crypto').randomUUID());
+  const note = `Bulk disposition [${batchToken}]`;
+  const results = [], applyRows = [], beforeTransfers = [];
+  let applied = 0, notFound = 0, errored = 0;
+
+  for (const raw of rows) {
+    const id = String(raw.id || '').trim();
+    if (!id) { results.push({ id: '', status: 'error', message: 'missing id' }); errored++; continue; }
+    const tr = existing.get(id);
+    if (!tr) { results.push({ id, status: 'not_found' }); notFound++; continue; }
+    const cfg = cfgFor(tr.company_id, raw.disposition);
+    if (!cfg) { results.push({ id, status: 'error', message: `unknown disposition "${String(raw.disposition || '').trim()}"` }); errored++; continue; }
+    const cl = resolveCloser(raw.closer);
+    if (!cl.ok) { results.push({ id, status: 'error', message: `${cl.reason}: "${String(raw.closer || '').trim()}"` }); errored++; continue; }
+
+    const closerId = cl.id || tr.assigned_closer_id || null;
+    const status = (cl.id && (!tr.status || tr.status === 'pending')) ? 'assigned' : null;
+    results.push({ id, status: dryRun ? 'would_apply' : 'applied', disposition: cfg.name, closer: cl.id ? 'set' : 'unchanged' });
+    applied++;
+    if (dryRun) continue;
+
+    applyRows.push({
+      transfer_id: id, closer_id: cl.id || null, status,
+      disposition_config_id: cfg.id, disposition_name: cfg.name, color: cfg.color || '#6b7280', note,
+    });
+    if (cl.id) beforeTransfers.push({ id, before: { assigned_closer_id: tr.assigned_closer_id ?? null, status: tr.status ?? null } });
+  }
+
+  let opId = null;
+  if (!dryRun && applyRows.length) {
+    for (let i = 0; i < applyRows.length; i += 1000) {
+      const { error } = await supabaseAdmin.rpc('app_bulk_apply_disposition', { p_rows: applyRows.slice(i, i + 1000) });
+      if (error) {
+        const hint = (/function .* does not exist/i.test(error.message) || error.code === 'PGRST202')
+          ? ' — apply migration 144 first.' : '';
+        return res.status(500).json({ error: `Disposition apply failed: ${error.message}${hint}` });
+      }
+    }
+    try {
+      const { data: op } = await supabaseAdmin.from('data_cleanup_operations').insert({
+        field: '(bulk disposition: transfers)', field_type: 'bulk_disposition', sale_column: null, match_blank: false,
+        old_value: null, new_value: `${applied} disposition(s)`,
+        affected: { dispo: { batch_note: note, transfers: beforeTransfers } },
+        counts: { applied, not_found: notFound, errored, total: applied }, performed_by: req.user.id,
+      }).select('id').single();
+      opId = op?.id || null;
+    } catch { /* non-critical */ }
+  }
+
+  res.json({ summary: { applied, not_found: notFound, errored, dry_run: dryRun }, results, operation_id: opId });
 }));
 
 module.exports = router;

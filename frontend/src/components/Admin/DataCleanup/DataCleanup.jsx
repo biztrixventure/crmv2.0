@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X, ListChecks, MapPin, Hash } from 'lucide-react';
+import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X, ListChecks, MapPin, Hash, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../UI';
 import client from '../../../api/client';
@@ -186,6 +186,90 @@ const GeoFillPanel = ({ onDone }) => {
   );
 };
 
+// ── Set disposition on transfers by id ───────────────────────────────────────
+// Paste "transfer_id, disposition, closer name". The disposition must match a
+// real configured disposition; the closer must match exactly one real closer's
+// full name. Dry-run first; every mismatch is reported, never guessed.
+const DispositionPanel = ({ onDone }) => {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes]   = useState(null);
+  const [names, setNames] = useState([]);
+  useEffect(() => { client.get('data-cleanup/dispo-names').then(r => setNames(r.data.names || [])).catch(() => {}); }, []);
+
+  const parseRows = () => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const p = (line.includes('\t') ? line.split('\t') : line.split(',')).map(s => s.trim());
+    return { id: p[0], disposition: p[1] || '', closer: p.slice(2).join(' ').trim() };
+  });
+
+  const run = async (dryRun) => {
+    const rows = parseRows();
+    if (!rows.length) return toast.error('Paste at least one "id, disposition, closer" line.');
+    setBusy(true);
+    try {
+      const r = await client.post('data-cleanup/bulk-disposition', { rows, dry_run: dryRun });
+      setRes({ ...r.data, dry_run: dryRun });
+      if (!dryRun) { toast.success(`Applied ${r.data.summary.applied} disposition(s).`); onDone?.(); }
+    } catch (e) { toast.error(e.response?.data?.error || 'Disposition update failed'); }
+    finally { setBusy(false); }
+  };
+
+  const s = res?.summary;
+  const problems = (res?.results || []).filter(r => ['not_found', 'error'].includes(r.status));
+
+  return (
+    <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Set the real disposition (and closer) on transfers that came from manual entry or bulk upload and never got a dialer dispo.
+        One line per record: <code>transfer_id, disposition, closer name</code>. Comma or tab separated; closer is optional.
+      </p>
+
+      {names.length > 0 && (
+        <div className="rounded-lg p-2.5 text-[11px]" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <span className="font-bold" style={{ color: 'var(--color-text-secondary)' }}>Valid dispositions (must match exactly): </span>
+          <span style={{ color: 'var(--color-text)' }}>{names.join(' · ')}</span>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Data</label>
+        <textarea value={text} onChange={e => { setText(e.target.value); setRes(null); }} rows={6}
+          placeholder={`e2b1…-id, Sale, John Smith\n7c4a…-id, No Sale, Jane Doe`} className="input font-mono text-xs w-full resize-y" />
+        <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+          Closer name must exactly match a real closer's full name (first + last). {parseRows().length} line(s).
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="secondary" onClick={() => run(true)} disabled={busy} className="flex items-center gap-1.5">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Preview (dry-run)
+        </Button>
+        <Button variant="primary" onClick={() => run(false)} disabled={busy || !res || res.dry_run === false} className="flex items-center gap-1.5" title={!res ? 'Preview first' : ''}>
+          <Tag size={15} /> Apply dispositions
+        </Button>
+      </div>
+
+      {s && (
+        <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            {res.dry_run ? 'Preview' : 'Done'}: {s.applied} {res.dry_run ? 'would apply' : 'applied'} · {s.not_found} not found · {s.errored} error{s.errored === 1 ? '' : 's'}
+          </p>
+          {problems.length > 0 && (
+            <div className="max-h-44 overflow-y-auto space-y-1">
+              {problems.map((p, i) => (
+                <div key={i} className="text-[11px] font-mono flex items-center gap-2">
+                  <span style={{ color: STATUS_COLOR[p.status] }}>● {p.status}</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{p.id || '(no id)'}{p.message ? ` — ${p.message}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Superadmin batch find/replace. Search ONE or MANY form fields at once (great
 // for the same dirty value scattered across fields), see the distinct values per
 // field, then click one to replace it precisely. Replace is always single
@@ -349,6 +433,7 @@ const DataCleanup = () => {
   const TABS = [
     { key: 'replace', label: 'Find & Replace', icon: Search },
     { key: 'bulk',    label: 'Bulk update by ID', icon: ListChecks },
+    { key: 'dispo',   label: 'Set Disposition', icon: Tag },
     { key: 'geo',     label: 'Fill City/State', icon: MapPin },
   ];
 
@@ -376,8 +461,9 @@ const DataCleanup = () => {
         ))}
       </div>
 
-      {tab === 'bulk' && <BulkByIdPanel fields={fields} onDone={loadHistory} />}
-      {tab === 'geo'  && <GeoFillPanel onDone={loadHistory} />}
+      {tab === 'bulk'  && <BulkByIdPanel fields={fields} onDone={loadHistory} />}
+      {tab === 'dispo' && <DispositionPanel onDone={loadHistory} />}
+      {tab === 'geo'   && <GeoFillPanel onDone={loadHistory} />}
 
       {tab === 'replace' && (
       <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
