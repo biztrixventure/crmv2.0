@@ -240,7 +240,10 @@ router.get('/sales', asyncHandler(async (req, res) => {
   const saleSearchIds = search ? await searchRecordIds('sales', search) : null;
   const applySaleSearch = (q) => {
     if (!search) return q;
-    if (saleSearchIds) return q.in('id', saleSearchIds.length ? saleSearchIds : [NO_MATCH]);
+    // Use the RPC's id list only when it actually returned matches. Empty/null
+    // (RPC not applied, errored, or no any-field hit) → fall back to the legacy
+    // name/phone/reference search so the bar is never silently blank.
+    if (saleSearchIds && saleSearchIds.length) return q.in('id', saleSearchIds);
     const s = escapeOrValue(search);
     return q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`);
   };
@@ -385,7 +388,9 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   const transferSearchIds = search ? await searchRecordIds('transfers', search) : null;
   const applyTransferSearch = (q) => {
     if (!search) return q;
-    if (transferSearchIds) return q.in('id', transferSearchIds.length ? transferSearchIds : [NO_MATCH]);
+    // Only filter by the RPC ids when it actually matched; otherwise fall back to
+    // the legacy column search so the bar never goes silently blank.
+    if (transferSearchIds && transferSearchIds.length) return q.in('id', transferSearchIds);
     const s = escapeOrValue(search);
     return q.or(`normalized_phone.ilike.%${s}%,form_data->>customer_name.ilike.%${s}%,form_data->>customer_phone.ilike.%${s}%,form_data->>Phone.ilike.%${s}%,form_data->>FirstName.ilike.%${s}%,form_data->>LastName.ilike.%${s}%`);
   };
