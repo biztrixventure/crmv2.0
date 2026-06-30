@@ -17,6 +17,8 @@ import client from '../api/client';
 import DevCredit from '../components/DevCredit';
 import { CalendarClock, AlertTriangle } from 'lucide-react';
 import PaymentRemindersPanel from '../components/Payments/PaymentRemindersPanel';
+import DncLookupPanel from '../components/Shared/DncLookupPanel';
+import { useFeatureFlags } from '../contexts/FeatureFlagsContext';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
 import QueueTab            from '../components/Compliance/QueueTab';
@@ -46,6 +48,7 @@ const CODE_TABS = [
   { key: 'scripts',     label: 'Scripts & Rebuttals', icon: ScrollText },
   { key: 'faqs',        label: 'FAQs',               icon: HelpCircle },
   { key: 'questions',   label: 'Call Questions',     icon: ClipboardCheck },
+  { key: 'dnc',         label: 'DNC Check',          icon: Shield, flag: 'tool_blacklist_lookup' },
 ];
 
 const ComplianceShell = () => {
@@ -54,10 +57,15 @@ const ComplianceShell = () => {
   const navigate = useNavigate();
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
+  const { isEnabledStrict } = useFeatureFlags();
 
-  // Layer admin override onto the code-defined catalog.
+  // Layer admin override onto the code-defined catalog. Feature-gated tabs
+  // (e.g. DNC) drop out unless their flag is on for this company.
   const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
-  const TABS = useMemo(() => applyComplianceLayout(CODE_TABS), [applyComplianceLayout]);
+  const TABS = useMemo(
+    () => applyComplianceLayout(CODE_TABS.filter(t => !t.flag || isEnabledStrict(t.flag))),
+    [applyComplianceLayout, isEnabledStrict],
+  );
 
   // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition
   // the admin configured on the sale-disposition form field. Renaming a
@@ -228,6 +236,7 @@ const ComplianceShell = () => {
           />
         )}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
+        {activeTab === 'dnc' && <DncLookupPanel />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

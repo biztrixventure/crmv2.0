@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react';
 import { Shield, Check, KeyRound, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
+import DncLookupPanel from '../../Shared/DncLookupPanel';
+
+const VERSIONS = [
+  ['v1', 'v1 — status only'],
+  ['v2', 'v2 — status only'],
+  ['v3', 'v3 — status + carrier (recommended)'],
+  ['v5', 'v5 — extended'],
+];
 
 // Superadmin: configure the Blacklist Alliance DNC lookup. The API key is stored
 // server-side only — this screen never receives it back, just a masked tail.
@@ -16,7 +24,7 @@ export default function BlacklistSettings() {
   const save = async (extra = {}) => {
     setBusy(true);
     try {
-      const r = await client.put('blacklist/settings', { enabled: cfg.enabled, cache_days: cfg.cache_days, ...extra });
+      const r = await client.put('blacklist/settings', { enabled: cfg.enabled, cache_days: cfg.cache_days, version: cfg.version, ...extra });
       setCfg(r.data);
       if (extra.api_key || extra.clear_key) setKeyInput('');
       toast.success('Saved');
@@ -65,6 +73,18 @@ export default function BlacklistSettings() {
           </div>
         </div>
 
+        {/* API version */}
+        <div className="flex items-center justify-between gap-3 py-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <span>
+            <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>API version</span>
+            <span className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>v3 adds carrier + wireless detail. Use what your plan supports.</span>
+          </span>
+          <select value={cfg.version || 'v3'} onChange={e => setCfg({ ...cfg, version: e.target.value })}
+            className="input text-sm py-1" style={{ minWidth: 170 }}>
+            {VERSIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+
         {/* cache window */}
         <div className="flex items-center justify-between gap-3 py-2" style={{ borderTop: '1px solid var(--color-border)' }}>
           <span>
@@ -80,6 +100,13 @@ export default function BlacklistSettings() {
         <button onClick={() => save()} disabled={busy} className="text-sm font-bold px-4 py-2 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)' }}>
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Save settings
         </button>
+      </div>
+
+      {/* Live test — verify the key/version against a real number. */}
+      <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <h4 className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Test a number</h4>
+        <DncLookupPanel compact />
+        <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Good: 2223334444 · Blacklisted: 9999999999. Save the key first; a test counts as one API call.</p>
       </div>
     </div>
   );

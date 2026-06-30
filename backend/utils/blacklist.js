@@ -24,10 +24,13 @@ async function setApiKey(value, userId) {
     .upsert({ key: KEY_NAME, value: value || null, updated_at: new Date().toISOString(), updated_by: userId || null }, { onConflict: 'key' });
 }
 
+const VALID_VERSIONS = ['v1', 'v2', 'v3', 'v5'];
 async function settings() {
+  const v = String(await getConfig(null, 'blacklist.version', 'v3'));
   return {
     enabled:   !!(await getConfig(null, 'blacklist.enabled', false)),
     cacheDays: parseInt(await getConfig(null, 'blacklist.cache_days', 30), 10) || 30,
+    version:   VALID_VERSIONS.includes(v) ? v : 'v3',
   };
 }
 
@@ -63,7 +66,7 @@ async function lookup(phone, { force = false } = {}) {
   const apiKey = await getApiKey();
   if (!apiKey) return { ok: false, error: 'No API key configured' };
 
-  const url = `https://api.blacklistalliance.net/lookup?key=${encodeURIComponent(apiKey)}&ver=v3&resp=json&phone=${p}`;
+  const url = `https://api.blacklistalliance.net/lookup?key=${encodeURIComponent(apiKey)}&ver=${cfg.version}&resp=json&phone=${p}`;
   let data;
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -80,7 +83,9 @@ async function lookup(phone, { force = false } = {}) {
     phone: p,
     status: data.status || null,
     message: data.message || null,
-    codes: Array.isArray(data.code) ? data.code : (data.code ? String(data.code).split(',').map(s => s.trim()).filter(Boolean) : []),
+    // The API sends code:"none" for clean numbers — treat that as no codes.
+    codes: (Array.isArray(data.code) ? data.code : String(data.code || '').split(','))
+      .map(s => String(s).trim()).filter(c => c && c.toLowerCase() !== 'none'),
     wireless: data.wireless === 1 || data.wireless === '1' || data.wireless === true,
     carrier: data.carrier || null,
     results: data.results ?? null,

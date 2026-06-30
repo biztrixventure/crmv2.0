@@ -14,11 +14,14 @@ const bl = require('../utils/blacklist');
 
 const router = express.Router();
 
+const VALID_VERSIONS = ['v1', 'v2', 'v3', 'v5'];
 const maskedSettings = async () => {
   const key = await bl.getApiKey();
+  const v = String(await getConfig(null, 'blacklist.version', 'v3'));
   return {
     enabled:    !!(await getConfig(null, 'blacklist.enabled', false)),
     cache_days: parseInt(await getConfig(null, 'blacklist.cache_days', 30), 10) || 30,
+    version:    VALID_VERSIONS.includes(v) ? v : 'v3',
     has_key:    !!key,
     key_preview: key ? `••••${String(key).slice(-4)}` : null,
   };
@@ -49,8 +52,15 @@ router.put('/settings', asyncHandler(async (req, res) => {
   const b = req.body || {};
   if (b.enabled !== undefined)    await setConfig('global', 'blacklist.enabled', !!b.enabled, req.user.id);
   if (b.cache_days !== undefined) await setConfig('global', 'blacklist.cache_days', Math.max(1, Math.min(parseInt(b.cache_days, 10) || 30, 365)), req.user.id);
-  if (b.clear_key)                              await bl.setApiKey('', req.user.id);
-  else if (typeof b.api_key === 'string' && b.api_key.trim()) await bl.setApiKey(b.api_key.trim(), req.user.id);
+  if (b.version !== undefined && VALID_VERSIONS.includes(String(b.version))) await setConfig('global', 'blacklist.version', String(b.version), req.user.id);
+  if (b.clear_key) {
+    await bl.setApiKey('', req.user.id);
+  } else if (typeof b.api_key === 'string' && b.api_key.trim()) {
+    await bl.setApiKey(b.api_key.trim(), req.user.id);
+    // Saving a key activates the feature unless the same request explicitly
+    // disabled it — removes the "added the key but still off" foot-gun.
+    if (b.enabled === undefined) await setConfig('global', 'blacklist.enabled', true, req.user.id);
+  }
   res.json(await maskedSettings());
 }));
 
