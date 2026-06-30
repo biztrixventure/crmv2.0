@@ -24,6 +24,10 @@ const router = express.Router();
 const CITY_KEYS  = ['City', 'city', 'customer_city'];
 const STATE_KEYS = ['State', 'state', 'customer_state'];
 const ZIP_KEYS   = ['Zip', 'zip', 'ZipCode', 'zip_code', 'customer_zip', 'PostalCode', 'Postal'];
+// A malformed id (header row, stray text, typo) must NOT 500 the whole batch via
+// PostgREST "invalid input syntax for type uuid" — validate, report per-row.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s) => UUID_RE.test(String(s || '').trim());
 const firstZip   = (fd) => { for (const k of ZIP_KEYS) { const v = fd && fd[k]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
 const blankAll   = (fd, keys) => !keys.some(k => fd && fd[k] != null && String(fd[k]).trim() !== '');
 
@@ -365,7 +369,7 @@ router.post('/bulk-by-id', asyncHandler(async (req, res) => {
   if (!rows.length) return res.status(400).json({ error: 'no rows provided' });
   if (rows.length > 5000) return res.status(400).json({ error: 'max 5000 rows per run' });
 
-  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(Boolean))];
+  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(isUuid))];
   const saleCols = ', customer_phone, customer_phone_2, customer_email, car_make, car_model, car_vin, plan, client_name, reference_no, payment_due_note';
   const sel = 'id, form_data' + (table === 'sales' ? saleCols : '');
   const existing = new Map();
@@ -387,6 +391,7 @@ router.post('/bulk-by-id', asyncHandler(async (req, res) => {
     const id = String(raw.id || '').trim();
     const values = Array.isArray(raw.values) ? raw.values : [];
     if (!id) { results.push({ id: '', status: 'error', message: 'missing id' }); errored++; continue; }
+    if (!isUuid(id)) { results.push({ id, status: 'error', message: 'invalid id (not a uuid)' }); errored++; continue; }
     const rec = existing.get(id);
     if (!rec) { results.push({ id, status: 'not_found' }); notFound++; continue; }
 
@@ -558,8 +563,8 @@ router.post('/bulk-disposition', asyncHandler(async (req, res) => {
   if (!rows.length) return res.status(400).json({ error: 'no rows provided' });
   if (rows.length > 5000) return res.status(400).json({ error: 'max 5000 rows per run' });
 
-  // 1) Load the target transfers.
-  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(Boolean))];
+  // 1) Load the target transfers (only well-formed uuids reach the DB query).
+  const ids = [...new Set(rows.map(r => String(r.id || '').trim()).filter(isUuid))];
   const existing = new Map();
   for (let i = 0; i < ids.length; i += 200) {
     const { data, error } = await supabaseAdmin.from('transfers')
@@ -648,6 +653,7 @@ router.post('/bulk-disposition', asyncHandler(async (req, res) => {
   for (const raw of rows) {
     const id = String(raw.id || '').trim();
     if (!id) { results.push({ id: '', status: 'error', message: 'missing id' }); errored++; continue; }
+    if (!isUuid(id)) { results.push({ id, status: 'error', message: 'invalid id (not a uuid)' }); errored++; continue; }
     const tr = existing.get(id);
     if (!tr) { results.push({ id, status: 'not_found' }); notFound++; continue; }
     const dr = resolveDispo(tr.company_id, raw.disposition);
