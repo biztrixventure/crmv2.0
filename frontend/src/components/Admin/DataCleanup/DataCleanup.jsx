@@ -195,7 +195,8 @@ const DispositionPanel = ({ onDone }) => {
   const [busy, setBusy] = useState(false);
   const [res, setRes]   = useState(null);
   const [names, setNames] = useState([]);
-  useEffect(() => { client.get('data-cleanup/dispo-names').then(r => setNames(r.data.names || [])).catch(() => {}); }, []);
+  const [codes, setCodes] = useState({});
+  useEffect(() => { client.get('data-cleanup/dispo-names').then(r => { setNames(r.data.names || []); setCodes(r.data.codes || {}); }).catch(() => {}); }, []);
 
   const parseRows = () => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
     const p = (line.includes('\t') ? line.split('\t') : line.split(',')).map(s => s.trim());
@@ -221,13 +222,18 @@ const DispositionPanel = ({ onDone }) => {
     <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         Set the real disposition (and closer) on transfers that came from manual entry or bulk upload and never got a dialer dispo.
-        One line per record: <code>transfer_id, disposition, closer name</code>. Comma or tab separated; closer is optional.
+        One line per record: <code>transfer_id, disposition, closer name</code>. The disposition can be the <strong>full name</strong> or
+        the dialer <strong>short code</strong> (e.g. <code>CALLBK</code>) — both resolve to the real disposition + its colour. Comma or tab separated; closer is optional.
       </p>
 
       {names.length > 0 && (
-        <div className="rounded-lg p-2.5 text-[11px]" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <span className="font-bold" style={{ color: 'var(--color-text-secondary)' }}>Valid dispositions (must match exactly): </span>
-          <span style={{ color: 'var(--color-text)' }}>{names.join(' · ')}</span>
+        <div className="rounded-lg p-2.5 text-[11px] space-y-1" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div><span className="font-bold" style={{ color: 'var(--color-text-secondary)' }}>Valid dispositions: </span>
+            <span style={{ color: 'var(--color-text)' }}>{names.join(' · ')}</span></div>
+          {Object.keys(codes).length > 0 && (
+            <div><span className="font-bold" style={{ color: 'var(--color-text-secondary)' }}>Short codes: </span>
+              <span style={{ color: 'var(--color-text)' }}>{Object.entries(codes).map(([c, n]) => `${c} → ${n}`).join(' · ')}</span></div>
+          )}
         </div>
       )}
 

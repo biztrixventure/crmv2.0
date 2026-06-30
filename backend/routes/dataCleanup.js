@@ -534,12 +534,17 @@ router.post('/fill-geo', asyncHandler(async (req, res) => {
   res.json({ summary: { filled, failed, scanned: (data || []).length, candidates: candidates.length, dry_run: dryRun }, results: results.slice(0, 200), operation_id: opId });
 }));
 
-// ── GET /dispo-names — valid disposition names (so the operator pastes exact) ─
+// ── GET /dispo-names — valid disposition names + their dialer short codes ─────
+// So the operator can paste either the full name or the mapped short code.
 router.get('/dispo-names', asyncHandler(async (req, res) => {
-  const { data } = await supabaseAdmin.from('disposition_configs')
-    .select('name, company_id').eq('is_active', true);
-  const names = [...new Set((data || []).map(d => (d.name || '').trim()).filter(Boolean))].sort();
-  res.json({ names });
+  const [{ data: cfgs }, { data: maps }] = await Promise.all([
+    supabaseAdmin.from('disposition_configs').select('name').eq('is_active', true),
+    supabaseAdmin.from('vicidial_dispo_map').select('vici_code, disposition_name').not('disposition_name', 'is', null),
+  ]);
+  const names = [...new Set((cfgs || []).map(d => (d.name || '').trim()).filter(Boolean))].sort();
+  const codes = {};   // CODE -> full name (first mapping wins)
+  (maps || []).forEach(m => { const c = (m.vici_code || '').trim(); if (c && !codes[c]) codes[c] = m.disposition_name; });
+  res.json({ names, codes });
 }));
 
 // ── POST /bulk-disposition — set a transfer's disposition + closer by id ──────
@@ -563,15 +568,45 @@ router.post('/bulk-disposition', asyncHandler(async (req, res) => {
     (data || []).forEach(t => existing.set(t.id, t));
   }
 
-  // 2) Disposition configs → cfgFor(company, name) (company wins, else global).
+  // 2) Disposition resolution. The pasted value may be the FULL name ("Callback")
+  //    OR the dialer SHORT CODE ("CALLBK") that the superadmin mapped in the dispo
+  //    mapping. Both resolve to the SAME config → the CRM stores the canonical
+  //    full name + that config's real color (never a guessed colour). Unmapped =
+  //    error. All in-memory maps, so it stays instant.
   const { data: cfgRows } = await supabaseAdmin.from('disposition_configs')
     .select('id, name, color, company_id').eq('is_active', true);
   const cfgByKey = new Map();
   (cfgRows || []).forEach(c => cfgByKey.set(`${c.company_id || ''}|${String(c.name).trim().toLowerCase()}`, c));
-  const cfgFor = (co, name) => {
+  const cfgByName = (co, name) => {
     const ln = String(name || '').trim().toLowerCase();
     if (!ln) return null;
     return cfgByKey.get(`${co || ''}|${ln}`) || cfgByKey.get(`|${ln}`) || null;
+  };
+  // short code -> mapped full name (only rows that ARE mapped).
+  const { data: mapRows } = await supabaseAdmin.from('vicidial_dispo_map')
+    .select('company_id, vici_code, disposition_name').not('disposition_name', 'is', null);
+  const codeByKey = new Map();
+  (mapRows || []).forEach(m => codeByKey.set(`${m.company_id || ''}|${String(m.vici_code).trim().toLowerCase()}`, m.disposition_name));
+  const nameForCode = (co, code) => {
+    const lc = String(code || '').trim().toLowerCase();
+    if (!lc) return null;
+    return codeByKey.get(`${co || ''}|${lc}`) || codeByKey.get(`|${lc}`) || null;
+  };
+  const resolveDispo = (co, input) => {
+    const v = String(input || '').trim();
+    if (!v) return { ok: false, reason: 'no disposition given' };
+    // a) the value IS a configured full name
+    let cfg = cfgByName(co, v);
+    if (cfg) return { ok: true, cfg };
+    // b) the value is a short code → its mapped full name → that name's config
+    const mapped = nameForCode(co, v);
+    if (mapped) {
+      cfg = cfgByName(co, mapped);
+      if (cfg) return { ok: true, cfg };
+      // mapped name with no active config → show the full name, default colour
+      return { ok: true, cfg: { id: null, name: mapped, color: '#6b7280' } };
+    }
+    return { ok: false, reason: `disposition not mapped: "${v}"` };
   };
 
   // 3) Closer name → user id — ONLY real closers (closer / closer_manager role),
@@ -615,8 +650,9 @@ router.post('/bulk-disposition', asyncHandler(async (req, res) => {
     if (!id) { results.push({ id: '', status: 'error', message: 'missing id' }); errored++; continue; }
     const tr = existing.get(id);
     if (!tr) { results.push({ id, status: 'not_found' }); notFound++; continue; }
-    const cfg = cfgFor(tr.company_id, raw.disposition);
-    if (!cfg) { results.push({ id, status: 'error', message: `unknown disposition "${String(raw.disposition || '').trim()}"` }); errored++; continue; }
+    const dr = resolveDispo(tr.company_id, raw.disposition);
+    if (!dr.ok) { results.push({ id, status: 'error', message: dr.reason }); errored++; continue; }
+    const cfg = dr.cfg;
     const cl = resolveCloser(raw.closer);
     if (!cl.ok) { results.push({ id, status: 'error', message: `${cl.reason}: "${String(raw.closer || '').trim()}"` }); errored++; continue; }
 
