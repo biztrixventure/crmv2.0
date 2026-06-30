@@ -17,7 +17,7 @@ import client from '../api/client';
 import DevCredit from '../components/DevCredit';
 import { CalendarClock, AlertTriangle } from 'lucide-react';
 import PaymentRemindersPanel from '../components/Payments/PaymentRemindersPanel';
-import DncLookupPanel from '../components/Shared/DncLookupPanel';
+import ComplianceDncReport from '../components/Shared/ComplianceDncReport';
 import { useFeatureFlags } from '../contexts/FeatureFlagsContext';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
@@ -236,7 +236,7 @@ const ComplianceShell = () => {
           />
         )}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
-        {activeTab === 'dnc' && <DncLookupPanel />}
+        {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

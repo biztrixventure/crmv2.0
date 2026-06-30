@@ -6,6 +6,7 @@
 // The API key never leaves the server; settings only ever return a masked tail.
 // ============================================================================
 const express = require('express');
+const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
@@ -13,6 +14,10 @@ const { isFeatureEnabled } = require('../utils/featureGate');
 const bl = require('../utils/blacklist');
 
 const router = express.Router();
+
+// Bulk scan + report are a compliance/superadmin tool.
+const canScan = async (req) =>
+  req.user.role === 'superadmin' || req.user.role === 'compliance_manager' || await isSuperAdmin(req.user.id);
 
 const VALID_VERSIONS = ['v1', 'v2', 'v3', 'v5'];
 const maskedSettings = async () => {
@@ -62,6 +67,78 @@ router.put('/settings', asyncHandler(async (req, res) => {
     if (b.enabled === undefined) await setConfig('global', 'blacklist.enabled', true, req.user.id);
   }
   res.json(await maskedSettings());
+}));
+
+// ── GET /scan/prepare — cost preview before a bulk scan ──────────────────────
+router.get('/scan/prepare', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const cfg = await bl.settings();
+  if (!cfg.enabled) return res.status(400).json({ error: 'Enable the DNC lookup + set an API key first' });
+  const { data, error } = await supabaseAdmin.rpc('app_sales_dnc_prepare', { p_cache_days: cfg.cacheDays });
+  if (error) return res.status(500).json({ error: error.message });
+  const row = Array.isArray(data) ? data[0] : data;
+  res.json({ distinct_phones: Number(row?.distinct_phones || 0), to_check: Number(row?.to_check || 0), cache_days: cfg.cacheDays });
+}));
+
+// ── POST /scan/run — check the next batch of unchecked numbers ────────────────
+// The frontend calls this repeatedly (with a small gap) until remaining hits 0.
+router.post('/scan/run', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const cfg = await bl.settings();
+  if (!cfg.enabled) return res.status(400).json({ error: 'DNC lookup is turned off' });
+  const batch = Math.min(Math.max(parseInt(req.body?.batch, 10) || 25, 1), 50);
+
+  const { data: phones, error } = await supabaseAdmin.rpc('app_unchecked_sale_phones', { p_limit: batch, p_cache_days: cfg.cacheDays });
+  if (error) return res.status(500).json({ error: error.message });
+  const list = (phones || []).map(r => (typeof r === 'string' ? r : r.phone)).filter(Boolean);
+
+  let checked = 0, blacklisted = 0, good = 0, failed = 0;
+  // Gentle concurrency so we don't hammer the API; live calls only (these are
+  // unchecked by definition, so the cache won't short-circuit them).
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(5, list.length || 1) }, async () => {
+    while (i < list.length) {
+      const p = list[i++];
+      const r = await bl.lookup(p, { force: true });
+      if (!r.ok) { failed++; continue; }
+      checked++; r.blacklisted ? blacklisted++ : good++;
+    }
+  }));
+
+  // What's left after this batch?
+  const { data: prep } = await supabaseAdmin.rpc('app_sales_dnc_prepare', { p_cache_days: cfg.cacheDays });
+  const remaining = Number((Array.isArray(prep) ? prep[0] : prep)?.to_check || 0);
+  res.json({ batch_checked: checked, blacklisted, good, failed, remaining });
+}));
+
+// ── GET /report/summary — counts by verdict ──────────────────────────────────
+router.get('/report/summary', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const { data, error } = await supabaseAdmin.rpc('app_sales_dnc_summary');
+  if (error) return res.status(500).json({ error: error.message });
+  const out = { good: { sales: 0, phones: 0 }, blacklisted: { sales: 0, phones: 0 }, unchecked: { sales: 0, phones: 0 } };
+  (data || []).forEach(r => { if (out[r.dnc_status]) out[r.dnc_status] = { sales: Number(r.sales), phones: Number(r.phones) }; });
+  res.json(out);
+}));
+
+// ── GET /report/sales — sales joined with their DNC verdict (filter + page) ───
+router.get('/report/sales', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const status = ['good', 'blacklisted', 'unchecked'].includes(req.query.status) ? req.query.status : null;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 1000);
+  const offset = (page - 1) * limit;
+
+  let q = supabaseAdmin.from('v_sales_dnc')
+    .select('id, customer_name, customer_phone, reference_no, plan, client_name, status, sale_date, company_id, closer_id, dnc_status, dnc_message, dnc_codes', { count: 'exact' })
+    .order('sale_date', { ascending: false });
+  if (status) q = q.eq('dnc_status', status);
+  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  q = q.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ sales: data || [], total: count || 0, page, limit });
 }));
 
 module.exports = router;
