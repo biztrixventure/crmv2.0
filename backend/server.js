@@ -174,8 +174,13 @@ app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 
 
 // General API limiter — keyed by user ID extracted from the Bearer JWT payload
 // (no signature verification needed here; actual auth still runs on all routes).
-// This gives each authenticated user their own 1000-request/15min bucket instead
-// of sharing one IP-based bucket across all users behind a corporate NAT/proxy.
+// This gives each authenticated user their own per-user bucket instead of
+// sharing one IP-based bucket across all users behind a corporate NAT/proxy.
+// 1000/15min was too tight for an active session: app polling (notifications,
+// stats) + chat (list/message polls, presence, read receipts, conversation
+// switches) added up and 429'd real users mid-chat. 4000/15min (~4.4 req/s
+// sustained, per authenticated user) gives comfortable headroom while still
+// bounding abuse — auth is still required on every route.
 const userIdFromToken = (req) => {
   const auth = req.headers.authorization;
   if (auth && auth.startsWith('Bearer ')) {
@@ -198,7 +203,7 @@ app.use(['/api/vicidial/fronter-xfer', '/api/vicidial/closer-dispo', '/api/vicid
 
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000,
+  max: 4000,
   keyGenerator: userIdFromToken,
   skip: isVicidialIngest,
   message: { error: 'Too many requests' },

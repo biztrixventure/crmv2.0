@@ -100,6 +100,15 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
     channelRef.current?.send({ type: 'broadcast', event: 'read', payload: { user_id: meId, at: new Date().toISOString() } });
   }, [conversationId, meId]);
   const markReadRef = useRef(markRead); useEffect(() => { markReadRef.current = markRead; }, [markRead]);
+  // Debounced read-receipt: a burst of incoming messages collapses into ONE
+  // PATCH (+ broadcast) after a short quiet, instead of one request per message
+  // — that per-message PATCH was a big chunk of the chat request volume that
+  // tripped the rate limiter in busy conversations.
+  const markReadTimer = useRef(null);
+  const markReadSoon = useCallback(() => {
+    clearTimeout(markReadTimer.current);
+    markReadTimer.current = setTimeout(() => markReadRef.current(), 1200);
+  }, []);
 
   // Reset the live peer-read marker when switching conversations.
   useEffect(() => { setPeerReadAt(null); }, [conversationId]);
@@ -268,7 +277,7 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
               deleted: !!payload.new.deleted_at, edited: !!payload.new.edited_at, created_at: payload.new.created_at, reactions: [] };
             setMessages(prev => dedupe([...prev, msg]));
             dropTyping(msg.sender_id);
-            if (msg.sender_id !== meId) { playNotificationSound(); markReadRef.current(); }
+            if (msg.sender_id !== meId) { playNotificationSound(); markReadSoon(); }
           })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           (payload) => {
@@ -315,6 +324,7 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
     return () => {
       clearTimeout(retryRef.current);
       clearTimeout(pollRef.current);
+      clearTimeout(markReadTimer.current);
       clearInterval(typingTimer);
       abortRef.current?.abort();
       typingRef.current.clear();
