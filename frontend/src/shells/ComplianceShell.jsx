@@ -60,11 +60,13 @@ const ComplianceShell = () => {
   const { isEnabledStrict } = useFeatureFlags();
 
   // Layer admin override onto the code-defined catalog. Feature-gated tabs
-  // (e.g. DNC) drop out unless their flag is on for this company.
+  // (e.g. DNC) drop out unless their flag is on for this company — but superadmin
+  // always sees them (superadmin bypasses feature gating everywhere).
+  const isSuperadmin = user?.role === 'superadmin';
   const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
   const TABS = useMemo(
-    () => applyComplianceLayout(CODE_TABS.filter(t => !t.flag || isEnabledStrict(t.flag))),
-    [applyComplianceLayout, isEnabledStrict],
+    () => applyComplianceLayout(CODE_TABS.filter(t => !t.flag || isSuperadmin || isEnabledStrict(t.flag))),
+    [applyComplianceLayout, isEnabledStrict, isSuperadmin],
   );
 
   // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition
