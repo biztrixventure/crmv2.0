@@ -32,6 +32,7 @@ const TABS = [
   { id: 'broadcast',     label: 'Broadcast',      icon: Megaphone },
   { id: 'guests',        label: 'Guest Links',    icon: Link2 },
   { id: 'colors',        label: 'Font Colors',    icon: Palette },
+  { id: 'controls',      label: 'Message Controls', icon: Clock },
   { id: 'log',           label: 'Moderation Log', icon: ScrollText },
   { id: 'companies',     label: 'Rollout',        icon: Building2 },
   { id: 'portal',        label: 'Client Portal',  icon: Headphones },
@@ -535,6 +536,73 @@ const ACTION_LABEL = {
 };
 const ACTION_VARIANT = (a) => /delete|ban|remove|lock/.test(a) && !/unlock|unban/.test(a) ? 'error' : /unban|unlock|unmute/.test(a) ? 'success' : 'info';
 
+// ── Message Controls — edit/delete toggles + time windows (superadmin) ────────
+const ControlsTab = () => {
+  const [cfg, setCfg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    client.get('chat/settings')
+      .then(r => setCfg(r.data))
+      .catch(() => setCfg({ edit_enabled: true, delete_enabled: true, edit_window_min: 15, delete_everyone_window_min: 60 }));
+  }, []);
+  const save = async () => {
+    setBusy(true);
+    try { const r = await client.put('chat/settings', cfg); setCfg(r.data); setSaved(true); setTimeout(() => setSaved(false), 1600); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not save'); }
+    finally { setBusy(false); }
+  };
+  if (!cfg) return <div className="p-8 text-center text-text-secondary">Loading…</div>;
+
+  const Toggle = ({ label, hint, on, onChange }) => (
+    <label className="flex items-start justify-between gap-4 py-3 cursor-pointer" style={{ borderBottom: '1px solid var(--color-border)' }}>
+      <span>
+        <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{label}</span>
+        <span className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>{hint}</span>
+      </span>
+      <input type="checkbox" checked={!!on} onChange={e => onChange(e.target.checked)} className="mt-1 w-5 h-5 flex-shrink-0" />
+    </label>
+  );
+  const WindowRow = ({ label, hint, value, onChange, disabled }) => (
+    <div className="py-3" style={{ borderBottom: '1px solid var(--color-border)', opacity: disabled ? 0.5 : 1 }}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{label}</span>
+        <span className="flex items-center gap-2">
+          <input type="number" min={0} max={100000} value={value} disabled={disabled}
+            onChange={e => onChange(parseInt(e.target.value, 10) || 0)} className="input text-sm py-1 w-24 text-right" />
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>min</span>
+        </span>
+      </div>
+      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{hint} <strong>0 = no limit.</strong></p>
+    </div>
+  );
+
+  return (
+    <div className="max-w-xl mx-auto p-1">
+      <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <h3 className="text-lg font-bold mb-1 flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Clock size={18} /> Message edit &amp; delete controls</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+          Applies to everyone. Users can always “Delete for me” (hides only for them). “Edit” and “Delete for everyone” obey the toggles + time windows below.
+        </p>
+        <Toggle label="Allow editing messages" hint="Users can edit their own messages within the window."
+          on={cfg.edit_enabled} onChange={v => setCfg({ ...cfg, edit_enabled: v })} />
+        <WindowRow label="Edit window" hint="How long after sending a message it can still be edited."
+          value={cfg.edit_window_min} disabled={!cfg.edit_enabled} onChange={v => setCfg({ ...cfg, edit_window_min: v })} />
+        <Toggle label="Allow “Delete for everyone”" hint="Users can remove their own message for all participants within the window."
+          on={cfg.delete_enabled} onChange={v => setCfg({ ...cfg, delete_enabled: v })} />
+        <WindowRow label="Delete-for-everyone window" hint="How long after sending a message it can still be deleted for everyone."
+          value={cfg.delete_everyone_window_min} disabled={!cfg.delete_enabled} onChange={v => setCfg({ ...cfg, delete_everyone_window_min: v })} />
+        <div className="flex items-center gap-3 mt-4">
+          <Button variant="primary" onClick={save} disabled={busy} className="flex items-center gap-1.5">
+            {saved ? <><Check size={15} /> Saved</> : 'Save settings'}
+          </Button>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Takes effect the next time a user opens chat.</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ModerationTab = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -750,6 +818,7 @@ const ChatAdmin = () => {
       {tab === 'broadcast' && <BroadcastTab />}
       {tab === 'guests' && <GuestsTab />}
       {tab === 'colors' && <ColorsTab />}
+      {tab === 'controls' && <ControlsTab />}
       {tab === 'log' && <ModerationTab />}
       {tab === 'companies' && <CompaniesTab />}
       {tab === 'portal' && <ClientPortalTab />}

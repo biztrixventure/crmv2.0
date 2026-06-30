@@ -21,8 +21,12 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) 
   const [invites, setInvites] = useState([]);
   const [inviteBusy, setInviteBusy] = useState(null);
   const [settingsConv, setSettingsConv] = useState(null);   // group settings modal
+  const [msgSettings, setMsgSettings] = useState({ edit_enabled: true, delete_enabled: true, edit_window_min: 15, delete_everyone_window_min: 60 });
   const pollRef = useRef(null);
   const onlineIds = usePresence(open);
+
+  // Edit/delete controls (superadmin-configured) — fetched once per open.
+  useEffect(() => { if (open) client.get('chat/settings').then(r => setMsgSettings(r.data)).catch(() => {}); }, [open]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,7 +172,7 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) 
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread key={active.id} conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
+              ? <MessageThread key={active.id} conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} msgSettings={msgSettings} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>

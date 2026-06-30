@@ -210,9 +210,21 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, ...res.data.message } : m));
   }, []);
 
+  // Delete for everyone (soft delete) — shows "message deleted" to all.
   const deleteMessage = useCallback(async (id) => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, deleted: true, body: null } : m));
-    try { await client.delete(`chat/messages/${id}`); } catch { /* ignore */ }
+    try { await client.delete(`chat/messages/${id}`); }
+    catch (e) {
+      // window passed / disabled → restore + surface why.
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, deleted: false } : m));
+      throw e;
+    }
+  }, []);
+
+  // Delete for me — hide locally + persist so it stays hidden for this user only.
+  const hideMessage = useCallback(async (id) => {
+    setMessages(prev => prev.filter(m => m.id !== id));
+    try { await client.post(`chat/messages/${id}/hide`); } catch { /* best-effort */ }
   }, []);
 
   // ── reactions (optimistic + persisted + broadcast for instant peers) ───────
@@ -333,5 +345,5 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
     };
   }, [conversationId, meId, nameOf, fetchLatest, schedulePoll]);
 
-  return { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping };
+  return { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, hideMessage, addReaction, loadOlder, markRead, sendTyping };
 };

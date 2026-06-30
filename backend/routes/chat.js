@@ -19,10 +19,25 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { findOrCreateDM, ensureMembers, pushNewMessage, pushMentions, createInvites, getUserCards, searchDirectory } = require('../utils/chatService');
+const { getConfig, setConfig } = require('../utils/businessConfig');
+const { isSuperAdmin } = require('../models/helpers');
 
 const router = express.Router();
 
 const MAX_BODY = 4000;
+
+// ── message edit/delete controls (superadmin-configurable) ───────────────────
+async function chatMessageSettings() {
+  return {
+    edit_enabled:               !!(await getConfig(null, 'chat.edit_enabled', true)),
+    delete_enabled:             !!(await getConfig(null, 'chat.delete_enabled', true)),
+    edit_window_min:            parseInt(await getConfig(null, 'chat.edit_window_min', 15), 10) || 0,
+    delete_everyone_window_min: parseInt(await getConfig(null, 'chat.delete_everyone_window_min', 60), 10) || 0,
+  };
+}
+// minutes <= 0 → unlimited.
+const withinWindow = (createdAt, minutes) =>
+  !minutes || minutes <= 0 || (Date.now() - new Date(createdAt).getTime()) <= minutes * 60000;
 const MAX_HTML = 40000;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;   // 10MB
 const ATTACH_BUCKET = 'chat-attachments';
@@ -525,17 +540,21 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   // Tolerate messages.guest_id not being migrated yet (108): retry without it so
   // chat never breaks if the backend ships before the migration is applied.
   const baseCols = 'id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at';
-  const runMsgQuery = (withGuest) => {
+  // withExtras pulls guest_id + hidden_for and excludes anything this user has
+  // "deleted for me" (hidden_for contains their id). Tolerant: if either column
+  // isn't migrated yet (108 / 145) the fallback drops both so chat never breaks.
+  const runMsgQuery = (withExtras) => {
     let q = supabaseAdmin.from('messages')
-      .select(withGuest ? `${baseCols}, guest_id` : baseCols)
+      .select(withExtras ? `${baseCols}, guest_id, hidden_for` : baseCols)
       .eq('conversation_id', req.params.id)
       .order('created_at', { ascending: false })
       .limit(limit + 1);
+    if (withExtras) q = q.not('hidden_for', 'cs', `{${req.user.id}}`);
     if (req.query.before) q = q.lt('created_at', req.query.before);
     return q;
   };
   let { data, error } = await runMsgQuery(true);
-  if (error && /guest_id|column/i.test(error.message || '')) ({ data, error } = await runMsgQuery(false));
+  if (error && /guest_id|hidden_for|column/i.test(error.message || '')) ({ data, error } = await runMsgQuery(false));
   if (error) return res.status(500).json({ error: error.message });
 
   const hasMore = (data || []).length > limit;
@@ -753,10 +772,16 @@ router.patch('/messages/:id', [
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Message is empty or too long' });
 
   const { data: existing } = await supabaseAdmin
-    .from('messages').select('id, sender_id, deleted_at').eq('id', req.params.id).maybeSingle();
+    .from('messages').select('id, sender_id, deleted_at, created_at').eq('id', req.params.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Message not found' });
   if (existing.sender_id !== req.user.id) return res.status(403).json({ error: 'You can only edit your own messages' });
   if (existing.deleted_at) return res.status(400).json({ error: 'Cannot edit a deleted message' });
+
+  const s = await chatMessageSettings();
+  if (!s.edit_enabled) return res.status(403).json({ error: 'Editing messages is turned off' });
+  if (!withinWindow(existing.created_at, s.edit_window_min)) {
+    return res.status(403).json({ error: `The ${s.edit_window_min}-minute edit window has passed` });
+  }
 
   const { data, error } = await supabaseAdmin
     .from('messages')
@@ -766,12 +791,18 @@ router.patch('/messages/:id', [
   res.json({ message: { ...data, deleted: false, edited: true } });
 }));
 
-// ── DELETE /chat/messages/:id — soft-delete own message ───────────────────────
+// ── DELETE /chat/messages/:id — soft-delete own message FOR EVERYONE ───────────
 router.delete('/messages/:id', asyncHandler(async (req, res) => {
   const { data: existing } = await supabaseAdmin
-    .from('messages').select('id, sender_id').eq('id', req.params.id).maybeSingle();
+    .from('messages').select('id, sender_id, created_at').eq('id', req.params.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Message not found' });
   if (existing.sender_id !== req.user.id) return res.status(403).json({ error: 'You can only delete your own messages' });
+
+  const s = await chatMessageSettings();
+  if (!s.delete_enabled) return res.status(403).json({ error: 'Deleting for everyone is turned off' });
+  if (!withinWindow(existing.created_at, s.delete_everyone_window_min)) {
+    return res.status(403).json({ error: `The ${s.delete_everyone_window_min}-minute delete-for-everyone window has passed` });
+  }
 
   const { error } = await supabaseAdmin
     .from('messages')
@@ -779,6 +810,39 @@ router.delete('/messages/:id', asyncHandler(async (req, res) => {
     .eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: 'deleted' });
+}));
+
+// ── POST /chat/messages/:id/hide — "delete for me" (any member, any message) ───
+router.post('/messages/:id/hide', asyncHandler(async (req, res) => {
+  const uid = req.user.id;
+  const { data: existing } = await supabaseAdmin
+    .from('messages').select('id, conversation_id, hidden_for').eq('id', req.params.id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Message not found' });
+  if (!(await getMembership(existing.conversation_id, uid))) {
+    return res.status(403).json({ error: 'Not a member of this conversation' });
+  }
+  const hidden = Array.isArray(existing.hidden_for) ? existing.hidden_for : [];
+  if (!hidden.includes(uid)) {
+    const { error } = await supabaseAdmin.from('messages')
+      .update({ hidden_for: [...hidden, uid] }).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  res.json({ ok: true });
+}));
+
+// ── GET/PUT /chat/settings — edit/delete controls (read: any; write: super) ───
+router.get('/settings', asyncHandler(async (req, res) => {
+  res.json(await chatMessageSettings());
+}));
+router.put('/settings', asyncHandler(async (req, res) => {
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin only' });
+  const b = req.body || {};
+  const clampMin = (v) => Math.max(0, Math.min(parseInt(v, 10) || 0, 100000));
+  if (b.edit_enabled !== undefined)               await setConfig('global', 'chat.edit_enabled', !!b.edit_enabled, req.user.id);
+  if (b.delete_enabled !== undefined)             await setConfig('global', 'chat.delete_enabled', !!b.delete_enabled, req.user.id);
+  if (b.edit_window_min !== undefined)            await setConfig('global', 'chat.edit_window_min', clampMin(b.edit_window_min), req.user.id);
+  if (b.delete_everyone_window_min !== undefined) await setConfig('global', 'chat.delete_everyone_window_min', clampMin(b.delete_everyone_window_min), req.user.id);
+  res.json(await chatMessageSettings());
 }));
 
 module.exports = router;

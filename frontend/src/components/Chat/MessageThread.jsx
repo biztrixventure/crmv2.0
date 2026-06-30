@@ -1,5 +1,6 @@
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, CheckCheck, AlertCircle, SmilePlus, Megaphone, FileText, Download, Settings, Reply } from 'lucide-react';
+import { ArrowLeft, Lock, MoreVertical, Pencil, Trash2, Check, CheckCheck, AlertCircle, Megaphone, FileText, Download, Settings, Reply, EyeOff } from 'lucide-react';
+import { toast } from 'sonner';
 import { useChat } from '../../hooks/useChat';
 import { useLastSeen } from '../../hooks/useLastSeen';
 import { formatLastSeen } from '../../utils/lastSeen';
@@ -50,10 +51,15 @@ const Attachment = ({ a, mine }) => {
   );
 };
 
-const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact, onReply, onJumpTo }) => {
+const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onDelete, onHide, onReact, onReply, onJumpTo }) => {
   const [menu, setMenu] = useState(false);
-  const [picker, setPicker] = useState(false);
   const mentioned = !mine && Array.isArray(m.mentions) && m.mentions.includes(meId);
+  const isTemp = String(m.id).startsWith('temp-');
+  const ageMin = (Date.now() - new Date(m.created_at).getTime()) / 60000;
+  const within = (min) => !min || min <= 0 || ageMin <= min;   // 0/undefined = unlimited
+  const canEdit   = mine && !m.deleted && !isTemp && settings.edit_enabled   && within(settings.edit_window_min);
+  const canDelAll = mine && !m.deleted && !isTemp && settings.delete_enabled && within(settings.delete_everyone_window_min);
+  const canHide   = !m.deleted && !isTemp;   // "delete for me" — any member, any message
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
       <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -70,16 +76,26 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact,
           </p>
         )}
         <div className="relative flex items-end gap-1">
-          {/* hover actions — Reply for everyone, Edit/Delete for own messages */}
+          {/* ONE hover menu — react row + reply + edit/delete. (Replaces the
+              separate react launcher that overlapped the menu.) */}
           {!m.deleted && (
             <div className={`relative self-center ${mine ? 'order-first' : 'order-last'}`}>
-              <button onClick={() => setMenu(v => !v)} className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity" style={{ color: 'var(--color-text-tertiary)' }}><MoreVertical size={14} /></button>
+              <button onClick={() => setMenu(v => !v)} className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity" style={{ color: 'var(--color-text-tertiary)' }} title="Message actions"><MoreVertical size={14} /></button>
               {menu && (
-                <div className={`absolute bottom-7 ${mine ? 'right-0' : 'left-0'} z-20 rounded-xl py-1 w-28`} style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
-                  <button onClick={() => { setMenu(false); onReply(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Reply size={12} /> Reply</button>
-                  {mine && <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={12} /> Edit</button>}
-                  {mine && <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={12} /> Delete</button>}
-                </div>
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
+                  <div className={`absolute bottom-7 ${mine ? 'right-0' : 'left-0'} z-20 rounded-xl py-1.5 w-44`} style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                    {!isTemp && (
+                      <div className="flex items-center justify-around px-2 pb-1.5 mb-1" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        {QUICK.map(e => <button key={e} onClick={() => { setMenu(false); onReact(m.id, e); }} className="text-lg leading-none hover:scale-125 transition-transform">{e}</button>)}
+                      </div>
+                    )}
+                    <button onClick={() => { setMenu(false); onReply(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Reply size={13} /> Reply</button>
+                    {canEdit   && <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={13} /> Edit</button>}
+                    {canHide   && <button onClick={() => { setMenu(false); onHide(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><EyeOff size={13} /> Delete for me</button>}
+                    {canDelAll && <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={13} /> Delete for everyone</button>}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -131,18 +147,6 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact,
                     : null}
               </span>
             </div>
-
-            {/* react launcher */}
-            {!m.deleted && !String(m.id).startsWith('temp-') && (
-              <div className={`absolute ${mine ? 'left-0 -translate-x-full pl-0 pr-1' : 'right-0 translate-x-full pl-1'} top-1/2 -translate-y-1/2`}>
-                <button onClick={() => setPicker(p => !p)} className="opacity-0 group-hover:opacity-100 p-1 rounded-full transition-opacity" style={{ color: 'var(--color-text-tertiary)' }} title="React"><SmilePlus size={15} /></button>
-                {picker && (
-                  <div className="absolute z-20 flex gap-0.5 p-1 rounded-full" style={{ bottom: '120%', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
-                    {QUICK.map(e => <button key={e} onClick={() => { setPicker(false); onReact(m.id, e); }} className="text-base hover:scale-125 transition-transform px-0.5">{e}</button>)}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -166,7 +170,7 @@ const Bubble = memo(({ m, mine, meId, showName, read, onEdit, onDelete, onReact,
   );
 });
 
-const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, onOpenSettings }) => {
+const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, msgSettings = {}, onSent, onOpenSettings }) => {
   const nameMap = useMemo(() => {
     const m = {};
     (conversation.members || []).forEach(c => { m[c.id] = c.id === meId ? 'You' : c.name; });
@@ -177,8 +181,15 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
   // actual name in the typing indicator, not "You".
   const myName = useMemo(() => (conversation.members || []).find(c => c.id === meId)?.name || 'Someone', [conversation.members, meId]);
 
-  const { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, addReaction, loadOlder, markRead, sendTyping } =
+  const { messages, loading, loadingOlder, hasMore, typingNames, peerReadAt, sendMessage, editMessage, deleteMessage, hideMessage, addReaction, loadOlder, markRead, sendTyping } =
     useChat(conversation.id, { meId, resolveName, myName });
+
+  // Hard guarantee against cross-conversation bleed: only ever render messages
+  // that belong to THIS conversation, no matter what's transiently in state.
+  const visibleMessages = useMemo(
+    () => messages.filter(m => !m.conversation_id || m.conversation_id === conversation.id),
+    [messages, conversation.id],
+  );
 
   const scrollRef = useRef(null);
   const nearBottomRef = useRef(true);
@@ -211,9 +222,15 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
 
   const onEdit = useCallback(async (m) => {
     const next = window.prompt('Edit message', m.body);
-    if (next != null && next.trim() && next.trim() !== m.body) { try { await editMessage(m.id, next); } catch { /* ignore */ } }
+    if (next != null && next.trim() && next.trim() !== m.body) {
+      try { await editMessage(m.id, next); } catch (e) { toast.error(e?.response?.data?.error || 'Could not edit message'); }
+    }
   }, [editMessage]);
-  const onDelete = useCallback((m) => { if (window.confirm('Delete this message?')) deleteMessage(m.id); }, [deleteMessage]);
+  const onDelete = useCallback(async (m) => {
+    if (!window.confirm('Delete this message for everyone? This cannot be undone.')) return;
+    try { await deleteMessage(m.id); } catch (e) { toast.error(e?.response?.data?.error || 'Could not delete message'); }
+  }, [deleteMessage]);
+  const onHide = useCallback((m) => { hideMessage(m.id); }, [hideMessage]);
 
   // After a successful send, nudge the parent to refresh the conversation list so
   // a brand-new DM (hidden until it has a message) appears immediately.
@@ -304,15 +321,15 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
       {/* Messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-3 space-y-1" style={{ backgroundColor: 'var(--color-bg)' }}>
         {loadingOlder && <div className="flex justify-center py-2"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" /></div>}
-        {loading && !messages.length ? (
+        {loading && !visibleMessages.length ? (
           <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
-        ) : !messages.length ? (
+        ) : !visibleMessages.length ? (
           <div className="flex flex-col items-center justify-center h-full gap-2" style={{ color: 'var(--color-text-tertiary)' }}>
             <Avatar name={conversation.title} group={conversation.type !== 'dm'} size={56} />
             <p className="text-sm">{isBroadcast ? 'No announcement yet.' : 'Say hello 👋'}</p>
           </div>
-        ) : messages.map((m, i) => {
-          const prev = messages[i - 1];
+        ) : visibleMessages.map((m, i) => {
+          const prev = visibleMessages[i - 1];
           const showDay = !prev || !sameDay(prev.created_at, m.created_at);
           const showName = conversation.type !== 'dm' && (!prev || prev.sender_id !== m.sender_id);
           return (
@@ -322,9 +339,9 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, onSent, 
                   <span className="text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{dayLabel(m.created_at)}</span>
                 </div>
               )}
-              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName}
+              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName} settings={msgSettings}
                 read={m.sender_id === meId && !m.pending && !m.deleted && readThrough != null && new Date(m.created_at) <= readThrough}
-                onEdit={onEdit} onDelete={onDelete} onReact={addReaction} onReply={setReplyTo} onJumpTo={jumpTo} />
+                onEdit={onEdit} onDelete={onDelete} onHide={onHide} onReact={addReaction} onReply={setReplyTo} onJumpTo={jumpTo} />
             </div>
           );
         })}
