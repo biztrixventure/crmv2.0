@@ -37,9 +37,12 @@ INSERT INTO business_config (scope, key, value) VALUES
   ('global', 'blacklist.cache_days', '30'::jsonb)
 ON CONFLICT (scope, key) DO NOTHING;
 
-INSERT INTO feature_flags (key, label, description, is_enabled) VALUES
-  ('tool_blacklist_lookup', 'Blacklist / DNC Lookup',
-   'Closers + compliance can check a phone against the Blacklist Alliance DNC / litigation database.', false)
+-- feature_flags catalog uses (category, default_enabled, sort_order) — the
+-- original is_enabled column from migration 020 was superseded.
+INSERT INTO feature_flags (key, label, description, category, default_enabled, sort_order) VALUES
+  ('tool_blacklist_lookup', 'Tool · Blacklist / DNC',
+   'Closers + compliance can check a phone against the Blacklist Alliance DNC / litigation database.',
+   'admin_tools', false, 206)
 ON CONFLICT (key) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';
