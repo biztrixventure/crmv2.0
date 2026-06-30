@@ -26,7 +26,9 @@ BEGIN
   UPDATE transfers t SET
     assigned_closer_id = COALESCE(v.closer_id, t.assigned_closer_id),
     assigned_to        = COALESCE(v.closer_id, t.assigned_to),
-    status             = COALESCE(v.status, t.status),
+    -- transfers.status is the transfer_status ENUM — cast the text from the JSON
+    -- before COALESCE, or "types text and transfer_status cannot be matched".
+    status             = COALESCE(v.status::transfer_status, t.status),
     updated_at         = now()
   FROM jsonb_to_recordset(p_rows)
        AS v(transfer_id uuid, closer_id uuid, status text,
