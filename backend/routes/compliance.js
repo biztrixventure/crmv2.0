@@ -15,9 +15,14 @@ const NO_MATCH = '00000000-0000-0000-0000-000000000000';
 // (matches the full record id, every form_data cell, and the key typed
 // columns). Returns an array of ids, or null when the RPC is unavailable
 // (migration 141 not applied yet) so callers fall back to the legacy column
-// search. Cached per (table,term) for the request's lifetime is unnecessary —
-// each handler calls it once.
-async function searchRecordIds(table, term, limit = 500) {
+// search.
+//
+// CAP: the ids are sent back to PostgREST as `id=in.(…)` in the URL. A broad
+// term can match hundreds of records, and a few hundred uuids overflow the
+// request URL → the query 500s and the list renders blank (the same overflow the
+// fronter sales path avoids with an inner join). 150 keeps the URL well under
+// the limit while still surfacing plenty of matches; refine the term to narrow.
+async function searchRecordIds(table, term, limit = 150) {
   try {
     const { data, error } = await supabaseAdmin.rpc('app_record_search', { p_table: table, p_q: term, p_limit: limit });
     if (error) return null;
