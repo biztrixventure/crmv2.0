@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
 import ResellModal from '../Closer/ResellModal';
 import CustomerTimeline from './CustomerTimeline';
+import NumberRiskCheck from './NumberRiskCheck';
 import ReassignOwnership from './ReassignOwnership';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
@@ -154,7 +155,9 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const canFinancial = hasPermission('view_financial_data') && roFlag('view_financial_data');
   const FIELD = {
     name:    <Row key="name"    label="Name"  value={sale.customer_name} />,
-    phone:   <Row key="phone"   label="Phone" value={sale.customer_phone} />,
+    phone:   sale.customer_phone ? <Row key="phone" label="Phone" value={
+               <span className="inline-flex items-center gap-2 justify-end flex-wrap">{sale.customer_phone}<NumberRiskCheck phone={sale.customer_phone} /></span>
+             } /> : null,
     phone_2: sale.customer_phone_2 ? <Row key="phone_2" label="Phone 2" value={sale.customer_phone_2} /> : null,
     email:   sale.customer_email   ? <Row key="email"   label="Email"   value={sale.customer_email} /> : null,
     address: sale.customer_address ? <Row key="address" label="Address" value={sale.customer_address} /> : null,

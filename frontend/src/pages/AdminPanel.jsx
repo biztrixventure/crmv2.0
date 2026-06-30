@@ -29,6 +29,7 @@ import VicidialAdmin from "../components/Admin/Vicidial/VicidialAdmin";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
+import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
@@ -115,6 +116,7 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "chat",           label: "Chat Control"         }] : []),
     ...(isSAorRO                                       ? [{ id: "features",       label: "Features"             }] : []),
     ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
   ].filter(item => {
@@ -186,6 +188,7 @@ const AdminPanel = () => {
                   {activeTab === "chat"          && <ChatAdmin />}
                   {activeTab === "features"    && <FeatureFlagsManager />}
                   {activeTab === "business-rules" && <BusinessRulesHub />}
+                  {activeTab === "blacklist" && <BlacklistSettings />}
                   {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
                   <DevCredit />
                 </div>

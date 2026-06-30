@@ -8,6 +8,7 @@ import {
 import client from '../../../api/client';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
 import CopyableNumber from '../../UI/CopyableNumber';
+import NumberRiskCheck from '../../Shared/NumberRiskCheck';
 import { fmtSaleDate, fmtDateTimeET } from '../../../utils/timezone';
 
 // ── CSV export of a customer's full record (client-side, no backend) ─────────
@@ -362,7 +363,7 @@ export default function CustomerProfile() {
             </div>
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {identity.phone && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone} /></span>}
+            {identity.phone && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone} /><NumberRiskCheck phone={identity.phone} /></span>}
             {identity.phone_2 && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone_2} /></span>}
             {identity.email && <span className="flex items-center gap-1.5"><Mail size={13} />{identity.email}</span>}
             {identity.address && <Tip text={identity.address} className="cursor-help max-w-full"><span className="flex items-center gap-1.5 truncate"><MapPin size={13} />{identity.address}</span></Tip>}

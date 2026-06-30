@@ -60,6 +60,7 @@ const NAV_SECTIONS = [
     items: [
       { id: 'features',         label: 'Feature Flags',   icon: Zap       },
       { id: 'business-rules',   label: 'Business Rules',  icon: Settings2 },
+      { id: 'blacklist',        label: 'Blacklist / DNC', icon: Shield    },
       // SuperAdmin-only — managed at navItems level in AdminPanel, so the
       // filter step below hides it for everyone else automatically.
       { id: 'readonly-admins',  label: 'Readonly Admins', icon: Eye       },
