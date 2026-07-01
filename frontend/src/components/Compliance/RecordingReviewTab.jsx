@@ -239,8 +239,11 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
               <button onClick={() => { setManualMode(false); setManualCands(null); setChosen((data?.existing || []).map(c => c.recording_id)); }} className="text-xs font-semibold px-2 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Back</button>
             </div>
           )}
-          <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-            {manualMode ? 'Phone-search results — pick the actual sale call, then Confirm to save it to this sale:' : `Every recording on this lead — pick the actual sale call${hadExisting ? ' (currently confirmed pre-selected)' : ''}:`}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+              {manualMode ? 'Phone-search results — pick the actual sale call, then Confirm to save it to this sale:' : `Every recording on this lead — pick the actual sale call${hadExisting ? ' (currently confirmed pre-selected)' : ''}:`}
+            </div>
+            {!manualMode && <button onClick={startManual} className="text-[11px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 flex-shrink-0" style={{ border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}><Search size={12} /> Search all dialers by phone</button>}
           </div>
           <CandidateList candidates={candidates} loading={loading || manualBusy} chosen={chosen} setChosen={setChosen} emptyText={manualMode ? 'No recordings for that number/date on the dialer.' : undefined} />
         </>

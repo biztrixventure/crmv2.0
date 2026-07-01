@@ -382,9 +382,10 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     if (clients.length)      q = q.in('client_name', clients);
     return q;
   };
-  // Pseudonyms + recording length per sale (zero dialer calls). GATE ON → the
-  // compliance-confirmed length + review status; GATE OFF → the pre-change cached
-  // live-resolved length (portal_recording_meta), no review status.
+  // Pseudonyms + recording length per sale (zero dialer calls). HYBRID per sale:
+  // compliance-confirmed → linked-clip count + summed length + 'confirmed';
+  // unconfirmed → live-resolved length (portal_recording_meta), or 'pending_review'
+  // when the strict gate is ON.
   const respond = async (rows, extra) => {
     const ids = [...new Set((rows || []).map(r => r.closer_id).filter(Boolean))];
     const pseudo = await getPseudoNames(ids);
@@ -397,23 +398,24 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
       closer_name: pseudo.get(s.closer_id) || 'Agent',
     });
 
-    if (recordingReviewGateOn()) {
-      const confRows = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', (rows || []).map(r => r.id));
-      const confBy = new Map();   // sale_id -> { clips, duration }
-      for (const c of confRows) { const g = confBy.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); confBy.set(c.sale_id, g); }
-      const sales = (rows || []).map(s => {
-        const g = confBy.get(s.id);
-        return { ...base(s), duration: g ? (g.duration || null) : null, clips: g ? g.clips : 0, review_status: g ? 'confirmed' : 'pending_review' };
-      });
-      return res.json({ sales, ...extra });
-    }
-
-    // GATE OFF — unchanged pre-feature behavior
-    const metaRows = await fetchIn('portal_recording_meta', 'sale_id, found, duration', 'sale_id', (rows || []).map(r => r.id));
+    // HYBRID resolution (per sale — no global flag flip needed):
+    //   compliance-CONFIRMED sale → show its linked clips (count + summed length);
+    //   not yet confirmed         → live-resolve length (pre-feature behavior),
+    //   strict gate ON            → unconfirmed sales report 'pending_review' instead.
+    const list = rows || [];
+    const confRows = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', list.map(r => r.id));
+    const confBy = new Map();   // sale_id -> { clips, duration }
+    for (const c of confRows) { const g = confBy.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); confBy.set(c.sale_id, g); }
+    const strict = recordingReviewGateOn();
+    const unconfirmed = strict ? [] : list.filter(s => !confBy.has(s.id)).map(s => s.id);
+    const metaRows = unconfirmed.length ? await fetchIn('portal_recording_meta', 'sale_id, found, duration', 'sale_id', unconfirmed) : [];
     const metaBy = new Map(metaRows.map(m => [m.sale_id, m]));
-    const sales = (rows || []).map(s => {
+    const sales = list.map(s => {
+      const g = confBy.get(s.id);
+      if (g) return { ...base(s), duration: g.duration || null, clips: g.clips, review_status: 'confirmed' };
+      if (strict) return { ...base(s), duration: null, clips: 0, review_status: 'pending_review' };
       const m = metaBy.get(s.id);
-      return { ...base(s), duration: (m && m.found) ? m.duration : null, meta_known: !!m };
+      return { ...base(s), duration: (m && m.found) ? m.duration : null, clips: 0, meta_known: !!m };
     });
     res.json({ sales, ...extra });
   };
@@ -455,41 +457,42 @@ async function resolveRecordingMeta(sale) {
 const META_NEG_TTL = 12 * 60 * 60 * 1000;   // re-check a "not found" after 12h (positives cached forever)
 const metaFresh = (row) => row && (row.found || (Date.now() - new Date(row.resolved_at).getTime() < META_NEG_TTL));
 
-// Batch: recording length (+ review status when the gate is ON) per sale.
-//   GATE ON  → straight from compliance confirmations (no dialer, no heuristic).
-//   GATE OFF → pre-change behavior: cached live-resolve, bounded, with `pending`.
+// Batch: recording length + review status per sale (HYBRID).
+//   confirmed   → straight from compliance's linked clips (no dialer, no heuristic).
+//   unconfirmed → cached live-resolve, bounded, with `pending` (strict gate ON →
+//                 'pending_review' instead of resolving).
 router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const closers = req.portalClient.closer_ids || [];
   const clients = req.portalClient.client_names || [];
   const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).filter(Boolean))].slice(0, 300);
   if (!ids.length) return res.json({ meta: {}, pending: [] });
 
-  if (recordingReviewGateOn()) {
-    const srows = await fetchIn('sales', 'id, closer_id, client_name', 'id', ids);
-    const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
-    const sales = (srows || []).filter(inScope);
-    if (!sales.length) return res.json({ meta: {}, pending: [] });
-    const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
-    const bySale = new Map();
-    for (const c of confs) { const g = bySale.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); bySale.set(c.sale_id, g); }
-    const meta = {};
-    for (const s of sales) {
-      const g = bySale.get(s.id);
-      meta[s.id] = g ? { available: true, duration: g.duration || null, clips: g.clips, status: 'confirmed' } : { available: false, status: 'pending_review' };
-    }
-    return res.json({ meta, pending: [] });
-  }
-
-  // GATE OFF — unchanged pre-feature behavior (bounded live-resolve + cache)
+  // HYBRID: confirmed sales come straight from compliance's linked clips; only
+  // the UNCONFIRMED ones fall through to the bounded live-resolve (skipped when
+  // the strict gate is ON — those report 'pending_review').
   const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id', 'id', ids);
   const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
   const sales = (srows || []).filter(inScope);
   if (!sales.length) return res.json({ meta: {}, pending: [] });
-  const cached = await fetchIn('portal_recording_meta', '*', 'sale_id', sales.map(s => s.id));
-  const cacheBy = new Map(cached.map(r => [r.sale_id, r]));
+  const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
+  const bySale = new Map();
+  for (const c of confs) { const g = bySale.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); bySale.set(c.sale_id, g); }
+  const strict = recordingReviewGateOn();
   const meta = {};
+  const needLive = [];
+  for (const s of sales) {
+    const g = bySale.get(s.id);
+    if (g) meta[s.id] = { available: true, duration: g.duration || null, clips: g.clips, status: 'confirmed' };
+    else if (strict) meta[s.id] = { available: false, status: 'pending_review' };
+    else needLive.push(s);
+  }
+  if (!needLive.length) return res.json({ meta, pending: [] });
+
+  // unconfirmed → bounded live-resolve + cache (pre-feature behavior)
+  const cached = await fetchIn('portal_recording_meta', '*', 'sale_id', needLive.map(s => s.id));
+  const cacheBy = new Map(cached.map(r => [r.sale_id, r]));
   const todo = [];
-  for (const s of sales) { const row = cacheBy.get(s.id); if (metaFresh(row)) meta[s.id] = { available: row.found, duration: row.duration }; else todo.push(s); }
+  for (const s of needLive) { const row = cacheBy.get(s.id); if (metaFresh(row)) meta[s.id] = { available: row.found, duration: row.duration }; else todo.push(s); }
   const CAP = 24;
   const pending = todo.slice(CAP).map(s => s.id);
   await mapLimit(todo.slice(0, CAP), 5, async (s) => {
@@ -521,16 +524,11 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     return res.status(404).json({ error: 'Not available' });
   }
 
-  // ── GATE ON: confirmed reference ONLY — no live auto-resolve ──
-  if (recordingReviewGateOn()) {
-    const { data: confs } = await supabaseAdmin
-      .from('sale_recording_confirmations')
-      .select('*').eq('sale_id', sale.id).order('clip_order', { ascending: true });
-    // unconfirmed → pending review (409), not 404, so the portal shows a distinct
-    // "being verified" state.
-    if (!confs || !confs.length) {
-      return res.status(409).json({ status: 'pending_review', error: 'Recording is being verified' });
-    }
+  // ── HYBRID: play compliance's CONFIRMED clip(s) first (regardless of gate) ──
+  const { data: confs } = await supabaseAdmin
+    .from('sale_recording_confirmations')
+    .select('*').eq('sale_id', sale.id).order('clip_order', { ascending: true });
+  if (confs && confs.length) {
     // pick the requested clip (?recording_id= or ?clip=N, 1-based), else the first
     let clip = confs[0];
     if (req.query.recording_id) clip = confs.find(c => c.recording_id === req.query.recording_id) || clip;
@@ -548,8 +546,11 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     if (!url) return res.status(404).json({ error: 'Recording not available' });
     return pipeAudio(req, res, url, () => locationForRecording(clip));
   }
+  // No confirmation for this sale: strict gate → "being verified" (409); otherwise
+  // fall through to the live auto-resolve so nothing is hidden.
+  if (recordingReviewGateOn()) return res.status(409).json({ status: 'pending_review', error: 'Recording is being verified' });
 
-  // ── GATE OFF: unchanged pre-feature behavior — live auto-resolve ──
+  // ── unconfirmed + gate OFF: pre-feature behavior — live auto-resolve ──
   const [{ data: prof }, { data: tr }] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
     sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -590,7 +591,8 @@ router.get('/sales/:id/clips', authMiddleware, requirePortalClient, asyncHandler
   const okCloser = !closers.length || closers.includes(sale?.closer_id);
   const okClient = !clients.length || clients.includes(sale?.client_name);
   if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) return res.status(404).json({ error: 'Not available' });
-  if (!recordingReviewGateOn()) return res.json({ clips: [] });
+  // Hybrid: return the compliance-confirmed clips whenever they exist (a linked
+  // sale gets its multi-clip dropdown even while the strict gate is OFF).
   const { data: confs } = await supabaseAdmin
     .from('sale_recording_confirmations').select('clip_order, duration, recording_id')
     .eq('sale_id', sale.id).order('clip_order', { ascending: true });
