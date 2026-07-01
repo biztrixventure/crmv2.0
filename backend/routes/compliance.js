@@ -1,8 +1,9 @@
 const express = require('express');
+const axios = require('axios');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
-const { listCandidatesForSale, listCandidatesByPhone } = require('../utils/dialerBoxes');
+const { listCandidatesForSale, listCandidatesByPhone, locationForRecording } = require('../utils/dialerBoxes');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
@@ -171,6 +172,37 @@ router.delete('/recordings/confirm/:saleId', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', req.params.saleId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+}));
+
+// STREAM a candidate recording for the reviewer to listen (source hidden,
+// nothing stored). Resolve by box_id+lead_id+recording_id (deterministic); a
+// passed location is used as a fast path and re-derived if stale.
+router.get('/recordings/stream', asyncHandler(async (req, res) => {
+  const ref = { box_id: req.query.box_id, lead_id: req.query.lead_id, recording_id: req.query.recording_id };
+  const reresolve = () => locationForRecording(ref);
+  let url = req.query.location && /^https?:\/\//.test(req.query.location) ? req.query.location : await reresolve();
+  if (!url) return res.status(404).json({ error: 'Recording not found' });
+  const pipe = async (u, retry) => {
+    try {
+      const upstream = await axios.get(u, {
+        responseType: 'stream', timeout: 30000,
+        headers: req.headers.range ? { Range: req.headers.range } : {},
+        validateStatus: s => s >= 200 && s < 400,
+      });
+      res.status(upstream.status === 206 ? 206 : 200);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'private, no-store');
+      if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+      if (upstream.headers['content-range'])  res.setHeader('Content-Range', upstream.headers['content-range']);
+      upstream.data.pipe(res);
+      upstream.data.on('error', () => { try { res.end(); } catch { /* noop */ } });
+    } catch (e) {
+      if (!retry && !res.headersSent) { const fresh = await reresolve().catch(() => null); if (fresh && fresh !== u) return pipe(fresh, true); }
+      if (!res.headersSent) res.status(502).json({ error: 'Could not load audio' });
+    }
+  };
+  return pipe(url, false);
 }));
 
 // REVIEW QUEUE — eligible (coded+mapped) sales with no confirmation yet

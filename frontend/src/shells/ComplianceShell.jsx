@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -34,6 +34,7 @@ import ComplianceInfoModal from '../components/Compliance/ComplianceInfoModal';
 import ScriptManager      from '../components/Admin/ScriptManager/ScriptManager';
 import FAQManager         from '../components/Admin/FAQManager/FAQManager';
 import CallQuestionsManager from '../components/Compliance/CallQuestionsManager';
+import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -41,6 +42,7 @@ const CODE_TABS = [
   { key: 'queue',       label: 'Review Queue',       icon: Clock },
   { key: 'payments',    label: 'Payments at Risk',   icon: AlertTriangle },
   { key: 'sales',       label: 'All Sales',          icon: FileText },
+  { key: 'rec_review',  label: 'Recording Review',   icon: Headphones },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
   { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
@@ -239,6 +241,7 @@ const ComplianceShell = () => {
             isPostDate={isPostDateDispo(activeTab.slice(6))}
           />
         )}
+        {activeTab === 'rec_review' && <RecordingReviewTab companyList={companyList} />}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'card_validator' && <CardValidator />}
