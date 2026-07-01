@@ -1,0 +1,214 @@
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Boxes, Loader2, RefreshCw, X, Send, Trash2, GitBranch, Inbox, Upload, Globe,
+  CheckCircle2, Circle, ChevronRight, ArrowDownRight,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import UserPicker from './UserPicker';
+
+const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
+const fmt = (d) => { try { return d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return d || ''; } };
+
+// Batch distribution inbox — receive, re-batch (sub-batch = copy downstream),
+// view lineage, and cascade-delete. Reads /distribution-batches.
+export default function BatchInbox() {
+  const { user } = useAuth();
+  const isSuper = user?.role === 'superadmin';
+  const canSend = SENDER_ROLES.has(user?.role);
+  const [box, setBox] = useState('received');   // received | sent | all(superadmin)
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState(null);   // batch being viewed
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = box === 'all' ? { scope: 'all' } : { box };
+      const r = await client.get('distribution-batches/received', { params });
+      setRows(r.data.batches || []);
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not load batches'); setRows([]); }
+    finally { setLoading(false); }
+  }, [box]);
+  useEffect(() => { load(); }, [load]);
+
+  const tabs = [['received', 'Received', Inbox], ['sent', 'Sent', Upload], ...(isSuper ? [['all', 'All', Globe]] : [])];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Boxes size={18} style={{ color: 'var(--color-primary-600)' }} />
+        <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Batch Distribution</h2>
+        <div className="ml-2 flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          {tabs.map(([k, label, Icon]) => (
+            <button key={k} onClick={() => setBox(k)} className="text-xs font-semibold px-3 py-1.5 flex items-center gap-1"
+              style={{ background: box === k ? 'var(--gradient-sidebar)' : 'transparent', color: box === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} title="Refresh">
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} />
+        </button>
+      </div>
+
+      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
+              {['Batch', 'From', 'To', 'Numbers', 'Sent', ''].map((h, i) => <th key={i} className="text-left font-semibold px-3 py-2 text-xs">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? <tr><td colSpan={6} className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></td></tr>
+              : rows.length === 0 ? <tr><td colSpan={6} className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}><Boxes size={24} className="inline mb-1" /><div>No batches{box === 'received' ? ' received' : box === 'sent' ? ' sent' : ''}.</div></td></tr>
+                : rows.map(b => (
+                  <tr key={b.id} className="border-t hover:bg-black/[0.02] cursor-pointer" style={{ borderColor: 'var(--color-border)' }} onClick={() => setActive(b)}>
+                    <td className="px-3 py-2 font-medium" style={{ color: 'var(--color-text)' }}>
+                      {b.source === 'data_analyzer' && <span className="text-[9px] font-bold mr-1 px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>ORIGINAL</span>}
+                      {b.name}
+                    </td>
+                    <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{b.created_by_name || '—'}</td>
+                    <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{b.sent_to_name || '—'}</td>
+                    <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text)' }}>{b.item_count}</td>
+                    <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{fmt(b.sent_at)}</td>
+                    <td className="px-3 py-2 text-right"><ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} /></td>
+                  </tr>
+                ))}
+          </tbody>
+        </table>
+      </div>
+
+      {active && <BatchDetail batch={active} me={user} canSend={canSend} isSuper={isSuper} onClose={() => setActive(null)} onChanged={() => { setActive(null); load(); }} />}
+    </div>
+  );
+}
+
+// ── one batch: items + sub-batch + lineage + delete ───────────────────────────
+function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState(new Set());
+  const [subOpen, setSubOpen] = useState(false);
+  const [recipient, setRecipient] = useState(null);
+  const [subName, setSubName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [lineage, setLineage] = useState(null);
+  const canDelete = isSuper || batch.created_by === me?.id;
+
+  useEffect(() => {
+    client.get(`distribution-batches/${batch.id}/items`).then(r => setItems(r.data.items || [])).catch(() => {}).finally(() => setLoading(false));
+  }, [batch.id]);
+
+  const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allSel = items.length > 0 && sel.size === items.length;
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(items.map(i => i.id)));
+
+  const createSub = async () => {
+    if (!recipient) return toast.error('Pick a recipient');
+    setSaving(true);
+    try {
+      await client.post(`distribution-batches/${batch.id}/sub-batch`, {
+        recipient_id: recipient.id, name: subName.trim() || undefined,
+        item_ids: sel.size ? [...sel] : undefined,   // undefined = all items
+      });
+      toast.success(`Sub-batch sent to ${recipient.name} (${sel.size || items.length} numbers)`);
+      onChanged();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not create sub-batch'); }
+    finally { setSaving(false); }
+  };
+
+  const del = async () => {
+    if (!window.confirm('Delete this batch AND every sub-batch it was re-sent to, everywhere downstream? This cannot be undone.')) return;
+    setSaving(true);
+    try {
+      const r = await client.delete(`distribution-batches/${batch.id}`);
+      toast.success(`Deleted ${r.data.deleted_batches} batch(es) across the chain`);
+      onChanged();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not delete'); setSaving(false); }
+  };
+
+  const openLineage = async () => {
+    try { const r = await client.get(`distribution-batches/${batch.id}/lineage`); setLineage(r.data); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not load lineage'); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div className="min-w-0 flex-1">
+            <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{batch.name}</div>
+            <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{batch.item_count} numbers · from {batch.created_by_name || '—'} · {fmt(batch.sent_at)}</div>
+          </div>
+          <button onClick={openLineage} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><GitBranch size={13} /> Lineage</button>
+          <button onClick={onClose} style={{ color: 'var(--color-text-secondary)' }}><X size={18} /></button>
+        </div>
+
+        {lineage ? (
+          <Lineage data={lineage} onBack={() => setLineage(null)} />
+        ) : (
+          <>
+            <div className="px-4 py-2 flex items-center gap-2 text-xs" style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <button onClick={toggleAll} className="flex items-center gap-1">{allSel ? <CheckCircle2 size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={15} />}<span>{sel.size ? `${sel.size} selected` : 'Select all'}</span></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {loading ? <div className="text-center py-8"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+                : items.map(i => {
+                  const on = sel.has(i.id);
+                  return (
+                    <button key={i.id} onClick={() => toggle(i.id)} className="w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
+                      style={{ background: on ? 'var(--color-surface-hover)' : 'transparent' }}>
+                      {on ? <CheckCircle2 size={16} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={16} style={{ color: 'var(--color-text-tertiary)' }} />}
+                      <span className="tabular-nums text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{i.phone_number}</span>
+                      {i.customer_name && <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{i.customer_name}</span>}
+                      <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{i.status}</span>
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="p-4 space-y-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {subOpen && canSend && (
+                <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Create sub-batch — copies {sel.size ? `${sel.size} selected` : `all ${items.length}`} numbers to a new recipient (this batch keeps its copy).</div>
+                  <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-batch name (optional)" className="w-full text-sm rounded-lg px-3 py-2 mb-2" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+                  <UserPicker value={recipient} onChange={setRecipient} />
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button onClick={() => setSubOpen(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
+                    <button onClick={createSub} disabled={saving || !recipient} className="text-sm font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send</button>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                {canDelete && <button onClick={del} disabled={saving} className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1" style={{ color: 'var(--color-error-600)' }}><Trash2 size={13} /> Delete (cascades downstream)</button>}
+                {canSend && !subOpen && <button onClick={() => setSubOpen(true)} className="ml-auto text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Send size={15} /> Create sub-batch</button>}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Lineage({ data, onBack }) {
+  const Row = ({ b }) => (
+    <div className="flex items-center gap-2 py-1.5" style={{ paddingLeft: (b.depth || 0) * 16 }}>
+      {b.depth > 0 && <ArrowDownRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
+      <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: b.source === 'data_analyzer' ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{b.source === 'data_analyzer' ? 'ORIGINAL' : 'SUB'}</span>
+      <span className="text-sm font-medium" style={{ color: b.status === 'deleted' ? 'var(--color-text-tertiary)' : 'var(--color-text)', textDecoration: b.status === 'deleted' ? 'line-through' : 'none' }}>{b.name}</span>
+      <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{b.created_by_name} → {b.sent_to_name}</span>
+    </div>
+  );
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <button onClick={onBack} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to items</button>
+      <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Ancestors (origin → here)</div>
+      {(data.ancestors || []).slice().reverse().map(b => <Row key={b.id} b={{ ...b, depth: 0 }} />)}
+      <div className="text-[10px] font-bold uppercase tracking-wide mt-4 mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Descendants (everywhere re-sent)</div>
+      {(data.descendants || []).map(b => <Row key={b.id} b={b} />)}
+    </div>
+  );
+}

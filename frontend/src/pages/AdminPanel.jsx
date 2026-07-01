@@ -35,6 +35,7 @@ import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PaymentRemindersPanel from "../components/Payments/PaymentRemindersPanel";
 import ActivityPanel from "../components/Admin/ActivityPanel";
+import BatchInbox from "../components/Distribution/BatchInbox";
 import client from "../api/client";
 
 // ============================================================================
@@ -103,6 +104,9 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
     ...(isSAorRO                                       ? [{ id: "numbers",        label: "Numbers Intelligence" }] : []),
     ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
+    // Batch distribution inbox — superadmin manages their own sent batches
+    // (created_by=me) + an "All" view (BatchInbox's built-in superadmin scoping).
+    ...(user?.role === 'superadmin'                    ? [{ id: "batches",        label: "Batches"              }] : []),
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
     ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "vicidial",       label: "VICIdial"             }] : []),
@@ -174,6 +178,7 @@ const AdminPanel = () => {
                   {activeTab === "customer-profiles" && <CustomerProfile />}
                   {activeTab === "numbers"     && <NumbersIntelligence />}
                   {activeTab === "data-analyzer" && <DataAnalyzer />}
+                  {activeTab === "batches" && <BatchInbox />}
                   {activeTab === "data-cleanup" && <DataCleanup />}
                   {activeTab === "vicidial" && <VicidialAdmin />}
                   {activeTab === "vehicles"     && <VehicleManager />}

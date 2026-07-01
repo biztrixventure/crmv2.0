@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2, Building2, CalendarRange, GripVertical } from 'lucide-react';
 import client from '../../../api/client';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
+import SendBatchModal from '../../Distribution/SendBatchModal';
 
 // Persisted custom order of the filter cards (drag-and-drop).
 const ORDER_KEY = 'bsx_data_analyzer_field_order_v1';
@@ -533,6 +534,7 @@ const DataAnalyzer = () => {
   const [limit]               = useState(50);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showSend, setShowSend] = useState(false);
   const [err, setErr]         = useState('');
 
   // Disposition names from the Dispositions tab (disposition_configs) — drive the
@@ -737,6 +739,7 @@ const DataAnalyzer = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {showSend && <SendBatchModal dataset={dataset} filters={payload} onClose={() => setShowSend(false)} />}
       {/* Header — stacks on mobile so the title + button row don't fight for room. */}
       <div className="rounded-2xl p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="flex items-center gap-2.5 min-w-0">
@@ -771,6 +774,10 @@ const DataAnalyzer = () => {
           <button onClick={exportCsv} disabled={exporting || loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/90 hover:bg-white text-primary-700 disabled:opacity-50">
             {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} CSV
+          </button>
+          <button onClick={() => setShowSend(true)} disabled={loading} title="Distribute this result as a batch"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white disabled:opacity-50">
+            <Send size={13} /> Send batch
           </button>
           <button onClick={() => run(1)} disabled={loading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-white text-primary-700 disabled:opacity-50">

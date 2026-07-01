@@ -13,6 +13,11 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireToolAccess } = require('../utils/featureGate');
+const notifications = require('../utils/notificationService');
+
+// Roles allowed to distribute a result set as a batch (analyzer access already
+// gates the router; readonly_admin can view but not send).
+const BATCH_SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
 
 const router = express.Router();
 
@@ -501,6 +506,63 @@ router.post('/breakdown', asyncHandler(async (req, res) => {
     .slice(0, top);
 
   res.json({ group_by: group, total: all.length, items });
+}));
+
+// ============================================================================
+// POST /send-batch — distribute the current filtered result as a distribution
+// batch (original: parent_batch_id NULL, source 'data_analyzer'). Dedupes the
+// result to DISTINCT phone numbers (a result can have many rows/lead_ids per
+// phone — phone is the unit per the audit). Notifies the recipient.
+// Body: { dataset, filters, name, recipient_id }
+// ============================================================================
+router.post('/send-batch', asyncHandler(async (req, res) => {
+  if (!BATCH_SENDER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed to send batches' });
+  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const name    = String(req.body?.name || 'Untitled batch').slice(0, 200);
+  const recipientId = req.body?.recipient_id;
+  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
+
+  // light columns; dedupe by the last-10 of the normalized phone
+  const columns = dataset === 'sales' ? 'customer_phone,customer_phone_2,customer_name' : 'normalized_phone';
+  const all = await fetchAll(dataset, filters, { columns, cap: 50_000 });
+
+  const dig = (s) => String(s || '').replace(/\D/g, '');
+  const tail = (d) => (d.length >= 10 ? d.slice(-10) : d);
+  const byPhone = new Map();
+  for (const r of all) {
+    const cands = dataset === 'sales' ? [r.customer_phone, r.customer_phone_2] : [r.normalized_phone];
+    const nm = dataset === 'sales' ? (r.customer_name || null) : null;
+    for (const c of cands) {
+      const d = dig(c); if (d.length < 7) continue;
+      const key = tail(d);
+      if (!byPhone.has(key)) byPhone.set(key, { phone_number: d, customer_name: nm });
+    }
+  }
+  const items = [...byPhone.values()];
+  if (!items.length) return res.status(400).json({ error: 'No phone numbers in the current result to send' });
+
+  const { data: rcr } = await supabaseAdmin.from('user_company_roles')
+    .select('company_id').eq('user_id', recipientId).eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
+
+  const { data: batch, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
+    name, created_by: req.user.id, parent_batch_id: null, source: 'data_analyzer',
+    sent_to_user_id: recipientId, company_id: rcr?.company_id || null, item_count: items.length,
+  }).select().single();
+  if (bErr) return res.status(500).json({ error: bErr.message });
+
+  const rows = items.map(i => ({ batch_id: batch.id, phone_number: i.phone_number, customer_name: i.customer_name }));
+  for (let i = 0; i < rows.length; i += 1000) {
+    const { error } = await supabaseAdmin.from('distribution_batch_items').insert(rows.slice(i, i + 1000));
+    if (error) { await supabaseAdmin.from('distribution_batches').delete().eq('id', batch.id); return res.status(500).json({ error: error.message }); }
+  }
+
+  notifications.notifyUsers([recipientId], {
+    type: 'batch_received', title: 'New batch received',
+    message: `${req.user.name || 'A superadmin'} sent you "${name}" (${items.length} numbers).`,
+    companyId: batch.company_id, data: { batch_id: batch.id, kind: 'distribution_batch' }, dedupBase: `batch_${batch.id}`,
+  }).catch(() => {});
+  res.status(201).json({ batch: { id: batch.id, name, item_count: items.length } });
 }));
 
 module.exports = router;

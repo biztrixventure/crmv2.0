@@ -3,6 +3,7 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
+import BatchInbox from "../components/Distribution/BatchInbox";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -221,6 +222,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
+    { key: 'batches',      label: 'Batches',      icon: Send },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
     // Delegated superadmin tools — STRICT gate: hidden unless the flag is
@@ -1210,6 +1212,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </div>
         )}
         {activeTab === 'search'    && <SaleSearch />}
+        {activeTab === 'batches'   && <BatchInbox />}
         {activeTab === 'faqs'      && (hasPermission('manage_faqs') ? <FAQManager /> : <FAQPanel />)}
         {activeTab === 'scripts'   && (hasPermission('manage_faqs') ? <ScriptManager /> : <ScriptPanel />)}
         {activeTab === 'calendar'  && <EventsCalendar canEdit={false} />}

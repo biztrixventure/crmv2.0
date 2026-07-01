@@ -35,6 +35,7 @@ import ScriptManager      from '../components/Admin/ScriptManager/ScriptManager'
 import FAQManager         from '../components/Admin/FAQManager/FAQManager';
 import CallQuestionsManager from '../components/Compliance/CallQuestionsManager';
 import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
+import BatchInbox          from '../components/Distribution/BatchInbox';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -43,6 +44,7 @@ const CODE_TABS = [
   { key: 'payments',    label: 'Payments at Risk',   icon: AlertTriangle },
   { key: 'sales',       label: 'All Sales',          icon: FileText },
   { key: 'rec_review',  label: 'Recording Review',   icon: Headphones },
+  { key: 'batches',     label: 'Batches',            icon: Building2 },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
   { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
@@ -242,6 +244,7 @@ const ComplianceShell = () => {
           />
         )}
         {activeTab === 'rec_review' && <RecordingReviewTab companyList={companyList} />}
+        {activeTab === 'batches' && <BatchInbox />}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'card_validator' && <CardValidator />}

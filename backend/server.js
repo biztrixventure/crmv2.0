@@ -47,6 +47,7 @@ const announcementsRoutes       = require('./routes/announcements');
 const marqueeRoutes             = require('./routes/marquee');
 const spiffRoutes               = require('./routes/spiff');
 const dataAnalyzerRoutes        = require('./routes/dataAnalyzer');
+const distributionBatchesRoutes = require('./routes/distributionBatches');
 const dataCleanupRoutes         = require('./routes/dataCleanup');
 const { ingest: vicidialIngest, api: vicidialApi } = require('./routes/vicidial');
 const vehiclesRoutes            = require('./routes/vehicles');
@@ -301,6 +302,7 @@ app.use('/api/announcements',      authMiddleware, readonlyGuard, announcementsR
 app.use('/api/marquee',            authMiddleware, readonlyGuard, marqueeRoutes);
 app.use('/api/spiff',              authMiddleware, readonlyGuard, spiffRoutes);
 app.use('/api/data-analyzer',      authMiddleware, readonlyGuard, dataAnalyzerRoutes);
+app.use('/api/distribution-batches', authMiddleware, distributionBatchesRoutes);
 app.use('/api/data-cleanup',       authMiddleware, readonlyGuard, dataCleanupRoutes);
 app.use('/api/vehicles',           authMiddleware, readonlyGuard, vehiclesRoutes);
 // Chat — admin routes mounted first (superadmin-gated, no feature gate so
