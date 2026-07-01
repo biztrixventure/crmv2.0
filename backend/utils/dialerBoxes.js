@@ -35,6 +35,7 @@ const SYSTEM_SKIP = new Set([
 ]);
 
 const axios = require('axios');
+const logger = require('./logger');
 
 // phone_number_log on one box for a phone → parsed call rows (any order). Uses
 // axios (always present) — bare global fetch isn't guaranteed on every Node.
@@ -191,33 +192,68 @@ const onlyDigits = s => String(s || '').replace(/\D/g, '');
 const phoneTail  = p => { const d = onlyDigits(p); return d.length >= 10 ? d.slice(-10) : d; };
 
 // Find the ACTUAL sale-call recording for a sale. Precise path = by lead_id on
-// the lead's own box; fallback = the closer's agent recordings for the sale date,
-// narrowed by the customer's phone in the filename. Among candidates we pick the
-// LONGEST call — that's the substantive sale conversation, not a quick redial.
-// Returns { location, recording_id, duration, start, box } or null (no match →
-// the portal hides the sale, never plays a wrong recording).
-async function findSaleRecording({ code, phone, agentIds = [], date } = {}) {
+// the lead's own box; fallback = the closer's agent recordings for the sale date.
+// BOTH paths are scoped to the CLOSER's own agent id(s): one lead_id carries
+// recordings from the fronter's original call AND the closer's post-transfer
+// call, and both are to the same customer phone — so the ONLY thing that
+// separates the closer's leg from the fronter's is the recording's `user` (agent)
+// field. Without the closer's agent id we can't tell them apart and must not
+// guess. Among the closer's own legs we pick the LONGEST call — the substantive
+// sale conversation, not a quick redial. Returns { location, recording_id,
+// duration, start, box } or null (no match → the portal hides the sale, never
+// plays a wrong recording).
+async function findSaleRecording({ code, phone, agentIds = [], date, closerId } = {}) {
   const tail = phoneTail(phone);
   const matchesPhone = rec => tail && onlyDigits(rec.location).includes(tail);
 
+  // The closer's dialer agent id(s) are what distinguish the closer's leg from
+  // the fronter's on the same lead_id. Missing → do NOT fall back to a phone/
+  // longest guess (that's exactly what served the fronter's call); skip + flag so
+  // the closer's profile gets mapped instead of silently degrading.
+  const agentSet = new Set(agentIds.filter(Boolean).map(a => String(a).toUpperCase()));
+  if (!agentSet.size) {
+    logger.warn('PORTAL_REC', `recording lookup skipped: closer ${closerId || 'unknown'} has no vicidial_agent_ids mapped`);
+    return null;
+  }
+  const byCloser = rec => rec.user && agentSet.has(String(rec.user).toUpperCase());
+
+  // 1. Precise path: recordings for the lead_id on the lead's own box, then keep
+  //    ONLY the closer's own legs (drops the fronter's original call).
   let pool = [];
+  let fromLeadId = false;
   const m = String(code || '').match(/^([A-Za-z]+)(\d+)$/);
   if (m) {
     const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
-    if (box) pool = await recordingLookup(box, { lead_id: m[2] });
+    if (box) {
+      const raw = await recordingLookup(box, { lead_id: m[2] });
+      const mine = raw.filter(byCloser);
+      if (mine.length) { pool = mine; fromLeadId = true; }
+      // Cross-box transfer: the closer's leg is recorded on a DIFFERENT box than
+      // the lead, so the lead_id lookup returns only the fronter's leg → filtering
+      // to the closer empties the pool. Fall through to the agent+date branch
+      // (queries every box by the closer's agent) instead of dead-ending on the
+      // fronter's call.
+      else if (raw.length) {
+        logger.info('PORTAL_REC', `lead_id ${m[1]}${m[2]}: no closer leg on lead box (cross-box?) — falling through to agent+date`);
+      }
+    }
   }
-  if (!pool.length && date && agentIds.length) {
+
+  // 2. Fallback: the closer's agent recordings for the sale date, across all
+  //    boxes. (agent_user already scopes per-agent; byCloser is belt-and-braces.)
+  if (!pool.length && date) {
     const d = String(date).slice(0, 10);
-    const ids = [...new Set(agentIds.filter(Boolean).map(String))];
+    const ids = [...agentSet];
     const results = await Promise.all(BOXES.flatMap(b => ids.map(a => recordingLookup(b, { agent_user: a, date: d }))));
-    pool = results.flat();
+    pool = results.flat().filter(byCloser);
   }
   if (!pool.length) return null;
 
   const phoneMatched = pool.filter(matchesPhone);
-  // lead_id path is precise → fall back to all if no phone in filename; agent+date
-  // path is broad → REQUIRE a phone match so we never serve someone else's call.
-  const cand = phoneMatched.length ? phoneMatched : (m ? pool : []);
+  // lead_id path is precise (already agent-scoped) → fall back to all if no phone
+  // in filename; agent+date path is broad → REQUIRE a phone match so we never
+  // serve another of the closer's calls from the same day.
+  const cand = phoneMatched.length ? phoneMatched : (fromLeadId ? pool : []);
   if (!cand.length) return null;
   cand.sort((a, b) => b.duration - a.duration);
   return cand[0];
