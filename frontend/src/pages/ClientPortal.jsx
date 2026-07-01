@@ -55,6 +55,7 @@ export default function ClientPortal() {
   const [playing, setPlaying]        = useState(false);
   const [cur, setCur]                = useState(0);
   const [dur, setDur]                = useState(0);
+  const [part, setPart]              = useState(0);     // current clip index for split (multi-part) sales
   const [durations, setDurations]    = useState({});   // sale id → length (s)
   const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording (gate OFF)
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
@@ -204,11 +205,20 @@ export default function ClientPortal() {
     } finally { setAudioLoad(false); }
   };
 
-  const playSale = (sale) => {
-    setSelected(sale);
+  // A sale confirmed by compliance can be SPLIT across several calls (clips). We
+  // play them as ordered parts; `sale.clips` is the count from the list.
+  const clipCount = (selected && !selected.isTest) ? Math.max(1, selected.clips || 1) : 1;
+  const loadPart = (sale, idx) => {
     startBlob(sale.isTest
       ? client.get('portal/test-audio', { responseType: 'blob' })
-      : client.get(`portal/sales/${sale.id}/recording`, { responseType: 'blob' }));
+      : client.get(`portal/sales/${sale.id}/recording`, { params: idx != null ? { clip: idx + 1 } : {}, responseType: 'blob' }));
+  };
+  const goPart = (idx) => { if (selected && idx >= 0 && idx < clipCount) { setPart(idx); loadPart(selected, idx); } };
+
+  const playSale = (sale) => {
+    setSelected(sale);
+    setPart(0);
+    loadPart(sale, sale.isTest ? null : 0);
   };
 
   // Download the recording to the CLIENT'S device. It streams from the dialer
@@ -219,15 +229,19 @@ export default function ClientPortal() {
     if (downloading) return;
     setDownloading(sale.id);
     try {
-      const res = sale.isTest
-        ? await client.get('portal/test-audio', { responseType: 'blob' })
-        : await client.get(`portal/sales/${sale.id}/recording`, { responseType: 'blob' });
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement('a');
+      // split sales → download each part; single → one file
+      const count = (!sale.isTest && sale.clips > 1) ? sale.clips : 1;
       const safe = (sale.customer_name || 'call').replace(/[^\w]+/g, '_').slice(0, 40);
-      a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}.mp3`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      for (let i = 0; i < count; i++) {
+        const res = sale.isTest
+          ? await client.get('portal/test-audio', { responseType: 'blob' })
+          : await client.get(`portal/sales/${sale.id}/recording`, { params: count > 1 ? { clip: i + 1 } : {}, responseType: 'blob' });
+        const url = URL.createObjectURL(res.data);
+        const a = document.createElement('a');
+        a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}${count > 1 ? `_part${i + 1}` : ''}.mp3`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      }
     } catch (err) {
       setAudioErr(
         err?.response?.status === 409 ? 'This recording is being verified by compliance — check back soon.'
@@ -355,6 +369,7 @@ export default function ClientPortal() {
                               : (noRec[s.id] || s.review_status === 'confirmed')
                                 ? null
                                 : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
+                          {s.clips > 1 ? <span className="font-semibold" style={{ color: P.accent }}>{s.clips} parts</span> : null}
                           {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
                         </div>
                       </div>
@@ -385,6 +400,14 @@ export default function ClientPortal() {
                   {selected.isTest && <Sparkles size={13} style={{ color: P.accent }} />}{selected.customer_name}
                 </div>
                 {!selected.isTest && <div className="text-[11px] truncate" style={{ color: P.sub }}>{selected.closer_name} · {fmtDate(selected.sale_date)}</div>}
+                {clipCount > 1 && (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <button onClick={() => goPart(part - 1)} disabled={part === 0 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>‹</button>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: P.tint2, color: P.accent }}>Part {part + 1} / {clipCount}</span>
+                    <button onClick={() => goPart(part + 1)} disabled={part === clipCount - 1 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>›</button>
+                    <span className="text-[10px]" style={{ color: P.muted }}>plays in sequence</span>
+                  </div>
+                )}
               </div>
               <button onClick={() => skip(-10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipBack size={18} style={{ color: P.text }} /></button>
               <button onClick={toggle} disabled={audioLoading} className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg" style={{ background: P.grad, boxShadow: P.shadow }}>
@@ -413,9 +436,10 @@ export default function ClientPortal() {
       )}
 
       <audio ref={audioRef} crossOrigin="anonymous"
-        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+        onEnded={() => { if (selected && !selected.isTest && part < clipCount - 1) { const n = part + 1; setPart(n); loadPart(selected, n); } else setPlaying(false); }}
         onTimeUpdate={() => setCur(audioRef.current?.currentTime || 0)}
-        onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setDur(d); if (selected?.id && d && isFinite(d)) setDurations(m => ({ ...m, [selected.id]: d })); }}
+        onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setDur(d); if (selected?.id && d && isFinite(d) && clipCount === 1) setDurations(m => ({ ...m, [selected.id]: d })); }}
         controlsList="nodownload" className="hidden" />
 
       <span style={{ position: 'fixed', bottom: 3, right: 6, fontSize: 8, letterSpacing: 1, color: '#8B7355', opacity: 0.06, userSelect: 'none', pointerEvents: 'none' }}>am · bv</span>
