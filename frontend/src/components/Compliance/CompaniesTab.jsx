@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Building2 } from 'lucide-react';
+import { Building2, BarChart3 } from 'lucide-react';
 import client from '../../api/client';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { TabHeader, Spinner, Empty } from './shared';
+import CompanyReportModal from './CompanyReportModal';
 
 // Overview of every company with live KPI counts. The date range filters the
 // time-based KPIs (Sales / Pending / Transfers) to the selected window via the
@@ -30,6 +31,7 @@ const CompaniesTab = ({ companyList, loading, onRefresh, onNavigate }) => {
 
   const shown = hasRange ? (rows || []) : companyList;
   const busy  = hasRange ? fetching : loading;
+  const [reportCo, setReportCo] = useState(null);   // company open in the report modal
 
   return (
     <div>
@@ -52,16 +54,22 @@ const CompaniesTab = ({ companyList, loading, onRefresh, onNavigate }) => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {shown.map(c => (
-            <CompanyCard key={c.id} company={c} onNavigate={onNavigate} />
+            <CompanyCard key={c.id} company={c} onNavigate={onNavigate} onOpenReport={setReportCo} />
           ))}
         </div>
       )}
+
+      {reportCo && <CompanyReportModal company={reportCo} onClose={() => setReportCo(null)} onNavigate={onNavigate} />}
     </div>
   );
 };
 
-const CompanyCard = ({ company: c, onNavigate }) => (
-  <div className="rounded-2xl p-5 transition-shadow hover:shadow-md"
+const CompanyCard = ({ company: c, onNavigate, onOpenReport }) => {
+  // A click anywhere on the card (except a metric/button) opens the full report.
+  const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+  return (
+  <div onClick={() => onOpenReport(c)} title="Open company report"
+    className="rounded-2xl p-5 transition-shadow hover:shadow-lg cursor-pointer"
     style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
 
     {/* Header */}
@@ -86,39 +94,39 @@ const CompanyCard = ({ company: c, onNavigate }) => (
           )}
         </div>
       </div>
+      <BarChart3 size={16} style={{ color: 'var(--color-text-tertiary)' }} title="Report" />
     </div>
 
-    {/* Operational counts — Users / Transfers / Pending. Click a number to
-        drill into the matching records. */}
+    {/* Headline metrics — Approved sales first (what matters), then Pending +
+        Users. Click a box to drill into those records. */}
     <div className="grid grid-cols-3 gap-2 mb-2.5">
       {[
-        { label: 'Users',     val: c.user_count },
-        { label: 'Transfers', val: c.transfer_count ?? 0,   nav: ['transfers', { company: c.id }] },
-        { label: 'Pending',   val: c.pending_review_count,  color: c.pending_review_count > 0 ? '#d97706' : undefined, nav: ['sales', { company: c.id, status: 'pending_review' }] },
+        { label: 'Approved', val: c.completed_count ?? 0, color: '#16a34a', nav: ['sales', { company: c.id, status: 'closed_won' }] },
+        { label: 'Pending',  val: c.pending_review_count ?? 0, color: c.pending_review_count > 0 ? '#d97706' : undefined, nav: ['sales', { company: c.id, status: 'pending_review' }] },
+        { label: 'Users',    val: c.user_count ?? 0 },
       ].map(s => {
         const Tag = s.nav ? 'button' : 'div';
         return (
           <Tag key={s.label} type={s.nav ? 'button' : undefined}
-            onClick={s.nav ? () => onNavigate(s.nav[0], s.nav[1]) : undefined}
+            onClick={s.nav ? stop(() => onNavigate(s.nav[0], s.nav[1])) : undefined}
             title={s.nav ? `View ${s.label.toLowerCase()}` : undefined}
-            className={`rounded-lg px-2 py-1.5 text-center w-full transition-colors ${s.nav ? 'cursor-pointer hover:shadow-sm' : ''}`}
-            style={{ backgroundColor: 'var(--color-bg-secondary)', border: `1px solid ${s.nav ? 'var(--color-border)' : 'var(--color-border)'}` }}>
-            <p className="text-base font-bold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
-            <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
+            className={`rounded-lg px-2 py-2 text-center w-full transition-colors ${s.nav ? 'cursor-pointer hover:shadow-sm' : ''}`}
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <p className="text-lg font-extrabold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
           </Tag>
         );
       })}
     </div>
 
-    {/* Sales status capsules — Total / Approved / Cancelled, accurate filtered
-        counts (no gross), styled like the other status capsules. */}
+    {/* Secondary counts — Total / Transfers / Cancelled. */}
     <div className="flex items-center gap-1.5 flex-wrap mb-4">
       {[
-        { label: 'Total Sales',     val: c.sale_count ?? 0,      bg: '#dbeafe', fg: '#1e40af', nav: ['sales', { company: c.id }] },
-        { label: 'Approved Sales',  val: c.completed_count ?? 0, bg: '#dcfce7', fg: '#166534', nav: ['sales', { company: c.id, status: 'closed_won' }] },
-        { label: 'Cancelled Sales', val: c.cancelled_count ?? 0, bg: '#fee2e2', fg: '#991b1b', nav: ['sales', { company: c.id, status: 'cancelled' }] },
+        { label: 'Total Sales', val: c.sale_count ?? 0,      bg: '#dbeafe', fg: '#1e40af', nav: ['sales', { company: c.id }] },
+        { label: 'Transfers',   val: c.transfer_count ?? 0,  bg: '#ede9fe', fg: '#6d28d9', nav: ['transfers', { company: c.id }] },
+        { label: 'Cancelled',   val: c.cancelled_count ?? 0, bg: '#fee2e2', fg: '#991b1b', nav: ['sales', { company: c.id, status: 'cancelled' }] },
       ].map(s => (
-        <button key={s.label} type="button" onClick={() => onNavigate(s.nav[0], s.nav[1])}
+        <button key={s.label} type="button" onClick={stop(() => onNavigate(s.nav[0], s.nav[1]))}
           title={`View ${s.label.toLowerCase()}`}
           className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full cursor-pointer transition-transform hover:scale-105"
           style={{ backgroundColor: s.bg, color: s.fg }}>
@@ -129,20 +137,19 @@ const CompanyCard = ({ company: c, onNavigate }) => (
 
     {/* Actions */}
     <div className="flex gap-2">
-      <button
-        onClick={() => onNavigate('sales', { company: c.id })}
-        className="flex-1 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+      <button onClick={stop(() => onOpenReport(c))}
+        className="flex-1 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-1.5"
         style={{ background: 'var(--gradient-sidebar)' }}>
-        View Sales
+        <BarChart3 size={13} /> Full Report
       </button>
-      <button
-        onClick={() => onNavigate('transfers', { company: c.id })}
+      <button onClick={stop(() => onNavigate('sales', { company: c.id }))}
         className="flex-1 py-1.5 rounded-lg text-xs font-semibold border hover:opacity-80 transition-opacity"
         style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-        Transfers
+        View Sales
       </button>
     </div>
   </div>
-);
+  );
+};
 
 export default CompaniesTab;

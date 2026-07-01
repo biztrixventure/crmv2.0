@@ -197,6 +197,84 @@ router.get('/companies', asyncHandler(async (req, res) => {
   res.json({ companies: enriched, total: enriched.length });
 }));
 
+// ── GET /compliance/companies/:id/report — one company's deep-dive report ──────
+// Sales scoped by type (closer → company_id; fronter → linked transfer's company),
+// with agent (closer/fronter) leaderboard + per-client breakdown + funnel.
+router.get('/companies/:id/report', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { date_from, date_to } = req.query;
+  const { data: co } = await supabaseAdmin
+    .from('companies').select('id, name, company_type, is_active, created_at').eq('id', id).maybeSingle();
+  if (!co) return res.status(404).json({ error: 'Company not found' });
+  const isFronter = co.company_type === 'fronter';
+
+  const bySaleDate  = (q) => { if (date_from) q = q.gte('sale_date', date_from); if (date_to) q = q.lte('sale_date', date_to); return q; };
+  const byCreatedAt = (q) => { if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from)); if (date_to) q = q.lte('created_at', etDateToUtcEnd(date_to)); return q; };
+
+  // Sales for this company.
+  let sq = isFronter
+    ? supabaseAdmin.from('sales').select('id, status, down_payment, monthly_payment, client_name, closer_id, fronter_id, is_resell, cancellation_date, transfers!inner(company_id)').eq('transfers.company_id', id)
+    : supabaseAdmin.from('sales').select('id, status, down_payment, monthly_payment, client_name, closer_id, fronter_id, is_resell, cancellation_date').eq('company_id', id);
+  const { data: salesData } = await bySaleDate(sq).limit(20000);
+  const S = salesData || [];
+
+  // Transfers this company owns (fronter) / worked (closer).
+  let transfers_total = 0;
+  if (isFronter) {
+    const { count } = await byCreatedAt(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).eq('company_id', id).neq('vicidial_pending', true));
+    transfers_total = count || 0;
+  } else {
+    const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('user_id').eq('company_id', id).eq('is_active', true);
+    const uids = (ucr || []).map(u => u.user_id);
+    if (uids.length) {
+      const { count } = await byCreatedAt(supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).in('assigned_closer_id', uids).neq('vicidial_pending', true));
+      transfers_total = count || 0;
+    }
+  }
+
+  const CANCEL = ['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback'];
+  const isApproved  = s => s.status === 'closed_won';
+  const isCancelled = s => s.cancellation_date || CANCEL.includes(s.status);
+  const approved = S.filter(isApproved);
+
+  const sales = {
+    total: S.length, approved: approved.length,
+    pending: S.filter(s => s.status === 'pending_review').length,
+    cancelled: S.filter(isCancelled).length,
+    resells: S.filter(s => s.is_resell).length,
+    gross_down_payment: approved.reduce((a, s) => a + (Number(s.down_payment) || 0), 0),
+    monthly_recurring:  approved.reduce((a, s) => a + (Number(s.monthly_payment) || 0), 0),
+  };
+
+  // Agent leaderboard — closer co groups by closer, fronter co by fronter.
+  const agentKey = isFronter ? 'fronter_id' : 'closer_id';
+  const agentMap = new Map(), clientMap = new Map();
+  S.forEach(s => {
+    const ak = s[agentKey];
+    if (ak) { const a = agentMap.get(ak) || { id: ak, sales: 0, approved: 0, cancelled: 0 }; a.sales++; if (isApproved(s)) a.approved++; if (isCancelled(s)) a.cancelled++; agentMap.set(ak, a); }
+    const ck = (s.client_name || '').trim() || '—';
+    const c = clientMap.get(ck) || { name: ck, sales: 0, approved: 0 }; c.sales++; if (isApproved(s)) c.approved++; clientMap.set(ck, c);
+  });
+
+  const agentIds = [...agentMap.keys()];
+  const nameById = {};
+  if (agentIds.length) {
+    const { data: p } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', agentIds);
+    (p || []).forEach(x => { nameById[x.user_id] = [x.first_name, x.last_name].filter(Boolean).join(' ') || 'Unknown'; });
+  }
+  const agents  = [...agentMap.values()].map(a => ({ ...a, name: nameById[a.id] || 'Unknown' })).sort((a, b) => b.approved - a.approved || b.sales - a.sales).slice(0, 25);
+  const clients = [...clientMap.values()].sort((a, b) => b.approved - a.approved || b.sales - a.sales).slice(0, 25);
+
+  res.json({
+    company: co,
+    role_label: isFronter ? 'fronter' : 'closer',
+    range: { date_from: date_from || null, date_to: date_to || null },
+    sales, transfers_total,
+    conversion_rate: transfers_total ? Math.round((sales.approved / transfers_total) * 1000) / 10 : null,
+    agents, clients,
+  });
+}));
+
 // ── GET /compliance/users ─────────────────────────────────────────────────────
 // Returns all users (or filtered by company) for export user-selector.
 router.get('/users', asyncHandler(async (req, res) => {
