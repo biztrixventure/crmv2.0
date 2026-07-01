@@ -11,7 +11,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { isSuperAdmin } = require('../models/helpers');
-const { findSaleRecording } = require('../utils/dialerBoxes');
+const { findSaleRecording, locationForRecording } = require('../utils/dialerBoxes');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { getPseudoNames } = require('../utils/pseudonym');
 const logger = require('../utils/logger');
@@ -19,9 +19,23 @@ const logger = require('../utils/logger');
 const TEST_AUDIO_KEY = 'portal.test_audio';
 const getTestAudio = async () => (await getConfig(null, TEST_AUDIO_KEY, { enabled: false, url: '', label: 'Visualizer demo' })) || {};
 
+// Global cutover gate for the compliance recording-review workflow.
+//   OFF (default) → the portal live-resolves recordings exactly as before this
+//                   feature (findSaleRecording; no review gate, no 409s).
+//   ON            → confirmed-reference-first; unconfirmed sales return 409
+//                   "pending review" and the client sees "being verified".
+// Flip via env RECORDING_REVIEW_GATE_ENABLED=true once the compliance admin UI
+// is ready. Read per-request so the value takes effect on the next deploy/restart
+// without touching the route code. The candidate-list / confirm / queue endpoints
+// (routes/compliance.js) are NOT gated — reviewers can build the backlog first.
+const recordingReviewGateOn = () =>
+  String(process.env.RECORDING_REVIEW_GATE_ENABLED || '').trim().toLowerCase() === 'true';
+
 // Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
-// by the recording proxy and the test-audio proxy.
-async function pipeAudio(req, res, url) {
+// by the recording proxy and the test-audio proxy. `reresolve` (optional) is
+// called once if the URL fails — a confirmed clip's stored location can go
+// stale, so we re-derive it deterministically from its recording_id and retry.
+async function pipeAudio(req, res, url, reresolve) {
   try {
     const upstream = await axios.get(url, {
       responseType: 'stream', timeout: 30000,
@@ -37,6 +51,10 @@ async function pipeAudio(req, res, url) {
     upstream.data.pipe(res);
     upstream.data.on('error', () => { try { res.end(); } catch { /* noop */ } });
   } catch (e) {
+    // stored location stale/404 → re-derive from the reference once, then retry
+    if (reresolve && !res.headersSent) {
+      try { const fresh = await reresolve(); if (fresh && fresh !== url) return pipeAudio(req, res, fresh); } catch { /* fall through */ }
+    }
     logger.warn('PORTAL', `stream failed: ${e.message}`);
     if (!res.headersSent) res.status(502).json({ error: 'Could not load audio' });
   }
@@ -364,27 +382,38 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     if (clients.length)      q = q.in('client_name', clients);
     return q;
   };
-  // Pseudonyms for whichever closers actually appear in the results, plus any
-  // ALREADY-CACHED recording length (portal_recording_meta) so the client sees
-  // the exact call length at first sight — zero dialer calls here (cold ones are
-  // filled in by /sales/recording-meta afterwards).
+  // Pseudonyms + recording length per sale (zero dialer calls). GATE ON → the
+  // compliance-confirmed length + review status; GATE OFF → the pre-change cached
+  // live-resolved length (portal_recording_meta), no review status.
   const respond = async (rows, extra) => {
     const ids = [...new Set((rows || []).map(r => r.closer_id).filter(Boolean))];
     const pseudo = await getPseudoNames(ids);
+    const base = (s) => ({
+      id: s.id,
+      customer_name: s.customer_name || '—',
+      phone: s.customer_phone || '',
+      sale_date: s.sale_date,
+      closer_id: s.closer_id,
+      closer_name: pseudo.get(s.closer_id) || 'Agent',
+    });
+
+    if (recordingReviewGateOn()) {
+      const confRows = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', (rows || []).map(r => r.id));
+      const confBy = new Map();   // sale_id -> { clips, duration }
+      for (const c of confRows) { const g = confBy.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); confBy.set(c.sale_id, g); }
+      const sales = (rows || []).map(s => {
+        const g = confBy.get(s.id);
+        return { ...base(s), duration: g ? (g.duration || null) : null, clips: g ? g.clips : 0, review_status: g ? 'confirmed' : 'pending_review' };
+      });
+      return res.json({ sales, ...extra });
+    }
+
+    // GATE OFF — unchanged pre-feature behavior
     const metaRows = await fetchIn('portal_recording_meta', 'sale_id, found, duration', 'sale_id', (rows || []).map(r => r.id));
     const metaBy = new Map(metaRows.map(m => [m.sale_id, m]));
     const sales = (rows || []).map(s => {
       const m = metaBy.get(s.id);
-      return {
-        id: s.id,
-        customer_name: s.customer_name || '—',
-        phone: s.customer_phone || '',
-        sale_date: s.sale_date,
-        closer_id: s.closer_id,
-        closer_name: pseudo.get(s.closer_id) || 'Agent',
-        duration: (m && m.found) ? m.duration : null,   // cached exact length (or null)
-        meta_known: !!m,                                 // already resolved (skip re-asking)
-      };
+      return { ...base(s), duration: (m && m.found) ? m.duration : null, meta_known: !!m };
     });
     res.json({ sales, ...extra });
   };
@@ -411,8 +440,7 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   return respond(data, { next_offset: (data?.length === limit) ? offset + limit : null });
 }));
 
-// Resolve a sale's recording length (same resolution as the stream route, minus
-// the audio). Returns { found, duration, recording_id }.
+// GATE OFF only: resolve a sale's recording length live (minus the audio).
 async function resolveRecordingMeta(sale) {
   const [{ data: prof }, { data: tr }] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
@@ -427,34 +455,41 @@ async function resolveRecordingMeta(sale) {
 const META_NEG_TTL = 12 * 60 * 60 * 1000;   // re-check a "not found" after 12h (positives cached forever)
 const metaFresh = (row) => row && (row.found || (Date.now() - new Date(row.resolved_at).getTime() < META_NEG_TTL));
 
-// Batch: exact recording length per sale (cached). The portal calls this after
-// the (instant) list to fill in lengths that weren't cached yet, then persists
-// them so next time they show at first sight. Bounded so one call never fans out
-// hundreds of dialer lookups — the rest come back as `pending` for a follow-up.
+// Batch: recording length (+ review status when the gate is ON) per sale.
+//   GATE ON  → straight from compliance confirmations (no dialer, no heuristic).
+//   GATE OFF → pre-change behavior: cached live-resolve, bounded, with `pending`.
 router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const closers = req.portalClient.closer_ids || [];
   const clients = req.portalClient.client_names || [];
-  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).filter(Boolean))].slice(0, 200);
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).filter(Boolean))].slice(0, 300);
   if (!ids.length) return res.json({ meta: {}, pending: [] });
 
-  // scope the requested ids to THIS client's sales (closers AND/OR client_names)
+  if (recordingReviewGateOn()) {
+    const srows = await fetchIn('sales', 'id, closer_id, client_name', 'id', ids);
+    const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
+    const sales = (srows || []).filter(inScope);
+    if (!sales.length) return res.json({ meta: {}, pending: [] });
+    const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
+    const bySale = new Map();
+    for (const c of confs) { const g = bySale.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); bySale.set(c.sale_id, g); }
+    const meta = {};
+    for (const s of sales) {
+      const g = bySale.get(s.id);
+      meta[s.id] = g ? { available: true, duration: g.duration || null, clips: g.clips, status: 'confirmed' } : { available: false, status: 'pending_review' };
+    }
+    return res.json({ meta, pending: [] });
+  }
+
+  // GATE OFF — unchanged pre-feature behavior (bounded live-resolve + cache)
   const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id', 'id', ids);
   const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
   const sales = (srows || []).filter(inScope);
   if (!sales.length) return res.json({ meta: {}, pending: [] });
-
   const cached = await fetchIn('portal_recording_meta', '*', 'sale_id', sales.map(s => s.id));
   const cacheBy = new Map(cached.map(r => [r.sale_id, r]));
-
   const meta = {};
   const todo = [];
-  for (const s of sales) {
-    const row = cacheBy.get(s.id);
-    if (metaFresh(row)) meta[s.id] = { available: row.found, duration: row.duration };
-    else todo.push(s);
-  }
-
-  // resolve up to CAP uncached this round; the rest come back as pending
+  for (const s of sales) { const row = cacheBy.get(s.id); if (metaFresh(row)) meta[s.id] = { available: row.found, duration: row.duration }; else todo.push(s); }
   const CAP = 24;
   const pending = todo.slice(CAP).map(s => s.id);
   await mapLimit(todo.slice(0, CAP), 5, async (s) => {
@@ -465,7 +500,6 @@ router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncH
       { onConflict: 'sale_id' },
     ).then(() => {}, () => {});
   });
-
   res.json({ meta, pending });
 }));
 
@@ -487,18 +521,42 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     return res.status(404).json({ error: 'Not available' });
   }
 
+  // ── GATE ON: confirmed reference ONLY — no live auto-resolve ──
+  if (recordingReviewGateOn()) {
+    const { data: confs } = await supabaseAdmin
+      .from('sale_recording_confirmations')
+      .select('*').eq('sale_id', sale.id).order('clip_order', { ascending: true });
+    // unconfirmed → pending review (409), not 404, so the portal shows a distinct
+    // "being verified" state.
+    if (!confs || !confs.length) {
+      return res.status(409).json({ status: 'pending_review', error: 'Recording is being verified' });
+    }
+    // pick the requested clip (?recording_id= or ?clip=N, 1-based), else the first
+    let clip = confs[0];
+    if (req.query.recording_id) clip = confs.find(c => c.recording_id === req.query.recording_id) || clip;
+    else if (req.query.clip) { const n = parseInt(req.query.clip, 10); if (n >= 1 && n <= confs.length) clip = confs[n - 1]; }
+
+    if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
+      const { data: prof } = await supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', sale.closer_id).maybeSingle();
+      supabaseAdmin.from('portal_listens').insert({
+        portal_client_id: req.portalClient.id, sale_id: sale.id, closer_id: sale.closer_id,
+        closer_name: fullName(prof), customer_name: sale.customer_name, recording_id: clip.recording_id, ip: clientIp(req),
+      }).then(() => {}, () => {});
+    }
+    // Stream the confirmed clip; re-derive the URL deterministically if it's stale.
+    const url = clip.location || await locationForRecording(clip);
+    if (!url) return res.status(404).json({ error: 'Recording not available' });
+    return pipeAudio(req, res, url, () => locationForRecording(clip));
+  }
+
+  // ── GATE OFF: unchanged pre-feature behavior — live auto-resolve ──
   const [{ data: prof }, { data: tr }] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
     sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-
   const rec = await findSaleRecording({
-    code: tr?.vicidial_vendor_code,
-    phone: sale.customer_phone,
-    agentIds: prof?.vicidial_agent_ids || [],
-    date: sale.sale_date,
-    dialerAt: tr?.created_at,
-    closerId: sale.closer_id,
+    code: tr?.vicidial_vendor_code, phone: sale.customer_phone,
+    agentIds: prof?.vicidial_agent_ids || [], date: sale.sale_date, dialerAt: tr?.created_at, closerId: sale.closer_id,
   });
   if (!rec) {
     logger.info('PORTAL', `no recording: sale=${sale.id} code=${tr?.vicidial_vendor_code || 'none'} agents=${JSON.stringify(prof?.vicidial_agent_ids || [])} date=${sale.sale_date} (dialer reachable? run /portal/admin/diag)`);
@@ -508,26 +566,16 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     ).then(() => {}, () => {});
     return res.status(404).json({ error: 'Recording not available' });
   }
-  // warm the length cache so the list shows it at first sight next time
   supabaseAdmin.from('portal_recording_meta').upsert(
     { sale_id: sale.id, found: true, duration: rec.duration || null, recording_id: rec.recording_id || null, resolved_at: new Date().toISOString() },
     { onConflict: 'sale_id' },
   ).then(() => {}, () => {});
-
-  // audit (best-effort; logged only on the first chunk request, not range seeks)
   if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
     supabaseAdmin.from('portal_listens').insert({
-      portal_client_id: req.portalClient.id,
-      sale_id: sale.id,
-      closer_id: sale.closer_id,
-      closer_name: fullName(prof),
-      customer_name: sale.customer_name,
-      recording_id: rec.recording_id,
-      ip: clientIp(req),
+      portal_client_id: req.portalClient.id, sale_id: sale.id, closer_id: sale.closer_id,
+      closer_name: fullName(prof), customer_name: sale.customer_name, recording_id: rec.recording_id, ip: clientIp(req),
     }).then(() => {}, () => {});
   }
-
-  // Proxy the upstream MP3 → client (Range-aware), never revealing the URL.
   return pipeAudio(req, res, rec.location);
 }));
 

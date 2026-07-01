@@ -277,6 +277,88 @@ async function findSaleRecording({ code, phone, agentIds = [], date, dialerAt, c
   return cand[0];
 }
 
+// ── Compliance review: candidate listing (UNFILTERED, cross-box) ────────────
+// All recording legs related to a sale — fronter + closer + redials — with NO
+// agent filter and NO longest-pick, for a human to eyeball. Unions the lead_id
+// lookup (every leg on the lead's box) with the closer's agent+date recordings
+// across all boxes (catches the closer's cross-box leg, narrowed to this
+// customer's phone so it doesn't dump the closer's whole day). Each row carries
+// phone_matches; the route adds agent name + is_closer_agent.
+async function listCandidatesForSale({ code, phone, agentIds = [], date, dialerAt } = {}) {
+  const tail = phoneTail(phone);
+  const agentSet = new Set((agentIds || []).filter(Boolean).map(a => String(a).toUpperCase()));
+  const days = new Set();
+  const addDay = v => { const d = String(v || '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) days.add(d); };
+  if (dialerAt) { const b = new Date(dialerAt).getTime(); if (Number.isFinite(b)) for (const o of [-4, -28, 20]) addDay(new Date(b + o * 3600000).toISOString()); }
+  addDay(date);
+
+  const byId = new Map();   // box|recording_id -> row
+  const add = (r, boxId) => { const k = boxId + '|' + r.recording_id; if (!byId.has(k)) byId.set(k, { ...r, box_id: boxId }); };
+
+  const m = String(code || '').match(/^([A-Za-z]+)(\d+)$/);
+  if (m) {
+    const box = BOXES.find(b => b.id === BOX_BY_PREFIX[m[1].toUpperCase()]);
+    if (box) { const raw = await recordingLookup(box, { lead_id: m[2] }); raw.forEach(r => { addDay(r.start); add(r, box.id); }); }
+  }
+  if (agentSet.size && days.size && tail) {
+    const ids = [...agentSet], dl = [...days];
+    const res = await Promise.all(BOXES.flatMap(b => ids.flatMap(a => dl.map(d => recordingLookup(b, { agent_user: a, date: d }).then(rows => ({ b, rows }))))));
+    res.forEach(({ b, rows }) => rows.forEach(r => { if (onlyDigits(r.location).includes(tail)) add(r, b.id); }));
+  }
+  return [...byId.values()]
+    .map(r => ({
+      box_id: r.box_id, start_time: r.start, recording_id: r.recording_id, lead_id: r.lead_id,
+      duration: r.duration, location: r.location, agent_user: r.user,
+      phone_matches: !!(tail && onlyDigits(r.location).includes(tail)),
+    }))
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+}
+
+// Direct phone search (not tied to a sale) for the reviewer's manual tool. The
+// recording API can't search by phone, so first pull the phone's call log
+// (agents + dates across boxes), then recording_lookup per (box, agent, day) in
+// range and keep the legs whose filename contains the phone.
+async function listCandidatesByPhone({ phone, dateFrom, dateTo } = {}) {
+  const tail = phoneTail(phone);
+  if (!tail) return [];
+  const calls = await lookupCallsByPhone(phone);
+  const keys = new Map();
+  for (const c of calls) {
+    const day = String(c.call_date || '').slice(0, 10);
+    if (!day) continue;
+    if (dateFrom && day < String(dateFrom).slice(0, 10)) continue;
+    if (dateTo && day > String(dateTo).slice(0, 10)) continue;
+    if (!c.user || /^(VDAD|VDCL|admin|-+)$/i.test(c.user)) continue;
+    keys.set(c.box + '|' + c.user + '|' + day, { boxId: c.box, user: c.user, day });
+  }
+  const byId = new Map();
+  await Promise.all([...keys.values()].map(async ({ boxId, user, day }) => {
+    const box = BOXES.find(b => b.id === boxId); if (!box) return;
+    const rows = await recordingLookup(box, { agent_user: user, date: day });
+    rows.forEach(r => { if (onlyDigits(r.location).includes(tail)) { const k = boxId + '|' + r.recording_id; if (!byId.has(k)) byId.set(k, { ...r, box_id: boxId }); } });
+  }));
+  return [...byId.values()]
+    .map(r => ({
+      box_id: r.box_id, start_time: r.start, recording_id: r.recording_id, lead_id: r.lead_id,
+      duration: r.duration, location: r.location, agent_user: r.user, phone_matches: true,
+    }))
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+}
+
+// Deterministically re-derive a confirmed clip's stream URL from its reference
+// (used when the stored location URL is stale/404s). recording_lookup by lead_id
+// on the stored box, matched on recording_id. Returns the URL or null.
+async function locationForRecording({ box_id, lead_id, recording_id } = {}) {
+  if (!recording_id) return null;
+  const box = BOXES.find(b => b.id === box_id); if (!box) return null;
+  if (lead_id) {
+    const rows = await recordingLookup(box, { lead_id });
+    const hit = rows.find(r => String(r.recording_id) === String(recording_id));
+    if (hit) return hit.location;
+  }
+  return null;
+}
+
 // Resolve the dialer lead_id for an un-coded (manual) transfer: recording_lookup
 // by the closer's agent + the call date on that box, then match the customer
 // phone inside the recording filename. Returns { lead_id, box, prefix } or null.
@@ -301,4 +383,5 @@ module.exports = {
   refreshBoxes,
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
+  listCandidatesForSale, listCandidatesByPhone, locationForRecording,
 };

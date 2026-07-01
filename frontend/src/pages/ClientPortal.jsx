@@ -55,8 +55,8 @@ export default function ClientPortal() {
   const [playing, setPlaying]        = useState(false);
   const [cur, setCur]                = useState(0);
   const [dur, setDur]                = useState(0);
-  const [durations, setDurations]    = useState({});   // sale id → length (s): cached or learned on play
-  const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording
+  const [durations, setDurations]    = useState({});   // sale id → length (s)
+  const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording (gate OFF)
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
   const [dark, setDark] = useState(() => localStorage.getItem('portalTheme') !== 'light');
   const toggleTheme = () => setDark(d => { localStorage.setItem('portalTheme', d ? 'light' : 'dark'); return !d; });
@@ -89,9 +89,10 @@ export default function ClientPortal() {
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
 
-  // Show the exact call length BEFORE playing: seed from cached lengths that came
-  // with the list, then fetch the rest from /recording-meta (which caches them so
-  // next load is instant). Bounded — follows the server's `pending` list.
+  // Show the call length before playing. The list carries the length (confirmed
+  // length when the review gate is ON, cached length when OFF). Rows the gate
+  // decides (review_status present) need no further work; otherwise (gate OFF,
+  // uncached) fill the length from /recording-meta, which caches it server-side.
   useEffect(() => {
     if (!sales.length) return;
     setDurations(prev => {
@@ -101,8 +102,8 @@ export default function ClientPortal() {
     });
     let cancelled = false;
     (async () => {
-      // ids whose length we don't have yet (skip test row + already-resolved-empty)
-      let ids = sales.filter(s => !s.isTest && !s.duration && !durations[s.id] && !noRec[s.id]).map(s => s.id);
+      // only rows with no length AND not already decided by the gate (review_status)
+      let ids = sales.filter(s => !s.isTest && !s.duration && !durations[s.id] && !noRec[s.id] && s.review_status === undefined).map(s => s.id);
       let guard = 0;
       while (ids.length && !cancelled && guard++ < 30) {
         const chunk = ids.slice(0, 40);
@@ -118,7 +119,7 @@ export default function ClientPortal() {
         });
         setNoRec(prev => {
           const next = { ...prev };
-          for (const [id, m] of Object.entries(meta)) if (!m.available) next[id] = true;
+          for (const [id, m] of Object.entries(meta)) if (!m.available && m.status !== 'pending_review') next[id] = true;
           return next;
         });
         ids = [...(resp.data.pending || []), ...ids.slice(40)];
@@ -196,7 +197,10 @@ export default function ClientPortal() {
         a.play().catch(() => {});
       }
     } catch (e) {
-      setAudioErr(e?.response?.status === 404 ? 'No recording available for this call.' : 'This audio could not be loaded right now.');
+      setAudioErr(
+        e?.response?.status === 409 ? 'This recording is being verified by compliance — check back soon.'
+        : e?.response?.status === 404 ? 'No recording available for this call.'
+        : 'This audio could not be loaded right now.');
     } finally { setAudioLoad(false); }
   };
 
@@ -225,7 +229,10 @@ export default function ClientPortal() {
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setAudioErr(err?.response?.status === 404 ? 'No recording available to download.' : 'Could not download this recording.');
+      setAudioErr(
+        err?.response?.status === 409 ? 'This recording is being verified by compliance — check back soon.'
+        : err?.response?.status === 404 ? 'No recording available to download.'
+        : 'Could not download this recording.');
     } finally { setDownloading(null); }
   };
 
@@ -343,9 +350,11 @@ export default function ClientPortal() {
                           <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
                           {durations[s.id]
                             ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span>
-                            : noRec[s.id]
-                              ? <span className="flex items-center gap-1" style={{ color: P.muted }}><Clock size={11} />no recording</span>
-                              : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
+                            : s.review_status === 'pending_review'
+                              ? <span className="flex items-center gap-1 italic" style={{ color: P.muted }}><Clock size={11} />being verified</span>
+                              : (noRec[s.id] || s.review_status === 'confirmed')
+                                ? null
+                                : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
                           {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
                         </div>
                       </div>

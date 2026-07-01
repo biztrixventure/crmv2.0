@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { listCandidatesForSale, listCandidatesByPhone } = require('../utils/dialerBoxes');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
@@ -67,6 +68,128 @@ function profileName(map, id) {
   const p = map[id];
   return p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || null : null;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// RECORDING REVIEW (compliance confirms which recording(s) a sale should show)
+// All routes below inherit the router guard above (compliance_manager /
+// superadmin / tool_compliance_review) + the server-level readonlyGuard, which
+// is exactly the mig-009 compliance-write pattern.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Annotate raw dialer candidates with a display name + fronter/closer badge.
+// is_closer_agent: for a sale it's authoritative membership in THAT sale's
+// closer agent ids; for a bare phone search it falls back to the agent's role.
+async function annotateCandidates(cands, saleCloserAgentIds = []) {
+  const closerSet = new Set((saleCloserAgentIds || []).map(a => String(a).toUpperCase()));
+  const agents = [...new Set(cands.map(c => String(c.agent_user || '').toUpperCase()).filter(Boolean))];
+  const nameByAgent = new Map(), uidByAgent = new Map();
+  for (const a of agents) {
+    const { data } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, first_name, last_name').contains('vicidial_agent_ids', [a]).limit(1).maybeSingle();
+    if (data) { nameByAgent.set(a, `${data.first_name || ''} ${data.last_name || ''}`.trim() || a); uidByAgent.set(a, data.user_id); }
+  }
+  const roleByUid = new Map();
+  const uids = [...new Set([...uidByAgent.values()])];
+  if (uids.length) {
+    const { data: roles } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').in('user_id', uids).eq('is_active', true);
+    (roles || []).forEach(r => { if (!roleByUid.has(r.user_id)) roleByUid.set(r.user_id, r.custom_roles?.level || null); });
+  }
+  return cands.map(c => {
+    const a = String(c.agent_user || '').toUpperCase();
+    const level = roleByUid.get(uidByAgent.get(a));
+    return {
+      ...c,
+      agent_name: nameByAgent.get(a) || c.agent_user || '(unknown agent)',
+      agent_role: level || null,
+      is_closer_agent: closerSet.size ? closerSet.has(a) : (level === 'closer' || level === 'closer_manager'),
+    };
+  });
+}
+
+// LIST candidates — by sale_id (resolve its code/agents) OR by phone (+date range)
+router.get('/recordings/candidates', asyncHandler(async (req, res) => {
+  if (req.query.sale_id) {
+    const { data: sale } = await supabaseAdmin.from('sales')
+      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id').eq('id', req.query.sale_id).maybeSingle();
+    if (!sale) return res.status(404).json({ error: 'Sale not found' });
+    const [{ data: prof }, { data: tr }] = await Promise.all([
+      supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
+      sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    const agentIds = prof?.vicidial_agent_ids || [];
+    const raw = await listCandidatesForSale({ code: tr?.vicidial_vendor_code, phone: sale.customer_phone, agentIds, date: sale.sale_date, dialerAt: tr?.created_at });
+    const candidates = await annotateCandidates(raw, agentIds);
+    const { data: existing } = await supabaseAdmin.from('sale_recording_confirmations')
+      .select('*').eq('sale_id', sale.id).order('clip_order', { ascending: true });
+    return res.json({
+      sale: { id: sale.id, customer_name: sale.customer_name, phone: sale.customer_phone, sale_date: sale.sale_date, closer_agent_ids: agentIds, vendor_code: tr?.vicidial_vendor_code || null },
+      candidates, existing: existing || [],
+    });
+  }
+  const phone = String(req.query.phone || '').trim();
+  if (phone) {
+    const raw = await listCandidatesByPhone({ phone, dateFrom: req.query.date_from || null, dateTo: req.query.date_to || null });
+    const candidates = await annotateCandidates(raw, []);
+    return res.json({ candidates });
+  }
+  return res.status(400).json({ error: 'sale_id or phone is required' });
+}));
+
+// CONFIRM — overwrite the sale's confirmation with an ordered list of clips
+router.post('/recordings/confirm', asyncHandler(async (req, res) => {
+  const saleId = req.body.sale_id;
+  const clips = Array.isArray(req.body.clips) ? req.body.clips : [];
+  if (!saleId || !clips.length) return res.status(400).json({ error: 'sale_id and at least one clip are required' });
+  const { data: sale } = await supabaseAdmin.from('sales').select('id').eq('id', saleId).maybeSingle();
+  if (!sale) return res.status(404).json({ error: 'Sale not found' });
+
+  const rows = clips.slice(0, 20).map((c, i) => ({
+    sale_id: saleId, clip_order: i + 1,
+    box_id: String(c.box_id || '').slice(0, 60),
+    lead_id: c.lead_id ? String(c.lead_id).slice(0, 40) : null,
+    recording_id: String(c.recording_id || '').slice(0, 60),
+    location: c.location ? String(c.location).slice(0, 600) : null,
+    agent_user: c.agent_user ? String(c.agent_user).slice(0, 40) : null,
+    start_time: c.start_time || null,
+    duration: Number.isFinite(+c.duration) ? Math.round(+c.duration) : null,
+    confirmed_by: req.user.id,
+    note: c.note ? String(c.note).slice(0, 500) : null,
+  }));
+  if (rows.some(r => !r.box_id || !r.recording_id)) return res.status(400).json({ error: 'each clip needs box_id and recording_id' });
+
+  // re-confirmation overwrites the prior pick
+  await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', saleId);
+  const { data, error } = await supabaseAdmin.from('sale_recording_confirmations').insert(rows).select();
+  if (error) return res.status(500).json({ error: error.message });
+  logger.success('COMPLIANCE_REC', `sale ${saleId} confirmed ${rows.length} clip(s) by ${req.user.id}`);
+  res.json({ ok: true, confirmations: data });
+}));
+
+// UNCONFIRM — send a sale back to the pending-review queue
+router.delete('/recordings/confirm/:saleId', asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', req.params.saleId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+}));
+
+// REVIEW QUEUE — eligible (coded+mapped) sales with no confirmation yet
+router.get('/recordings/queue', asyncHandler(async (req, res) => {
+  const companyId = req.query.company_id || null;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const { data, error } = await supabaseAdmin.rpc('app_recording_review_queue', {
+    p_company_ids: companyId ? [companyId] : null,
+    p_date_from: req.query.date_from || null,
+    p_date_to: req.query.date_to || null,
+    p_closer_id: req.query.closer_id || null,
+    p_limit: limit, p_offset: offset,
+  });
+  if (error) return res.status(500).json({ error: error.message });
+  const total = (data && data.length) ? Number(data[0].total_count) : 0;
+  const queue = (data || []).map(({ total_count, ...r }) => r);
+  res.json({ queue, total, limit, offset });
+}));
 
 async function enrichProfiles(records, userIdFn) {
   const ids = [...new Set(records.map(userIdFn).filter(Boolean))];
