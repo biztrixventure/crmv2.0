@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, LogOut, Loader2, Headphones,
-  Calendar, User, Search, RefreshCw, AudioLines, Sparkles, X, Download, Clock,
+  Calendar, User, Search, RefreshCw, AudioLines, Sparkles, X, Download, Clock, Sun, Moon,
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,6 +16,30 @@ const fmt = (s) => {
   return `${m}:${String(r).padStart(2, '0')}`;
 };
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d || ''; } };
+
+// Business palettes (warm brown/gold). Dark = default; light mirrors the CRM
+// light tokens. Both contrast-checked: cream on near-black / dark brown on cream,
+// and white content only ever sits on the dark-brown button gradient.
+const PAL_DARK = {
+  bg: 'radial-gradient(1200px 600px at 80% -10%, #241608 0%, #0D0A07 45%, #080503 100%)',
+  text: '#F0E6D8', sub: '#C0A282', muted: '#8B7355',
+  accent: '#C4894A', grad: 'linear-gradient(135deg,#7A4820 0%,#5A3210 100%)',
+  border: 'rgba(196,137,74,0.16)', borderOn: 'rgba(196,137,74,0.55)',
+  tint: 'rgba(196,137,74,0.05)', tint2: 'rgba(196,137,74,0.10)',
+  active: 'linear-gradient(90deg,rgba(196,137,74,0.22),rgba(122,72,32,0.06))',
+  player: 'rgba(20,13,7,0.94)', shadow: '0 8px 24px -8px rgba(122,72,32,0.7)',
+  progress: 'linear-gradient(90deg,#C4894A,#7A4820)',
+};
+const PAL_LIGHT = {
+  bg: 'radial-gradient(1200px 600px at 80% -10%, #FBF6EE 0%, #F5EDE4 45%, #EDE2D2 100%)',
+  text: '#241C11', sub: '#5A4F45', muted: '#8B7F75',
+  accent: '#8B5E2E', grad: 'linear-gradient(135deg,#8B5E2E 0%,#5A3210 100%)',
+  border: 'rgba(110,88,56,0.22)', borderOn: 'rgba(139,94,46,0.6)',
+  tint: 'rgba(110,88,56,0.05)', tint2: 'rgba(110,88,56,0.10)',
+  active: 'linear-gradient(90deg,rgba(139,94,46,0.16),rgba(110,88,56,0.05))',
+  player: 'rgba(253,251,248,0.95)', shadow: '0 8px 24px -8px rgba(110,88,56,0.4)',
+  progress: 'linear-gradient(90deg,#8B5E2E,#5A3210)',
+};
 
 export default function ClientPortal() {
   const { user, logout } = useAuth();
@@ -33,6 +57,9 @@ export default function ClientPortal() {
   const [dur, setDur]                = useState(0);
   const [durations, setDurations]    = useState({});   // sale id → length (s), learned on play
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
+  const [dark, setDark] = useState(() => localStorage.getItem('portalTheme') !== 'light');
+  const toggleTheme = () => setDark(d => { localStorage.setItem('portalTheme', d ? 'light' : 'dark'); return !d; });
+  const darkRef = useRef(dark); darkRef.current = dark;   // read inside the canvas draw loop
 
   const audioRef    = useRef(null);
   const urlRef      = useRef(null);
@@ -100,7 +127,8 @@ export default function ClientPortal() {
         const h = Math.max(3, v * (H - 4));
         const x = i * (bw + gap), y = (H - h) / 2;
         const g = c.createLinearGradient(0, y, 0, y + h);
-        g.addColorStop(0, '#E0B074'); g.addColorStop(1, '#C4894A');
+        if (darkRef.current) { g.addColorStop(0, '#E0B074'); g.addColorStop(1, '#C4894A'); }
+        else { g.addColorStop(0, '#A8885C'); g.addColorStop(1, '#6E5838'); }
         c.fillStyle = g; c.globalAlpha = data ? 0.55 + v * 0.45 : 0.5;
         const r = Math.min(bw / 2, 3);
         c.beginPath();
@@ -172,18 +200,7 @@ export default function ClientPortal() {
   const pct = dur ? (cur / dur) * 100 : 0;
   const testItem = me.test_audio?.enabled ? { id: '__test__', isTest: true, customer_name: me.test_audio.label || 'Visualizer demo' } : null;
 
-  // Business palette (warm brown/gold, dark) — mirrors the CRM dark theme tokens
-  // so contrast is safe: light cream text on near-black brown, amber accents.
-  const P = {
-    bg: 'radial-gradient(1200px 600px at 80% -10%, #241608 0%, #0D0A07 45%, #080503 100%)',
-    text: '#F0E6D8', sub: '#C0A282', muted: '#8B7355',
-    accent: '#C4894A', grad: 'linear-gradient(135deg,#7A4820 0%,#5A3210 100%)',
-    border: 'rgba(196,137,74,0.16)', borderOn: 'rgba(196,137,74,0.55)',
-    tint: 'rgba(196,137,74,0.05)', tint2: 'rgba(196,137,74,0.10)',
-    active: 'linear-gradient(90deg,rgba(196,137,74,0.22),rgba(122,72,32,0.06))',
-    player: 'rgba(20,13,7,0.94)', shadow: '0 8px 24px -8px rgba(122,72,32,0.7)',
-    progress: 'linear-gradient(90deg,#C4894A,#7A4820)',
-  };
+  const P = dark ? PAL_DARK : PAL_LIGHT;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: P.bg, color: P.text }}>
@@ -198,9 +215,15 @@ export default function ClientPortal() {
             <div className="text-[11px]" style={{ color: P.sub }}>{me.name || user?.name || 'Client'}</div>
           </div>
         </div>
-        <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors hover:bg-white/5" style={{ background: P.tint2, color: P.text }}>
-          <LogOut size={14} /> Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={toggleTheme} title={dark ? 'Switch to light' : 'Switch to dark'}
+            className="p-2 rounded-lg transition-colors hover:opacity-80" style={{ background: P.tint2, color: P.accent }}>
+            {dark ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors hover:opacity-80" style={{ background: P.tint2, color: P.text }}>
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 overflow-y-auto px-5 sm:px-8 py-6">
