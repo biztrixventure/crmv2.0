@@ -112,11 +112,13 @@ async function annotateCandidates(cands, saleCloserAgentIds = []) {
 router.get('/recordings/candidates', asyncHandler(async (req, res) => {
   if (req.query.sale_id) {
     const { data: sale } = await supabaseAdmin.from('sales')
-      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id').eq('id', req.query.sale_id).maybeSingle();
+      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id, company_id, plan, monthly_payment, reference_no, status')
+      .eq('id', req.query.sale_id).maybeSingle();
     if (!sale) return res.status(404).json({ error: 'Sale not found' });
-    const [{ data: prof }, { data: tr }] = await Promise.all([
-      supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
+    const [{ data: prof }, { data: tr }, { data: co }] = await Promise.all([
+      supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
       sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+      sale.company_id ? supabaseAdmin.from('companies').select('name').eq('id', sale.company_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
     const agentIds = prof?.vicidial_agent_ids || [];
     const raw = await listCandidatesForSale({ code: tr?.vicidial_vendor_code, phone: sale.customer_phone, agentIds, date: sale.sale_date, dialerAt: tr?.created_at });
@@ -124,7 +126,13 @@ router.get('/recordings/candidates', asyncHandler(async (req, res) => {
     const { data: existing } = await supabaseAdmin.from('sale_recording_confirmations')
       .select('*').eq('sale_id', sale.id).order('clip_order', { ascending: true });
     return res.json({
-      sale: { id: sale.id, customer_name: sale.customer_name, phone: sale.customer_phone, sale_date: sale.sale_date, closer_agent_ids: agentIds, vendor_code: tr?.vicidial_vendor_code || null },
+      sale: {
+        id: sale.id, customer_name: sale.customer_name, phone: sale.customer_phone, sale_date: sale.sale_date,
+        closer_id: sale.closer_id, closer_name: `${prof?.first_name || ''} ${prof?.last_name || ''}`.trim() || null,
+        company_id: sale.company_id, company_name: co?.name || null,
+        plan: sale.plan, monthly_payment: sale.monthly_payment, reference_no: sale.reference_no, status: sale.status,
+        closer_agent_ids: agentIds, vendor_code: tr?.vicidial_vendor_code || null,
+      },
       candidates, existing: existing || [],
     });
   }
@@ -205,22 +213,27 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
   return pipe(url, false);
 }));
 
-// REVIEW QUEUE — eligible (coded+mapped) sales with no confirmation yet
+// REVIEW QUEUE — eligible (coded+mapped) sales, filterable by confirmation
+// status ('pending' default | 'confirmed' | 'all'), date range, closer, company,
+// and free-text (name / phone / reference / lead code).
 router.get('/recordings/queue', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || null;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+  const status = ['pending', 'confirmed', 'all'].includes(req.query.status) ? req.query.status : 'pending';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 300);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const { data, error } = await supabaseAdmin.rpc('app_recording_review_queue', {
     p_company_ids: companyId ? [companyId] : null,
     p_date_from: req.query.date_from || null,
     p_date_to: req.query.date_to || null,
     p_closer_id: req.query.closer_id || null,
+    p_status: status,
+    p_search: (req.query.search || '').trim() || null,
     p_limit: limit, p_offset: offset,
   });
   if (error) return res.status(500).json({ error: error.message });
   const total = (data && data.length) ? Number(data[0].total_count) : 0;
   const queue = (data || []).map(({ total_count, ...r }) => r);
-  res.json({ queue, total, limit, offset });
+  res.json({ queue, total, status, limit, offset });
 }));
 
 async function enrichProfiles(records, userIdFn) {
