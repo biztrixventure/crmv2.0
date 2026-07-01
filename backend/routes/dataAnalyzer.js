@@ -14,6 +14,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireToolAccess } = require('../utils/featureGate');
 const notifications = require('../utils/notificationService');
+const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
 
 // Roles allowed to distribute a result set as a batch (analyzer access already
 // gates the router; readonly_admin can view but not send).
@@ -551,7 +552,17 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
   }).select().single();
   if (bErr) return res.status(500).json({ error: bErr.message });
 
-  const rows = items.map(i => ({ batch_id: batch.id, phone_number: i.phone_number, customer_name: i.customer_name }));
+  // Rule filter — only writes 'excluded' rows at the FINAL hop (recipient is a
+  // fronter/closer). Upstream recipients (managers) get everything; the excluded
+  // preview travels via /rule-preview instead.
+  const rules = await getBatchRules(rcr?.company_id || null);
+  const dialer = await isDialerRecipient(recipientId);
+  const exMap = dialer ? await ruleExclusions(items.map(i => i.phone_number), recipientId, rcr?.company_id, rules) : new Map();
+
+  const rows = items.map(i => {
+    const reason = exMap.get(i.phone_number);
+    return { batch_id: batch.id, phone_number: i.phone_number, customer_name: i.customer_name, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
+  });
   for (let i = 0; i < rows.length; i += 1000) {
     const { error } = await supabaseAdmin.from('distribution_batch_items').insert(rows.slice(i, i + 1000));
     if (error) { await supabaseAdmin.from('distribution_batches').delete().eq('id', batch.id); return res.status(500).json({ error: error.message }); }
@@ -559,10 +570,33 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
 
   notifications.notifyUsers([recipientId], {
     type: 'batch_received', title: 'New batch received',
-    message: `${req.user.name || 'A superadmin'} sent you "${name}" (${items.length} numbers).`,
+    message: `${req.user.name || 'A superadmin'} sent you "${name}" (${items.length - exMap.size} numbers).`,
     companyId: batch.company_id, data: { batch_id: batch.id, kind: 'distribution_batch' }, dedupBase: `batch_${batch.id}`,
   }).catch(() => {});
-  res.status(201).json({ batch: { id: batch.id, name, item_count: items.length } });
+  res.status(201).json({ batch: { id: batch.id, name, item_count: items.length, excluded_count: exMap.size } });
+}));
+
+// ── POST /send-batch/preview — dry-run rule counts for the Send Batch modal ────
+router.post('/send-batch/preview', asyncHandler(async (req, res) => {
+  if (!BATCH_SENDER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const recipientId = req.body?.recipient_id;
+  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
+
+  const columns = dataset === 'sales' ? 'customer_phone,customer_phone_2' : 'normalized_phone';
+  const all = await fetchAll(dataset, filters, { columns, cap: 50_000 });
+  const dig = (s) => String(s || '').replace(/\D/g, '');
+  const tail = (d) => (d.length >= 10 ? d.slice(-10) : d);
+  const set = new Set();
+  for (const r of all) for (const c of (dataset === 'sales' ? [r.customer_phone, r.customer_phone_2] : [r.normalized_phone])) { const d = dig(c); if (d.length >= 7) set.add(tail(d)); }
+  const phones = [...set];
+
+  const { data: rcr } = await supabaseAdmin.from('user_company_roles').select('company_id').eq('user_id', recipientId).eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
+  const rules = await getBatchRules(rcr?.company_id || null);
+  const dialer = await isDialerRecipient(recipientId);
+  const exMap = await ruleExclusions(phones, recipientId, rcr?.company_id, rules);
+  res.json({ ...summarize(phones, exMap), recipient_is_dialer: dialer, rules });
 }));
 
 module.exports = router;

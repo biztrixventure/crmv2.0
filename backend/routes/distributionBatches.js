@@ -11,6 +11,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const notifications = require('../utils/notificationService');
+const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -89,7 +90,7 @@ router.get('/:id/items', asyncHandler(async (req, res) => {
   const { batch, error } = await loadVisibleBatch(req, req.params.id);
   if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
   const { data: items } = await supabaseAdmin.from('distribution_batch_items')
-    .select('id, phone_number, lead_id, customer_name, status, notes, created_at')
+    .select('id, phone_number, lead_id, customer_name, status, notes, exclusion_reason, created_at')
     .eq('batch_id', batch.id).order('created_at', { ascending: true });
   res.json({ batch: { id: batch.id, name: batch.name, item_count: batch.item_count }, items: items || [] });
 }));
@@ -123,18 +124,50 @@ router.post('/:id/sub-batch', asyncHandler(async (req, res) => {
   }).select().single();
   if (bErr) return res.status(500).json({ error: bErr.message });
 
-  const rows = srcItems.map(s => ({ batch_id: child.id, phone_number: s.phone_number, lead_id: s.lead_id || null, customer_name: s.customer_name || null }));
+  // Rule filter — writes 'excluded' rows only when the recipient is a dialer
+  // (final hop); upstream managers receive everything.
+  const rules = await getBatchRules(child.company_id || null);
+  const dialer = await isDialerRecipient(recipientId);
+  const exMap = dialer ? await ruleExclusions(srcItems.map(s => s.phone_number), recipientId, child.company_id, rules) : new Map();
+
+  const rows = srcItems.map(s => {
+    const reason = exMap.get(s.phone_number);
+    return { batch_id: child.id, phone_number: s.phone_number, lead_id: s.lead_id || null, customer_name: s.customer_name || null, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
+  });
   const { error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows);
   if (iErr) { await supabaseAdmin.from('distribution_batches').delete().eq('id', child.id); return res.status(500).json({ error: iErr.message }); }
 
   notifications.notifyUsers([recipientId], {
     type: 'batch_received', title: 'New batch received',
-    message: `${req.user.name || 'A manager'} sent you "${name}" (${rows.length} numbers).`,
+    message: `${req.user.name || 'A manager'} sent you "${name}" (${rows.length - exMap.size} numbers).`,
     companyId: child.company_id, data: { batch_id: child.id, kind: 'distribution_batch' },
     dedupBase: `batch_${child.id}`,
   }).catch(() => {});
-  logger.success('DIST_BATCH', `sub-batch ${child.id} (${rows.length} items) ${req.user.id} → ${recipientId}, parent ${batch.id}`);
-  res.status(201).json({ batch: child });
+  logger.success('DIST_BATCH', `sub-batch ${child.id} (${rows.length} items, ${exMap.size} excluded) ${req.user.id} → ${recipientId}, parent ${batch.id}`);
+  res.status(201).json({ batch: child, excluded_count: exMap.size });
+}));
+
+// ── dry-run rule preview for the Create Sub-Batch modal ───────────────────────
+router.post('/:id/sub-batch/preview', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const recipientId = req.body.recipient_id;
+  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
+  const itemIds = Array.isArray(req.body.item_ids) ? req.body.item_ids.filter(Boolean) : null;
+  let sel = supabaseAdmin.from('distribution_batch_items').select('phone_number').eq('batch_id', batch.id).neq('status', 'excluded');
+  if (itemIds && itemIds.length) sel = sel.in('id', itemIds);
+  const { data: rows } = await sel;
+  const phones = [...new Set((rows || []).map(r => r.phone_number).filter(Boolean))];
+  const { data: rcr } = await supabaseAdmin.from('user_company_roles').select('company_id').eq('user_id', recipientId).eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
+  const rules = await getBatchRules(rcr?.company_id || batch.company_id || null);
+  const dialer = await isDialerRecipient(recipientId);
+  const exMap = await ruleExclusions(phones, recipientId, rcr?.company_id || batch.company_id, rules);
+  res.json({ ...summarize(phones, exMap), recipient_is_dialer: dialer, rules });
+}));
+
+// read-only "active rules" for the current user's company (BatchInbox note)
+router.get('/rules', asyncHandler(async (req, res) => {
+  res.json({ rules: await getBatchRules(req.user.company_id || null) });
 }));
 
 // ── cascading soft-delete (this batch + entire descendant subtree) ────────────
@@ -170,7 +203,8 @@ router.get('/my-numbers', asyncHandler(async (req, res) => {
   if (!ids.length) return res.json({ numbers: [] });
   const { data: items } = await supabaseAdmin.from('distribution_batch_items')
     .select('id, phone_number, customer_name, status, notes, batch_id')
-    .in('batch_id', ids).order('created_at', { ascending: false }).limit(2000);
+    .in('batch_id', ids).neq('status', 'excluded')   // fronter never sees rule-excluded numbers
+    .order('created_at', { ascending: false }).limit(2000);
   res.json({ numbers: (items || []).map(i => ({ ...i, source: 'batch' })) });
 }));
 

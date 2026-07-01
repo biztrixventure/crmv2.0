@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Boxes, Loader2, RefreshCw, X, Send, Trash2, GitBranch, Inbox, Upload, Globe,
-  CheckCircle2, Circle, ChevronRight, ArrowDownRight,
+  CheckCircle2, Circle, ChevronRight, ArrowDownRight, Ban, Filter,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import UserPicker from './UserPicker';
+import RulePreview from './RulePreview';
 
 const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
+const EX_REASON = { already_assigned: 'already assigned', transferred_by_you: 'they transferred it', transferred_by_anyone: 'transferred by someone' };
 const fmt = (d) => { try { return d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return d || ''; } };
 
 // Batch distribution inbox — receive, re-batch (sub-batch = copy downstream),
@@ -95,15 +97,30 @@ function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
   const [subName, setSubName] = useState('');
   const [saving, setSaving] = useState(false);
   const [lineage, setLineage] = useState(null);
+  const [rules, setRules] = useState(null);
+  const [subPreview, setSubPreview] = useState(null);
+  const [subPreviewing, setSubPreviewing] = useState(false);
   const canDelete = isSuper || batch.created_by === me?.id;
+  const rulesActive = rules && (rules.block_reassign_same_person || rules.skip_if_transferred_by_recipient || rules.skip_if_transferred_by_anyone);
 
   useEffect(() => {
     client.get(`distribution-batches/${batch.id}/items`).then(r => setItems(r.data.items || [])).catch(() => {}).finally(() => setLoading(false));
+    client.get('distribution-batches/rules').then(r => setRules(r.data.rules)).catch(() => {});
   }, [batch.id]);
 
+  // dry-run rule preview when a sub-batch recipient is chosen
+  useEffect(() => {
+    if (!subOpen || !recipient) { setSubPreview(null); return; }
+    let cancelled = false; setSubPreviewing(true);
+    client.post(`distribution-batches/${batch.id}/sub-batch/preview`, { recipient_id: recipient.id, item_ids: sel.size ? [...sel] : undefined })
+      .then(r => { if (!cancelled) setSubPreview(r.data); }).catch(() => { if (!cancelled) setSubPreview(null); }).finally(() => { if (!cancelled) setSubPreviewing(false); });
+    return () => { cancelled = true; };
+  }, [subOpen, recipient, sel, batch.id]);
+
+  const selectable = items.filter(i => i.status !== 'excluded');
   const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allSel = items.length > 0 && sel.size === items.length;
-  const toggleAll = () => setSel(allSel ? new Set() : new Set(items.map(i => i.id)));
+  const allSel = selectable.length > 0 && sel.size === selectable.length;
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(selectable.map(i => i.id)));
 
   const createSub = async () => {
     if (!recipient) return toast.error('Pick a recipient');
@@ -153,18 +170,26 @@ function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
             <div className="px-4 py-2 flex items-center gap-2 text-xs" style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <button onClick={toggleAll} className="flex items-center gap-1">{allSel ? <CheckCircle2 size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={15} />}<span>{sel.size ? `${sel.size} selected` : 'Select all'}</span></button>
             </div>
+            {rulesActive && (
+              <div className="px-4 py-1.5 text-[11px] flex items-center gap-1.5" style={{ color: 'var(--color-warning-600)', borderBottom: '1px solid var(--color-border)' }}>
+                <Filter size={11} /> Skip rules active — matching numbers are excluded when a fronter receives this.
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto p-2">
               {loading ? <div className="text-center py-8"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
                 : items.map(i => {
+                  const excluded = i.status === 'excluded';
                   const on = sel.has(i.id);
                   return (
-                    <button key={i.id} onClick={() => toggle(i.id)} className="w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
-                      style={{ background: on ? 'var(--color-surface-hover)' : 'transparent' }}>
-                      {on ? <CheckCircle2 size={16} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={16} style={{ color: 'var(--color-text-tertiary)' }} />}
-                      <span className="tabular-nums text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{i.phone_number}</span>
+                    <div key={i.id} onClick={() => !excluded && toggle(i.id)} className="w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
+                      style={{ background: on ? 'var(--color-surface-hover)' : 'transparent', opacity: excluded ? 0.6 : 1, cursor: excluded ? 'default' : 'pointer' }}>
+                      {excluded ? <Ban size={16} style={{ color: 'var(--color-warning-600)' }} /> : on ? <CheckCircle2 size={16} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={16} style={{ color: 'var(--color-text-tertiary)' }} />}
+                      <span className="tabular-nums text-sm font-semibold" style={{ color: 'var(--color-text)', textDecoration: excluded ? 'line-through' : 'none' }}>{i.phone_number}</span>
                       {i.customer_name && <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{i.customer_name}</span>}
-                      <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{i.status}</span>
-                    </button>
+                      {excluded
+                        ? <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap" style={{ color: 'var(--color-warning-600)' }}>excluded · {EX_REASON[i.exclusion_reason] || i.exclusion_reason}</span>
+                        : <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{i.status}</span>}
+                    </div>
                   );
                 })}
             </div>
@@ -175,6 +200,7 @@ function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
                   <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Create sub-batch — copies {sel.size ? `${sel.size} selected` : `all ${items.length}`} numbers to a new recipient (this batch keeps its copy).</div>
                   <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-batch name (optional)" className="w-full text-sm rounded-lg px-3 py-2 mb-2" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
                   <UserPicker value={recipient} onChange={setRecipient} />
+                  {recipient && <RulePreview preview={subPreview} previewing={subPreviewing} recipientName={recipient.name} />}
                   <div className="flex justify-end gap-2 mt-2">
                     <button onClick={() => setSubOpen(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
                     <button onClick={createSub} disabled={saving || !recipient} className="text-sm font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send</button>

@@ -1,14 +1,28 @@
-import { useState } from 'react';
-import { X, Loader2, Send } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Loader2, Send, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import UserPicker from './UserPicker';
+import RulePreview from './RulePreview';
 
 // Distribute the Data Analyzer's current filtered result as an original batch.
 export default function SendBatchModal({ dataset, filters, onClose, onSent }) {
   const [name, setName] = useState('');
   const [recipient, setRecipient] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Dry-run rule preview whenever a recipient is chosen.
+  useEffect(() => {
+    if (!recipient) { setPreview(null); return; }
+    let cancelled = false; setPreviewing(true);
+    client.post('data-analyzer/send-batch/preview', { dataset, filters, recipient_id: recipient.id })
+      .then(r => { if (!cancelled) setPreview(r.data); })
+      .catch(() => { if (!cancelled) setPreview(null); })
+      .finally(() => { if (!cancelled) setPreviewing(false); });
+    return () => { cancelled = true; };
+  }, [recipient, dataset, filters]);
 
   const send = async () => {
     if (!name.trim()) return toast.error('Give the batch a name');
@@ -42,6 +56,7 @@ export default function SendBatchModal({ dataset, filters, onClose, onSent }) {
           <div>
             <label className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Send to</label>
             <div className="mt-1"><UserPicker value={recipient} onChange={setRecipient} /></div>
+            {recipient && <RulePreview preview={preview} previewing={previewing} recipientName={recipient.name} />}
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 p-4" style={{ borderTop: '1px solid var(--color-border)' }}>
