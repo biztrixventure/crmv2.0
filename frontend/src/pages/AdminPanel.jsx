@@ -36,6 +36,7 @@ import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PaymentRemindersPanel from "../components/Payments/PaymentRemindersPanel";
 import ActivityPanel from "../components/Admin/ActivityPanel";
 import BatchInbox from "../components/Distribution/BatchInbox";
+import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import client from "../api/client";
 
 // ============================================================================
@@ -107,6 +108,7 @@ const AdminPanel = () => {
     // Batch distribution inbox — superadmin manages their own sent batches
     // (created_by=me) + an "All" view (BatchInbox's built-in superadmin scoping).
     ...(user?.role === 'superadmin'                    ? [{ id: "batches",        label: "Batches"              }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "note-shortcodes",label: "Note Shortcuts"       }] : []),
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
     ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "vicidial",       label: "VICIdial"             }] : []),
@@ -179,6 +181,7 @@ const AdminPanel = () => {
                   {activeTab === "numbers"     && <NumbersIntelligence />}
                   {activeTab === "data-analyzer" && <DataAnalyzer />}
                   {activeTab === "batches" && <BatchInbox />}
+                  {activeTab === "note-shortcodes" && <NoteShortcodesManager />}
                   {activeTab === "data-cleanup" && <DataCleanup />}
                   {activeTab === "vicidial" && <VicidialAdmin />}
                   {activeTab === "vehicles"     && <VehicleManager />}

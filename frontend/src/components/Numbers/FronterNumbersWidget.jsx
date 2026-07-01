@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward } from 'lucide-react';
+import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward, StickyNote } from 'lucide-react';
 import client from '../../api/client';
 
 // Fronters' floating "My Numbers" — same Document Picture-in-Picture pattern as
@@ -20,11 +20,118 @@ const STATUS = {
 };
 const FILTERS = ['all', 'new', 'called', 'callback', 'completed'];
 
-function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onStatus, onRefresh, onClose }) {
+// Per-number note editor with "/" shortcode autocomplete. INLINE styles only
+// (lives inside the PiP window, which has none of the app CSS). Mirrors the
+// chat message-shortcut UX (type /code → insert full text). Shortcodes are
+// server-side, merged across three tiers (personal > company > global) with a
+// tier badge; any user can add/delete their OWN personal ones right here.
+function NoteEditor({ initial, shortcodes, onSave, onCancel, onSavePersonal, onDeletePersonal }) {
+  const [val, setVal] = useState(initial || '');
+  const [menu, setMenu] = useState(null);   // { token, items } | null
+  const [adding, setAdding] = useState(null); // { code, text } | null — personal mini-form
+  const taRef = useRef(null);
+  const C = { border: '#e2e8f0', sub: '#64748b', head: '#4f46e5', text: '#0f172a', bg: '#f8fafc' };
+  const tierColor = { mine: '#059669', company: '#2563eb', global: '#94a3b8' };
+
+  const recompute = (text, pos) => {
+    const upto = text.slice(0, pos);
+    const m = upto.match(/(?:^|\s)\/([a-z0-9]*)$/i);   // "/token" at the cursor
+    if (!m) return setMenu(null);
+    const token = m[1].toLowerCase();
+    const items = (shortcodes || []).filter(s => s.code.toLowerCase().startsWith(token)).slice(0, 8);
+    setMenu({ token, items });
+  };
+  const onChange = (e) => { setVal(e.target.value); recompute(e.target.value, e.target.selectionStart); };
+  const pick = (sc) => {
+    const ta = taRef.current; const pos = ta ? ta.selectionStart : val.length;
+    const slashPos = pos - ((menu?.token.length || 0) + 1);
+    const next = val.slice(0, slashPos) + sc.text + val.slice(pos);
+    setVal(next); setMenu(null);
+    requestAnimationFrame(() => { if (ta) { const c = slashPos + sc.text.length; ta.focus(); ta.setSelectionRange(c, c); } });
+  };
+  const onKeyDown = (e) => {
+    if (!menu) return;
+    if (e.key === 'Escape') { e.preventDefault(); setMenu(null); }
+    else if (e.key === 'Enter' && menu.items[0]) { e.preventDefault(); pick(menu.items[0]); }
+  };
+  const startAdd = (code = '') => { setMenu(null); setAdding({ code, text: '' }); };
+  const submitAdd = () => {
+    if (!adding.code.trim() || !adding.text.trim()) return;
+    onSavePersonal?.(adding.code.trim(), adding.text.trim());
+    setAdding(null);
+  };
+
+  const btn = { border: 'none', background: 'transparent', cursor: 'pointer' };
+  const mini = { fontSize: 12, padding: '4px 6px', borderRadius: 6, border: `1px solid ${C.border}`, outline: 'none' };
+
+  return (
+    <div style={{ position: 'relative', marginTop: 5 }}>
+      <textarea ref={taRef} value={val} onChange={onChange} onKeyDown={onKeyDown} rows={2} autoFocus
+        placeholder="Add a note… type / for shortcuts"
+        style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 8, border: `1px solid ${C.border}`, resize: 'none', outline: 'none', fontFamily: 'inherit', color: C.text }} />
+      {menu && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 50, marginTop: 2, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.15)', maxHeight: 168, overflowY: 'auto' }}>
+          {menu.items.map(sc => (
+            <div key={sc.id} style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${C.border}` }}>
+              <button onMouseDown={(e) => { e.preventDefault(); pick(sc); }}
+                style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, textAlign: 'left', padding: '6px 8px' }}>
+                <span style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 11, color: C.head, flexShrink: 0 }}>/{sc.code}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: tierColor[sc.tier], flexShrink: 0 }}>{sc.tier}</span>
+                <span style={{ fontSize: 11, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{sc.text}</span>
+              </button>
+              {sc.tier === 'mine' && onDeletePersonal && (
+                <button onMouseDown={(e) => { e.preventDefault(); onDeletePersonal(sc.id); }} title="Delete my shortcut"
+                  style={{ ...btn, padding: '0 6px', color: '#ef4444', flexShrink: 0, display: 'flex' }}><X size={12} /></button>
+              )}
+            </div>
+          ))}
+          {menu.token && onSavePersonal && (
+            <button onMouseDown={(e) => { e.preventDefault(); startAdd(menu.token); }}
+              style={{ ...btn, display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: C.bg, fontSize: 11, fontWeight: 700, color: C.head }}>
+              ＋ Add “/{menu.token}” as my shortcut
+            </button>
+          )}
+          {!menu.items.length && !menu.token && (
+            <div style={{ padding: '8px', fontSize: 11, color: C.sub }}>No shortcuts</div>
+          )}
+        </div>
+      )}
+
+      {adding && (
+        <div style={{ marginTop: 6, padding: 8, borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>New personal shortcut (only you)</div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 700, color: C.sub }}>/</span>
+            <input value={adding.code} onChange={e => setAdding(a => ({ ...a, code: e.target.value }))} placeholder="code" style={{ ...mini, width: 64 }} />
+            <input value={adding.text} onChange={e => setAdding(a => ({ ...a, text: e.target.value }))} placeholder="full text" style={{ ...mini, flex: 1, minWidth: 0 }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 5 }}>
+            <button onClick={() => setAdding(null)} style={{ ...btn, fontSize: 11, fontWeight: 700, color: C.sub }}>Cancel</button>
+            <button onClick={submitAdd} disabled={!adding.code.trim() || !adding.text.trim()}
+              style={{ ...btn, fontSize: 11, fontWeight: 700, color: '#fff', background: C.head, borderRadius: 6, padding: '4px 10px', opacity: (!adding.code.trim() || !adding.text.trim()) ? 0.5 : 1 }}>Save mine</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+        {onSavePersonal
+          ? <button onClick={() => startAdd('')} style={{ ...btn, fontSize: 11, fontWeight: 700, color: C.head }}>＋ my shortcut</button>
+          : <span />}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={onCancel} style={{ ...btn, fontSize: 11, fontWeight: 700, color: C.sub }}>Cancel</button>
+          <button onClick={() => onSave(val)} style={{ ...btn, fontSize: 11, fontWeight: 700, color: '#fff', background: C.head, borderRadius: 6, padding: '4px 10px' }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onStatus, onRefresh, onClose, shortcodes, onSaveNote, onSavePersonal, onDeletePersonal }) {
   const C = { card: '#ffffff', text: '#0f172a', sub: '#64748b', border: '#e2e8f0', head: '#4f46e5' };
   const iconBtn = { background: 'transparent', border: 'none', color: '#fff', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex' };
   const counts = numbers.reduce((a, n) => { a.all++; a[n.status] = (a[n.status] || 0) + 1; return a; }, { all: 0 });
   const list = filter === 'all' ? numbers : numbers.filter(n => n.status === filter);
+  const [openNote, setOpenNote] = useState(null);
 
   const act = (n, status, Icon, color, title) => (
     n.status !== status ? (
@@ -86,12 +193,25 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
                 <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: s.bg, color: s.c }}>{s.l}</span>
               </div>
               {n.customer_name && <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{n.customer_name}</div>}
-              <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 2, marginTop: 4, alignItems: 'center' }}>
                 {act(n, 'called', PhoneCall, '#d97706', 'Mark Called')}
                 {act(n, 'callback', Clock, '#7c3aed', 'Mark Callback')}
                 {act(n, 'completed', CheckCircle, '#059669', 'Mark Done')}
                 {act(n, 'skip', SkipForward, '#6b7280', 'Skip')}
+                <button onClick={() => setOpenNote(o => o === n.id ? null : n.id)} title={n.notes ? 'Edit note' : 'Add note'}
+                  style={{ border: 'none', background: 'transparent', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex', marginLeft: 'auto' }}>
+                  <StickyNote size={14} color={n.notes ? '#4f46e5' : '#94a3b8'} />
+                </button>
               </div>
+              {openNote === n.id ? (
+                <NoteEditor initial={n.notes} shortcodes={shortcodes}
+                  onCancel={() => setOpenNote(null)}
+                  onSave={(v) => { onSaveNote(n, v); setOpenNote(null); }}
+                  onSavePersonal={onSavePersonal} onDeletePersonal={onDeletePersonal} />
+              ) : n.notes ? (
+                <div onClick={() => setOpenNote(n.id)} title="Edit note"
+                  style={{ fontSize: 11, color: '#475569', marginTop: 3, whiteSpace: 'pre-wrap', cursor: 'pointer' }}>{n.notes}</div>
+              ) : null}
             </div>
           );
         })}
@@ -109,6 +229,7 @@ export default function FronterNumbersWidget({ user }) {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter]   = useState('all');
   const [copied, setCopied]   = useState(null);
+  const [shortcodes, setShortcodes] = useState([]);   // /code note shortcuts (company-scoped)
   const [inPageOpen, setInPageOpen] = useState(false);
   const [pipOpen, setPipOpen] = useState(false);
   const pipWinRef  = useRef(null);
@@ -148,7 +269,34 @@ export default function FronterNumbersWidget({ user }) {
       .catch(() => {});
   }, []);
 
+  // Save a per-number note (routes to the item's own source, both accept notes).
+  const saveNote = useCallback((item, notes) => {
+    const url = item.source === 'batch' ? `distribution-batches/items/${item.id}` : `number-lists/${item.id}`;
+    client.put(url, { notes })
+      .then(() => setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, notes } : n)))
+      .catch(() => {});
+  }, []);
+
+  // Load /code shortcuts (personal + company + global) and collapse to one per
+  // code with PERSONAL > company > global precedence for the autocomplete.
+  const loadShortcodes = useCallback(() => {
+    client.get('note-shortcodes').then(r => {
+      const raw = r.data.shortcodes || [];
+      const rank = { mine: 3, company: 2, global: 1 };
+      const by = new Map();
+      for (const s of raw) { const cur = by.get(s.code); if (!cur || rank[s.tier] > rank[cur.tier]) by.set(s.code, s); }
+      setShortcodes([...by.values()].sort((a, b) => (a.sort_order - b.sort_order) || a.code.localeCompare(b.code)));
+    }).catch(() => {});
+  }, []);
+  const savePersonal = useCallback(async (code, text) => {
+    try { await client.post('note-shortcodes/mine', { code, text }); loadShortcodes(); } catch { /* ignore */ }
+  }, [loadShortcodes]);
+  const deletePersonal = useCallback(async (id) => {
+    try { await client.delete(`note-shortcodes/mine/${id}`); loadShortcodes(); } catch { /* ignore */ }
+  }, [loadShortcodes]);
+
   useEffect(() => { if (inPageOpen || pipOpen) load(); }, [inPageOpen, pipOpen, load]);
+  useEffect(() => { if (inPageOpen || pipOpen) loadShortcodes(); }, [inPageOpen, pipOpen, loadShortcodes]);
   // Keep it fresh while open (managers may assign mid-shift).
   useEffect(() => {
     if (!inPageOpen && !pipOpen) return;
@@ -182,10 +330,11 @@ export default function FronterNumbersWidget({ user }) {
     if (pipOpen && pipRootRef.current) {
       pipRootRef.current.render(
         <NumbersBody numbers={numbers} loading={loading} filter={filter} setFilter={setFilter}
-          onCopy={copyNumber} copied={copied} onStatus={setStatus} onRefresh={load} onClose={closePiP} />
+          onCopy={copyNumber} copied={copied} onStatus={setStatus} onRefresh={load} onClose={closePiP}
+          shortcodes={shortcodes} onSaveNote={saveNote} onSavePersonal={savePersonal} onDeletePersonal={deletePersonal} />
       );
     }
-  }, [pipOpen, numbers, loading, filter, copied, copyNumber, setStatus, load, closePiP]);
+  }, [pipOpen, numbers, loading, filter, copied, copyNumber, setStatus, load, closePiP, shortcodes, saveNote, savePersonal, deletePersonal]);
 
   useEffect(() => () => { try { pipWinRef.current?.close(); } catch { /* noop */ } }, []);
 
@@ -205,7 +354,8 @@ export default function FronterNumbersWidget({ user }) {
         <div className="fixed left-4 bottom-4 z-[60] w-80 max-w-[calc(100vw-32px)] rounded-2xl overflow-hidden animate-scale-in"
           style={{ height: 470, boxShadow: 'var(--shadow-xl)', border: '1px solid var(--color-border)' }}>
           <NumbersBody numbers={numbers} loading={loading} filter={filter} setFilter={setFilter}
-            onCopy={copyNumber} copied={copied} onStatus={setStatus} onRefresh={load} onClose={() => setInPageOpen(false)} />
+            onCopy={copyNumber} copied={copied} onStatus={setStatus} onRefresh={load} onClose={() => setInPageOpen(false)}
+            shortcodes={shortcodes} onSaveNote={saveNote} onSavePersonal={savePersonal} onDeletePersonal={deletePersonal} />
         </div>
       )}
     </>
