@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, LogOut, Loader2, Headphones,
-  Calendar, User, Search, RefreshCw, AudioLines, Sparkles, X,
+  Calendar, User, Search, RefreshCw, AudioLines, Sparkles, X, Download, Clock,
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +31,8 @@ export default function ClientPortal() {
   const [playing, setPlaying]        = useState(false);
   const [cur, setCur]                = useState(0);
   const [dur, setDur]                = useState(0);
+  const [durations, setDurations]    = useState({});   // sale id → length (s), learned on play
+  const [downloading, setDownloading] = useState(null); // sale id currently downloading
 
   const audioRef    = useRef(null);
   const urlRef      = useRef(null);
@@ -137,6 +139,28 @@ export default function ClientPortal() {
       : client.get(`portal/sales/${sale.id}/recording`, { responseType: 'blob' }));
   };
 
+  // Download the recording to the CLIENT'S device. It streams from the dialer
+  // through the proxy into a browser blob, then Save — nothing is written on the
+  // CRM/server (same stream endpoint the player uses).
+  const downloadSale = async (sale, e) => {
+    e?.stopPropagation();
+    if (downloading) return;
+    setDownloading(sale.id);
+    try {
+      const res = sale.isTest
+        ? await client.get('portal/test-audio', { responseType: 'blob' })
+        : await client.get(`portal/sales/${sale.id}/recording`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      const safe = (sale.customer_name || 'call').replace(/[^\w]+/g, '_').slice(0, 40);
+      a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}.mp3`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setAudioErr(err?.response?.status === 404 ? 'No recording available to download.' : 'Could not download this recording.');
+    } finally { setDownloading(null); }
+  };
+
   const toggle = () => { const a = audioRef.current; if (!a) return; a.paused ? a.play() : a.pause(); };
   const skip   = (d) => { const a = audioRef.current; if (!a) return; a.currentTime = Math.min(Math.max(0, a.currentTime + d), dur || a.duration || 0); };
   const seek   = (e) => { const a = audioRef.current; if (!a) return; a.currentTime = Number(e.target.value); setCur(Number(e.target.value)); };
@@ -219,20 +243,27 @@ export default function ClientPortal() {
               {filtered.map(s => {
                 const on = selected?.id === s.id;
                 return (
-                  <button key={s.id} onClick={() => playSale(s)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                  <div key={s.id} className="flex items-center gap-1 rounded-xl transition-all"
                     style={{ background: on ? 'linear-gradient(90deg,rgba(99,102,241,0.2),rgba(139,92,246,0.06))' : 'rgba(148,163,184,0.04)', border: `1px solid ${on ? 'rgba(99,102,241,0.55)' : 'rgba(148,163,184,0.1)'}`, transform: on ? 'translateX(2px)' : 'none' }}>
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(148,163,184,0.1)' }}>
-                      {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold truncate" style={{ color: '#f1f5f9' }}>{s.customer_name}</div>
-                      <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: '#64748b' }}>
-                        <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
-                        <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                        {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
+                    <button onClick={() => playSale(s)} className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(148,163,184,0.1)' }}>
+                        {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
                       </div>
-                    </div>
-                  </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate" style={{ color: '#f1f5f9' }}>{s.customer_name}</div>
+                        <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: '#64748b' }}>
+                          <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
+                          <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
+                          {durations[s.id] ? <span className="flex items-center gap-1 tabular-nums"><Clock size={11} />{fmt(durations[s.id])}</span> : null}
+                          {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
+                        </div>
+                      </div>
+                    </button>
+                    <button onClick={(e) => downloadSale(s, e)} disabled={downloading === s.id}
+                      className="p-2.5 mr-2 rounded-lg hover:bg-white/5 flex-shrink-0" title="Download recording to your device">
+                      {downloading === s.id ? <Loader2 size={16} className="animate-spin" style={{ color: '#94a3b8' }} /> : <Download size={16} style={{ color: '#94a3b8' }} />}
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -260,6 +291,9 @@ export default function ClientPortal() {
                 {audioLoading ? <Loader2 size={19} className="animate-spin text-white" /> : playing ? <Pause size={19} className="text-white" /> : <Play size={19} className="text-white" />}
               </button>
               <button onClick={() => skip(10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipForward size={18} style={{ color: '#cbd5e1' }} /></button>
+              <button onClick={(e) => downloadSale(selected, e)} disabled={downloading === selected.id} className="p-2 rounded-lg hover:bg-white/5" title="Download to your device">
+                {downloading === selected.id ? <Loader2 size={18} className="animate-spin" style={{ color: '#cbd5e1' }} /> : <Download size={18} style={{ color: '#cbd5e1' }} />}
+              </button>
               <button onClick={() => { audioRef.current?.pause(); setSelected(null); }} className="p-2 rounded-lg hover:bg-white/5 ml-1"><X size={16} style={{ color: '#64748b' }} /></button>
             </div>
             {audioErr ? (
@@ -281,7 +315,7 @@ export default function ClientPortal() {
       <audio ref={audioRef} crossOrigin="anonymous"
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)}
         onTimeUpdate={() => setCur(audioRef.current?.currentTime || 0)}
-        onLoadedMetadata={() => setDur(audioRef.current?.duration || 0)}
+        onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setDur(d); if (selected?.id && d && isFinite(d)) setDurations(m => ({ ...m, [selected.id]: d })); }}
         controlsList="nodownload" className="hidden" />
 
       <span style={{ position: 'fixed', bottom: 3, right: 6, fontSize: 8, letterSpacing: 1, color: '#94a3b8', opacity: 0.05, userSelect: 'none', pointerEvents: 'none' }}>am · bv</span>
