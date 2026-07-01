@@ -38,6 +38,7 @@ function CandidateList({ candidates, loading, chosen, setChosen, emptyText }) {
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [playingId, setPlayingId] = useState(null);
   const [loadingId, setLoadingId] = useState(null);
+  const [loadedRid, setLoadedRid] = useState(null);
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
 
   const play = async (c) => {
@@ -50,7 +51,7 @@ function CandidateList({ candidates, loading, chosen, setChosen, emptyText }) {
       });
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       const url = URL.createObjectURL(res.data); urlRef.current = url;
-      a.src = url; a.dataset.rid = c.recording_id; a.load(); a.play().catch(() => {});
+      a.src = url; a.dataset.rid = c.recording_id; setLoadedRid(c.recording_id); a.load(); a.play().catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
@@ -117,7 +118,14 @@ function CandidateList({ candidates, loading, chosen, setChosen, emptyText }) {
           </div>
         );
       })}
-      <audio ref={audioRef} className="hidden" onPlay={() => setPlayingId(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingId(null)} onEnded={() => setPlayingId(null)} />
+      {/* FIX 1 — real inline player with native controls (seek bar, time, volume).
+          The per-card ▶ loads the clip; the stream is blob-fetched with the
+          compliance auth header (a raw <audio src> to the authed route would 401),
+          so the src is an object URL. Visible once a clip has been loaded. */}
+      <div className="sticky bottom-0 pt-2" style={{ background: 'var(--color-bg)', display: loadedRid ? 'block' : 'none' }}>
+        <audio ref={audioRef} controls className="w-full"
+          onPlay={() => setPlayingId(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingId(null)} onEnded={() => setPlayingId(null)} />
+      </div>
     </div>
   );
 }
@@ -129,6 +137,11 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
   const [chosen, setChosen] = useState([]);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  // FIX 2 — manual phone-search fallback when the auto lookup finds nothing
+  const [manualMode, setManualMode] = useState(false);
+  const [manualCands, setManualCands] = useState(null);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [mPhone, setMPhone] = useState(''); const [mFrom, setMFrom] = useState(''); const [mTo, setMTo] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,7 +157,10 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
   useEffect(() => { load(); }, [load]);
 
   const sale = data?.sale || {};
-  const candidates = data?.candidates || [];
+  // Fall back to already-confirmed clips when the auto lookup returns nothing, so a
+  // re-review of a manually-linked sale still shows its confirmed recordings.
+  const autoCandidates = (data?.candidates && data.candidates.length) ? data.candidates : (data?.existing || []);
+  const candidates = manualMode ? (manualCands || []) : autoCandidates;
   const byId = useMemo(() => new Map(candidates.map(c => [c.recording_id, c])), [candidates]);
   const hadExisting = (data?.existing || []).length > 0;
 
@@ -164,6 +180,25 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
     try { await client.delete(`compliance/recordings/confirm/${saleId}`); toast.success('Sent back to pending'); onConfirmed(saleId); }
     catch (e) { toast.error(e.response?.data?.error || 'Could not clear'); }
     finally { setSaving(false); }
+  };
+
+  // FIX 2 — locate a recording by phone when the automatic lookup found none.
+  // Results feed the SAME CandidateList → confirming saves against THIS sale.
+  const runManualSearch = async (phone, from, to) => {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length < 4) { toast.error('Enter at least 4 digits'); return; }
+    setManualBusy(true);
+    try {
+      const r = await client.get('compliance/recordings/candidates', { params: { phone: digits, date_from: from || undefined, date_to: to || undefined } });
+      setManualCands(r.data.candidates || []);
+    } catch (e) { toast.error(e.response?.data?.error || 'Search failed'); setManualCands([]); }
+    finally { setManualBusy(false); }
+  };
+  const startManual = () => {
+    const digits = String(sale.phone || '').replace(/\D/g, '');
+    setMPhone(digits); setMFrom(sale.sale_date || ''); setMTo(sale.sale_date || '');
+    setChosen([]); setManualMode(true);
+    if (digits.length >= 4) runManualSearch(digits, sale.sale_date, sale.sale_date);
   };
 
   return (
@@ -187,10 +222,29 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
           </button>
         </>
       }>
-      <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-        Every recording on this lead — pick the actual sale call{hadExisting ? ' (currently confirmed pre-selected)' : ''}:
-      </div>
-      <CandidateList candidates={candidates} loading={loading} chosen={chosen} setChosen={setChosen} />
+      {!loading && !manualMode && autoCandidates.length === 0 ? (
+        <div className="p-4 rounded-xl text-center space-y-3" style={{ background: 'var(--color-warning-50, rgba(217,119,6,0.08))', border: '1px solid var(--color-warning-200, rgba(217,119,6,0.25))' }}>
+          <div className="flex items-center justify-center gap-2 text-sm font-bold" style={{ color: 'var(--color-warning-700, #b45309)' }}><AlertTriangle size={16} /> No recording found automatically</div>
+          <div className="text-xs max-w-md mx-auto" style={{ color: 'var(--color-text-secondary)' }}>The lead-id / agent+date lookup returned nothing. Search the dialer by phone number to locate it manually — once you confirm it, it saves to this sale and is found instantly every time after, straight from the CRM.</div>
+          <button onClick={startManual} className="text-sm font-bold px-4 py-2 rounded-lg inline-flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Search size={15} /> Search by phone to locate it</button>
+        </div>
+      ) : (
+        <>
+          {manualMode && (
+            <div className="p-2.5 rounded-xl mb-3 flex items-end gap-2 flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <div className="flex-1 min-w-[130px]"><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>Phone</label><input value={mPhone} onChange={e => setMPhone(e.target.value)} inputMode="tel" onKeyDown={e => e.key === 'Enter' && runManualSearch(mPhone, mFrom, mTo)} style={{ ...inp }} /></div>
+              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>From</label><input type="date" value={mFrom} onChange={e => setMFrom(e.target.value)} style={inp} /></div>
+              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>To</label><input type="date" value={mTo} onChange={e => setMTo(e.target.value)} style={inp} /></div>
+              <button onClick={() => runManualSearch(mPhone, mFrom, mTo)} disabled={manualBusy} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{manualBusy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Search</button>
+              <button onClick={() => { setManualMode(false); setManualCands(null); setChosen((data?.existing || []).map(c => c.recording_id)); }} className="text-xs font-semibold px-2 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Back</button>
+            </div>
+          )}
+          <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+            {manualMode ? 'Phone-search results — pick the actual sale call, then Confirm to save it to this sale:' : `Every recording on this lead — pick the actual sale call${hadExisting ? ' (currently confirmed pre-selected)' : ''}:`}
+          </div>
+          <CandidateList candidates={candidates} loading={loading || manualBusy} chosen={chosen} setChosen={setChosen} emptyText={manualMode ? 'No recordings for that number/date on the dialer.' : undefined} />
+        </>
+      )}
     </Modal>
   );
 }

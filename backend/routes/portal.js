@@ -579,4 +579,22 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
   return pipeAudio(req, res, rec.location);
 }));
 
+// Per-clip list for the multi-recording dropdown. GATE ON → the compliance-
+// confirmed clips in order with their STORED durations + recording_id (so the
+// portal labels "Call N (m:ss)" from the confirmation, matching what plays).
+// GATE OFF → empty (findSaleRecording resolves a single recording, no split).
+router.get('/sales/:id/clips', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
+  const closers = req.portalClient.closer_ids || [];
+  const clients = req.portalClient.client_names || [];
+  const { data: sale } = await supabaseAdmin.from('sales').select('id, closer_id, client_name').eq('id', req.params.id).maybeSingle();
+  const okCloser = !closers.length || closers.includes(sale?.closer_id);
+  const okClient = !clients.length || clients.includes(sale?.client_name);
+  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) return res.status(404).json({ error: 'Not available' });
+  if (!recordingReviewGateOn()) return res.json({ clips: [] });
+  const { data: confs } = await supabaseAdmin
+    .from('sale_recording_confirmations').select('clip_order, duration, recording_id')
+    .eq('sale_id', sale.id).order('clip_order', { ascending: true });
+  res.json({ clips: (confs || []).map(c => ({ clip_order: c.clip_order, duration: c.duration || null, recording_id: c.recording_id })) });
+}));
+
 module.exports = router;

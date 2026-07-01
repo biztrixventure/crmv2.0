@@ -56,6 +56,7 @@ export default function ClientPortal() {
   const [cur, setCur]                = useState(0);
   const [dur, setDur]                = useState(0);
   const [part, setPart]              = useState(0);     // current clip index for split (multi-part) sales
+  const [clipMeta, setClipMeta]      = useState([]);   // per-clip [{clip_order, duration, recording_id}] for the selected sale
   const [durations, setDurations]    = useState({});   // sale id → length (s)
   const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording (gate OFF)
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
@@ -218,6 +219,12 @@ export default function ClientPortal() {
   const playSale = (sale) => {
     setSelected(sale);
     setPart(0);
+    setClipMeta([]);
+    // Multi-clip sale → pull the confirmed clip list (labels + stored durations)
+    // so the dropdown can show "Call 1 (4:32)" etc.
+    if (!sale.isTest && (sale.clips || 0) > 1) {
+      client.get(`portal/sales/${sale.id}/clips`).then(r => setClipMeta(r.data.clips || [])).catch(() => {});
+    }
     loadPart(sale, sale.isTest ? null : 0);
   };
 
@@ -403,9 +410,16 @@ export default function ClientPortal() {
                 {clipCount > 1 && (
                   <div className="flex items-center gap-1.5 mt-1">
                     <button onClick={() => goPart(part - 1)} disabled={part === 0 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>‹</button>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: P.tint2, color: P.accent }}>Part {part + 1} / {clipCount}</span>
+                    {/* dropdown: pick which confirmed call to play */}
+                    <select value={part} onChange={e => goPart(Number(e.target.value))} disabled={audioLoading}
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer" style={{ background: P.tint2, color: P.accent, border: 'none' }}>
+                      {Array.from({ length: clipCount }, (_, i) => {
+                        const d = clipMeta[i]?.duration;
+                        return <option key={i} value={i} style={{ color: '#111' }}>Call {i + 1}{d ? ` (${fmt(d)})` : ''}</option>;
+                      })}
+                    </select>
                     <button onClick={() => goPart(part + 1)} disabled={part === clipCount - 1 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>›</button>
-                    <span className="text-[10px]" style={{ color: P.muted }}>plays in sequence</span>
+                    <span className="text-[10px]" style={{ color: P.muted }}>of {clipCount}</span>
                   </div>
                 )}
               </div>
@@ -439,7 +453,15 @@ export default function ClientPortal() {
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
         onEnded={() => { if (selected && !selected.isTest && part < clipCount - 1) { const n = part + 1; setPart(n); loadPart(selected, n); } else setPlaying(false); }}
         onTimeUpdate={() => setCur(audioRef.current?.currentTime || 0)}
-        onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setDur(d); if (selected?.id && d && isFinite(d) && clipCount === 1) setDurations(m => ({ ...m, [selected.id]: d })); }}
+        onLoadedMetadata={() => {
+          const d = audioRef.current?.duration || 0; setDur(d);
+          // FIX 3 — only FILL the displayed length from the decoded audio when we
+          // don't already have a value. A compliance-confirmed sale's duration
+          // comes from the stored confirmation (server) — never overwrite it with
+          // the browser-decoded length, so the portal always shows exactly what
+          // compliance confirmed.
+          if (selected?.id && d && isFinite(d) && clipCount === 1 && !durations[selected.id]) setDurations(m => ({ ...m, [selected.id]: d }));
+        }}
         controlsList="nodownload" className="hidden" />
 
       <span style={{ position: 'fixed', bottom: 3, right: 6, fontSize: 8, letterSpacing: 1, color: '#8B7355', opacity: 0.06, userSelect: 'none', pointerEvents: 'none' }}>am · bv</span>
