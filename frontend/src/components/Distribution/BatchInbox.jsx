@@ -8,6 +8,7 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import UserPicker from './UserPicker';
 import RulePreview from './RulePreview';
+import FilterBar from '../UI/FilterBar';
 
 const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
 const EX_REASON = { already_assigned: 'already assigned', transferred_by_you: 'they transferred it', transferred_by_anyone: 'transferred by someone' };
@@ -20,6 +21,10 @@ export default function BatchInbox() {
   const isSuper = user?.role === 'superadmin';
   const canSend = SENDER_ROLES.has(user?.role);
   const [box, setBox] = useState('received');   // received | sent | all(superadmin)
+  const [q, setQ] = useState('');
+  const [dr, setDr] = useState({ date_from: '', date_to: '' });
+  const [companyId, setCompanyId] = useState('');
+  const [companies, setCompanies] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(null);   // batch being viewed
@@ -28,32 +33,58 @@ export default function BatchInbox() {
     setLoading(true);
     try {
       const params = box === 'all' ? { scope: 'all' } : { box };
+      if (q)           params.q = q;
+      if (dr.date_from) params.date_from = dr.date_from;
+      if (dr.date_to)   params.date_to = dr.date_to;
+      if (companyId)   params.company_id = companyId;
       const r = await client.get('distribution-batches/received', { params });
       setRows(r.data.batches || []);
     } catch (e) { toast.error(e.response?.data?.error || 'Could not load batches'); setRows([]); }
     finally { setLoading(false); }
-  }, [box]);
+  }, [box, q, dr.date_from, dr.date_to, companyId]);
   useEffect(() => { load(); }, [load]);
 
+  // Company options for the superadmin "extras" filter (existing /companies endpoint).
+  useEffect(() => {
+    if (!isSuper) return;
+    client.get('companies').then(r => setCompanies(r.data?.companies || r.data || [])).catch(() => {});
+  }, [isSuper]);
+
   const tabs = [['received', 'Received', Inbox], ['sent', 'Sent', Upload], ...(isSuper ? [['all', 'All', Globe]] : [])];
+  const statusPills = (
+    <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      {tabs.map(([k, label, Icon]) => (
+        <button key={k} onClick={() => setBox(k)} className="text-xs font-semibold px-3 py-1.5 flex items-center gap-1"
+          style={{ background: box === k ? 'var(--gradient-sidebar)' : 'transparent', color: box === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>
+          <Icon size={13} /> {label}
+        </button>
+      ))}
+    </div>
+  );
+  const extras = isSuper ? (
+    <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Company">
+      <option value="">All companies</option>
+      {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </select>
+  ) : null;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2">
         <Boxes size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Batch Distribution</h2>
-        <div className="ml-2 flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-          {tabs.map(([k, label, Icon]) => (
-            <button key={k} onClick={() => setBox(k)} className="text-xs font-semibold px-3 py-1.5 flex items-center gap-1"
-              style={{ background: box === k ? 'var(--gradient-sidebar)' : 'transparent', color: box === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>
-              <Icon size={13} /> {label}
-            </button>
-          ))}
-        </div>
         <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} title="Refresh">
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} />
         </button>
       </div>
+
+      <FilterBar
+        search={{ value: q, onChange: setQ, placeholder: 'Search batch, phone, or person…' }}
+        dateRange={{ value: dr, onChange: setDr, defaultPreset: 'all' }}
+        statusPills={statusPills}
+        extras={extras}
+        onClearAll={() => { setBox('received'); setCompanyId(''); }}
+      />
 
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
@@ -231,7 +262,7 @@ function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
   );
 }
 
-function Lineage({ data, onBack }) {
+export function Lineage({ data, onBack }) {
   const Row = ({ b }) => (
     <div className="flex items-center gap-2 py-1.5" style={{ paddingLeft: (b.depth || 0) * 16 }}>
       {b.depth > 0 && <ArrowDownRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />}

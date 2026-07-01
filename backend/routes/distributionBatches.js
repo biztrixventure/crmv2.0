@@ -9,7 +9,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
+const { isSuperAdmin, getUserCompanies } = require('../models/helpers');
 const notifications = require('../utils/notificationService');
 const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
 const logger = require('../utils/logger');
@@ -71,18 +71,89 @@ router.get('/recipients', asyncHandler(async (req, res) => {
 router.get('/received', asyncHandler(async (req, res) => {
   const sa = await isSuperAdmin(req.user.id);
   const box = req.query.box === 'sent' ? 'sent' : 'received';
-  let q = supabaseAdmin.from('distribution_batches').select('*').eq('status', 'active').order('sent_at', { ascending: false }).limit(300);
+  // Optional filter chrome (FilterBar). ALL optional — absent → same query as before.
+  const search    = String(req.query.q || '').trim();
+  const companyId = req.query.company_id || null;
+  const dateFrom  = req.query.date_from || null;
+  const dateTo    = req.query.date_to || null;
+
+  let query = supabaseAdmin.from('distribution_batches').select('*').eq('status', 'active').order('sent_at', { ascending: false }).limit(300);
   if (sa && req.query.scope === 'all') { /* no owner filter */ }
-  else if (box === 'sent') q = q.eq('created_by', req.user.id);
-  else q = q.eq('sent_to_user_id', req.user.id);
-  const { data: rows } = await q;
-  const names = await namesFor((rows || []).flatMap(b => [b.created_by, b.sent_to_user_id]));
-  res.json({ batches: (rows || []).map(b => ({
+  else if (box === 'sent') query = query.eq('created_by', req.user.id);
+  else query = query.eq('sent_to_user_id', req.user.id);
+  if (companyId) query = query.eq('company_id', companyId);
+  if (dateFrom)  query = query.gte('sent_at', dateFrom);
+  if (dateTo)    query = query.lte('sent_at', `${dateTo}T23:59:59.999Z`);   // inclusive end-of-day
+  const { data: rows } = await query;
+
+  let list = rows || [];
+  const names = await namesFor(list.flatMap(b => [b.created_by, b.sent_to_user_id]));
+
+  // Free-text search over batch name / sender / recipient names, plus phone via a
+  // scoped item lookup — applied in-process over the (<=300) visible batches so no
+  // new endpoint is needed. Absent q → this whole block is skipped.
+  if (search && list.length) {
+    const term = search.toLowerCase();
+    const digits = search.replace(/\D/g, '');
+    let phoneIds = new Set();
+    if (digits.length >= 3) {
+      const { data: hits } = await supabaseAdmin.from('distribution_batch_items')
+        .select('batch_id').in('batch_id', list.map(b => b.id)).ilike('phone_number', `%${digits}%`);
+      (hits || []).forEach(h => phoneIds.add(h.batch_id));
+    }
+    list = list.filter(b =>
+      (b.name || '').toLowerCase().includes(term) ||
+      (names[b.created_by] || '').toLowerCase().includes(term) ||
+      (names[b.sent_to_user_id] || '').toLowerCase().includes(term) ||
+      phoneIds.has(b.id));
+  }
+
+  res.json({ batches: list.map(b => ({
     id: b.id, name: b.name, source: b.source, parent_batch_id: b.parent_batch_id,
     created_by: b.created_by, created_by_name: names[b.created_by] || null,
     sent_to_user_id: b.sent_to_user_id, sent_to_name: names[b.sent_to_user_id] || null,
     sent_at: b.sent_at, item_count: b.item_count, company_id: b.company_id,
   })) });
+}));
+
+// ── roster: flat, cross-chain "all assigned numbers" (one row per assignment) ──
+// Scoped in the RPC (mig 159): superadmin/compliance/readonly see everything;
+// managers see their tree (sent/received + descendants) UNION their company's
+// fronter batches. Lineage stays on-demand via /:id/lineage.
+const ROSTER_ROLES = new Set(['superadmin', 'readonly_admin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
+const UNRESTRICTED_ROLES = new Set(['superadmin', 'readonly_admin', 'compliance_manager']);
+router.get('/roster', asyncHandler(async (req, res) => {
+  if (!ROSTER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  const sa = await isSuperAdmin(req.user.id);
+  const unrestricted = sa || UNRESTRICTED_ROLES.has(req.user.role);
+  const companyIds = unrestricted ? null : (await getUserCompanies(req.user.id)).map(c => c.id);
+
+  const limit  = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+  const { data, error } = await supabaseAdmin.rpc('app_batch_roster', {
+    p_user: req.user.id,
+    p_unrestricted: unrestricted,
+    p_company_ids: (companyIds && companyIds.length) ? companyIds : null,
+    p_search: (req.query.q || '').trim() || null,
+    p_status: req.query.status || null,
+    p_company_id: req.query.company_id || null,
+    p_date_from: req.query.date_from || null,
+    p_date_to: req.query.date_to || null,
+    p_limit: limit, p_offset: offset,
+  });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const rows = data || [];
+  // total_count only on page 1 (RPC returns 0 past it) — client keeps it (like Y3).
+  const total = offset === 0 ? (rows.length ? Number(rows[0].total_count) : 0) : null;
+  const names = await namesFor(rows.flatMap(r => [r.holder_id, r.sender_id]));
+  const roster = rows.map(({ total_count, ...r }) => ({
+    ...r,
+    holder_name: names[r.holder_id] || null,
+    sender_name: names[r.sender_id] || null,
+  }));
+  res.json({ roster, total, limit, offset });
 }));
 
 // ── one batch's items ─────────────────────────────────────────────────────────
@@ -107,8 +178,12 @@ router.post('/:id/sub-batch', asyncHandler(async (req, res) => {
   const itemIds = Array.isArray(req.body.item_ids) ? req.body.item_ids.filter(Boolean) : null;   // null = all
   const name = String(req.body.name || `${batch.name} → sub-batch`).slice(0, 200);
 
-  // pull the source items to copy
-  let sel = supabaseAdmin.from('distribution_batch_items').select('phone_number, lead_id, customer_name').eq('batch_id', batch.id);
+  // pull the source items to copy, in the parent's sequence (position, then the
+  // legacy created_at order for any pre-158 rows) so the child preserves order.
+  let sel = supabaseAdmin.from('distribution_batch_items').select('phone_number, lead_id, customer_name')
+    .eq('batch_id', batch.id)
+    .order('position', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
   if (itemIds && itemIds.length) sel = sel.in('id', itemIds);
   const { data: srcItems } = await sel;
   if (!srcItems || !srcItems.length) return res.status(400).json({ error: 'No items to send' });
@@ -130,9 +205,10 @@ router.post('/:id/sub-batch', asyncHandler(async (req, res) => {
   const dialer = await isDialerRecipient(recipientId);
   const exMap = dialer ? await ruleExclusions(srcItems.map(s => s.phone_number), recipientId, child.company_id, rules) : new Map();
 
-  const rows = srcItems.map(s => {
+  const rows = srcItems.map((s, idx) => {
     const reason = exMap.get(s.phone_number);
-    return { batch_id: child.id, phone_number: s.phone_number, lead_id: s.lead_id || null, customer_name: s.customer_name || null, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
+    // fresh 1-based position in the child, preserving the parent's order.
+    return { batch_id: child.id, position: idx + 1, phone_number: s.phone_number, lead_id: s.lead_id || null, customer_name: s.customer_name || null, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
   });
   const { error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows);
   if (iErr) { await supabaseAdmin.from('distribution_batches').delete().eq('id', child.id); return res.status(500).json({ error: iErr.message }); }

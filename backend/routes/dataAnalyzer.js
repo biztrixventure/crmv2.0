@@ -559,9 +559,10 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
   const dialer = await isDialerRecipient(recipientId);
   const exMap = dialer ? await ruleExclusions(items.map(i => i.phone_number), recipientId, rcr?.company_id, rules) : new Map();
 
-  const rows = items.map(i => {
+  const rows = items.map((i, idx) => {
     const reason = exMap.get(i.phone_number);
-    return { batch_id: batch.id, phone_number: i.phone_number, customer_name: i.customer_name, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
+    // position = 1-based insertion order within this batch (Phase A foundation).
+    return { batch_id: batch.id, position: idx + 1, phone_number: i.phone_number, customer_name: i.customer_name, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
   });
   for (let i = 0; i < rows.length; i += 1000) {
     const { error } = await supabaseAdmin.from('distribution_batch_items').insert(rows.slice(i, i + 1000));
