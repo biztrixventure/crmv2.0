@@ -24,15 +24,17 @@ const MarqueeBanner = () => {
     return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [user?.id]);
 
-  // Rotate through multiple active items.
-  useEffect(() => {
-    if (items.length < 2) { setIdx(0); return; }
-    const t = setInterval(() => setIdx(i => (i + 1) % items.length), 15000);
-    return () => clearInterval(t);
-  }, [items.length]);
+  // Advance is driven by the scroll actually finishing (MarqueeStrip.onDone),
+  // not a fixed timer — so the next item starts only once the current one has
+  // fully scrolled off, and a single item just loops. `pass` bumps every
+  // completed scroll to remount the strip and start the next pass cleanly.
+  const [pass, setPass] = useState(0);
+  const sig = items.map(i => i.id).join(',');   // reset only when the item SET changes
+  useEffect(() => { setIdx(0); setPass(p => p + 1); }, [sig]);
 
   if (!items.length) return null;
-  return <MarqueeStrip item={items[idx % items.length]} />;
+  const advance = () => { setIdx(i => (i + 1) % items.length); setPass(p => p + 1); };
+  return <MarqueeStrip key={pass} item={items[idx % items.length]} onDone={advance} />;
 };
 
 export default MarqueeBanner;
