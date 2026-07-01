@@ -18,7 +18,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
-  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database,
+  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -200,6 +200,7 @@ const StaffShell = () => {
     ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
+    ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
   ];
 
   // Sale modal

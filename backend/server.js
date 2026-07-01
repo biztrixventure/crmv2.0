@@ -37,6 +37,7 @@ const leadIntelligenceRoutes    = require('./routes/leadIntelligence');
 const dispositionConfigsRoutes  = require('./routes/dispositionConfigs');
 const zipcodeRoutes             = require('./routes/zipcode');
 const blacklistRoutes           = require('./routes/blacklist');
+const cardValidatorRoutes       = require('./routes/cardValidator');
 const faqsRoutes                = require('./routes/faqs');
 const scriptsRoutes             = require('./routes/scripts');
 const callChecklistRoutes       = require('./routes/callChecklist');
@@ -290,6 +291,7 @@ app.use('/api/lead-intelligence',    authMiddleware, readonlyGuard, leadIntellig
 app.use('/api/disposition-configs', authMiddleware, readonlyGuard, dispositionConfigsRoutes);
 app.use('/api/zipcode',            authMiddleware, readonlyGuard, zipcodeRoutes);
 app.use('/api/blacklist',          authMiddleware, readonlyGuard, blacklistRoutes);
+app.use('/api/card-validator',     authMiddleware, readonlyGuard, cardValidatorRoutes);
 app.use('/api/faqs',               authMiddleware, readonlyGuard, faqsRoutes);
 app.use('/api/scripts',            authMiddleware, readonlyGuard, scriptsRoutes);
 app.use('/api/call-checklist',     authMiddleware, readonlyGuard, callChecklistRoutes);

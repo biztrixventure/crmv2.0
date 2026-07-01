@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -18,6 +18,7 @@ import DevCredit from '../components/DevCredit';
 import { CalendarClock, AlertTriangle } from 'lucide-react';
 import PaymentRemindersPanel from '../components/Payments/PaymentRemindersPanel';
 import ComplianceDncReport from '../components/Shared/ComplianceDncReport';
+import CardValidator from '../components/Shared/CardValidator';
 import { useFeatureFlags } from '../contexts/FeatureFlagsContext';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
@@ -49,6 +50,7 @@ const CODE_TABS = [
   { key: 'faqs',        label: 'FAQs',               icon: HelpCircle },
   { key: 'questions',   label: 'Call Questions',     icon: ClipboardCheck },
   { key: 'dnc',         label: 'DNC Check',          icon: Shield, flag: 'tool_blacklist_lookup' },
+  { key: 'card_validator', label: 'Card Validator',  icon: CreditCard, flag: 'tool_card_validator' },
 ];
 
 const ComplianceShell = () => {
@@ -239,6 +241,7 @@ const ComplianceShell = () => {
         )}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'dnc' && <ComplianceDncReport />}
+        {activeTab === 'card_validator' && <CardValidator />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

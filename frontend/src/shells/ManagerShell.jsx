@@ -11,7 +11,7 @@ import {
   CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
-  UserCircle, Database, Settings2, Zap, Building2,
+  UserCircle, Database, Settings2, Zap, Building2, CreditCard,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
@@ -229,6 +229,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
+    ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
     ...(isEnabledStrict('tool_compliance_review') ? [{ key: 'tool_compliance_review', label: 'Compliance Review', icon: Shield        }] : []),
     ...(isEnabledStrict('tool_business_rules')    ? [{ key: 'tool_business_rules',    label: 'Business Rules',    icon: Settings2     }] : []),
     ...(isEnabledStrict('tool_feature_admin')     ? [{ key: 'tool_feature_admin',     label: 'Feature Flags',     icon: Zap           }] : []),
