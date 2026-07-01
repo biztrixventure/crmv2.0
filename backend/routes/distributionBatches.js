@@ -241,6 +241,144 @@ router.post('/:id/sub-batch/preview', asyncHandler(async (req, res) => {
   res.json({ ...summarize(phones, exMap), recipient_is_dialer: dialer, rules });
 }));
 
+// ── multi-recipient split: even (or custom) chunks, sequential or random ──────
+// Fisher-Yates shuffle (in place).
+function shuffleInPlace(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+// Per-recipient chunk sizes: explicit counts when given (validated by caller),
+// else an even split with the remainder handed to the first recipients.
+function chunkSizes(n, r, counts) {
+  if (Array.isArray(counts) && counts.length === r) return counts.map(c => Math.max(0, parseInt(c, 10) || 0));
+  const base = Math.floor(n / r), rem = n % r;
+  return Array.from({ length: r }, (_, i) => base + (i < rem ? 1 : 0));
+}
+// Deal position-ordered `items` to recipients as contiguous chunks (sequential)
+// or shuffled chunks (random). Returns [{ recipient_id, items }].
+function planSplit(items, recipientIds, mode, counts) {
+  const pool = mode === 'random' ? shuffleInPlace([...items]) : [...items];
+  const sizes = chunkSizes(pool.length, recipientIds.length, counts);
+  const out = []; let idx = 0;
+  recipientIds.forEach((rid, i) => { const take = sizes[i] || 0; out.push({ recipient_id: rid, items: pool.slice(idx, idx + take) }); idx += take; });
+  return out;
+}
+// Source items in position order, sliced to an optional [from,to] POSITION range.
+async function loadRangeItems(batchId, from, to) {
+  const { data } = await supabaseAdmin.from('distribution_batch_items')
+    .select('id, phone_number, lead_id, customer_name, position')
+    .eq('batch_id', batchId)
+    .order('position', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+  let items = data || [];
+  if (from != null) items = items.filter(it => (it.position ?? 0) >= from);
+  if (to   != null) items = items.filter(it => (it.position ?? 0) <= to);
+  return items;
+}
+// Each recipient's primary (first active) company, resolved in one query.
+async function recipientCompanies(recipientIds) {
+  const { data } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, company_id, created_at').in('user_id', recipientIds).eq('is_active', true)
+    .order('created_at', { ascending: true });
+  const map = {};
+  (data || []).forEach(r => { if (!(r.user_id in map)) map[r.user_id] = r.company_id; });
+  return map;
+}
+function parseSplitBody(body) {
+  const recipientIds = Array.isArray(body.recipient_ids) ? [...new Set(body.recipient_ids.filter(Boolean))] : [];
+  const mode = body.mode === 'random' ? 'random' : 'sequential';
+  const from = (body.from != null && body.from !== '') ? parseInt(body.from, 10) : null;
+  const to   = (body.to   != null && body.to   !== '') ? parseInt(body.to, 10)   : null;
+  const counts = Array.isArray(body.counts) ? body.counts : null;
+  return { recipientIds, mode, from, to, counts };
+}
+
+// dry-run: per-recipient chunk sizes + rule-exclusion counts (sizes exact;
+// exclusions exact for sequential, an estimate for random since the final
+// shuffle differs from this preview's shuffle).
+router.post('/:id/split/preview', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const { recipientIds, mode, from, to, counts } = parseSplitBody(req.body);
+  if (!recipientIds.length) return res.status(400).json({ error: 'recipient_ids is required' });
+  const items = await loadRangeItems(batch.id, from, to);
+  if (!items.length) return res.json({ mode, total: 0, recipients: [] });
+  const plan = planSplit(items, recipientIds, mode, counts);
+  const cmap = await recipientCompanies(recipientIds);
+  const recipients = [];
+  for (const part of plan) {
+    const companyId = cmap[part.recipient_id] || batch.company_id || null;
+    const rules = await getBatchRules(companyId);
+    const dialer = await isDialerRecipient(part.recipient_id);
+    const exMap = dialer ? await ruleExclusions(part.items.map(x => x.phone_number), part.recipient_id, companyId, rules) : new Map();
+    recipients.push({ recipient_id: part.recipient_id, count: part.items.length, excluded: exMap.size, included: part.items.length - exMap.size, recipient_is_dialer: dialer });
+  }
+  res.json({ mode, total: items.length, recipients });
+}));
+
+// Split a range of this batch across many recipients → one child batch each
+// (parent_batch_id = source). Runs the rule-filter per recipient. Best-effort
+// atomic: if any child fails, all children created in this call are rolled back.
+router.post('/:id/split', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to send batches' });
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const { recipientIds, mode, from, to, counts } = parseSplitBody(req.body);
+  if (recipientIds.length < 1) return res.status(400).json({ error: 'At least one recipient is required' });
+
+  const items = await loadRangeItems(batch.id, from, to);
+  if (!items.length) return res.status(400).json({ error: 'No items in the selected range' });
+  if (recipientIds.length > items.length) return res.status(400).json({ error: 'More recipients than numbers in the range' });
+  if (counts) {
+    const sum = counts.reduce((a, b) => a + (parseInt(b, 10) || 0), 0);
+    if (counts.length !== recipientIds.length || sum !== items.length)
+      return res.status(400).json({ error: 'counts must have one entry per recipient and sum to the range size' });
+  }
+
+  const plan = planSplit(items, recipientIds, mode, counts);
+  const cmap = await recipientCompanies(recipientIds);
+  const created = [];
+  const summary = [];
+  try {
+    for (const part of plan) {
+      if (!part.items.length) continue;   // a 0-count recipient gets no batch
+      const companyId = cmap[part.recipient_id] || batch.company_id || null;
+      const rules = await getBatchRules(companyId);
+      const dialer = await isDialerRecipient(part.recipient_id);
+      const exMap = dialer ? await ruleExclusions(part.items.map(x => x.phone_number), part.recipient_id, companyId, rules) : new Map();
+
+      const name = `${batch.name} → split (${mode})`;
+      const { data: child, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
+        name, created_by: req.user.id, parent_batch_id: batch.id, source: 'sub_batch',
+        sent_to_user_id: part.recipient_id, company_id: companyId, item_count: part.items.length,
+      }).select().single();
+      if (bErr) throw new Error(bErr.message);
+      created.push(child.id);
+
+      const rows = part.items.map((it, idx) => {
+        const reason = exMap.get(it.phone_number);
+        // sequential → keep the ORIGINAL position (a contiguous slice is self-
+        // documenting). random → 1-based DEAL ORDER: the persisted, reproducible
+        // audit trail of who got which number in what order (read back with
+        // ORDER BY position on the child batch).
+        const position = mode === 'random' ? (idx + 1) : (it.position ?? (idx + 1));
+        return { batch_id: child.id, position, phone_number: it.phone_number, lead_id: it.lead_id || null, customer_name: it.customer_name || null, ...(reason ? { status: 'excluded', exclusion_reason: reason } : {}) };
+      });
+      const { error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows);
+      if (iErr) throw new Error(iErr.message);
+
+      notifications.notifyUsers([part.recipient_id], {
+        type: 'batch_received', title: 'New batch received',
+        message: `${req.user.name || 'A manager'} sent you "${name}" (${part.items.length - exMap.size} numbers).`,
+        companyId, data: { batch_id: child.id, kind: 'distribution_batch' }, dedupBase: `batch_${child.id}`,
+      }).catch(() => {});
+      summary.push({ batch_id: child.id, recipient_id: part.recipient_id, item_count: part.items.length, excluded_count: exMap.size });
+    }
+  } catch (e) {
+    if (created.length) await supabaseAdmin.from('distribution_batches').delete().in('id', created);   // rollback
+    return res.status(500).json({ error: e.message });
+  }
+  logger.success('DIST_BATCH', `split ${batch.id} (${mode}) → ${summary.length} recipients, ${items.length} numbers, by ${req.user.id}`);
+  res.status(201).json({ mode, total: items.length, children: summary });
+}));
+
 // read-only "active rules" for the current user's company (BatchInbox note)
 router.get('/rules', asyncHandler(async (req, res) => {
   res.json({ rules: await getBatchRules(req.user.company_id || null) });

@@ -3,8 +3,9 @@ import { Search, Loader2, User, Check } from 'lucide-react';
 import client from '../../api/client';
 
 // Reusable "pick any CRM user" list, backed by GET /distribution-batches/recipients.
-// value = the selected user object (or null); onChange(user).
-export default function UserPicker({ value, onChange, placeholder = 'Search a person by name…' }) {
+// Single (default): value = the selected user object (or null); onChange(user).
+// Multi: pass multiple + selected (array of user objects) + onToggle(user).
+export default function UserPicker({ value, onChange, multiple = false, selected = [], onToggle, placeholder = 'Search a person by name…' }) {
   const [q, setQ] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -27,9 +28,10 @@ export default function UserPicker({ value, onChange, placeholder = 'Search a pe
         {loading ? <div className="text-center py-4"><Loader2 size={16} className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
           : users.length === 0 ? <div className="text-center py-4 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No matching users</div>
             : users.map(u => {
-              const on = value?.id === u.id;
+              const on = multiple ? selected.some(s => s.id === u.id) : value?.id === u.id;
+              const pick = () => (multiple ? onToggle?.(u) : onChange?.(u));
               return (
-                <button key={u.id} onClick={() => onChange(u)} className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg"
+                <button key={u.id} onClick={pick} className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg"
                   style={{ background: on ? 'var(--color-surface-hover)' : 'var(--color-surface)', border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
                   <User size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                   <div className="min-w-0 flex-1">
