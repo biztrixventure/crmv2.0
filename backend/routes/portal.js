@@ -246,9 +246,9 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
     if (s) {
       const [{ data: p }, { data: tr }] = await Promise.all([
         supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', s.closer_id).maybeSingle(),
-        s.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', s.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+        s.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', s.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
-      const rec = await findSaleRecording({ code: tr?.vicidial_vendor_code, phone: s.customer_phone, agentIds: p?.vicidial_agent_ids || [], date: s.sale_date, closerId: s.closer_id });
+      const rec = await findSaleRecording({ code: tr?.vicidial_vendor_code, phone: s.customer_phone, agentIds: p?.vicidial_agent_ids || [], date: s.sale_date, dialerAt: tr?.created_at, closerId: s.closer_id });
       sale = { customer: s.customer_name, phone: s.customer_phone, date: s.sale_date, code: tr?.vicidial_vendor_code || null, agents: p?.vicidial_agent_ids || [], found: !!rec, duration: rec?.duration || null };
     } else sale = { error: 'sale not found' };
   }
@@ -421,7 +421,7 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
 
   const [{ data: prof }, { data: tr }] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
-    sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+    sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
   const rec = await findSaleRecording({
@@ -429,6 +429,7 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     phone: sale.customer_phone,
     agentIds: prof?.vicidial_agent_ids || [],
     date: sale.sale_date,
+    dialerAt: tr?.created_at,
     closerId: sale.closer_id,
   });
   if (!rec) {

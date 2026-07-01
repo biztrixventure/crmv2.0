@@ -202,7 +202,7 @@ const phoneTail  = p => { const d = onlyDigits(p); return d.length >= 10 ? d.sli
 // sale conversation, not a quick redial. Returns { location, recording_id,
 // duration, start, box } or null (no match → the portal hides the sale, never
 // plays a wrong recording).
-async function findSaleRecording({ code, phone, agentIds = [], date, closerId } = {}) {
+async function findSaleRecording({ code, phone, agentIds = [], date, dialerAt, closerId } = {}) {
   const tail = phoneTail(phone);
   const matchesPhone = rec => tail && onlyDigits(rec.location).includes(tail);
 
@@ -217,6 +217,22 @@ async function findSaleRecording({ code, phone, agentIds = [], date, closerId } 
   }
   const byCloser = rec => rec.user && agentSet.has(String(rec.user).toUpperCase());
 
+  // Candidate DIALER days for the agent+date fallback. sale_date is NOT reliable
+  // here — it can drift days from the real call (late data entry / manual date),
+  // so anchoring the fallback on it misses the recording. We anchor instead on
+  // the ACTUAL dialer day: the recording start_times on the lead (any leg) and
+  // the transfer's created_at (with EDT/UTC-4 + ±1 day TZ slack), keeping
+  // sale_date only as a last resort. Safe to widen: the agent+date branch is
+  // scoped to the closer's agent AND requires a phone match, so extra days can
+  // only ever match this closer's own calls to this exact customer.
+  const days = new Set();
+  const addDay = v => { const d = String(v || '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) days.add(d); };
+  if (dialerAt) {
+    const base = new Date(dialerAt).getTime();
+    if (Number.isFinite(base)) for (const off of [-4, -4 - 24, -4 + 24]) addDay(new Date(base + off * 3600000).toISOString());
+  }
+  addDay(date);
+
   // 1. Precise path: recordings for the lead_id on the lead's own box, then keep
   //    ONLY the closer's own legs (drops the fronter's original call).
   let pool = [];
@@ -226,6 +242,7 @@ async function findSaleRecording({ code, phone, agentIds = [], date, closerId } 
     const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
     if (box) {
       const raw = await recordingLookup(box, { lead_id: m[2] });
+      raw.forEach(r => addDay(r.start));   // real call day, from ANY leg on this lead
       const mine = raw.filter(byCloser);
       if (mine.length) { pool = mine; fromLeadId = true; }
       // Cross-box transfer: the closer's leg is recorded on a DIFFERENT box than
@@ -239,12 +256,13 @@ async function findSaleRecording({ code, phone, agentIds = [], date, closerId } 
     }
   }
 
-  // 2. Fallback: the closer's agent recordings for the sale date, across all
-  //    boxes. (agent_user already scopes per-agent; byCloser is belt-and-braces.)
-  if (!pool.length && date) {
-    const d = String(date).slice(0, 10);
+  // 2. Fallback: the closer's agent recordings across all boxes, on every
+  //    candidate dialer day. (agent_user already scopes per-agent; byCloser is
+  //    belt-and-braces.)
+  if (!pool.length && days.size) {
     const ids = [...agentSet];
-    const results = await Promise.all(BOXES.flatMap(b => ids.map(a => recordingLookup(b, { agent_user: a, date: d }))));
+    const dl = [...days];
+    const results = await Promise.all(BOXES.flatMap(b => ids.flatMap(a => dl.map(d => recordingLookup(b, { agent_user: a, date: d })))));
     pool = results.flat().filter(byCloser);
   }
   if (!pool.length) return null;
