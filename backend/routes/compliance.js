@@ -219,6 +219,9 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
 router.get('/recordings/queue', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || null;
   const status = ['pending', 'confirmed', 'all'].includes(req.query.status) ? req.query.status : 'pending';
+  const SORTS = new Set(['sale_date', 'customer_name', 'customer_phone', 'closer_name', 'company_name', 'plan', 'monthly_payment', 'status', 'created_at']);
+  const sort = SORTS.has(req.query.sort) ? req.query.sort : 'sale_date';
+  const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 300);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const { data, error } = await supabaseAdmin.rpc('app_recording_review_queue', {
@@ -228,6 +231,7 @@ router.get('/recordings/queue', asyncHandler(async (req, res) => {
     p_closer_id: req.query.closer_id || null,
     p_status: status,
     p_search: (req.query.search || '').trim() || null,
+    p_sort: sort, p_dir: dir,
     p_limit: limit, p_offset: offset,
   });
   if (error) return res.status(500).json({ error: error.message });

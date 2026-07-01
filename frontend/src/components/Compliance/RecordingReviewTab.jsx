@@ -309,18 +309,21 @@ function QueueView({ companyList }) {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(null);
+  const [sort, setSort] = useState({ col: 'sale_date', dir: 'desc' });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { status, limit: PAGE, offset };
+      const params = { status, sort: sort.col, dir: sort.dir, limit: PAGE, offset };
       for (const k of ['date_from', 'date_to', 'company_id', 'closer_id', 'search']) if (filters[k]) params[k] = filters[k];
       const r = await client.get('compliance/recordings/queue', { params });
       setRows(r.data.queue || []); setTotal(r.data.total || 0);
     } catch (e) { toast.error(e.response?.data?.error || 'Could not load the queue'); setRows([]); }
     finally { setLoading(false); }
-  }, [status, filters, offset]);
+  }, [status, filters, offset, sort]);
   useEffect(() => { load(); }, [load]);
+  // click a header → sort by it; click again → flip direction
+  const toggleSort = (col) => { setOffset(0); setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }); };
 
   const closerOptions = useMemo(() => {
     const m = new Map(); for (const r of rows) if (r.closer_id) m.set(r.closer_id, r.closer_name || r.closer_id);
@@ -353,7 +356,7 @@ function QueueView({ companyList }) {
         <Field label="Search">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-            <input value={filters.search} onChange={e => setF('search', e.target.value)} placeholder="name, phone, reference, code" style={{ ...inp, paddingLeft: 30, minWidth: 200 }} />
+            <input value={filters.search} onChange={e => setF('search', e.target.value)} placeholder="Search anything — name, phone, closer, company, product, ref, code" style={{ ...inp, paddingLeft: 30, minWidth: 320 }} />
           </div>
         </Field>
         <Field label="From"><input type="date" value={filters.date_from} onChange={e => setF('date_from', e.target.value)} style={inp} /></Field>
@@ -381,8 +384,19 @@ function QueueView({ companyList }) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
-              {['Sale date', 'Customer', 'Phone', 'Closer', 'Company', 'Product', 'Amount', 'Status', ''].map((h, i) => (
-                <th key={i} className="text-left font-semibold px-3 py-2 text-xs whitespace-nowrap">{h}</th>
+              {[
+                ['Sale date', 'sale_date'], ['Customer', 'customer_name'], ['Phone', 'customer_phone'],
+                ['Closer', 'closer_name'], ['Company', 'company_name'], ['Product', 'plan'],
+                ['Amount', 'monthly_payment'], ['Status', 'status'], ['', null],
+              ].map(([h, key], i) => (
+                <th key={i} onClick={() => key && toggleSort(key)}
+                  className={`text-left font-semibold px-3 py-2 text-xs whitespace-nowrap select-none ${key ? 'cursor-pointer' : ''}`}
+                  style={{ color: sort.col === key ? 'var(--color-primary-600)' : undefined }}>
+                  <span className="inline-flex items-center gap-0.5">
+                    {h}
+                    {key && sort.col === key && (sort.dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                  </span>
+                </th>
               ))}
             </tr>
           </thead>
