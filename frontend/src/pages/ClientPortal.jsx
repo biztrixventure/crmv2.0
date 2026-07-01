@@ -100,7 +100,7 @@ export default function ClientPortal() {
         const h = Math.max(3, v * (H - 4));
         const x = i * (bw + gap), y = (H - h) / 2;
         const g = c.createLinearGradient(0, y, 0, y + h);
-        g.addColorStop(0, '#818cf8'); g.addColorStop(1, '#c084fc');
+        g.addColorStop(0, '#E0B074'); g.addColorStop(1, '#C4894A');
         c.fillStyle = g; c.globalAlpha = data ? 0.55 + v * 0.45 : 0.5;
         const r = Math.min(bw / 2, 3);
         c.beginPath();
@@ -172,20 +172,33 @@ export default function ClientPortal() {
   const pct = dur ? (cur / dur) * 100 : 0;
   const testItem = me.test_audio?.enabled ? { id: '__test__', isTest: true, customer_name: me.test_audio.label || 'Visualizer demo' } : null;
 
+  // Business palette (warm brown/gold, dark) — mirrors the CRM dark theme tokens
+  // so contrast is safe: light cream text on near-black brown, amber accents.
+  const P = {
+    bg: 'radial-gradient(1200px 600px at 80% -10%, #241608 0%, #0D0A07 45%, #080503 100%)',
+    text: '#F0E6D8', sub: '#C0A282', muted: '#8B7355',
+    accent: '#C4894A', grad: 'linear-gradient(135deg,#7A4820 0%,#5A3210 100%)',
+    border: 'rgba(196,137,74,0.16)', borderOn: 'rgba(196,137,74,0.55)',
+    tint: 'rgba(196,137,74,0.05)', tint2: 'rgba(196,137,74,0.10)',
+    active: 'linear-gradient(90deg,rgba(196,137,74,0.22),rgba(122,72,32,0.06))',
+    player: 'rgba(20,13,7,0.94)', shadow: '0 8px 24px -8px rgba(122,72,32,0.7)',
+    progress: 'linear-gradient(90deg,#C4894A,#7A4820)',
+  };
+
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'radial-gradient(1200px 600px at 80% -10%, #1e293b 0%, #0b1120 45%, #060912 100%)', color: '#e2e8f0' }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: P.bg, color: P.text }}>
       {/* header */}
-      <header className="flex-shrink-0 flex items-center justify-between px-5 sm:px-8 py-4" style={{ borderBottom: '1px solid rgba(148,163,184,0.12)' }}>
+      <header className="flex-shrink-0 flex items-center justify-between px-5 sm:px-8 py-4" style={{ borderBottom: `1px solid ${P.border}` }}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#6366f1,#a855f7)', boxShadow: '0 8px 24px -8px rgba(139,92,246,0.6)' }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg" style={{ background: P.grad, boxShadow: P.shadow }}>
             <Headphones size={20} className="text-white" />
           </div>
           <div>
-            <div className="text-sm font-bold tracking-wide">Call Recordings</div>
-            <div className="text-[11px]" style={{ color: '#64748b' }}>{me.name || user?.name || 'Client'}</div>
+            <div className="text-sm font-bold tracking-wide" style={{ color: P.text }}>Call Recordings</div>
+            <div className="text-[11px]" style={{ color: P.sub }}>{me.name || user?.name || 'Client'}</div>
           </div>
         </div>
-        <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors hover:bg-white/5" style={{ background: 'rgba(148,163,184,0.08)', color: '#cbd5e1' }}>
+        <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors hover:bg-white/5" style={{ background: P.tint2, color: P.text }}>
           <LogOut size={14} /> Sign out
         </button>
       </header>
@@ -194,47 +207,58 @@ export default function ClientPortal() {
         <div className="max-w-5xl mx-auto">
           {/* closer chips */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
-            <button onClick={() => setCloser('')} className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all" style={chip(closer === '')}>All closers</button>
+            <button onClick={() => setCloser('')} className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all" style={chip(closer === '', P)}>All closers</button>
             {me.closers.map(c => (
-              <button key={c.id} onClick={() => setCloser(c.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all" style={chip(closer === c.id)}>{c.name}</button>
+              <button key={c.id} onClick={() => setCloser(c.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all" style={chip(closer === c.id, P)}>{c.name}</button>
             ))}
           </div>
 
           {/* search */}
-          <div className="flex items-center gap-2 mb-5">
+          <div className="flex items-center gap-2 mb-4">
             <div className="relative flex-1">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#475569' }} />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: P.muted }} />
               <input value={q} onChange={e => setQ(e.target.value)} inputMode="tel" placeholder="Search by phone number, customer, or closer…"
-                className="w-full text-sm rounded-xl pl-9 pr-3 py-2.5 outline-none transition-all focus:ring-2"
-                style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.14)', color: '#e2e8f0' }} />
+                className="w-full text-sm rounded-xl pl-9 pr-3 py-2.5 outline-none transition-all"
+                style={{ background: P.tint, border: `1px solid ${P.border}`, color: P.text }} />
             </div>
-            <button onClick={() => loadSales(phoneMode ? { phone: digits } : { scan: 120 })} className="p-2.5 rounded-xl hover:bg-white/5" style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.14)' }}>
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: '#94a3b8' }} />
+            <button onClick={() => loadSales(phoneMode ? { phone: digits } : { scan: 120 })} className="p-2.5 rounded-xl hover:bg-white/5" style={{ background: P.tint, border: `1px solid ${P.border}` }}>
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: P.sub }} />
             </button>
           </div>
+
+          {/* count */}
+          {!loading && (
+            <div className="flex items-center gap-1.5 mb-3 text-xs font-bold" style={{ color: P.accent }}>
+              <AudioLines size={14} />
+              {filtered.length} recording{filtered.length === 1 ? '' : 's'}
+              <span className="font-medium" style={{ color: P.muted }}>
+                {closer ? ' · this closer' : ''}{phoneMode ? ` matching “${q.trim()}”` : ''}
+              </span>
+            </div>
+          )}
 
           {/* test-audio banner (superadmin-broadcast demo) */}
           {testItem && !phoneMode && (
             <button onClick={() => playSale(testItem)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left mb-3 transition-all"
-              style={{ background: 'linear-gradient(90deg,rgba(168,85,247,0.18),rgba(99,102,241,0.06))', border: `1px solid ${selected?.id === '__test__' ? 'rgba(168,85,247,0.6)' : 'rgba(168,85,247,0.3)'}` }}>
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)' }}>
+              style={{ background: P.active, border: `1px solid ${selected?.id === '__test__' ? P.borderOn : P.border}` }}>
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: P.grad }}>
                 <Sparkles size={15} className="text-white" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>{testItem.customer_name}</div>
-                <div className="text-[11px]" style={{ color: '#a78bfa' }}>Tap to preview the visualizer</div>
+                <div className="text-sm font-semibold" style={{ color: P.text }}>{testItem.customer_name}</div>
+                <div className="text-[11px]" style={{ color: P.accent }}>Tap to preview the visualizer</div>
               </div>
-              <Play size={16} style={{ color: '#c4b5fd' }} />
+              <Play size={16} style={{ color: P.accent }} />
             </button>
           )}
 
           {/* list */}
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-24" style={{ color: '#475569' }}>
+            <div className="flex flex-col items-center justify-center py-24" style={{ color: P.muted }}>
               <Loader2 size={28} className="animate-spin mb-3" /><p className="text-sm">Loading…</p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center" style={{ color: '#475569' }}>
+            <div className="flex flex-col items-center justify-center py-24 text-center" style={{ color: P.muted }}>
               <AudioLines size={32} className="mb-3" />
               <p className="text-sm">{phoneMode ? `No sale found for "${q.trim()}".` : `No recordings to show${closer ? ' for this closer' : ''}.`}</p>
             </div>
@@ -244,24 +268,24 @@ export default function ClientPortal() {
                 const on = selected?.id === s.id;
                 return (
                   <div key={s.id} className="flex items-center gap-1 rounded-xl transition-all"
-                    style={{ background: on ? 'linear-gradient(90deg,rgba(99,102,241,0.2),rgba(139,92,246,0.06))' : 'rgba(148,163,184,0.04)', border: `1px solid ${on ? 'rgba(99,102,241,0.55)' : 'rgba(148,163,184,0.1)'}`, transform: on ? 'translateX(2px)' : 'none' }}>
+                    style={{ background: on ? P.active : P.tint, border: `1px solid ${on ? P.borderOn : P.border}`, transform: on ? 'translateX(2px)' : 'none' }}>
                     <button onClick={() => playSale(s)} className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'rgba(148,163,184,0.1)' }}>
-                        {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : '#94a3b8' }} />}
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? P.grad : P.tint2 }}>
+                        {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : P.sub }} />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate" style={{ color: '#f1f5f9' }}>{s.customer_name}</div>
-                        <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: '#64748b' }}>
+                        <div className="text-sm font-semibold truncate" style={{ color: P.text }}>{s.customer_name}</div>
+                        <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: P.sub }}>
                           <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
                           <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                          {durations[s.id] ? <span className="flex items-center gap-1 tabular-nums"><Clock size={11} />{fmt(durations[s.id])}</span> : null}
+                          {durations[s.id] ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span> : null}
                           {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
                         </div>
                       </div>
                     </button>
                     <button onClick={(e) => downloadSale(s, e)} disabled={downloading === s.id}
                       className="p-2.5 mr-2 rounded-lg hover:bg-white/5 flex-shrink-0" title="Download recording to your device">
-                      {downloading === s.id ? <Loader2 size={16} className="animate-spin" style={{ color: '#94a3b8' }} /> : <Download size={16} style={{ color: '#94a3b8' }} />}
+                      {downloading === s.id ? <Loader2 size={16} className="animate-spin" style={{ color: P.sub }} /> : <Download size={16} style={{ color: P.accent }} />}
                     </button>
                   </div>
                 );
@@ -273,39 +297,39 @@ export default function ClientPortal() {
 
       {/* now-playing player + visualizer */}
       {selected && (
-        <div className="flex-shrink-0 px-5 sm:px-8 pt-3 pb-4" style={{ background: 'rgba(8,12,22,0.94)', borderTop: '1px solid rgba(148,163,184,0.14)', backdropFilter: 'blur(14px)' }}>
+        <div className="flex-shrink-0 px-5 sm:px-8 pt-3 pb-4" style={{ background: P.player, borderTop: `1px solid ${P.border}`, backdropFilter: 'blur(14px)' }}>
           <div className="max-w-5xl mx-auto">
             {/* visualizer */}
-            <div className="rounded-xl mb-3 overflow-hidden" style={{ height: 64, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(148,163,184,0.1)' }}>
+            <div className="rounded-xl mb-3 overflow-hidden" style={{ height: 64, background: P.tint, border: `1px solid ${P.border}` }}>
               <canvas ref={canvasRef} className="w-full h-full block" />
             </div>
             <div className="flex items-center gap-3 mb-2">
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: '#f1f5f9' }}>
-                  {selected.isTest && <Sparkles size={13} style={{ color: '#a78bfa' }} />}{selected.customer_name}
+                <div className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: P.text }}>
+                  {selected.isTest && <Sparkles size={13} style={{ color: P.accent }} />}{selected.customer_name}
                 </div>
-                {!selected.isTest && <div className="text-[11px] truncate" style={{ color: '#64748b' }}>{selected.closer_name} · {fmtDate(selected.sale_date)}</div>}
+                {!selected.isTest && <div className="text-[11px] truncate" style={{ color: P.sub }}>{selected.closer_name} · {fmtDate(selected.sale_date)}</div>}
               </div>
-              <button onClick={() => skip(-10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipBack size={18} style={{ color: '#cbd5e1' }} /></button>
-              <button onClick={toggle} disabled={audioLoading} className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg,#6366f1,#a855f7)', boxShadow: '0 8px 22px -8px rgba(139,92,246,0.7)' }}>
+              <button onClick={() => skip(-10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipBack size={18} style={{ color: P.text }} /></button>
+              <button onClick={toggle} disabled={audioLoading} className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg" style={{ background: P.grad, boxShadow: P.shadow }}>
                 {audioLoading ? <Loader2 size={19} className="animate-spin text-white" /> : playing ? <Pause size={19} className="text-white" /> : <Play size={19} className="text-white" />}
               </button>
-              <button onClick={() => skip(10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipForward size={18} style={{ color: '#cbd5e1' }} /></button>
+              <button onClick={() => skip(10)} className="p-2 rounded-lg hover:bg-white/5" disabled={audioLoading}><SkipForward size={18} style={{ color: P.text }} /></button>
               <button onClick={(e) => downloadSale(selected, e)} disabled={downloading === selected.id} className="p-2 rounded-lg hover:bg-white/5" title="Download to your device">
-                {downloading === selected.id ? <Loader2 size={18} className="animate-spin" style={{ color: '#cbd5e1' }} /> : <Download size={18} style={{ color: '#cbd5e1' }} />}
+                {downloading === selected.id ? <Loader2 size={18} className="animate-spin" style={{ color: P.text }} /> : <Download size={18} style={{ color: P.text }} />}
               </button>
-              <button onClick={() => { audioRef.current?.pause(); setSelected(null); }} className="p-2 rounded-lg hover:bg-white/5 ml-1"><X size={16} style={{ color: '#64748b' }} /></button>
+              <button onClick={() => { audioRef.current?.pause(); setSelected(null); }} className="p-2 rounded-lg hover:bg-white/5 ml-1"><X size={16} style={{ color: P.sub }} /></button>
             </div>
             {audioErr ? (
-              <p className="text-xs text-center py-1" style={{ color: '#f87171' }}>{audioErr}</p>
+              <p className="text-xs text-center py-1" style={{ color: '#F87171' }}>{audioErr}</p>
             ) : (
               <div className="flex items-center gap-3">
-                <span className="text-[11px] tabular-nums w-10 text-right" style={{ color: '#64748b' }}>{fmt(cur)}</span>
-                <div className="relative flex-1 h-1.5 rounded-full" style={{ background: 'rgba(148,163,184,0.18)' }}>
-                  <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#6366f1,#a855f7)' }} />
+                <span className="text-[11px] tabular-nums w-10 text-right" style={{ color: P.sub }}>{fmt(cur)}</span>
+                <div className="relative flex-1 h-1.5 rounded-full" style={{ background: P.tint2 }}>
+                  <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${pct}%`, background: P.progress }} />
                   <input type="range" min={0} max={dur || 0} step="0.1" value={cur} onChange={seek} className="absolute inset-0 w-full opacity-0 cursor-pointer" style={{ margin: 0 }} />
                 </div>
-                <span className="text-[11px] tabular-nums w-10" style={{ color: '#64748b' }}>{fmt(dur)}</span>
+                <span className="text-[11px] tabular-nums w-10" style={{ color: P.sub }}>{fmt(dur)}</span>
               </div>
             )}
           </div>
@@ -318,13 +342,13 @@ export default function ClientPortal() {
         onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setDur(d); if (selected?.id && d && isFinite(d)) setDurations(m => ({ ...m, [selected.id]: d })); }}
         controlsList="nodownload" className="hidden" />
 
-      <span style={{ position: 'fixed', bottom: 3, right: 6, fontSize: 8, letterSpacing: 1, color: '#94a3b8', opacity: 0.05, userSelect: 'none', pointerEvents: 'none' }}>am · bv</span>
+      <span style={{ position: 'fixed', bottom: 3, right: 6, fontSize: 8, letterSpacing: 1, color: '#8B7355', opacity: 0.06, userSelect: 'none', pointerEvents: 'none' }}>am · bv</span>
     </div>
   );
 }
 
-const chip = (active) => ({
-  background: active ? 'linear-gradient(135deg,#6366f1,#a855f7)' : 'rgba(148,163,184,0.06)',
-  border: `1px solid ${active ? 'transparent' : 'rgba(148,163,184,0.14)'}`,
-  color: active ? '#fff' : '#94a3b8',
+const chip = (active, P) => ({
+  background: active ? P.grad : P.tint,
+  border: `1px solid ${active ? 'transparent' : P.border}`,
+  color: active ? '#fff' : P.sub,
 });
