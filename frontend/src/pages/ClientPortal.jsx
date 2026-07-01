@@ -55,7 +55,8 @@ export default function ClientPortal() {
   const [playing, setPlaying]        = useState(false);
   const [cur, setCur]                = useState(0);
   const [dur, setDur]                = useState(0);
-  const [durations, setDurations]    = useState({});   // sale id → length (s), learned on play
+  const [durations, setDurations]    = useState({});   // sale id → length (s): cached or learned on play
+  const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
   const [dark, setDark] = useState(() => localStorage.getItem('portalTheme') !== 'light');
   const toggleTheme = () => setDark(d => { localStorage.setItem('portalTheme', d ? 'light' : 'dark'); return !d; });
@@ -87,6 +88,45 @@ export default function ClientPortal() {
   }, [loadSales, phoneMode, digits]);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+
+  // Show the exact call length BEFORE playing: seed from cached lengths that came
+  // with the list, then fetch the rest from /recording-meta (which caches them so
+  // next load is instant). Bounded — follows the server's `pending` list.
+  useEffect(() => {
+    if (!sales.length) return;
+    setDurations(prev => {
+      const next = { ...prev };
+      for (const s of sales) if (s.duration && !next[s.id]) next[s.id] = s.duration;
+      return next;
+    });
+    let cancelled = false;
+    (async () => {
+      // ids whose length we don't have yet (skip test row + already-resolved-empty)
+      let ids = sales.filter(s => !s.isTest && !s.duration && !durations[s.id] && !noRec[s.id]).map(s => s.id);
+      let guard = 0;
+      while (ids.length && !cancelled && guard++ < 30) {
+        const chunk = ids.slice(0, 40);
+        let resp;
+        try { resp = await client.post('portal/sales/recording-meta', { ids: chunk }); }
+        catch { break; }
+        if (cancelled) break;
+        const meta = resp.data.meta || {};
+        setDurations(prev => {
+          const next = { ...prev };
+          for (const [id, m] of Object.entries(meta)) if (m.available && m.duration) next[id] = m.duration;
+          return next;
+        });
+        setNoRec(prev => {
+          const next = { ...prev };
+          for (const [id, m] of Object.entries(meta)) if (!m.available) next[id] = true;
+          return next;
+        });
+        ids = [...(resp.data.pending || []), ...ids.slice(40)];
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sales]);
 
   // ── Web Audio graph (built once) + visualizer draw loop ─────────────────────
   const ensureGraph = () => {
@@ -301,7 +341,11 @@ export default function ClientPortal() {
                         <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: P.sub }}>
                           <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
                           <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                          {durations[s.id] ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span> : null}
+                          {durations[s.id]
+                            ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span>
+                            : noRec[s.id]
+                              ? <span className="flex items-center gap-1" style={{ color: P.muted }}><Clock size={11} />no recording</span>
+                              : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
                           {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
                         </div>
                       </div>

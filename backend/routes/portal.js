@@ -364,18 +364,28 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     if (clients.length)      q = q.in('client_name', clients);
     return q;
   };
-  // Pseudonyms for whichever closers actually appear in the results.
+  // Pseudonyms for whichever closers actually appear in the results, plus any
+  // ALREADY-CACHED recording length (portal_recording_meta) so the client sees
+  // the exact call length at first sight — zero dialer calls here (cold ones are
+  // filled in by /sales/recording-meta afterwards).
   const respond = async (rows, extra) => {
     const ids = [...new Set((rows || []).map(r => r.closer_id).filter(Boolean))];
     const pseudo = await getPseudoNames(ids);
-    const sales = (rows || []).map(s => ({
-      id: s.id,
-      customer_name: s.customer_name || '—',
-      phone: s.customer_phone || '',
-      sale_date: s.sale_date,
-      closer_id: s.closer_id,
-      closer_name: pseudo.get(s.closer_id) || 'Agent',
-    }));
+    const metaRows = await fetchIn('portal_recording_meta', 'sale_id, found, duration', 'sale_id', (rows || []).map(r => r.id));
+    const metaBy = new Map(metaRows.map(m => [m.sale_id, m]));
+    const sales = (rows || []).map(s => {
+      const m = metaBy.get(s.id);
+      return {
+        id: s.id,
+        customer_name: s.customer_name || '—',
+        phone: s.customer_phone || '',
+        sale_date: s.sale_date,
+        closer_id: s.closer_id,
+        closer_name: pseudo.get(s.closer_id) || 'Agent',
+        duration: (m && m.found) ? m.duration : null,   // cached exact length (or null)
+        meta_known: !!m,                                 // already resolved (skip re-asking)
+      };
+    });
     res.json({ sales, ...extra });
   };
 
@@ -399,6 +409,64 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
   const { data } = await q;
   return respond(data, { next_offset: (data?.length === limit) ? offset + limit : null });
+}));
+
+// Resolve a sale's recording length (same resolution as the stream route, minus
+// the audio). Returns { found, duration, recording_id }.
+async function resolveRecordingMeta(sale) {
+  const [{ data: prof }, { data: tr }] = await Promise.all([
+    supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
+    sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const rec = await findSaleRecording({
+    code: tr?.vicidial_vendor_code, phone: sale.customer_phone,
+    agentIds: prof?.vicidial_agent_ids || [], date: sale.sale_date, dialerAt: tr?.created_at, closerId: sale.closer_id,
+  });
+  return { found: !!rec, duration: rec?.duration || null, recording_id: rec?.recording_id || null };
+}
+const META_NEG_TTL = 12 * 60 * 60 * 1000;   // re-check a "not found" after 12h (positives cached forever)
+const metaFresh = (row) => row && (row.found || (Date.now() - new Date(row.resolved_at).getTime() < META_NEG_TTL));
+
+// Batch: exact recording length per sale (cached). The portal calls this after
+// the (instant) list to fill in lengths that weren't cached yet, then persists
+// them so next time they show at first sight. Bounded so one call never fans out
+// hundreds of dialer lookups — the rest come back as `pending` for a follow-up.
+router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
+  const closers = req.portalClient.closer_ids || [];
+  const clients = req.portalClient.client_names || [];
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).filter(Boolean))].slice(0, 200);
+  if (!ids.length) return res.json({ meta: {}, pending: [] });
+
+  // scope the requested ids to THIS client's sales (closers AND/OR client_names)
+  const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id', 'id', ids);
+  const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
+  const sales = (srows || []).filter(inScope);
+  if (!sales.length) return res.json({ meta: {}, pending: [] });
+
+  const cached = await fetchIn('portal_recording_meta', '*', 'sale_id', sales.map(s => s.id));
+  const cacheBy = new Map(cached.map(r => [r.sale_id, r]));
+
+  const meta = {};
+  const todo = [];
+  for (const s of sales) {
+    const row = cacheBy.get(s.id);
+    if (metaFresh(row)) meta[s.id] = { available: row.found, duration: row.duration };
+    else todo.push(s);
+  }
+
+  // resolve up to CAP uncached this round; the rest come back as pending
+  const CAP = 24;
+  const pending = todo.slice(CAP).map(s => s.id);
+  await mapLimit(todo.slice(0, CAP), 5, async (s) => {
+    const m = await resolveRecordingMeta(s);
+    meta[s.id] = { available: m.found, duration: m.duration };
+    supabaseAdmin.from('portal_recording_meta').upsert(
+      { sale_id: s.id, found: m.found, duration: m.duration, recording_id: m.recording_id, resolved_at: new Date().toISOString() },
+      { onConflict: 'sale_id' },
+    ).then(() => {}, () => {});
+  });
+
+  res.json({ meta, pending });
 }));
 
 // stream the actual sale recording (source hidden, nothing stored) + audit
@@ -434,8 +502,17 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
   });
   if (!rec) {
     logger.info('PORTAL', `no recording: sale=${sale.id} code=${tr?.vicidial_vendor_code || 'none'} agents=${JSON.stringify(prof?.vicidial_agent_ids || [])} date=${sale.sale_date} (dialer reachable? run /portal/admin/diag)`);
+    supabaseAdmin.from('portal_recording_meta').upsert(
+      { sale_id: sale.id, found: false, duration: null, recording_id: null, resolved_at: new Date().toISOString() },
+      { onConflict: 'sale_id' },
+    ).then(() => {}, () => {});
     return res.status(404).json({ error: 'Recording not available' });
   }
+  // warm the length cache so the list shows it at first sight next time
+  supabaseAdmin.from('portal_recording_meta').upsert(
+    { sale_id: sale.id, found: true, duration: rec.duration || null, recording_id: rec.recording_id || null, resolved_at: new Date().toISOString() },
+    { onConflict: 'sale_id' },
+  ).then(() => {}, () => {});
 
   // audit (best-effort; logged only on the first chunk request, not range seeks)
   if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
