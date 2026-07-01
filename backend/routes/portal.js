@@ -19,17 +19,22 @@ const logger = require('../utils/logger');
 const TEST_AUDIO_KEY = 'portal.test_audio';
 const getTestAudio = async () => (await getConfig(null, TEST_AUDIO_KEY, { enabled: false, url: '', label: 'Visualizer demo' })) || {};
 
-// Global cutover gate for the compliance recording-review workflow.
-//   OFF (default) → the portal live-resolves recordings exactly as before this
-//                   feature (findSaleRecording; no review gate, no 409s).
-//   ON            → confirmed-reference-first; unconfirmed sales return 409
-//                   "pending review" and the client sees "being verified".
-// Flip via env RECORDING_REVIEW_GATE_ENABLED=true once the compliance admin UI
-// is ready. Read per-request so the value takes effect on the next deploy/restart
-// without touching the route code. The candidate-list / confirm / queue endpoints
-// (routes/compliance.js) are NOT gated — reviewers can build the backlog first.
-const recordingReviewGateOn = () =>
-  String(process.env.RECORDING_REVIEW_GATE_ENABLED || '').trim().toLowerCase() === 'true';
+// STRICT cutover gate for the compliance recording-review workflow.
+//   OFF (default) → hybrid: confirmed sales play their linked clips, unconfirmed
+//                   sales live-resolve (findSaleRecording). Nothing hidden.
+//   ON            → confirmed-only; unconfirmed sales return 409 "pending review"
+//                   and the client sees "being verified".
+// Superadmin toggles it from the GUI (stored in business_config, global key) — no
+// env change needed. Falls back to the legacy env RECORDING_REVIEW_GATE_ENABLED
+// only when the config has never been set, so existing envs behave unchanged.
+// Cached 60s by businessConfig. The candidate-list / confirm / queue endpoints
+// (routes/compliance.js) are NOT gated — reviewers build the backlog anytime.
+const GATE_KEY = 'recording_review.strict_gate';
+async function recordingReviewGateOn() {
+  const envDefault = String(process.env.RECORDING_REVIEW_GATE_ENABLED || '').trim().toLowerCase() === 'true';
+  const v = await getConfig(null, GATE_KEY, envDefault);
+  return v === true || v === 'true';
+}
 
 // Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
 // by the recording proxy and the test-audio proxy. `reresolve` (optional) is
@@ -339,6 +344,17 @@ router.patch('/admin/test-audio', authMiddleware, superOnly, asyncHandler(async 
   res.json(next);
 }));
 
+// Strict review-gate toggle (superadmin, GUI). ON → unconfirmed sales show
+// "being verified" instead of live-resolving. OFF (default) → hybrid.
+router.get('/admin/review-gate', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  res.json({ enabled: await recordingReviewGateOn() });
+}));
+router.patch('/admin/review-gate', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const enabled = !!req.body.enabled;
+  await setConfig('global', GATE_KEY, enabled, req.user.id);
+  res.json({ enabled });
+}));
+
 // ════════════════════════════════════════════════════════════════════════════
 // CLIENT (portal login)
 // ════════════════════════════════════════════════════════════════════════════
@@ -406,7 +422,7 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     const confRows = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', list.map(r => r.id));
     const confBy = new Map();   // sale_id -> { clips, duration }
     for (const c of confRows) { const g = confBy.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); confBy.set(c.sale_id, g); }
-    const strict = recordingReviewGateOn();
+    const strict = await recordingReviewGateOn();
     const unconfirmed = strict ? [] : list.filter(s => !confBy.has(s.id)).map(s => s.id);
     const metaRows = unconfirmed.length ? await fetchIn('portal_recording_meta', 'sale_id, found, duration', 'sale_id', unconfirmed) : [];
     const metaBy = new Map(metaRows.map(m => [m.sale_id, m]));
@@ -477,7 +493,7 @@ router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncH
   const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
   const bySale = new Map();
   for (const c of confs) { const g = bySale.get(c.sale_id) || { clips: 0, duration: 0 }; g.clips++; g.duration += (c.duration || 0); bySale.set(c.sale_id, g); }
-  const strict = recordingReviewGateOn();
+  const strict = await recordingReviewGateOn();
   const meta = {};
   const needLive = [];
   for (const s of sales) {
@@ -548,7 +564,7 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
   }
   // No confirmation for this sale: strict gate → "being verified" (409); otherwise
   // fall through to the live auto-resolve so nothing is hidden.
-  if (recordingReviewGateOn()) return res.status(409).json({ status: 'pending_review', error: 'Recording is being verified' });
+  if (await recordingReviewGateOn()) return res.status(409).json({ status: 'pending_review', error: 'Recording is being verified' });
 
   // ── unconfirmed + gate OFF: pre-feature behavior — live auto-resolve ──
   const [{ data: prof }, { data: tr }] = await Promise.all([

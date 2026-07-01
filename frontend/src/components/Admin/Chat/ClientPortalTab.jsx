@@ -49,18 +49,22 @@ export default function ClientPortalTab() {
   };
 
   const [saleClients, setSaleClients] = useState([]);
+  const [gate, setGate] = useState({ enabled: false });   // strict review-gate
+  const [gateBusy, setGateBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [c, cl, t, sc] = await Promise.all([
+    const [c, cl, t, sc, g] = await Promise.all([
       client.get('portal/admin/clients').catch(() => ({ data: { clients: [] } })),
       client.get('portal/admin/closers').catch(() => ({ data: { closers: [] } })),
       client.get('portal/admin/test-audio').catch(() => ({ data: { enabled: false, url: '', label: 'Visualizer demo' } })),
       client.get('portal/admin/sale-clients').catch(() => ({ data: { clients: [] } })),
+      client.get('portal/admin/review-gate').catch(() => ({ data: { enabled: false } })),
     ]);
     setClients(c.data.clients || []);
     setClosers(cl.data.closers || []);
     setTa(t.data || { enabled: false, url: '', label: 'Visualizer demo' });
     setSaleClients(sc.data.clients || []);
+    setGate(g.data || { enabled: false });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -70,6 +74,13 @@ export default function ClientPortalTab() {
     try { const r = await client.patch('portal/admin/test-audio', next); setTa(r.data); toast.success('Test audio saved'); }
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
     finally { setTaBusy(false); }
+  };
+
+  const saveGate = async (enabled) => {
+    setGate({ enabled }); setGateBusy(true);
+    try { const r = await client.patch('portal/admin/review-gate', { enabled }); setGate(r.data); toast.success(`Strict review gate ${r.data.enabled ? 'ON' : 'OFF'}`); }
+    catch (e) { toast.error(e.response?.data?.error || 'Save failed'); setGate({ enabled: !enabled }); }
+    finally { setGateBusy(false); }
   };
 
   const del = async (c) => {
@@ -158,6 +169,26 @@ export default function ClientPortalTab() {
           )}
         </div>
       )}
+
+      {/* Strict review gate — superadmin cutover control (no env change needed) */}
+      <div className="rounded-xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Headphones size={16} style={{ color: 'var(--color-primary-500)' }} />
+            <div>
+              <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Strict recording-review gate</div>
+              <div className="text-xs max-w-2xl" style={{ color: 'var(--color-text-secondary)' }}>
+                <b>Off (recommended):</b> hybrid — sales compliance has confirmed play the linked recordings; everything else auto-resolves as normal (nothing hidden). <b>On:</b> only compliance-confirmed sales play; every unconfirmed sale shows “being verified” to clients.
+              </div>
+            </div>
+          </div>
+          <button onClick={() => saveGate(!gate.enabled)} disabled={gateBusy}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 flex-shrink-0"
+            style={{ background: gate.enabled ? 'var(--color-warning-500)' : 'var(--color-bg-secondary)', color: gate.enabled ? '#fff' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+            {gateBusy ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />} {gate.enabled ? 'Strict: On' : 'Strict: Off'}
+          </button>
+        </div>
+      </div>
 
       {/* Test audio — broadcast a demo clip to ALL clients (for the visualizer) */}
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
