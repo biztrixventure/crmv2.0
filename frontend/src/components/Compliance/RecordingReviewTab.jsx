@@ -317,7 +317,9 @@ function QueueView({ companyList }) {
       const params = { status, sort: sort.col, dir: sort.dir, limit: PAGE, offset };
       for (const k of ['date_from', 'date_to', 'company_id', 'closer_id', 'search']) if (filters[k]) params[k] = filters[k];
       const r = await client.get('compliance/recordings/queue', { params });
-      setRows(r.data.queue || []); setTotal(r.data.total || 0);
+      // Y3: total comes back only on page 1 (null on later pages) — keep the
+      // page-1 total across pages so pagination controls don't collapse.
+      setRows(r.data.queue || []); setTotal(t => (r.data.total == null ? t : (r.data.total || 0)));
     } catch (e) { toast.error(e.response?.data?.error || 'Could not load the queue'); setRows([]); }
     finally { setLoading(false); }
   }, [status, filters, offset, sort]);

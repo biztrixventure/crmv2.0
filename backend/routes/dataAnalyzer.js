@@ -576,21 +576,44 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
   res.status(201).json({ batch: { id: batch.id, name, item_count: items.length, excluded_count: exMap.size } });
 }));
 
-// ── POST /send-batch/preview — dry-run rule counts for the Send Batch modal ────
-router.post('/send-batch/preview', asyncHandler(async (req, res) => {
-  if (!BATCH_SENDER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
-  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
-  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
-  const recipientId = req.body?.recipient_id;
-  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
-
+// Pull the current analyzer result and reduce to DISTINCT last-10 phone numbers.
+// Shared by the modal's "resolve phones once" + preview-fallback paths (R1).
+async function resolveDistinctPhones(dataset, filters) {
   const columns = dataset === 'sales' ? 'customer_phone,customer_phone_2' : 'normalized_phone';
   const all = await fetchAll(dataset, filters, { columns, cap: 50_000 });
   const dig = (s) => String(s || '').replace(/\D/g, '');
   const tail = (d) => (d.length >= 10 ? d.slice(-10) : d);
   const set = new Set();
   for (const r of all) for (const c of (dataset === 'sales' ? [r.customer_phone, r.customer_phone_2] : [r.normalized_phone])) { const d = dig(c); if (d.length >= 7) set.add(tail(d)); }
-  const phones = [...set];
+  return [...set];
+}
+
+// ── POST /send-batch/phones — resolve the modal's DISTINCT phone set ONCE ───────
+// The Send Batch modal calls this on open, caches the array, and passes it to
+// /send-batch/preview on each recipient change — so switching recipients never
+// re-runs fetchAll against the dataset (R1). Heavy work happens exactly once.
+router.post('/send-batch/phones', asyncHandler(async (req, res) => {
+  if (!BATCH_SENDER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const phones = await resolveDistinctPhones(dataset, filters);
+  res.json({ phones, total: phones.length });
+}));
+
+// ── POST /send-batch/preview — dry-run rule counts for the Send Batch modal ────
+router.post('/send-batch/preview', asyncHandler(async (req, res) => {
+  if (!BATCH_SENDER_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  const recipientId = req.body?.recipient_id;
+  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
+
+  // Prefer the client-cached phone set (R1 — no re-fetch per recipient). Fall
+  // back to resolving from dataset/filters for back-compat / direct callers.
+  let phones = Array.isArray(req.body?.phones) ? req.body.phones.filter(Boolean) : null;
+  if (!phones) {
+    const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+    const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+    phones = await resolveDistinctPhones(dataset, filters);
+  }
 
   const { data: rcr } = await supabaseAdmin.from('user_company_roles').select('company_id').eq('user_id', recipientId).eq('is_active', true).order('created_at', { ascending: true }).limit(1).maybeSingle();
   const rules = await getBatchRules(rcr?.company_id || null);

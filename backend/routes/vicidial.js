@@ -91,7 +91,8 @@ async function bumpDispoMap(companyId, rawCode) {
       .select('id, disposition_name, hits').eq('company_id', companyId).eq('vici_code', rawCode).maybeSingle();
     companyRow = m || null;
     if (companyRow) {
-      await supabaseAdmin.from('vicidial_dispo_map').update({ hits: (companyRow.hits || 0) + 1, last_seen_at: now }).eq('id', companyRow.id);
+      // Hit counter is analytics only — don't block the webhook response on it (Y1).
+      supabaseAdmin.from('vicidial_dispo_map').update({ hits: (companyRow.hits || 0) + 1, last_seen_at: now }).eq('id', companyRow.id).then(() => {}, () => {});
     } else {
       await supabaseAdmin.from('vicidial_dispo_map')
         .insert({ company_id: companyId, vici_code: rawCode, hits: 1, last_seen_at: now }).then(() => {}, () => {});
@@ -181,15 +182,36 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
     // Only promote a still-pending transfer (never downgrade completed/rejected).
     if (!transfer.status || transfer.status === 'pending') updates.status = 'assigned';
   }
-  const { error } = await supabaseAdmin.from('transfers').update(updates).eq('id', transfer.id);
+  // The transfers UPDATE, the dispo-config lookup, and the duplicate check are all
+  // independent (none reads another's result) — run them together (Y1) instead of
+  // three serial round-trips on the hot webhook path.
+  const cfgQuery = dispoName
+    ? supabaseAdmin.from('disposition_configs')
+        .select('id, color').eq('name', dispoName).eq('is_active', true)
+        .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
+        .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle()
+    : Promise.resolve({ data: null });
+  // Y2 — VICIdial re-fires the Dispo URL for the same call. Skip the INSERT if an
+  // IDENTICAL disposition already landed on this transfer in the last 12s (a
+  // retry). A DIFFERENT dispo (a genuine quick correction) has a different
+  // disposition_name → not matched here → proceeds normally (original Fix A design).
+  // Index-backed on transfer_id (idx_disp_actions_transfer).
+  const dupQuery = dispoName
+    ? supabaseAdmin.from('disposition_actions')
+        .select('id').eq('transfer_id', transfer.id).eq('disposition_name', dispoName)
+        .gte('created_at', new Date(Date.now() - 12_000).toISOString()).limit(1).maybeSingle()
+    : Promise.resolve({ data: null });
+
+  const [{ error }, { data: cfg }, { data: dupe }] = await Promise.all([
+    supabaseAdmin.from('transfers').update(updates).eq('id', transfer.id),
+    cfgQuery,
+    dupQuery,
+  ]);
   if (error) throw new Error(error.message);
 
   if (dispoName) {
+    if (dupe) { logger.info('VICIDIAL_DISPO', `Skipped duplicate "${dispoName}" on ${transfer.id} (<12s dialer retry)`); return; }
     try {
-      const { data: cfg } = await supabaseAdmin.from('disposition_configs')
-        .select('id, color').eq('name', dispoName).eq('is_active', true)
-        .or(`company_id.is.null,company_id.eq.${dispoCompanyId}`)
-        .order('company_id', { ascending: true, nullsFirst: false }).limit(1).maybeSingle();
       // NEVER send a null color (column is NOT NULL → silent insert failure = the
       // dispo "fetched" but never shows). Default to grey. user_id falls back to
       // the transfer's closer; genuinely-unknown setter needs migration 119.
@@ -365,24 +387,23 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   logger.info('VICIDIAL_DISPO_IN', `code="${p.code || ''}" alt_code="${p.alt_code || ''}" dispo="${dispo}" agent="${p.agent || ''}"`);
 
   // Closer identity from the dialing agent — drives company scoping + the queue.
+  // Agent resolution and the exact-code transfer match are independent — run them
+  // together (Y1) so the webhook doesn't pay two serial round-trips.
   const closerAgent = String(p.agent || '').trim();
-  let closerUserId = null, closerCompanyId = null;
-  if (closerAgent) {
-    const { userId, companyId } = await resolveAgent(closerAgent);
-    closerUserId = userId; closerCompanyId = companyId;
-  }
+  const [agentRes, exactRes] = await Promise.all([
+    closerAgent ? resolveAgent(closerAgent) : Promise.resolve({ userId: null, companyId: null }),
+    exactCodes.length
+      ? supabaseAdmin.from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
+          .in('vicidial_vendor_code', exactCodes).order('created_at', { ascending: false }).limit(1)
+      : Promise.resolve({ data: null }),
+  ]);
+  let closerUserId = agentRes.userId, closerCompanyId = agentRes.companyId;
   dbg.agent_mapped = !!closerUserId;
   dbg.closer_company_id = closerCompanyId;
 
   let tr = null, code = candidates[0];
   // 1. Exact (prefixed) code — globally unique, trust it directly.
-  if (exactCodes.length) {
-    const { data } = await supabaseAdmin
-      .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
-      .in('vicidial_vendor_code', exactCodes)
-      .order('created_at', { ascending: false }).limit(1);
-    if (data && data.length) { tr = data[0]; code = data[0].vicidial_vendor_code; }
-  }
+  if (exactRes.data && exactRes.data.length) { tr = exactRes.data[0]; code = exactRes.data[0].vicidial_vendor_code; }
   // 2. Prefixed bare lead_id — ambiguous across boxes, so REQUIRE the customer
   //    phone to also match (lead_id + phone together is unambiguous). Prevents a
   //    same numeric lead_id on another box stealing this disposition.

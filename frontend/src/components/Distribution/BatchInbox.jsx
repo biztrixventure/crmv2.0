@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Boxes, Loader2, RefreshCw, X, Send, Trash2, GitBranch, Inbox, Upload, Globe,
   CheckCircle2, Circle, ChevronRight, ArrowDownRight, Ban, Filter,
@@ -108,13 +108,25 @@ function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
     client.get('distribution-batches/rules').then(r => setRules(r.data.rules)).catch(() => {});
   }, [batch.id]);
 
-  // dry-run rule preview when a sub-batch recipient is chosen
+  // dry-run rule preview when a sub-batch recipient is chosen.
+  // Y4 — recipient change / open fires immediately; selection toggles (which can
+  // fire rapidly as the user checks many boxes) are debounced ~350ms so they
+  // don't spam the preview RPC.
+  const prevRecipRef = useRef(null);
   useEffect(() => {
-    if (!subOpen || !recipient) { setSubPreview(null); return; }
-    let cancelled = false; setSubPreviewing(true);
-    client.post(`distribution-batches/${batch.id}/sub-batch/preview`, { recipient_id: recipient.id, item_ids: sel.size ? [...sel] : undefined })
-      .then(r => { if (!cancelled) setSubPreview(r.data); }).catch(() => { if (!cancelled) setSubPreview(null); }).finally(() => { if (!cancelled) setSubPreviewing(false); });
-    return () => { cancelled = true; };
+    if (!subOpen || !recipient) { setSubPreview(null); prevRecipRef.current = null; return; }
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      setSubPreviewing(true);
+      client.post(`distribution-batches/${batch.id}/sub-batch/preview`, { recipient_id: recipient.id, item_ids: sel.size ? [...sel] : undefined })
+        .then(r => { if (!cancelled) setSubPreview(r.data); }).catch(() => { if (!cancelled) setSubPreview(null); }).finally(() => { if (!cancelled) setSubPreviewing(false); });
+    };
+    const recipientChanged = prevRecipRef.current !== recipient.id;
+    prevRecipRef.current = recipient.id;
+    if (recipientChanged) { run(); return () => { cancelled = true; }; }
+    const t = setTimeout(run, 350);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [subOpen, recipient, sel, batch.id]);
 
   const selectable = items.filter(i => i.status !== 'excluded');

@@ -12,17 +12,28 @@ export default function SendBatchModal({ dataset, filters, onClose, onSent }) {
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
+  const [phones, setPhones] = useState(null);   // R1: resolved once, reused per recipient
 
-  // Dry-run rule preview whenever a recipient is chosen.
+  // R1 — resolve the DISTINCT phone set ONCE when the modal opens. Recipient
+  // changes then reuse this cached array instead of re-pulling the dataset.
   useEffect(() => {
-    if (!recipient) { setPreview(null); return; }
+    let cancelled = false;
+    client.post('data-analyzer/send-batch/phones', { dataset, filters })
+      .then(r => { if (!cancelled) setPhones(r.data.phones || []); })
+      .catch(() => { if (!cancelled) setPhones([]); });
+    return () => { cancelled = true; };
+  }, [dataset, filters]);
+
+  // Dry-run rule preview whenever a recipient is chosen — uses the cached phones.
+  useEffect(() => {
+    if (!recipient || phones == null) { setPreview(null); return; }
     let cancelled = false; setPreviewing(true);
-    client.post('data-analyzer/send-batch/preview', { dataset, filters, recipient_id: recipient.id })
+    client.post('data-analyzer/send-batch/preview', { phones, recipient_id: recipient.id })
       .then(r => { if (!cancelled) setPreview(r.data); })
       .catch(() => { if (!cancelled) setPreview(null); })
       .finally(() => { if (!cancelled) setPreviewing(false); });
     return () => { cancelled = true; };
-  }, [recipient, dataset, filters]);
+  }, [recipient, phones]);
 
   const send = async () => {
     if (!name.trim()) return toast.error('Give the batch a name');

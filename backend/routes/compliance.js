@@ -235,7 +235,10 @@ router.get('/recordings/queue', asyncHandler(async (req, res) => {
     p_limit: limit, p_offset: offset,
   });
   if (error) return res.status(500).json({ error: error.message });
-  const total = (data && data.length) ? Number(data[0].total_count) : 0;
+  // Y3: the RPC only computes the window count on page 1 (offset 0); later pages
+  // return 0. Send null past page 1 so the client keeps the page-1 total (same
+  // "page 1 only" pattern as the sales/callbacks status_counts).
+  const total = offset === 0 ? ((data && data.length) ? Number(data[0].total_count) : 0) : null;
   const queue = (data || []).map(({ total_count, ...r }) => r);
   res.json({ queue, total, status, limit, offset });
 }));

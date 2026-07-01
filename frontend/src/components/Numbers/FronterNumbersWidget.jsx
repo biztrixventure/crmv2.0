@@ -298,6 +298,9 @@ export default function FronterNumbersWidget({ user }) {
   useEffect(() => { if (inPageOpen || pipOpen) load(); }, [inPageOpen, pipOpen, load]);
   useEffect(() => { if (inPageOpen || pipOpen) loadShortcodes(); }, [inPageOpen, pipOpen, loadShortcodes]);
   // Keep it fresh while open (managers may assign mid-shift).
+  // PERF (audit Y5): a 30s poll is fine at current fronter counts. If the fronter
+  // headcount grows ~10x, replace this interval with Supabase Realtime on
+  // distribution_batch_items (subscribe instead of poll) to cut steady DB load.
   useEffect(() => {
     if (!inPageOpen && !pipOpen) return;
     const t = setInterval(load, 30000);
