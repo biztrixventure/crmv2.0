@@ -783,10 +783,14 @@ router.patch('/messages/:id', [
     return res.status(403).json({ error: `The ${s.edit_window_min}-minute edit window has passed` });
   }
 
+  // NULL body_html too: edits are plain text (the bubble renders body_html in
+  // preference to body, so leaving stale HTML would hide the edit). Mirrors the
+  // admin edit path. The messages-table realtime UPDATE + the broadcast below
+  // push it live to everyone.
   const { data, error } = await supabaseAdmin
     .from('messages')
-    .update({ body: req.body.body.trim(), edited_at: new Date().toISOString() })
-    .eq('id', req.params.id).select('id, conversation_id, sender_id, body, created_at, edited_at').single();
+    .update({ body: req.body.body.trim(), body_html: null, edited_at: new Date().toISOString() })
+    .eq('id', req.params.id).select('id, conversation_id, sender_id, body, body_html, created_at, edited_at').single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: { ...data, deleted: false, edited: true } });
 }));

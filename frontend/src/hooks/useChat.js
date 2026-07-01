@@ -205,21 +205,32 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
     }
   }, [conversationId, meId]);
 
+  // Push a mutation (edit/delete) to peers INSTANTLY over Broadcast — the same
+  // channel reactions/typing/read use — so recipients update without waiting on
+  // (or depending on the reliability of) the postgres_changes UPDATE.
+  const broadcastUpdate = useCallback((payload) => {
+    channelRef.current?.send({ type: 'broadcast', event: 'message_update', payload: { by: meId, ...payload } });
+  }, [meId]);
+
   const editMessage = useCallback(async (id, text) => {
     const res = await client.patch(`chat/messages/${id}`, { body: text.trim() });
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, ...res.data.message } : m));
-  }, []);
+    const patch = res.data.message;   // body + body_html:null + edited:true
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
+    broadcastUpdate({ id, body: patch.body ?? null, body_html: patch.body_html ?? null, deleted: false, edited: true });
+  }, [broadcastUpdate]);
 
   // Delete for everyone (soft delete) — shows "message deleted" to all.
   const deleteMessage = useCallback(async (id) => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, deleted: true, body: null } : m));
-    try { await client.delete(`chat/messages/${id}`); }
-    catch (e) {
+    try {
+      await client.delete(`chat/messages/${id}`);
+      broadcastUpdate({ id, deleted: true, body: null, body_html: null, attachments: null });
+    } catch (e) {
       // window passed / disabled → restore + surface why.
       setMessages(prev => prev.map(m => m.id === id ? { ...m, deleted: false } : m));
       throw e;
     }
-  }, []);
+  }, [broadcastUpdate]);
 
   // Delete for me — hide locally + persist so it stays hidden for this user only.
   const hideMessage = useCallback(async (id) => {
@@ -309,6 +320,20 @@ export const useChat = (conversationId, { meId, resolveName, myName } = {}) => {
         .on('broadcast', { event: 'reaction' }, ({ payload }) => {
           if (!payload || payload.user_id === meId) return;
           setMessages(prev => applyReaction(prev, payload));
+        })
+        // Instant edit/delete propagation to peers (patches the ONE message in
+        // place → no re-fetch, no scroll jump, no flicker/dupes). Mirrors the
+        // postgres_changes UPDATE handler but delivered immediately over Broadcast.
+        .on('broadcast', { event: 'message_update' }, ({ payload }) => {
+          if (!payload || payload.by === meId || !payload.id) return;
+          setMessages(prev => prev.map(m => m.id === payload.id ? {
+            ...m,
+            body: payload.deleted ? null : (payload.body ?? m.body),
+            body_html: payload.deleted ? null : (payload.body_html ?? null),
+            attachments: payload.deleted ? null : m.attachments,
+            deleted: !!payload.deleted,
+            edited: payload.edited != null ? !!payload.edited : m.edited,
+          } : m));
         })
         .on('broadcast', { event: 'read' }, ({ payload }) => {
           if (!payload || payload.user_id === meId || !payload.at) return;
