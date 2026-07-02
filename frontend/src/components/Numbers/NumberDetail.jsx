@@ -1,29 +1,22 @@
 import { useState, useEffect } from 'react';
 import {
-  ArrowLeft, Phone, UserRound, Headset, ShieldCheck, Clock,
-  ArrowRightLeft, FileText, Copy, Check, Building2, ClipboardList, StickyNote, Loader2,
+  ArrowLeft, Phone, PhoneCall, Mail, MapPin, Car, Copy, Check,
+  ClipboardList, StickyNote, Loader2, UserRound,
 } from 'lucide-react';
 import client from '../../api/client';
 
-// Shared, palette-driven detail view for a single assigned number. Shows three
-// things about the number the fronter is working:
-//   1. Assignment details — the transfer-form fields attached when the number
+// Shared, palette-driven detail view for a single assigned number. Shows:
+//   1. Assignment Details — the transfer-form fields attached when the number
 //      was assigned (name, car make/model/year, mileage, …), from mapped_data.
 //   2. Notes — editable inline; the save routes to the row's own source so the
 //      note reflects on BOTH the PIP and the #Numbers page (same DB row).
-//   3. Lead history — last fronter + last closer + current policy + a merged
-//      transfer/sale timeline, resolved from the phone via the customer model.
+//   3. Customer — who the customer is: alt phone, email, address + their
+//      vehicle(s). NO lead history (no fronter/closer/who/when/why).
 //
-// Palette-driven so ONE component serves two very different hosts:
+// Palette-driven so ONE component serves two hosts:
 //   • the fronter PiP window — pass a hex palette (that document has NO app CSS)
 //   • the in-app #Numbers drawer — pass a CSS-variable palette (stays theme-aware)
 // Inline styles only, so both hosts render identically.
-
-const fmtDate = (d) => {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return isNaN(dt) ? '—' : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-};
 
 // mapped_data keys are the transfer form field names (snake/camel) — prettify to
 // a human label without needing the form config in the PiP window.
@@ -36,23 +29,11 @@ const prettyLabel = (k) => String(k || '')
 // keys already shown at the top (identity) — don't repeat them in the grid.
 const SKIP_KEYS = new Set(['phone_number', 'phone', 'customer_name', 'name', 'notes']);
 
-// Status → badge colors. Sales use policy statuses, transfers use transfer statuses.
-const STATUS_BADGE = {
-  closed_won:     { l: 'Closed Won',   c: '#059669', bg: '#d1fae5' },
-  pending_review: { l: 'Pending',      c: '#d97706', bg: '#fef3c7' },
-  returned:       { l: 'Returned',     c: '#dc2626', bg: '#fee2e2' },
-  cancelled:      { l: 'Cancelled',    c: '#6b7280', bg: '#f3f4f6' },
-  pending:        { l: 'Pending',      c: '#d97706', bg: '#fef3c7' },
-  assigned:       { l: 'Assigned',     c: '#2563eb', bg: '#eff6ff' },
-  completed:      { l: 'Completed',    c: '#059669', bg: '#d1fae5' },
-  rejected:       { l: 'Rejected',     c: '#dc2626', bg: '#fee2e2' },
-};
-const badgeFor = (status) => STATUS_BADGE[status] || { l: status || '—', c: '#6b7280', bg: '#f3f4f6' };
+const vehicleLabel = (v) => [v.year, v.make, v.model].filter(Boolean).join(' ').trim() || 'Vehicle';
 
 export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNote }) {
   const c = palette;
   const phone = number?.phone_number || '';
-  const customerName = number?.customer_name || '';
   const mapped = (number?.mapped_data && typeof number.mapped_data === 'object') ? number.mapped_data : null;
   const assignEntries = mapped
     ? Object.entries(mapped).filter(([k, v]) => !SKIP_KEYS.has(k) && v != null && String(v).trim() !== '')
@@ -93,18 +74,10 @@ export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNo
     setCopied(true); setTimeout(() => setCopied(false), 1200);
   };
 
-  const displayName = data?.customer_name || customerName || 'Unknown customer';
-
-  const agentCard = (label, agent, Icon, tint) => (
-    <div style={{ flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.bg }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: c.sub }}>
-        <Icon size={12} color={tint} /> {label}
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: c.text, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {agent?.name || '—'}
-      </div>
-    </div>
-  );
+  const cust = data?.customer || {};
+  const vehicles = data?.vehicles || [];
+  const displayName = cust.name || number?.customer_name || 'Unknown customer';
+  const hasContact = cust.email || cust.phone_2 || cust.address;
 
   const sectionHead = (Icon, tint, text, extra) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
@@ -113,6 +86,13 @@ export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNo
       {extra}
     </div>
   );
+
+  const contactRow = (Icon, value) => value ? (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0' }}>
+      <Icon size={13} color={c.sub} style={{ marginTop: 2, flexShrink: 0 }} />
+      <span style={{ fontSize: 13, color: c.text, wordBreak: 'break-word' }}>{value}</span>
+    </div>
+  ) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: c.card, color: c.text, fontFamily: 'system-ui,-apple-system,sans-serif' }}>
@@ -171,73 +151,44 @@ export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNo
           </div>
         )}
 
-        {/* 3. lead history */}
-        {sectionHead(Clock, c.sub, 'Lead History', data?.found ? (
-          <span style={{ fontSize: 11, color: c.sub }}>· {data.counts.transfers} transfer{data.counts.transfers === 1 ? '' : 's'}, {data.counts.sales} sale{data.counts.sales === 1 ? '' : 's'}</span>
-        ) : null)}
-
+        {/* 3. customer details + vehicles (NO lead history) */}
+        {sectionHead(UserRound, '#2563eb', 'Customer')}
         {loading ? (
-          <p style={{ fontSize: 12, textAlign: 'center', padding: '18px 0', color: c.sub }}>Loading history…</p>
+          <p style={{ fontSize: 12, textAlign: 'center', padding: '16px 0', color: c.sub }}>Loading customer…</p>
         ) : err ? (
-          <p style={{ fontSize: 12, textAlign: 'center', padding: '18px 0', color: '#dc2626' }}>Couldn’t load lead history.</p>
+          <p style={{ fontSize: 12, textAlign: 'center', padding: '16px 0', color: '#dc2626' }}>Couldn’t load customer details.</p>
         ) : !data?.found ? (
           <div style={{ padding: '16px 12px', borderRadius: 10, border: `1px dashed ${c.border}`, textAlign: 'center' }}>
-            <p style={{ fontSize: 12, color: c.sub, margin: 0 }}>Fresh number — no prior transfer or sale on record.</p>
-            <p style={{ fontSize: 11, color: c.sub, margin: '4px 0 0' }}>You’re the first to work this lead.</p>
+            <p style={{ fontSize: 12, color: c.sub, margin: 0 }}>Fresh number — no customer record yet.</p>
           </div>
         ) : (
           <>
-            {/* last fronter / last closer */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              {agentCard('Last Fronter', data.last_fronter, UserRound, '#2563eb')}
-              {agentCard('Last Closer', data.last_closer, Headset, '#7c3aed')}
-            </div>
-
-            {/* current policy */}
-            {data.current_policy && (
-              <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.bg, marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <ShieldCheck size={14} color="#059669" />
-                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: c.sub }}>Active Policy</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: '#d1fae5', color: '#059669' }}>Closed Won</span>
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: c.text }}>{data.current_policy.plan || 'Policy'}</div>
-                <div style={{ fontSize: 11, color: c.sub, marginTop: 1 }}>
-                  {data.current_policy.reference_no ? `Ref ${data.current_policy.reference_no} · ` : ''}{fmtDate(data.current_policy.sale_date)}
-                </div>
+            {hasContact ? (
+              <div style={{ padding: '4px 12px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.bg, marginBottom: 12 }}>
+                {contactRow(PhoneCall, cust.phone_2)}
+                {contactRow(Mail, cust.email)}
+                {contactRow(MapPin, cust.address)}
               </div>
+            ) : (
+              <p style={{ fontSize: 12, color: c.sub, margin: '0 0 12px' }}>No extra contact details on record.</p>
             )}
 
-            {/* timeline */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(data.timeline || []).map((e) => {
-                const isSale = e.kind === 'sale';
-                const b = badgeFor(e.status);
-                const Icon = isSale ? FileText : ArrowRightLeft;
-                const tint = isSale ? '#059669' : '#2563eb';
-                return (
-                  <div key={`${e.kind}_${e.id}`} style={{ padding: '8px 10px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.card }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Icon size={13} color={tint} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: c.text }}>{isSale ? 'Sale' : 'Transfer'}</span>
-                      {e.plan && <span style={{ fontSize: 11, color: c.sub }}>· {e.plan}</span>}
-                      <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: b.bg, color: b.c }}>{b.l}</span>
+            {vehicles.length > 0 && (
+              <>
+                {sectionHead(Car, '#059669', vehicles.length === 1 ? 'Vehicle' : `Vehicles (${vehicles.length})`)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {vehicles.map((v, i) => (
+                    <div key={i} style={{ padding: '8px 10px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.card }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Car size={13} color="#059669" />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: c.text }}>{vehicleLabel(v)}</span>
+                      </div>
+                      {v.vin && <div style={{ fontSize: 11, marginTop: 2, fontFamily: 'ui-monospace,monospace', color: c.sub }}>VIN {v.vin}</div>}
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 4, fontSize: 11, color: c.sub }}>
-                      <span>{fmtDate(e.date)}</span>
-                      {e.closer_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Headset size={10} /> {e.closer_name}</span>}
-                      {e.fronter_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><UserRound size={10} /> {e.fronter_name}</span>}
-                      {e.company_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Building2 size={10} /> {e.company_name}</span>}
-                    </div>
-                    {e.disposition && <div style={{ fontSize: 11, color: c.sub, marginTop: 2, fontStyle: 'italic' }}>“{e.disposition}”</div>}
-                    {isSale && e.reference_no && <div style={{ fontSize: 10, color: c.sub, marginTop: 1, fontFamily: 'ui-monospace,monospace' }}>Ref {e.reference_no}</div>}
-                  </div>
-                );
-              })}
-              {(!data.timeline || !data.timeline.length) && (
-                <p style={{ fontSize: 12, textAlign: 'center', padding: '14px 0', color: c.sub }}>No events.</p>
-              )}
-            </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

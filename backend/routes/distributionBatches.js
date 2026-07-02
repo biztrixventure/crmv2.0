@@ -428,12 +428,11 @@ router.get('/my-numbers', asyncHandler(async (req, res) => {
   })) });
 }));
 
-// ── number detail: who last had this lead + its policy history ────────────────
-// Any authenticated holder can look up a number they work. Returns a COMPACT,
-// non-PII summary (names/dates/status/disposition only — no card/email/address):
-// the last fronter + last closer of the lead (customer-identity model), the
-// current policy, and a merged transfer+sale timeline. Powers the click-to-detail
-// panel shared by the PIP and #Numbers.
+// ── number detail: the CUSTOMER behind the number ─────────────────────────────
+// Any authenticated holder can look up a number they work. Returns the customer's
+// own details — name, phones, email, address, and their vehicle(s) — resolved
+// through the customer-identity model. Deliberately NO lead history (no fronter/
+// closer/who/when/why): just who the customer is and what they drive.
 router.get('/number-detail', asyncHandler(async (req, res) => {
   const phone = String(req.query.phone || '').replace(/\D/g, '');
   if (phone.length < 7) return res.status(400).json({ error: 'A valid phone number is required' });
@@ -442,65 +441,44 @@ router.get('/number-detail', asyncHandler(async (req, res) => {
 
   const [{ data: salesR }, { data: transfersR }] = await Promise.all([
     supabaseAdmin.from('sales')
-      .select('id, customer_name, status, plan, reference_no, closer_disposition, sale_date, created_at, closer_id, fronter_id, company_id, superseded_by')
-      .eq('customer_uuid', uuid).order('sale_date', { ascending: false, nullsFirst: false }).limit(30),
+      .select('customer_name, customer_email, customer_address, customer_phone_2, car_year, car_make, car_model, car_vin, sale_date')
+      .eq('customer_uuid', uuid).order('sale_date', { ascending: false, nullsFirst: false }).limit(50),
     supabaseAdmin.from('transfers')
-      .select('id, status, latest_disposition, created_at, created_by, assigned_closer_id, company_id, form_data')
-      .eq('customer_uuid', uuid).order('created_at', { ascending: false }).limit(30),
+      .select('form_data, created_at').eq('customer_uuid', uuid).order('created_at', { ascending: false }).limit(30),
   ]);
   const sales = salesR || [];
   const transfers = transfersR || [];
   if (!sales.length && !transfers.length) return res.json({ found: false, phone });
 
-  const lastTransfer = transfers[0] || null;
-  const lastSale = sales[0] || null;
-  const lastFronterId = lastTransfer?.created_by || lastSale?.fronter_id || null;
-  const lastCloserId  = lastTransfer?.assigned_closer_id || lastSale?.closer_id || null;
+  const pick = (...vals) => { for (const v of vals) { if (v != null && String(v).trim() !== '') return String(v).trim(); } return null; };
+  const topSale = sales[0] || {};
+  const fd = (transfers[0] || {}).form_data || {};
 
-  // resolve every agent + company referenced, in two bulk queries
-  const agentIds = [...new Set([
-    ...sales.flatMap(s => [s.fronter_id, s.closer_id]),
-    ...transfers.flatMap(t => [t.created_by, t.assigned_closer_id]),
-  ].filter(Boolean))];
-  const companyIds = [...new Set([...sales.map(s => s.company_id), ...transfers.map(t => t.company_id)].filter(Boolean))];
-  const [agentNames, { data: coRows }] = await Promise.all([
-    namesFor(agentIds),
-    companyIds.length ? supabaseAdmin.from('companies').select('id, name').in('id', companyIds) : Promise.resolve({ data: [] }),
-  ]);
-  const coName = Object.fromEntries((coRows || []).map(c => [c.id, c.name]));
+  const customer = {
+    name:    pick(topSale.customer_name, fd.customer_name, [fd.FirstName, fd.LastName].filter(Boolean).join(' '), fd.Name),
+    phone,
+    phone_2: pick(topSale.customer_phone_2, fd.Phone2, fd.phone_2, fd.SecondaryPhone),
+    email:   pick(topSale.customer_email, fd.Email, fd.email, fd.customer_email),
+    address: pick(topSale.customer_address, fd.Address, fd.address, fd.customer_address),
+  };
 
-  const fd = lastTransfer?.form_data || {};
-  const customerName = lastSale?.customer_name
-    || fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ').trim() || fd.Name || null;
-  const activePolicy = sales.find(s => s.status === 'closed_won' && !s.superseded_by) || null;
+  // distinct vehicles across the customer's sales (+ latest transfer form_data),
+  // preferring a row that carries a VIN.
+  const vehMap = new Map();
+  const addVeh = (year, make, model, vin) => {
+    year = pick(year); make = pick(make); model = pick(model); vin = pick(vin);
+    if (!year && !make && !model && !vin) return;
+    const key = ([year, make, model].filter(Boolean).join(' ').toLowerCase()) || (vin || '').toLowerCase();
+    if (!key) return;
+    const cur = vehMap.get(key);
+    if (!cur) vehMap.set(key, { year, make, model, vin });
+    else if (!cur.vin && vin) cur.vin = vin;
+  };
+  sales.forEach(s => addVeh(s.car_year, s.car_make, s.car_model, s.car_vin));
+  addVeh(fd.car_year || fd.Year || fd.vehicle_year, fd.car_make || fd.Make || fd.vehicle_make,
+         fd.car_model || fd.Model || fd.vehicle_model, fd.car_vin || fd.VIN || fd.vin);
 
-  const timeline = [
-    ...transfers.map(t => ({
-      kind: 'transfer', id: t.id, date: t.created_at, status: t.status,
-      disposition: t.latest_disposition || null,
-      fronter_id: t.created_by, fronter_name: agentNames[t.created_by] || null,
-      closer_id: t.assigned_closer_id, closer_name: agentNames[t.assigned_closer_id] || null,
-      company_id: t.company_id, company_name: coName[t.company_id] || null,
-    })),
-    ...sales.map(s => ({
-      kind: 'sale', id: s.id, date: s.sale_date || s.created_at, status: s.status,
-      disposition: s.closer_disposition || null, plan: s.plan || null, reference_no: s.reference_no || null,
-      fronter_id: s.fronter_id, fronter_name: agentNames[s.fronter_id] || null,
-      closer_id: s.closer_id, closer_name: agentNames[s.closer_id] || null,
-      company_id: s.company_id, company_name: coName[s.company_id] || null,
-    })),
-  ].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-
-  res.json({
-    found: true, phone, customer_uuid: uuid, customer_name: customerName,
-    last_fronter: lastFronterId ? { id: lastFronterId, name: agentNames[lastFronterId] || null } : null,
-    last_closer:  lastCloserId  ? { id: lastCloserId,  name: agentNames[lastCloserId]  || null } : null,
-    current_policy: activePolicy
-      ? { id: activePolicy.id, plan: activePolicy.plan, reference_no: activePolicy.reference_no, status: activePolicy.status, sale_date: activePolicy.sale_date }
-      : null,
-    counts: { transfers: transfers.length, sales: sales.length },
-    timeline: timeline.slice(0, 40),
-  });
+  res.json({ found: true, phone, customer_uuid: uuid, customer, vehicles: [...vehMap.values()] });
 }));
 
 // ── item status / notes update (from the PIP widget) ──────────────────────────
