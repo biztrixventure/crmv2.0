@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Phone, UserRound, Headset, ShieldCheck, Clock,
-  ArrowRightLeft, FileText, Copy, Check, Building2,
+  ArrowRightLeft, FileText, Copy, Check, Building2, ClipboardList, StickyNote, Loader2,
 } from 'lucide-react';
 import client from '../../api/client';
 
-// Shared, palette-driven detail view for a single assigned number. Fetches the
-// lead history for the number's phone (last fronter + last closer via the
-// customer-identity model, current policy, and a merged transfer+sale timeline).
+// Shared, palette-driven detail view for a single assigned number. Shows three
+// things about the number the fronter is working:
+//   1. Assignment details — the transfer-form fields attached when the number
+//      was assigned (name, car make/model/year, mileage, …), from mapped_data.
+//   2. Notes — editable inline; the save routes to the row's own source so the
+//      note reflects on BOTH the PIP and the #Numbers page (same DB row).
+//   3. Lead history — last fronter + last closer + current policy + a merged
+//      transfer/sale timeline, resolved from the phone via the customer model.
 //
 // Palette-driven so ONE component serves two very different hosts:
 //   • the fronter PiP window — pass a hex palette (that document has NO app CSS)
@@ -19,6 +24,17 @@ const fmtDate = (d) => {
   const dt = new Date(d);
   return isNaN(dt) ? '—' : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
+
+// mapped_data keys are the transfer form field names (snake/camel) — prettify to
+// a human label without needing the form config in the PiP window.
+const prettyLabel = (k) => String(k || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/([a-z])([A-Z])/g, '$1 $2')
+  .replace(/\b\w/g, (ch) => ch.toUpperCase())
+  .trim();
+
+// keys already shown at the top (identity) — don't repeat them in the grid.
+const SKIP_KEYS = new Set(['phone_number', 'phone', 'customer_name', 'name', 'notes']);
 
 // Status → badge colors. Sales use policy statuses, transfers use transfer statuses.
 const STATUS_BADGE = {
@@ -33,14 +49,35 @@ const STATUS_BADGE = {
 };
 const badgeFor = (status) => STATUS_BADGE[status] || { l: status || '—', c: '#6b7280', bg: '#f3f4f6' };
 
-export default function NumberDetail({ phone, customerName, palette, onBack, onCopy }) {
+export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNote }) {
   const c = palette;
+  const phone = number?.phone_number || '';
+  const customerName = number?.customer_name || '';
+  const mapped = (number?.mapped_data && typeof number.mapped_data === 'object') ? number.mapped_data : null;
+  const assignEntries = mapped
+    ? Object.entries(mapped).filter(([k, v]) => !SKIP_KEYS.has(k) && v != null && String(v).trim() !== '')
+    : [];
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // notes
+  const [noteVal, setNoteVal] = useState(number?.notes || '');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+  useEffect(() => { setNoteVal(number?.notes || ''); setNoteSaved(false); }, [number?.id]);
+  const noteDirty = (noteVal || '') !== (number?.notes || '');
+  const saveNote = async () => {
+    if (!onSaveNote || !noteDirty) return;
+    setNoteSaving(true);
+    try { await onSaveNote(number, noteVal); setNoteSaved(true); setTimeout(() => setNoteSaved(false), 1500); }
+    finally { setNoteSaving(false); }
+  };
+
   useEffect(() => {
+    if (!phone) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(false);
     client.get('distribution-batches/number-detail', { params: { phone } })
@@ -69,6 +106,14 @@ export default function NumberDetail({ phone, customerName, palette, onBack, onC
     </div>
   );
 
+  const sectionHead = (Icon, tint, text, extra) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+      <Icon size={13} color={tint} />
+      <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: c.sub }}>{text}</span>
+      {extra}
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: c.card, color: c.text, fontFamily: 'system-ui,-apple-system,sans-serif' }}>
       {/* header */}
@@ -76,7 +121,7 @@ export default function NumberDetail({ phone, customerName, palette, onBack, onC
         <button onClick={onBack} title="Back" style={{ border: 'none', background: 'transparent', color: '#fff', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex' }}>
           <ArrowLeft size={16} />
         </button>
-        <span style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>Lead Detail</span>
+        <span style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>Number Detail</span>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
@@ -93,12 +138,50 @@ export default function NumberDetail({ phone, customerName, palette, onBack, onC
           </button>
         </div>
 
+        {/* 1. assignment details (mapped transfer fields) */}
+        {assignEntries.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            {sectionHead(ClipboardList, '#7c3aed', 'Assignment Details')}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {assignEntries.map(([k, v]) => (
+                <div key={k} style={{ padding: '7px 9px', borderRadius: 9, border: `1px solid ${c.border}`, background: c.bg, minWidth: 0 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: c.sub }}>{prettyLabel(k)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginTop: 1, wordBreak: 'break-word' }}>{String(v)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 2. notes (editable, reflects on both PIP and #Numbers) */}
+        {onSaveNote && (
+          <div style={{ marginBottom: 14 }}>
+            {sectionHead(StickyNote, '#4f46e5', 'Notes', noteSaved
+              ? <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 2 }}><Check size={11} /> saved</span>
+              : null)}
+            <textarea value={noteVal} onChange={(e) => setNoteVal(e.target.value)} rows={3}
+              placeholder="Add a note about this lead…"
+              style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 9, border: `1px solid ${c.border}`, background: c.card, color: c.text, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+              <button onClick={saveNote} disabled={!noteDirty || noteSaving}
+                style={{ border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 700, color: '#fff', background: c.head, cursor: (!noteDirty || noteSaving) ? 'default' : 'pointer', opacity: (!noteDirty || noteSaving) ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {noteSaving ? <Loader2 size={12} className="animate-spin" /> : null} Save note
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 3. lead history */}
+        {sectionHead(Clock, c.sub, 'Lead History', data?.found ? (
+          <span style={{ fontSize: 11, color: c.sub }}>· {data.counts.transfers} transfer{data.counts.transfers === 1 ? '' : 's'}, {data.counts.sales} sale{data.counts.sales === 1 ? '' : 's'}</span>
+        ) : null)}
+
         {loading ? (
-          <p style={{ fontSize: 12, textAlign: 'center', padding: '24px 0', color: c.sub }}>Loading history…</p>
+          <p style={{ fontSize: 12, textAlign: 'center', padding: '18px 0', color: c.sub }}>Loading history…</p>
         ) : err ? (
-          <p style={{ fontSize: 12, textAlign: 'center', padding: '24px 0', color: '#dc2626' }}>Couldn’t load lead history.</p>
+          <p style={{ fontSize: 12, textAlign: 'center', padding: '18px 0', color: '#dc2626' }}>Couldn’t load lead history.</p>
         ) : !data?.found ? (
-          <div style={{ padding: '20px 12px', borderRadius: 10, border: `1px dashed ${c.border}`, textAlign: 'center' }}>
+          <div style={{ padding: '16px 12px', borderRadius: 10, border: `1px dashed ${c.border}`, textAlign: 'center' }}>
             <p style={{ fontSize: 12, color: c.sub, margin: 0 }}>Fresh number — no prior transfer or sale on record.</p>
             <p style={{ fontSize: 11, color: c.sub, margin: '4px 0 0' }}>You’re the first to work this lead.</p>
           </div>
@@ -126,12 +209,6 @@ export default function NumberDetail({ phone, customerName, palette, onBack, onC
             )}
 
             {/* timeline */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <Clock size={13} color={c.sub} />
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: c.sub }}>History</span>
-              <span style={{ fontSize: 11, color: c.sub }}>· {data.counts.transfers} transfer{data.counts.transfers === 1 ? '' : 's'}, {data.counts.sales} sale{data.counts.sales === 1 ? '' : 's'}</span>
-            </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {(data.timeline || []).map((e) => {
                 const isSale = e.kind === 'sale';
@@ -158,7 +235,7 @@ export default function NumberDetail({ phone, customerName, palette, onBack, onC
                 );
               })}
               {(!data.timeline || !data.timeline.length) && (
-                <p style={{ fontSize: 12, textAlign: 'center', padding: '16px 0', color: c.sub }}>No events.</p>
+                <p style={{ fontSize: 12, textAlign: 'center', padding: '14px 0', color: c.sub }}>No events.</p>
               )}
             </div>
           </>

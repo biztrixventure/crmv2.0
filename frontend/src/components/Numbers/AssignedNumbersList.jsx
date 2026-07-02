@@ -271,6 +271,15 @@ const AssignedNumbersList = ({ user }) => {
     } catch { /* non-critical */ } finally { setUpdatingId(null); }
   };
 
+  // Save a note to the row's own source (batch vs number_list) and reflect it in
+  // both the list and the open detail drawer — same DB row the PIP writes.
+  const saveNote = async (item, notes) => {
+    const url = item.source === 'batch' ? `distribution-batches/items/${item.id}` : `number-lists/${item.id}`;
+    await client.put(url, { notes });
+    setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, notes } : n));
+    setDetailNum(d => (d && d.id === item.id ? { ...d, notes } : d));
+  };
+
   const handleTransferSuccess = (transferId, source) => {
     if (transferNum) {
       setNumbers(prev => prev.map(n =>
@@ -595,8 +604,8 @@ const AssignedNumbersList = ({ user }) => {
           onClick={() => setDetailNum(null)}>
           <div className="h-full w-full max-w-md animate-scale-in shadow-2xl"
             style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
-            <NumberDetail phone={detailNum.phone_number} customerName={detailNum.customer_name}
-              palette={APP_PALETTE} onBack={() => setDetailNum(null)} />
+            <NumberDetail number={detailNum} palette={APP_PALETTE}
+              onBack={() => setDetailNum(null)} onSaveNote={saveNote} />
           </div>
         </div>
       )}

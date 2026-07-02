@@ -136,11 +136,13 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
   const [detail, setDetail] = useState(null);   // number whose lead-detail is open
 
   // Detail view replaces the list in-place (PiP window is small). Same onCopy so
-  // tapping the phone in the detail still copies it for the dialer.
+  // tapping the phone in the detail still copies it for the dialer. Saving a note
+  // here updates the shared list (onSaveNote) AND this snapshot so it reflects
+  // immediately on the PIP row and the #Numbers page (same DB row).
   if (detail) {
     return (
-      <NumberDetail phone={detail.phone_number} customerName={detail.customer_name}
-        palette={PIP_PALETTE} onBack={() => setDetail(null)} onCopy={onCopy} />
+      <NumberDetail number={detail} palette={PIP_PALETTE} onBack={() => setDetail(null)} onCopy={onCopy}
+        onSaveNote={async (item, notes) => { await onSaveNote(item, notes); setDetail(d => (d && d.id === item.id ? { ...d, notes } : d)); }} />
     );
   }
 
@@ -194,7 +196,7 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
           return (
             <div key={n.id} style={{ padding: '7px 8px', borderRadius: 10, marginBottom: 2, background: '#fff', border: `1px solid ${C.border}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button onClick={() => onCopy(n.phone_number)} title="Tap to copy"
+                <button onClick={() => setDetail(n)} title="Open detail — info, notes & history"
                   style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'ui-monospace,monospace', fontWeight: 700, fontSize: 14, color: C.text, flex: 1, textAlign: 'left' }}>
                   {n.phone_number}
                 </button>
