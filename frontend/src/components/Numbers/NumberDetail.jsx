@@ -182,6 +182,7 @@ export default function NumberDetail({ number, palette, onBack, onCopy, onSaveNo
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Car size={13} color="#059669" />
                         <span style={{ fontSize: 13, fontWeight: 700, color: c.text }}>{vehicleLabel(v)}</span>
+                        {v.miles && <span style={{ marginLeft: 'auto', fontSize: 11, color: c.sub }}>{Number(String(v.miles).replace(/\D/g, '')).toLocaleString()} mi</span>}
                       </div>
                       {v.vin && <div style={{ fontSize: 11, marginTop: 2, fontFamily: 'ui-monospace,monospace', color: c.sub }}>VIN {v.vin}</div>}
                     </div>

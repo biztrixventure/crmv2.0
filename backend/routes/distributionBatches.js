@@ -450,33 +450,59 @@ router.get('/number-detail', asyncHandler(async (req, res) => {
   const transfers = transfersR || [];
   if (!sales.length && !transfers.length) return res.json({ found: false, phone });
 
-  const pick = (...vals) => { for (const v of vals) { if (v != null && String(v).trim() !== '') return String(v).trim(); } return null; };
+  const clean = (v) => { const s = v == null ? '' : String(v).trim(); return (s && s !== '-') ? s : null; };
+  const pick = (...vals) => { for (const v of vals) { const s = clean(v); if (s) return s; } return null; };
   const topSale = sales[0] || {};
-  const fd = (transfers[0] || {}).form_data || {};
 
-  const customer = {
-    name:    pick(topSale.customer_name, fd.customer_name, [fd.FirstName, fd.LastName].filter(Boolean).join(' '), fd.Name),
-    phone,
-    phone_2: pick(topSale.customer_phone_2, fd.Phone2, fd.phone_2, fd.SecondaryPhone),
-    email:   pick(topSale.customer_email, fd.Email, fd.email, fd.customer_email),
-    address: pick(topSale.customer_address, fd.Address, fd.address, fd.customer_address),
+  // Lead form_data keys vary (VICIdial imports use CarMake/CarYear/City/Zip/Miles,
+  // manual forms use car_make/customer_address, …) — match case-insensitively
+  // across the latest transfer's form_data so we don't miss a field by casing.
+  const fd = (transfers[0] || {}).form_data || {};
+  const fdKeys = Object.keys(fd);
+  const fget = (...cands) => {
+    for (const cand of cands) {
+      const hit = fdKeys.find(k => k.toLowerCase() === cand.toLowerCase());
+      const s = hit ? clean(fd[hit]) : null;
+      if (s) return s;
+    }
+    return null;
   };
 
-  // distinct vehicles across the customer's sales (+ latest transfer form_data),
-  // preferring a row that carries a VIN.
+  // email — skip the "no@email.com" placeholder when a real one exists
+  const emailCands = [topSale.customer_email, fget('customer_email', 'Email', 'email')].map(clean).filter(Boolean);
+  const email = emailCands.find(e => e.toLowerCase() !== 'no@email.com') || emailCands[0] || null;
+
+  // address — a single field if present, else composed from City / State / Zip
+  const street = pick(topSale.customer_address, fget('Address', 'customer_address', 'Street', 'StreetAddress', 'address1'));
+  const city = fget('City'), state = fget('State'), zip = fget('Zip', 'ZipCode', 'PostalCode', 'postal_code');
+  const csz = [[city, state].filter(Boolean).join(', '), zip].filter(Boolean).join(' ').trim();
+  const address = [street, csz].filter(Boolean).join(', ') || null;
+
+  const customer = {
+    name:    pick(topSale.customer_name, fget('customer_name'), [fget('FirstName'), fget('LastName')].filter(Boolean).join(' '), fget('Name')),
+    phone,
+    phone_2: pick(topSale.customer_phone_2, fget('Phone2', 'phone_2', 'SecondaryPhone', 'AltPhone')),
+    email,
+    address,
+    city, state, zip,
+  };
+
+  // distinct vehicles across sales (+ latest transfer form_data), preferring a
+  // row that carries a VIN; mileage attached when present.
   const vehMap = new Map();
-  const addVeh = (year, make, model, vin) => {
-    year = pick(year); make = pick(make); model = pick(model); vin = pick(vin);
+  const addVeh = (year, make, model, vin, miles) => {
+    year = clean(year); make = clean(make); model = clean(model); vin = clean(vin); miles = clean(miles);
     if (!year && !make && !model && !vin) return;
     const key = ([year, make, model].filter(Boolean).join(' ').toLowerCase()) || (vin || '').toLowerCase();
     if (!key) return;
     const cur = vehMap.get(key);
-    if (!cur) vehMap.set(key, { year, make, model, vin });
-    else if (!cur.vin && vin) cur.vin = vin;
+    if (!cur) vehMap.set(key, { year, make, model, vin, miles });
+    else { if (!cur.vin && vin) cur.vin = vin; if (!cur.miles && miles) cur.miles = miles; }
   };
-  sales.forEach(s => addVeh(s.car_year, s.car_make, s.car_model, s.car_vin));
-  addVeh(fd.car_year || fd.Year || fd.vehicle_year, fd.car_make || fd.Make || fd.vehicle_make,
-         fd.car_model || fd.Model || fd.vehicle_model, fd.car_vin || fd.VIN || fd.vin);
+  sales.forEach(s => addVeh(s.car_year, s.car_make, s.car_model, s.car_vin, null));
+  addVeh(fget('CarYear', 'car_year', 'Year', 'vehicle_year'), fget('CarMake', 'car_make', 'Make', 'vehicle_make'),
+         fget('CarModel', 'car_model', 'Model', 'vehicle_model'), fget('CarVin', 'car_vin', 'VIN', 'vin'),
+         fget('Miles', 'Mileage', 'miles', 'odometer'));
 
   res.json({ found: true, phone, customer_uuid: uuid, customer, vehicles: [...vehMap.values()] });
 }));
