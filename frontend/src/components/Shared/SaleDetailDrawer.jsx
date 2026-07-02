@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw } from 'lucide-react';
+import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw, Copy, Check } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import client from '../../api/client';
@@ -77,6 +77,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections } = useDrawerLayout('sale');
   const [resellOpen, setResellOpen]       = useState(false);
+  const [copied, setCopied]               = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
   // Resell chain — fetched on open when this sale carries an
   // original_sale_id OR has been resold into another row. Walk both
@@ -153,6 +154,60 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   // <Row> or null (null = empty value or not permitted). Financial fields keep
   // their permission gate no matter which section they're moved into.
   const canFinancial = hasPermission('view_financial_data') && roFlag('view_financial_data');
+
+  // Copy every field as ONE tab-separated row → pasting into a single sheet cell
+  // spreads horizontally across columns in this exact sequence. Fields the CRM
+  // never stores (payment status/method, card #, CVV, card expiry) are emitted
+  // blank so the columns still line up. Maturity = sale date + plan-duration years.
+  const g = (...keys) => { for (const k of keys) { const v = fd[k]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
+  const asDate = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d.toISOString().slice(0, 10); };
+  const copyCells = () => {
+    const planYears = (() => { const m = String(g('PlanDuration')).match(/(\d+)/); return m ? parseInt(m[1], 10) : null; })();
+    const maturity = (() => {
+      if (!sale.sale_date || !planYears) return '';
+      const d = new Date(String(sale.sale_date).slice(0, 10) + 'T00:00:00');
+      if (isNaN(d)) return '';
+      d.setFullYear(d.getFullYear() + planYears);
+      return d.toISOString().slice(0, 10);
+    })();
+    const name = sale.customer_name || [g('FirstName'), g('LastName')].filter(Boolean).join(' ');
+    const cells = [
+      String(sale.sale_date || g('SaleDate') || '').slice(0, 10),        // Date
+      sale.customer_phone || g('Phone', 'cli_number', 'customer_phone'), // CLI
+      sale.client_name || g('SaleClient'),                               // Project
+      SALE_LABEL[sale.status] || sale.status || '',                      // Status
+      asDate(sale.charge_at),                                            // Post Date
+      maturity,                                                          // Maturity Date
+      '',                                                                // Payment Status (not stored)
+      name,                                                              // Name
+      g('Zip'),                                                          // ZIP
+      sale.car_year || g('CarYear'),                                     // Year
+      sale.car_make || g('CarMake'),                                     // Make
+      sale.car_model || g('CarModel'),                                   // Model
+      sale.car_miles || g('Miles'),                                      // Miles
+      g('PlanDuration'),                                                 // Plan Duration Year
+      canFinancial ? (sale.monthly_payment || g('SaleMonthlyPayment')) : '', // Monthly Amount
+      canFinancial ? (sale.down_payment || g('SaleDownPayment')) : '',       // Down Payment
+      sale.car_vin || g('VIN'),                                          // VIN #
+      sale.closer_name || '',                                            // Closer Name
+      sale.fronter_name || '',                                           // Employee Name
+      sale.customer_address || g('Address'),                             // Address
+      g('City'),                                                         // City
+      g('State'),                                                        // State
+      '',                                                                // Payment Method (not stored)
+      '',                                                                // Card # (not stored)
+      '',                                                                // CVV (not stored)
+      '',                                                                // Expiry Date of Card (not stored)
+      sale.customer_email || g('Email'),                                 // Email
+      sale.policy_number || sale.reference_no || g('SaleReferenceNo'),   // Policy / Ref #
+      sale.compliance_note || '',                                        // Comments
+    ];
+    const row = cells.map(c => String(c ?? '').replace(/[\t\r\n]+/g, ' ').trim()).join('\t');
+    navigator.clipboard?.writeText(row)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })
+      .catch(() => {});
+  };
+
   const FIELD = {
     name:    <Row key="name"    label="Name"  value={sale.customer_name} />,
     phone:   sale.customer_phone ? <Row key="phone" label="Phone" value={
@@ -239,10 +294,17 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
               <p className="text-xs text-white/70">Sale Details</p>
             </div>
           </div>
-          <button onClick={onClose}
-            className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
-            <X size={18} className="text-white" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={copyCells}
+              title="Copy all fields as a spreadsheet row — paste into one cell, it fills across columns"
+              className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
+              {copied ? <Check size={18} className="text-white" /> : <Copy size={18} className="text-white" />}
+            </button>
+            <button onClick={onClose}
+              className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
+              <X size={18} className="text-white" />
+            </button>
+          </div>
         </div>
 
         {/* Status bar */}
