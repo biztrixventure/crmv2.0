@@ -36,6 +36,12 @@ async function recordingReviewGateOn() {
   return v === true || v === 'true';
 }
 
+// SALES ONLY on the portal: an un-charged post-dated sale isn't a reviewable sale
+// yet, so its recording must not surface to clients. Mirrors compliance's
+// exclude_post_date (closer_disposition ILIKE '%post%date%'); charged post-dates
+// flip closer_disposition to 'sale' and are no longer matched. NULL-safe.
+const isPostDate = (d) => /post[\s_-]?date|postdate/i.test(String(d || ''));
+
 // Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
 // by the recording proxy and the test-audio proxy. `reresolve` (optional) is
 // called once if the URL fails — a confirmed clip's stored location can go
@@ -392,10 +398,12 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   const closerFilter = req.query.closer_id && closers.includes(req.query.closer_id) ? [req.query.closer_id] : closers;
   const cols = 'id, customer_name, customer_phone, sale_date, closer_id, client_name';
 
-  // Scope every query to this portal's closers AND/OR clients.
+  // Scope every query to this portal's closers AND/OR clients, and hide un-charged
+  // post-dated sales (sales-only portal). NULL-safe OR keeps normal/charged rows.
   const scope = (q) => {
     if (closerFilter.length) q = q.in('closer_id', closerFilter);
     if (clients.length)      q = q.in('client_name', clients);
+    q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
     return q;
   };
   // Pseudonyms + recording length per sale (zero dialer calls). HYBRID per sale:
@@ -486,8 +494,8 @@ router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncH
   // HYBRID: confirmed sales come straight from compliance's linked clips; only
   // the UNCONFIRMED ones fall through to the bounded live-resolve (skipped when
   // the strict gate is ON — those report 'pending_review').
-  const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id', 'id', ids);
-  const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name));
+  const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition', 'id', ids);
+  const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name)) && !isPostDate(s.closer_disposition);
   const sales = (srows || []).filter(inScope);
   if (!sales.length) return res.json({ meta: {}, pending: [] });
   const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
@@ -531,11 +539,13 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
   const clients = req.portalClient.client_names || [];
   const { data: sale } = await supabaseAdmin
     .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, transfer_id')
+    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition')
     .eq('id', req.params.id)
     .maybeSingle();
   const okCloser = !closers.length || closers.includes(sale?.closer_id);
   const okClient = !clients.length || clients.includes(sale?.client_name);
+  // Sales-only: never stream an un-charged post-dated sale (not in the client's list).
+  if (sale && isPostDate(sale.closer_disposition)) return res.status(404).json({ error: 'Not available' });
   if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) {
     return res.status(404).json({ error: 'Not available' });
   }
@@ -603,10 +613,10 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
 router.get('/sales/:id/clips', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const closers = req.portalClient.closer_ids || [];
   const clients = req.portalClient.client_names || [];
-  const { data: sale } = await supabaseAdmin.from('sales').select('id, closer_id, client_name').eq('id', req.params.id).maybeSingle();
+  const { data: sale } = await supabaseAdmin.from('sales').select('id, closer_id, client_name, closer_disposition').eq('id', req.params.id).maybeSingle();
   const okCloser = !closers.length || closers.includes(sale?.closer_id);
   const okClient = !clients.length || clients.includes(sale?.client_name);
-  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) return res.status(404).json({ error: 'Not available' });
+  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient || isPostDate(sale.closer_disposition)) return res.status(404).json({ error: 'Not available' });
   // Hybrid: return the compliance-confirmed clips whenever they exist (a linked
   // sale gets its multi-clip dropdown even while the strict gate is OFF).
   const { data: confs } = await supabaseAdmin
