@@ -572,6 +572,7 @@ module.exports = {
   onDispositionSubmitted,
   notifyManagers,
   notifyFloorManagers,
+  notifyUsers,
   getUserIdsByLevel,
   createNotification,
 };
