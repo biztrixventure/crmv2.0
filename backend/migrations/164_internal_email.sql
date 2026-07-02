@@ -131,9 +131,11 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('email-attachments', 'email-attachments', true)
 ON CONFLICT (id) DO NOTHING;
 
--- ── feature flag (chat pattern: catalog row, default ON) ─────────────────────
-INSERT INTO feature_flags (key, name, description, default_enabled)
-VALUES ('internal_email', 'Internal Email', 'CRM-internal email between users: inbox, threads, templates, signatures.', true)
+-- ── feature flag (chat's exact seed shape: label/category, not name) ─────────
+INSERT INTO feature_flags (key, label, description, category, default_enabled, sort_order) VALUES
+  ('internal_email', 'Internal Email',
+   'CRM-internal email between users: inbox, threads, reply/forward, tiered templates, signatures, bulk fan-out.',
+   'operations', true, 14)
 ON CONFLICT (key) DO NOTHING;
 
 -- ── post-apply verification (paste separately after applying) ────────────────
