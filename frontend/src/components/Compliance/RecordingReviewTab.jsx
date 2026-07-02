@@ -302,57 +302,122 @@ function PhoneSearchView() {
           {chosen.length > 0 && (
             <div className="flex justify-end">
               <button onClick={() => setLinking(true)} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
-                <Link2 size={15} /> Link {chosen.length} to a sale…
+                <Link2 size={15} /> Attach {chosen.length} to a client’s sale…
               </button>
             </div>
           )}
         </>
       )}
-      {linking && <SalePicker clips={clips} onClose={() => setLinking(false)} onDone={() => { setLinking(false); setChosen([]); toast.success('Linked & confirmed'); }} />}
+      {linking && <ClientSalePicker clips={clips} onClose={() => setLinking(false)}
+        onDone={(cl, sale) => { setLinking(false); setChosen([]); toast.success(`Attached to ${sale.customer_name || 'sale'} — ${cl.name} can now hear it`); }} />}
     </div>
   );
 }
 
-// pick a sale to attach phone-searched clips to (reuses the queue as a finder)
-function SalePicker({ clips, onClose, onDone }) {
-  const [q, setQ] = useState('');
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+// Pick a portal CLIENT, then one of that client's in-scope sales, and ATTACH
+// (append) the phone-searched clips so that client hears them on that sale —
+// even a recording that doesn't "belong" to the sale. Sales are scoped exactly
+// like the portal browse, so whatever you attach, the chosen client will see.
+function ClientSalePicker({ clips, onClose, onDone }) {
+  const [step, setStep] = useState('client');   // 'client' → 'sale'
+  const [clients, setClients] = useState([]);
+  const [clientsLoading, setClientsLoading] = useState(true);
+  const [clientQ, setClientQ] = useState('');
+  const [chosenClient, setChosenClient] = useState(null);
+
+  const [saleQ, setSaleQ] = useState('');
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
   const [saving, setSaving] = useState(null);
 
-  const find = useCallback(async (term) => {
-    if (!term || term.trim().length < 2) { setRows([]); return; }
-    setLoading(true);
-    try { const r = await client.get('compliance/recordings/queue', { params: { status: 'all', search: term.trim(), limit: 20 } }); setRows(r.data.queue || []); }
-    catch { setRows([]); } finally { setLoading(false); }
+  useEffect(() => {
+    let cancelled = false;
+    client.get('compliance/recordings/portal-clients')
+      .then(r => { if (!cancelled) setClients(r.data.clients || []); })
+      .catch(() => { if (!cancelled) setClients([]); })
+      .finally(() => { if (!cancelled) setClientsLoading(false); });
+    return () => { cancelled = true; };
   }, []);
-  useEffect(() => { const t = setTimeout(() => find(q), 300); return () => clearTimeout(t); }, [q, find]);
 
+  const loadSales = useCallback(async (clientId, term) => {
+    setSalesLoading(true);
+    try {
+      const r = await client.get('compliance/recordings/client-sales', { params: { client_id: clientId, search: term || undefined, limit: 40 } });
+      setSales(r.data.sales || []);
+    } catch { setSales([]); } finally { setSalesLoading(false); }
+  }, []);
+  useEffect(() => {
+    if (step !== 'sale' || !chosenClient) return;
+    const t = setTimeout(() => loadSales(chosenClient.id, saleQ), 300);
+    return () => clearTimeout(t);
+  }, [step, chosenClient, saleQ, loadSales]);
+
+  const pickClient = (c) => { setChosenClient(c); setSaleQ(''); setSales([]); setStep('sale'); };
   const attach = async (sale) => {
     setSaving(sale.sale_id);
-    try { await client.post('compliance/recordings/confirm', { sale_id: sale.sale_id, clips }); onDone(); }
-    catch (e) { toast.error(e.response?.data?.error || 'Could not link'); setSaving(null); }
+    try { await client.post('compliance/recordings/confirm', { sale_id: sale.sale_id, clips, append: true }); onDone(chosenClient, sale); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not attach'); setSaving(null); }
   };
 
+  const fc = clientQ.trim().toLowerCase();
+  const filteredClients = clients.filter(c => !fc
+    || (c.name || '').toLowerCase().includes(fc)
+    || (c.login_email || '').toLowerCase().includes(fc)
+    || (c.closer_names || []).join(' ').toLowerCase().includes(fc)
+    || (c.client_names || []).join(' ').toLowerCase().includes(fc));
+
   return (
-    <Modal onClose={onClose} title="Link to a sale" subtitle={<span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Search by customer name, phone, or reference — confirms {clips.length} clip{clips.length === 1 ? '' : 's'} against it.</span>}>
-      <div className="relative mb-3">
-        <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-        <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search sales…" style={{ ...inp, paddingLeft: 32, width: '100%' }} />
-      </div>
-      {loading ? <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
-        : rows.length === 0 ? <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{q.trim().length < 2 ? 'Type to search…' : 'No matching sales.'}</div>
-        : <div className="space-y-1.5 max-h-80 overflow-y-auto">
-            {rows.map(r => (
-              <button key={r.sale_id} onClick={() => attach(r)} disabled={saving} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'} {r.confirmed && <span className="text-[10px] font-bold" style={{ color: 'var(--color-success-600)' }}>· confirmed ({r.clip_count})</span>}</div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone} · {r.closer_name} · {fmtDate(r.sale_date)}</div>
-                </div>
-                {saving === r.sale_id ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /> : <Link2 size={16} style={{ color: 'var(--color-primary-600)' }} />}
-              </button>
-            ))}
-          </div>}
+    <Modal onClose={onClose}
+      title={step === 'client' ? 'Attach to a client’s sale' : `Pick a sale for ${chosenClient?.name || 'client'}`}
+      subtitle={step === 'client'
+        ? <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Step 1 of 2 — choose the client login. Attaching {clips.length} recording{clips.length === 1 ? '' : 's'}.</span>
+        : <button onClick={() => { setStep('client'); setChosenClient(null); }} className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}><ChevronLeft size={13} /> back to clients</button>}>
+      {step === 'client' ? (
+        <>
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input autoFocus value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Search client logins…" style={{ ...inp, paddingLeft: 32, width: '100%' }} />
+          </div>
+          {clientsLoading ? <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+            : filteredClients.length === 0 ? <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No client logins found.</div>
+            : <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                {filteredClients.map(c => (
+                  <button key={c.id} onClick={() => pickClient(c)} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: c.is_active ? 1 : 0.55 }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{c.name}{!c.is_active && <span className="text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>· inactive</span>}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{c.login_email}</div>
+                      <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {(c.closer_names || []).length ? `${c.closer_names.length} closer${c.closer_names.length === 1 ? '' : 's'}` : ''}
+                        {(c.closer_names || []).length && (c.client_names || []).length ? ' · ' : ''}
+                        {(c.client_names || []).length ? c.client_names.join(', ') : ''}
+                      </div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'var(--color-primary-600)' }} />
+                  </button>
+                ))}
+              </div>}
+        </>
+      ) : (
+        <>
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input autoFocus value={saleQ} onChange={e => setSaleQ(e.target.value)} placeholder="Search this client’s sales — name, phone, ref" style={{ ...inp, paddingLeft: 32, width: '100%' }} />
+          </div>
+          {salesLoading ? <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+            : sales.length === 0 ? <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No sales visible to this client{saleQ ? ' for that search' : ''}.</div>
+            : <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                {sales.map(r => (
+                  <button key={r.sale_id} onClick={() => attach(r)} disabled={saving} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'} {r.confirmed && <span className="text-[10px] font-bold" style={{ color: 'var(--color-success-600)' }}>· has {r.clip_count} clip{r.clip_count === 1 ? '' : 's'}</span>}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone} · {r.closer_name || '—'} · {fmtDate(r.sale_date)}{r.client_name ? ` · ${r.client_name}` : ''}</div>
+                    </div>
+                    {saving === r.sale_id ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /> : <Link2 size={16} style={{ color: 'var(--color-primary-600)' }} />}
+                  </button>
+                ))}
+              </div>}
+        </>
+      )}
     </Modal>
   );
 }
@@ -415,7 +480,7 @@ function QueueView({ companyList }) {
         <Field label="Search">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-            <input value={filters.search} onChange={e => setF('search', e.target.value)} placeholder="Search anything — name, phone, closer, company, product, ref, code" style={{ ...inp, paddingLeft: 30, minWidth: 320 }} />
+            <input value={filters.search} onChange={e => setF('search', e.target.value)} placeholder="Search anything — name, phone, closer, company, product, ref, code, rec id" style={{ ...inp, paddingLeft: 30, minWidth: 340 }} />
           </div>
         </Field>
         <Field label="From"><input type="date" value={filters.date_from} onChange={e => setF('date_from', e.target.value)} style={inp} /></Field>
@@ -469,7 +534,10 @@ function QueueView({ companyList }) {
             ) : rows.map(r => (
               <tr key={r.sale_id} className="border-t hover:bg-black/[0.02] cursor-pointer" style={{ borderColor: 'var(--color-border)' }} onClick={() => setActive(r.sale_id)}>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDate(r.sale_date)}</td>
-                <td className="px-3 py-2 font-medium" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</td>
+                <td className="px-3 py-2 font-medium" style={{ color: 'var(--color-text)' }}>
+                  {r.customer_name || '—'}
+                  {r.recording_ids && <div className="text-[10px] font-mono mt-0.5 truncate max-w-[220px]" title={r.recording_ids} style={{ color: 'var(--color-text-tertiary)' }}>rec {r.recording_ids}</div>}
+                </td>
                 <td className="px-3 py-2 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.closer_name || '—'}</td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.company_name || '—'}</td>

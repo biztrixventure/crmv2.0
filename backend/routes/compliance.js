@@ -145,16 +145,32 @@ router.get('/recordings/candidates', asyncHandler(async (req, res) => {
   return res.status(400).json({ error: 'sale_id or phone is required' });
 }));
 
-// CONFIRM — overwrite the sale's confirmation with an ordered list of clips
+// CONFIRM — set the sale's confirmed clips. Default REPLACES the prior pick;
+// with { append: true } it ADDS the clips after the existing ones (used when
+// attaching an extra/foreign recording so the client can hear it too) and skips
+// any recording_id already confirmed on that sale.
 router.post('/recordings/confirm', asyncHandler(async (req, res) => {
   const saleId = req.body.sale_id;
-  const clips = Array.isArray(req.body.clips) ? req.body.clips : [];
+  const append = !!req.body.append;
+  let clips = Array.isArray(req.body.clips) ? req.body.clips : [];
   if (!saleId || !clips.length) return res.status(400).json({ error: 'sale_id and at least one clip are required' });
   const { data: sale } = await supabaseAdmin.from('sales').select('id').eq('id', saleId).maybeSingle();
   if (!sale) return res.status(404).json({ error: 'Sale not found' });
 
+  // In append mode, continue clip_order after the existing clips and drop any
+  // recording_id that's already confirmed on this sale (no duplicates).
+  let base = 0;
+  if (append) {
+    const { data: ex } = await supabaseAdmin.from('sale_recording_confirmations')
+      .select('clip_order, recording_id').eq('sale_id', saleId).order('clip_order', { ascending: false });
+    base = (ex && ex[0]) ? ex[0].clip_order : 0;
+    const have = new Set((ex || []).map(r => r.recording_id));
+    clips = clips.filter(c => !have.has(String(c.recording_id || '')));
+    if (!clips.length) return res.json({ ok: true, confirmations: [], note: 'already attached' });
+  }
+
   const rows = clips.slice(0, 20).map((c, i) => ({
-    sale_id: saleId, clip_order: i + 1,
+    sale_id: saleId, clip_order: base + i + 1,
     box_id: String(c.box_id || '').slice(0, 60),
     lead_id: c.lead_id ? String(c.lead_id).slice(0, 40) : null,
     recording_id: String(c.recording_id || '').slice(0, 60),
@@ -167,11 +183,11 @@ router.post('/recordings/confirm', asyncHandler(async (req, res) => {
   }));
   if (rows.some(r => !r.box_id || !r.recording_id)) return res.status(400).json({ error: 'each clip needs box_id and recording_id' });
 
-  // re-confirmation overwrites the prior pick
-  await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', saleId);
+  // replace-mode overwrites the prior pick; append-mode keeps it
+  if (!append) await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', saleId);
   const { data, error } = await supabaseAdmin.from('sale_recording_confirmations').insert(rows).select();
   if (error) return res.status(500).json({ error: error.message });
-  logger.success('COMPLIANCE_REC', `sale ${saleId} confirmed ${rows.length} clip(s) by ${req.user.id}`);
+  logger.success('COMPLIANCE_REC', `sale ${saleId} ${append ? 'appended' : 'confirmed'} ${rows.length} clip(s) by ${req.user.id}`);
   res.json({ ok: true, confirmations: data });
 }));
 
@@ -180,6 +196,76 @@ router.delete('/recordings/confirm/:saleId', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', req.params.saleId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+}));
+
+// PORTAL CLIENTS — the client logins (for "attach a recording to a client's
+// sale"). Read-only list with each client's assigned closers + client_names so
+// the picker can scope the sale search exactly like the portal does.
+router.get('/recordings/portal-clients', asyncHandler(async (req, res) => {
+  const { data: clients } = await supabaseAdmin.from('portal_clients')
+    .select('id, name, login_email, closer_ids, client_names, is_active')
+    .order('name', { ascending: true });
+  const closerIds = [...new Set((clients || []).flatMap(c => c.closer_ids || []))];
+  const nameMap = {};
+  if (closerIds.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, first_name, last_name').in('user_id', closerIds);
+    (profs || []).forEach(p => { nameMap[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || '(unnamed)'; });
+  }
+  res.json({ clients: (clients || []).map(c => ({
+    id: c.id, name: c.name, login_email: c.login_email, is_active: c.is_active,
+    closer_ids: c.closer_ids || [], client_names: c.client_names || [],
+    closer_names: (c.closer_ids || []).map(id => nameMap[id] || id),
+  })) });
+}));
+
+// CLIENT SALES — sales VISIBLE to one portal client, scoped EXACTLY like the
+// portal browse (closer_ids AND client_names when both set; post-date hidden).
+// Optional ?search= over name / phone / reference. Powers the pick-client →
+// pick-sale attach flow so the reviewer only ever attaches to a sale the chosen
+// client can actually see.
+router.get('/recordings/client-sales', asyncHandler(async (req, res) => {
+  const clientId = req.query.client_id;
+  if (!clientId) return res.status(400).json({ error: 'client_id is required' });
+  const { data: pc } = await supabaseAdmin.from('portal_clients')
+    .select('closer_ids, client_names').eq('id', clientId).maybeSingle();
+  if (!pc) return res.status(404).json({ error: 'Client not found' });
+  const closers = pc.closer_ids || [];
+  const clients = pc.client_names || [];
+  if (!closers.length && !clients.length) return res.json({ sales: [] });
+
+  const search = String(req.query.search || '').trim();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+
+  let q = supabaseAdmin.from('sales')
+    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, plan, reference_no')
+    .order('sale_date', { ascending: false, nullsFirst: false }).limit(limit);
+  if (closers.length) q = q.in('closer_id', closers);
+  if (clients.length) q = q.in('client_name', clients);
+  q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
+  if (search) {
+    const s = escapeOrValue(search);
+    q = q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`);
+  }
+  const { data: sales, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+
+  // annotate with closer name + whether it already has confirmed clips
+  const ids = (sales || []).map(s => s.id);
+  const closerIds = [...new Set((sales || []).map(s => s.closer_id).filter(Boolean))];
+  const [{ data: profs }, { data: confs }] = await Promise.all([
+    closerIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', closerIds) : Promise.resolve({ data: [] }),
+    ids.length ? supabaseAdmin.from('sale_recording_confirmations').select('sale_id').in('sale_id', ids) : Promise.resolve({ data: [] }),
+  ]);
+  const nameOf = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || '(unnamed)']));
+  const clipCount = {};
+  (confs || []).forEach(c => { clipCount[c.sale_id] = (clipCount[c.sale_id] || 0) + 1; });
+  res.json({ sales: (sales || []).map(s => ({
+    sale_id: s.id, customer_name: s.customer_name, customer_phone: s.customer_phone, sale_date: s.sale_date,
+    closer_id: s.closer_id, closer_name: nameOf[s.closer_id] || null, client_name: s.client_name,
+    plan: s.plan, reference_no: s.reference_no,
+    clip_count: clipCount[s.id] || 0, confirmed: (clipCount[s.id] || 0) > 0,
+  })) });
 }));
 
 // STREAM a candidate recording for the reviewer to listen (source hidden,
