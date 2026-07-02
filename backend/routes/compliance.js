@@ -3,7 +3,7 @@ const axios = require('axios');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
-const { listCandidatesForSale, listCandidatesByPhone, locationForRecording } = require('../utils/dialerBoxes');
+const { listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording } = require('../utils/dialerBoxes');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
@@ -136,13 +136,44 @@ router.get('/recordings/candidates', asyncHandler(async (req, res) => {
       candidates, existing: existing || [],
     });
   }
+  // LEAD ID — recording_lookup accepts lead_id natively → every leg on the lead
+  // across ALL boxes, raw, no agent-mapping needed.
+  const leadId = String(req.query.lead_id || '').trim();
+  if (leadId) {
+    const raw = await listCandidatesByLeadId(leadId, { dateFrom: req.query.date_from || null, dateTo: req.query.date_to || null });
+    const candidates = await annotateCandidates(raw, []);
+    return res.json({ candidates });
+  }
+
+  // RECORDING ID — the dialer API can't search by recording_id, so match it in
+  // the CRM's confirmed clips (the only place it's known once linked). If that
+  // clip carries a lead_id, ALSO pull the whole lead raw off the dialer so the
+  // reviewer sees this recording alongside its siblings.
+  const recId = String(req.query.recording_id || '').trim();
+  if (recId) {
+    const { data: rows } = await supabaseAdmin.from('sale_recording_confirmations')
+      .select('box_id, lead_id, recording_id, location, agent_user, start_time, duration').eq('recording_id', recId);
+    const raw = (rows || []).map(r => ({
+      box_id: r.box_id, start_time: r.start_time, recording_id: r.recording_id, lead_id: r.lead_id,
+      duration: r.duration, location: r.location, agent_user: r.agent_user, phone_matches: false,
+    }));
+    const withLead = (rows || []).find(r => r.lead_id);
+    if (withLead) {
+      const seen = new Set(raw.map(r => `${r.box_id}|${r.recording_id}`));
+      const leadRaw = await listCandidatesByLeadId(withLead.lead_id, {});
+      leadRaw.forEach(r => { const k = `${r.box_id}|${r.recording_id}`; if (!seen.has(k)) { seen.add(k); raw.push(r); } });
+    }
+    const candidates = await annotateCandidates(raw, []);
+    return res.json({ candidates, note: raw.length ? null : 'recording_id_not_linked' });
+  }
+
   const phone = String(req.query.phone || '').trim();
   if (phone) {
     const raw = await listCandidatesByPhone({ phone, dateFrom: req.query.date_from || null, dateTo: req.query.date_to || null });
     const candidates = await annotateCandidates(raw, []);
     return res.json({ candidates });
   }
-  return res.status(400).json({ error: 'sale_id or phone is required' });
+  return res.status(400).json({ error: 'phone, lead_id, recording_id, or sale_id is required' });
 }));
 
 // CONFIRM — set the sale's confirmed clips. Default REPLACES the prior pick;

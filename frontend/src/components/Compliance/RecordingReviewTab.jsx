@@ -252,21 +252,38 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
   );
 }
 
-// ── phone search (standalone) ────────────────────────────────────────────────
+// ── dialer search (standalone) — phone / lead id / recording id ───────────────
+// Searches the raw dialers directly. lead_id + phone return EVERY leg regardless
+// of whether the agent is mapped in the CRM; recording_id is matched against the
+// CRM's linked clips (the dialer API can't search by recording_id) and, if that
+// clip has a lead_id, the whole lead is then pulled raw off the dialer too.
+const DIALER_SEARCH_TYPES = [['phone', 'Phone'], ['lead_id', 'Lead ID'], ['recording_id', 'Recording ID']];
 function PhoneSearchView() {
-  const [phone, setPhone] = useState('');
+  const [type, setType] = useState('phone');
+  const [q, setQ] = useState('');
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [cands, setCands] = useState(null);
+  const [note, setNote] = useState(null);
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState([]);
   const [linking, setLinking] = useState(false);
 
+  const placeholder = type === 'phone' ? 'phone number' : type === 'lead_id' ? 'dialer lead id (digits)' : 'recording id';
+  const digitsType = type === 'phone' || type === 'lead_id';
+
   const search = async () => {
-    const digits = phone.replace(/\D/g, ''); if (digits.length < 4) { toast.error('Enter at least 4 digits'); return; }
-    setLoading(true); setChosen([]);
+    const val = q.trim();
+    if (type === 'phone') { if (val.replace(/\D/g, '').length < 4) { toast.error('Enter at least 4 digits'); return; } }
+    else if (!val) { toast.error('Enter a value to search'); return; }
+    setLoading(true); setChosen([]); setNote(null);
     try {
-      const r = await client.get('compliance/recordings/candidates', { params: { phone: digits, date_from: from || undefined, date_to: to || undefined } });
+      const params = { date_from: from || undefined, date_to: to || undefined };
+      if (type === 'phone')            params.phone = val.replace(/\D/g, '');
+      else if (type === 'lead_id')     params.lead_id = val.replace(/\D/g, '');
+      else                             params.recording_id = val;
+      const r = await client.get('compliance/recordings/candidates', { params });
       setCands(r.data.candidates || []);
+      setNote(r.data.note || null);
     } catch (e) { toast.error(e.response?.data?.error || 'Search failed'); setCands([]); }
     finally { setLoading(false); }
   };
@@ -274,23 +291,38 @@ function PhoneSearchView() {
   const byId = useMemo(() => new Map((cands || []).map(c => [c.recording_id, c])), [cands]);
   const clips = chosen.map(rid => byId.get(rid)).filter(Boolean).map(c => ({ box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location, agent_user: c.agent_user, start_time: c.start_time, duration: c.duration }));
 
+  const help = type === 'phone'
+    ? 'Phone search reads the dialer call log, which has a SHORT retention window (best within the last day or two). For older calls, search by Lead ID — it has no retention limit.'
+    : type === 'lead_id'
+    ? 'Lead ID pulls every recording on that lead from ALL connected dialers — the fronter leg, the closer leg and any redials — whether or not the agent is mapped in the CRM.'
+    : 'Recording IDs can only be searched once a recording has been linked to a sale (the dialer API has no recording-id search). If it is linked, its whole lead is pulled raw from the dialer too.';
+
   return (
     <div className="space-y-4">
       <div className="p-3 rounded-xl flex items-start gap-2" style={{ background: 'var(--color-warning-50, rgba(217,119,6,0.08))', border: '1px solid var(--color-warning-200, rgba(217,119,6,0.2))' }}>
         <AlertTriangle size={15} style={{ color: 'var(--color-warning-600)' }} className="mt-0.5 flex-shrink-0" />
-        <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          Phone search reads the dialer's call log, which has a <b>short retention window</b> (best for calls within the last day or two). Recent numbers work far better than old ones — for older sales, use the <b>Review Queue</b> instead.
-        </div>
+        <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{help}</div>
       </div>
+
+      {/* type selector */}
+      <div className="flex rounded-lg overflow-hidden w-fit" style={{ border: '1px solid var(--color-border)' }}>
+        {DIALER_SEARCH_TYPES.map(([k, label]) => (
+          <button key={k} onClick={() => { setType(k); setCands(null); setNote(null); setChosen([]); }} className="text-xs font-semibold px-3 py-1.5"
+            style={{ background: type === k ? 'var(--gradient-sidebar)' : 'transparent', color: type === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>{label}</button>
+        ))}
+      </div>
+
       <div className="flex items-end gap-3 flex-wrap p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <Field label="Phone number">
+        <Field label={DIALER_SEARCH_TYPES.find(t => t[0] === type)[1]}>
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-            <input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" placeholder="phone number" onKeyDown={e => e.key === 'Enter' && search()} style={{ ...inp, paddingLeft: 30 }} />
+            <input value={q} onChange={e => setQ(e.target.value)} inputMode={digitsType ? 'numeric' : 'text'} placeholder={placeholder} onKeyDown={e => e.key === 'Enter' && search()} style={{ ...inp, paddingLeft: 30, minWidth: 220 }} />
           </div>
         </Field>
-        <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} /></Field>
-        <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} /></Field>
+        {type !== 'recording_id' && <>
+          <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} /></Field>
+          <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} /></Field>
+        </>}
         <button onClick={search} disabled={loading} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Search
         </button>
@@ -298,7 +330,13 @@ function PhoneSearchView() {
 
       {cands !== null && (
         <>
-          <CandidateList candidates={cands} loading={loading} chosen={chosen} setChosen={setChosen} emptyText="No recordings found for that number in range." />
+          {note === 'recording_id_not_linked' && (
+            <div className="text-xs p-2.5 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              That recording id isn’t linked to any sale yet, so the dialer can’t locate it directly. Search by <b>lead id</b> or <b>phone</b> to pull it raw.
+            </div>
+          )}
+          <CandidateList candidates={cands} loading={loading} chosen={chosen} setChosen={setChosen}
+            emptyText={type === 'phone' ? 'No recordings found for that number in range.' : type === 'lead_id' ? 'No recordings on that lead id in any dialer.' : 'No linked recording matches that id.'} />
           {chosen.length > 0 && (
             <div className="flex justify-end">
               <button onClick={() => setLinking(true)} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
@@ -502,6 +540,9 @@ function QueueView({ companyList }) {
             className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Clear</button>
         )}
       </div>
+      <p className="text-[11px] -mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+        Searching a recording id here matches <b>confirmed</b> sales (a pending sale has no recording linked yet). To pull a recording straight off the dialers by <b>lead id</b>, <b>phone</b>, or <b>recording id</b>, use the <b>Dialer Search</b> tab.
+      </p>
 
       {/* table */}
       <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--color-border)' }}>
@@ -600,7 +641,7 @@ export default function RecordingReviewTab({ companyList = [] }) {
         <Headphones size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Recording Review</h2>
         <div className="ml-2 flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-          {[['queue', 'Review Queue'], ['phone', 'Phone Search']].map(([k, label]) => (
+          {[['queue', 'Review Queue'], ['phone', 'Dialer Search']].map(([k, label]) => (
             <button key={k} onClick={() => setMode(k)} className="text-xs font-semibold px-3 py-1.5"
               style={{ background: mode === k ? 'var(--gradient-sidebar)' : 'transparent', color: mode === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>{label}</button>
           ))}

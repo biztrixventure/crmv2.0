@@ -345,6 +345,32 @@ async function listCandidatesByPhone({ phone, dateFrom, dateTo } = {}) {
     .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
 }
 
+// Direct LEAD-ID search across ALL boxes — recording_lookup accepts lead_id
+// natively, so this returns EVERY leg on the lead (fronter + closer + redials)
+// with NO agent-mapping requirement and NO phone filter: pure raw data straight
+// off each dialer. Optional date range filters on the recording start day.
+async function listCandidatesByLeadId(leadId, { dateFrom, dateTo } = {}) {
+  const id = onlyDigits(leadId);
+  if (!id) return [];
+  const from = dateFrom ? String(dateFrom).slice(0, 10) : null;
+  const to   = dateTo   ? String(dateTo).slice(0, 10)   : null;
+  const byId = new Map();
+  const res = await Promise.all(BOXES.map(b => recordingLookup(b, { lead_id: id }).then(rows => ({ b, rows }))));
+  res.forEach(({ b, rows }) => rows.forEach(r => {
+    const day = String(r.start || '').slice(0, 10);
+    if (from && day && day < from) return;
+    if (to && day && day > to) return;
+    const k = b.id + '|' + r.recording_id;
+    if (!byId.has(k)) byId.set(k, { ...r, box_id: b.id });
+  }));
+  return [...byId.values()]
+    .map(r => ({
+      box_id: r.box_id, start_time: r.start, recording_id: r.recording_id, lead_id: r.lead_id,
+      duration: r.duration, location: r.location, agent_user: r.user, phone_matches: false,
+    }))
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+}
+
 // Deterministically re-derive a confirmed clip's stream URL from its reference
 // (used when the stored location URL is stale/404s). recording_lookup by lead_id
 // on the stored box, matched on recording_id. Returns the URL or null.
@@ -383,5 +409,5 @@ module.exports = {
   refreshBoxes,
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
-  listCandidatesForSale, listCandidatesByPhone, locationForRecording,
+  listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
 };
