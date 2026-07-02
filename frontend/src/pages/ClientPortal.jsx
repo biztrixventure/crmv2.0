@@ -408,18 +408,31 @@ export default function ClientPortal() {
                 </div>
                 {!selected.isTest && <div className="text-[11px] truncate" style={{ color: P.sub }}>{selected.closer_name} · {fmtDate(selected.sale_date)}</div>}
                 {clipCount > 1 && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <button onClick={() => goPart(part - 1)} disabled={part === 0 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>‹</button>
-                    {/* dropdown: pick which confirmed call to play */}
-                    <select value={part} onChange={e => goPart(Number(e.target.value))} disabled={audioLoading}
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer" style={{ background: P.tint2, color: P.accent, border: 'none' }}>
+                  <div className="mt-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: P.muted }}>
+                      {clipCount} recordings — tap one to play
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                       {Array.from({ length: clipCount }, (_, i) => {
+                        const active = i === part;
                         const d = clipMeta[i]?.duration;
-                        return <option key={i} value={i} style={{ color: '#111' }}>Call {i + 1}{d ? ` (${fmt(d)})` : ''}</option>;
+                        return (
+                          <button key={i} onClick={() => goPart(i)} disabled={audioLoading}
+                            title={`Call ${i + 1}${d ? ` · ${fmt(d)}` : ''}`}
+                            className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-50 active:scale-95"
+                            style={active
+                              ? { background: P.grad, color: '#fff', boxShadow: P.shadow }
+                              : { background: P.tint2, color: P.accent, border: `1px solid ${P.border}` }}>
+                            <span className="flex items-center justify-center rounded-full flex-shrink-0"
+                              style={{ width: 20, height: 20, background: active ? 'rgba(255,255,255,0.25)' : P.grad, color: '#fff' }}>
+                              {active ? (playing ? <Pause size={11} /> : <Play size={11} />) : <span className="text-[10px] font-extrabold">{i + 1}</span>}
+                            </span>
+                            <span className="leading-none">Call {i + 1}</span>
+                            {d ? <span className="tabular-nums leading-none" style={{ opacity: 0.85 }}>{fmt(d)}</span> : null}
+                          </button>
+                        );
                       })}
-                    </select>
-                    <button onClick={() => goPart(part + 1)} disabled={part === clipCount - 1 || audioLoading} className="text-xs leading-none px-1.5 py-1 rounded disabled:opacity-40" style={{ background: P.tint2, color: P.accent }}>›</button>
-                    <span className="text-[10px]" style={{ color: P.muted }}>of {clipCount}</span>
+                    </div>
                   </div>
                 )}
               </div>
