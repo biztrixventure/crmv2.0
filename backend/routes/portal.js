@@ -396,7 +396,14 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   if (!closers.length && !clients.length) return res.json({ sales: [] });
 
   const closerFilter = req.query.closer_id && closers.includes(req.query.closer_id) ? [req.query.closer_id] : closers;
-  const cols = 'id, customer_name, customer_phone, sale_date, closer_id, client_name';
+  // STRICT gate → the client sees ONLY compliance-reviewed sales: the !inner embed
+  // on sale_recording_confirmations makes it an INNER JOIN, so a sale with zero
+  // confirmations is dropped from the list entirely (not shown as "being verified").
+  // Hybrid (gate OFF) → normal columns, all in-scope sales listed.
+  const strict = await recordingReviewGateOn();
+  const cols = strict
+    ? 'id, customer_name, customer_phone, sale_date, closer_id, client_name, sale_recording_confirmations!inner(sale_id)'
+    : 'id, customer_name, customer_phone, sale_date, closer_id, client_name';
 
   // Scope every query to this portal's closers AND/OR clients, and hide un-charged
   // post-dated sales (sales-only portal). NULL-safe OR keeps normal/charged rows.
