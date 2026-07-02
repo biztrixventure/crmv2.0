@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward, StickyNote } from 'lucide-react';
+import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward, StickyNote, Info } from 'lucide-react';
 import client from '../../api/client';
+import NumberDetail, { PIP_PALETTE } from './NumberDetail';
 
 // Fronters' floating "My Numbers" — same Document Picture-in-Picture pattern as
 // the closer's call checklist: pops a real always-on-top OS window that floats
@@ -132,6 +133,16 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
   const counts = numbers.reduce((a, n) => { a.all++; a[n.status] = (a[n.status] || 0) + 1; return a; }, { all: 0 });
   const list = filter === 'all' ? numbers : numbers.filter(n => n.status === filter);
   const [openNote, setOpenNote] = useState(null);
+  const [detail, setDetail] = useState(null);   // number whose lead-detail is open
+
+  // Detail view replaces the list in-place (PiP window is small). Same onCopy so
+  // tapping the phone in the detail still copies it for the dialer.
+  if (detail) {
+    return (
+      <NumberDetail phone={detail.phone_number} customerName={detail.customer_name}
+        palette={PIP_PALETTE} onBack={() => setDetail(null)} onCopy={onCopy} />
+    );
+  }
 
   const act = (n, status, Icon, color, title) => (
     n.status !== status ? (
@@ -198,8 +209,12 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
                 {act(n, 'callback', Clock, '#7c3aed', 'Mark Callback')}
                 {act(n, 'completed', CheckCircle, '#059669', 'Mark Done')}
                 {act(n, 'skip', SkipForward, '#6b7280', 'Skip')}
-                <button onClick={() => setOpenNote(o => o === n.id ? null : n.id)} title={n.notes ? 'Edit note' : 'Add note'}
+                <button onClick={() => setDetail(n)} title="Lead detail — last fronter/closer + history"
                   style={{ border: 'none', background: 'transparent', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex', marginLeft: 'auto' }}>
+                  <Info size={14} color="#4f46e5" />
+                </button>
+                <button onClick={() => setOpenNote(o => o === n.id ? null : n.id)} title={n.notes ? 'Edit note' : 'Add note'}
+                  style={{ border: 'none', background: 'transparent', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex' }}>
                   <StickyNote size={14} color={n.notes ? '#4f46e5' : '#94a3b8'} />
                 </button>
               </div>

@@ -6,9 +6,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Phone, CheckCircle, RefreshCw, Clock, SkipForward, PhoneCall,
   RotateCcw, Filter, Search, X, Calendar, Send, ChevronDown,
-  ChevronUp, Link2, ArrowRight, Copy, Check,
+  ChevronUp, Link2, ArrowRight, Copy, Check, Info,
 } from 'lucide-react';
 import client from '../../api/client';
+import NumberDetail, { APP_PALETTE } from './NumberDetail';
 
 const STATUS_CONFIG = {
   new:       { label: 'New',       bg: '#eff6ff', color: '#2563eb', icon: Phone       },
@@ -219,6 +220,7 @@ const AssignedNumbersList = ({ user }) => {
   const [search,       setSearch]       = useState('');
   const [updatingId,   setUpdatingId]   = useState(null);
   const [transferNum,  setTransferNum]  = useState(null);
+  const [detailNum,    setDetailNum]    = useState(null);   // number whose lead-detail drawer is open
   const [expandedList, setExpandedList] = useState(null);
   const [copiedId,     setCopiedId]     = useState(null);
   const searchRef = useRef(null);
@@ -516,6 +518,12 @@ const AssignedNumbersList = ({ user }) => {
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600" />
                           ) : (
                             <>
+                              {/* Lead detail — last fronter/closer + policy history */}
+                              <button onClick={() => setDetailNum(n)} title="Lead detail — last fronter/closer + history"
+                                className="p-1.5 rounded-lg transition-colors hover:bg-bg-secondary">
+                                <Info size={13} style={{ color: 'var(--color-primary-600)' }} />
+                              </button>
+
                               {/* Create Transfer button */}
                               {!n.transfer_id && n.status !== 'transferred' && (
                                 <button
@@ -579,6 +587,18 @@ const AssignedNumbersList = ({ user }) => {
           onClose={() => setTransferNum(null)}
           onSuccess={handleTransferSuccess}
         />
+      )}
+
+      {/* Lead-detail drawer — same NumberDetail the PIP uses, themed palette */}
+      {detailNum && (
+        <div className="fixed inset-0 z-50 flex justify-end" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setDetailNum(null)}>
+          <div className="h-full w-full max-w-md animate-scale-in shadow-2xl"
+            style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
+            <NumberDetail phone={detailNum.phone_number} customerName={detailNum.customer_name}
+              palette={APP_PALETTE} onBack={() => setDetailNum(null)} />
+          </div>
+        </div>
       )}
     </div>
   );
