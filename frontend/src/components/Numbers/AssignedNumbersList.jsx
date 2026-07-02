@@ -16,6 +16,7 @@ const STATUS_CONFIG = {
   callback:  { label: 'Callback',  bg: '#f3e8ff', color: '#7c3aed', icon: Clock       },
   completed: { label: 'Done',      bg: '#d1fae5', color: '#059669', icon: CheckCircle },
   skip:      { label: 'Skip',      bg: '#f3f4f6', color: '#6b7280', icon: SkipForward },
+  transferred: { label: 'Transferred', bg: '#ede9fe', color: '#7c3aed', icon: Link2 },
 };
 
 const StatusBadge = ({ status }) => {
@@ -82,10 +83,14 @@ const TransferModal = ({ number, onClose, onSuccess }) => {
     try {
       const xferRes = await client.post('transfers', { form_data: formData, assigned_closer_id: closerId });
       const transferId = xferRes.data?.transfer?.id || xferRes.data?.id;
-      if (transferId) {
+      // Link back to the source: number_lists get a transfer_id (→ 'completed');
+      // batch items have no transfer link, so just mark them 'transferred'.
+      if (number.source === 'batch') {
+        await client.put(`distribution-batches/items/${number.id}`, { status: 'transferred' });
+      } else if (transferId) {
         await client.put(`number-lists/${number.id}/transfer`, { transfer_id: transferId });
       }
-      onSuccess(transferId);
+      onSuccess(transferId, number.source);
     } catch (err) {
       setError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to submit transfer');
     } finally { setSubmitting(false); }
@@ -226,18 +231,22 @@ const AssignedNumbersList = ({ user }) => {
     setTimeout(() => setCopiedId(c => (c === num ? null : c)), 1200);
   };
 
+  // Same merged feed the PIP uses (number_lists + distribution_batch_items), so
+  // #Numbers and the PIP show identical numbers and a status change on one
+  // reflects on the other (they write to the same DB rows). Filtering is done
+  // client-side below so both sources filter consistently.
   const fetchNumbers = useCallback(async () => {
-    if (!user?.company_id) return;
     setLoading(true);
     try {
-      const params = { company_id: user.company_id };
-      if (statusFilter !== 'all') params.status         = statusFilter;
-      if (dayFilter)               params.assignment_day = dayFilter;
-      if (search.trim())           params.search         = search.trim();
-      const res = await client.get('number-lists', { params });
-      setNumbers(res.data.numbers || []);
+      const [listRows, batchRows] = await Promise.all([
+        user?.company_id
+          ? client.get('number-lists', { params: { company_id: user.company_id } }).then(r => (r.data.numbers || []).map(n => ({ ...n, source: 'list' }))).catch(() => [])
+          : Promise.resolve([]),
+        client.get('distribution-batches/my-numbers').then(r => (r.data.numbers || []).map(n => ({ ...n, source: 'batch' }))).catch(() => []),
+      ]);
+      setNumbers([...batchRows, ...listRows]);
     } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [user?.company_id, statusFilter, dayFilter, search]);
+  }, [user?.company_id]);
 
   useEffect(() => { fetchNumbers(); }, [fetchNumbers]);
 
@@ -249,33 +258,41 @@ const AssignedNumbersList = ({ user }) => {
     searchTimeout.current = setTimeout(() => {}, 0); // fetchNumbers via useEffect
   };
 
-  const updateStatus = async (id, status) => {
-    setUpdatingId(id);
+  // Route the status write to the item's own source (batch vs number_list) — the
+  // exact same source-routing the PIP uses, so both stay in sync.
+  const updateStatus = async (item, status) => {
+    setUpdatingId(item.id);
+    const url = item.source === 'batch' ? `distribution-batches/items/${item.id}` : `number-lists/${item.id}`;
     try {
-      const res = await client.put(`number-lists/${id}`, { status });
-      // Mark + advance: when a status filter is active and the new status no
-      // longer matches it, drop the row so the fronter is left with the next
-      // one to work (e.g. working "New", each marked number disappears).
-      if (statusFilter !== 'all' && status !== statusFilter) {
-        setNumbers(prev => prev.filter(n => n.id !== id));
-      } else {
-        setNumbers(prev => prev.map(n => n.id === id ? { ...n, ...res.data.number } : n));
-      }
+      await client.put(url, { status });
+      setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, status } : n));
     } catch { /* non-critical */ } finally { setUpdatingId(null); }
   };
 
-  const handleTransferSuccess = (transferId) => {
+  const handleTransferSuccess = (transferId, source) => {
     if (transferNum) {
       setNumbers(prev => prev.map(n =>
-        n.id === transferNum.id ? { ...n, status: 'completed', transfer_id: transferId, transferred_at: new Date().toISOString() } : n
+        n.id === transferNum.id
+          ? { ...n, status: source === 'batch' ? 'transferred' : 'completed', transfer_id: transferId, transferred_at: new Date().toISOString() }
+          : n
       ));
       setTransferNum(null);
     }
   };
 
-  // Group by list_name
+  // Client-side filters (applied uniformly to batch + list items). Day filter
+  // only matches list items (batches have no assignment_day).
+  const q = search.trim().toLowerCase();
+  const visible = numbers.filter(n => {
+    if (statusFilter !== 'all' && n.status !== statusFilter) return false;
+    if (dayFilter && n.assignment_day !== dayFilter) return false;
+    if (q && !(String(n.phone_number || '').includes(q) || String(n.customer_name || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+
+  // Group by list_name (batch items carry their batch name as list_name).
   const grouped = {};
-  numbers.forEach(n => { if (!grouped[n.list_name]) grouped[n.list_name] = []; grouped[n.list_name].push(n); });
+  visible.forEach(n => { const key = n.list_name || 'Unassigned'; if (!grouped[key]) grouped[key] = []; grouped[key].push(n); });
 
   const counts = {
     all:       numbers.length,
@@ -284,6 +301,7 @@ const AssignedNumbersList = ({ user }) => {
     callback:  numbers.filter(n => n.status === 'callback').length,
     completed: numbers.filter(n => n.status === 'completed').length,
     skip:      numbers.filter(n => n.status === 'skip').length,
+    transferred: numbers.filter(n => n.status === 'transferred').length,
   };
 
   const transferredCount = numbers.filter(n => n.transfer_id).length;
@@ -401,7 +419,7 @@ const AssignedNumbersList = ({ user }) => {
         <div className="flex justify-center py-16">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
         </div>
-      ) : numbers.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="text-center py-16 rounded-2xl border border-dashed"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
           <Phone size={32} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -499,7 +517,7 @@ const AssignedNumbersList = ({ user }) => {
                           ) : (
                             <>
                               {/* Create Transfer button */}
-                              {!n.transfer_id && (
+                              {!n.transfer_id && n.status !== 'transferred' && (
                                 <button
                                   onClick={() => setTransferNum(n)}
                                   title="Create Transfer"
@@ -512,31 +530,31 @@ const AssignedNumbersList = ({ user }) => {
 
                               {/* Status quick-actions */}
                               {n.status !== 'called' && n.status !== 'completed' && (
-                                <button onClick={() => updateStatus(n.id, 'called')} title="Mark as Called"
+                                <button onClick={() => updateStatus(n,'called')} title="Mark as Called"
                                   className="p-1.5 rounded-lg transition-colors hover:bg-amber-100 opacity-0 group-hover:opacity-100">
                                   <PhoneCall size={13} style={{ color: '#d97706' }} />
                                 </button>
                               )}
                               {n.status !== 'callback' && n.status !== 'completed' && (
-                                <button onClick={() => updateStatus(n.id, 'callback')} title="Mark as Callback"
+                                <button onClick={() => updateStatus(n,'callback')} title="Mark as Callback"
                                   className="p-1.5 rounded-lg transition-colors hover:bg-purple-100 opacity-0 group-hover:opacity-100">
                                   <Clock size={13} style={{ color: '#7c3aed' }} />
                                 </button>
                               )}
                               {n.status !== 'completed' && (
-                                <button onClick={() => updateStatus(n.id, 'completed')} title="Mark as Done"
+                                <button onClick={() => updateStatus(n,'completed')} title="Mark as Done"
                                   className="p-1.5 rounded-lg transition-colors hover:bg-emerald-100 opacity-0 group-hover:opacity-100">
                                   <CheckCircle size={13} style={{ color: '#059669' }} />
                                 </button>
                               )}
                               {n.status !== 'skip' && n.status !== 'completed' && (
-                                <button onClick={() => updateStatus(n.id, 'skip')} title="Skip"
+                                <button onClick={() => updateStatus(n,'skip')} title="Skip"
                                   className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 opacity-0 group-hover:opacity-100">
                                   <SkipForward size={13} style={{ color: '#6b7280' }} />
                                 </button>
                               )}
                               {n.status !== 'new' && n.status !== 'completed' && (
-                                <button onClick={() => updateStatus(n.id, 'new')} title="Reset to New"
+                                <button onClick={() => updateStatus(n,'new')} title="Reset to New"
                                   className="p-1.5 rounded-lg transition-colors hover:bg-blue-100 opacity-0 group-hover:opacity-100">
                                   <RotateCcw size={12} style={{ color: '#6b7280' }} />
                                 </button>

@@ -412,14 +412,19 @@ router.get('/:id/lineage', asyncHandler(async (req, res) => {
 // ── fronter "My Numbers" feed — items in active batches sent to me ────────────
 router.get('/my-numbers', asyncHandler(async (req, res) => {
   const { data: myBatches } = await supabaseAdmin.from('distribution_batches')
-    .select('id').eq('sent_to_user_id', req.user.id).eq('status', 'active');
+    .select('id, name, sent_at').eq('sent_to_user_id', req.user.id).eq('status', 'active');
   const ids = (myBatches || []).map(b => b.id);
   if (!ids.length) return res.json({ numbers: [] });
+  const nameById = Object.fromEntries((myBatches || []).map(b => [b.id, b.name]));
   const { data: items } = await supabaseAdmin.from('distribution_batch_items')
-    .select('id, phone_number, customer_name, status, notes, batch_id')
+    .select('id, phone_number, customer_name, status, notes, batch_id, position, lead_id, created_at')
     .in('batch_id', ids).neq('status', 'excluded')   // fronter never sees rule-excluded numbers
     .order('created_at', { ascending: false }).limit(2000);
-  res.json({ numbers: (items || []).map(i => ({ ...i, source: 'batch' })) });
+  // list_name = the batch name so the #Numbers page can group batch items like
+  // it groups number_lists; assignment_day null (batches aren't day-scoped).
+  res.json({ numbers: (items || []).map(i => ({
+    ...i, source: 'batch', list_name: nameById[i.batch_id] || 'Distributed batch', assignment_day: null,
+  })) });
 }));
 
 // ── item status / notes update (from the PIP widget) ──────────────────────────
