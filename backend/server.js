@@ -54,6 +54,7 @@ const { ingest: vicidialIngest, api: vicidialApi } = require('./routes/vicidial'
 const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
+const emailRoutes               = require('./routes/emails');
 const guestChatRoutes           = require('./routes/guestChat');
 const portalRoutes              = require('./routes/portal');
 const presenceRoutes            = require('./routes/presence');
@@ -149,6 +150,8 @@ app.use(helmet({
 // encoded) — give this one route a larger JSON limit before the global parser
 // below claims the body. Registered first so it wins for this path.
 app.use('/api/chat/upload', express.json({ limit: '16mb' }));
+// Email attachments use the same base64 upload flow — same raised limit.
+app.use('/api/emails/upload', express.json({ limit: '16mb' }));
 
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
@@ -311,6 +314,8 @@ app.use('/api/vehicles',           authMiddleware, readonlyGuard, vehiclesRoutes
 // moderation always works); user routes behind the per-company 'chat' flag.
 app.use('/api/chat/admin',         authMiddleware, readonlyGuard, chatAdminRoutes);
 app.use('/api/chat',               authMiddleware, readonlyGuard, requireFeature('chat'), chatRoutes);
+// Internal email — same gating pattern as chat (per-company 'internal_email' flag).
+app.use('/api/emails',             authMiddleware, readonlyGuard, requireFeature('internal_email'), emailRoutes);
 // Client recording portal — admin (superadmin) + the isolated client login.
 // Each route guards itself (authMiddleware inside); no readonlyGuard so the
 // client GET stream is reachable, and audit writes aren't blocked.

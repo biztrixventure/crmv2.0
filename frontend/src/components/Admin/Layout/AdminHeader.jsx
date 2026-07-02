@@ -3,6 +3,7 @@ import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft } f
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
 import ChatLauncher from '../../Chat/ChatLauncher';
+import MailLauncher from '../../Mail/MailLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
 import { useFocus } from '../../../contexts/FocusContext';
 
@@ -68,6 +69,7 @@ const AdminHeader = ({
 
         {/* Right */}
         <div className="flex items-center gap-2">
+          <MailLauncher />
           <ChatLauncher />
           <NotificationBell
             notifications={notifications}

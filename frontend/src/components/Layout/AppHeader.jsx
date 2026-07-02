@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Moon, Sun, LogOut, ChevronDown, LayoutGrid } from 'lucide-react';
 import NotificationBell from '../UI/NotificationBell';
 import ChatLauncher from '../Chat/ChatLauncher';
+import MailLauncher from '../Mail/MailLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useFocus } from '../../contexts/FocusContext';
@@ -122,6 +123,7 @@ const AppHeader = ({
           {/* Right: Chat + Notifications + Theme · Profile · Logout */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* Control cluster */}
+            <MailLauncher />
             <ChatLauncher />
             <NotificationBell
               notifications={notifications}
