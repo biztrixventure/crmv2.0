@@ -5,9 +5,27 @@ import client from '../../../api/client';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 import SendBatchModal from '../../Distribution/SendBatchModal';
 
-// Persisted custom order of the filter cards (drag-and-drop).
-const ORDER_KEY = 'bsx_data_analyzer_field_order_v1';
-const readOrder  = () => { try { return JSON.parse(localStorage.getItem(ORDER_KEY) || '[]'); } catch { return []; } };
+// Default filter-card order (applies to BOTH sales and transfers — each dataset
+// picks the names it has, the rest are skipped). Dataset-specific synthetic
+// fields list both variants adjacently: disposition = closer_disposition (sales)
+// / latest_disposition (transfers); fronter = fronter_id / created_by; closer =
+// closer_id / assigned_closer_id. Matches the arrangement configured in-app.
+const DEFAULT_FIELD_ORDER = [
+  'status', 'SaleClient',
+  'closer_disposition', 'latest_disposition',
+  'fronter_id', 'created_by',
+  'closer_id', 'assigned_closer_id',
+  'State', 'CarMake', 'CarModel', 'CarYear', 'Miles', 'Monthly_Date',
+  'SaleDownPayment', 'Age', 'SalePlan', 'Payment_Duration',
+  'FirstName', 'Middle', 'LastName', '2nd_user', 'Phone', 'Other_Contact', 'Email',
+  'Zip', 'City', 'Address', 'VIN', 'Variant', 'Condition',
+  'SaleMonthlyPayment', 'SaleReferenceNo', 'PlanDuration',
+  'SaleDisposition', 'SaleDate', 'SaleCallReview',
+];
+// Persisted custom order of the filter cards (drag-and-drop). Key bumped to v2
+// to roll out the default arrangement; a user's own drag still overrides it.
+const ORDER_KEY = 'bsx_data_analyzer_field_order_v2';
+const readOrder  = () => { try { const s = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null'); return (Array.isArray(s) && s.length) ? s : DEFAULT_FIELD_ORDER.slice(); } catch { return DEFAULT_FIELD_ORDER.slice(); } };
 const writeOrder = (o) => { try { localStorage.setItem(ORDER_KEY, JSON.stringify(o)); } catch { /* quota */ } };
 
 // Single, meaningful date column per dataset: the actual sale date for sales,
