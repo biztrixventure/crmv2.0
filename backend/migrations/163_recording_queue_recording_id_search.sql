@@ -10,8 +10,12 @@
 --     recording_id for the sale, so typing a rec id finds its sale.
 -- Everything else (LEFT JOIN transfers, mapped-closer required, post-date
 -- exclusion, sorting, paging, page-1-only count) is identical to 162.
--- CREATE OR REPLACE — safe to re-run; supersedes 162. Apply AFTER 150-162.
+-- Adds an OUT column (recording_ids) → the return type changes, so CREATE OR
+-- REPLACE errors 42P13; DROP first, then recreate. Safe to re-run; supersedes
+-- 162. Apply AFTER 150-162.
 -- ============================================================================
+DROP FUNCTION IF EXISTS app_recording_review_queue(uuid[], date, date, uuid, text, text, text, text, int, int);
+
 CREATE OR REPLACE FUNCTION app_recording_review_queue(
   p_company_ids uuid[] DEFAULT NULL,
   p_date_from   date    DEFAULT NULL,
