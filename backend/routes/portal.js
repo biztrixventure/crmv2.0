@@ -70,6 +70,19 @@ async function deadStatuses() {
   const v = await getConfig(null, 'recording_review.excluded_statuses', DEAD_STATUS_DEFAULT);
   return (Array.isArray(v) && v.length) ? v : DEAD_STATUS_DEFAULT;
 }
+// The sales.status column is a Postgres ENUM (sale_status). A PostgREST
+// `.not('status','in',(…))` casts EVERY literal to the enum type, so a single
+// value that isn't an enum member (e.g. 'expired', which lives only in the
+// resell flow's config lists) makes the WHOLE query error — and the browse
+// query swallowed that error → the client saw ZERO sales. We therefore filter
+// the dead-status list down to real enum members before using it in a query.
+// (The JS-side dead checks on the stream endpoints are unaffected — no cast.)
+const VALID_SALE_STATUS = new Set([
+  'open', 'sold', 'follow_up', 'closed_won', 'closed_lost',
+  'cancelled', 'compliance_cancelled', 'chargeback', 'dispute',
+  'needs_revision', 'pending_review',
+]);
+const deadStatusesForQuery = (dead) => (dead || []).filter(s => VALID_SALE_STATUS.has(s));
 
 // Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
 // by the recording proxy and the test-audio proxy. `reresolve` (optional) is
@@ -437,12 +450,12 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   // Scope every query to this portal's closers AND/OR clients, hide un-charged
   // post-dated sales (sales-only portal), and drop DEAD statuses (FIX 1 — a
   // cancelled sale must not list on the portal in either gate mode).
-  const dead = await deadStatuses();
+  const dead = deadStatusesForQuery(await deadStatuses());   // enum-safe subset only
   const scope = (q) => {
     if (closerFilter.length) q = q.in('closer_id', closerFilter);
     if (clients.length)      q = q.in('client_name', clients);
     q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
-    q = q.not('status', 'in', `(${dead.join(',')})`);
+    if (dead.length) q = q.not('status', 'in', `(${dead.join(',')})`);
     return q;
   };
   // Pseudonyms + recording length per sale (zero dialer calls). HYBRID per sale:
@@ -486,10 +499,11 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
   // ── phone search ──
   const phoneQ = String(req.query.phone || '').replace(/\D/g, '');
   if (phoneQ.length >= 4) {
-    const { data } = await scope(supabaseAdmin.from('sales').select(cols))
+    const { data, error } = await scope(supabaseAdmin.from('sales').select(cols))
       .or(`customer_phone.ilike.%${phoneQ}%,customer_phone_2.ilike.%${phoneQ}%`)
       .order('sale_date', { ascending: false })
       .limit(60);
+    if (error) logger.error('PORTAL', `sales phone-search failed: ${error.message}`);
     return respond(data, { phone_search: true });
   }
 
@@ -501,7 +515,8 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     .range(offset, offset + limit - 1);
   if (req.query.date_from) q = q.gte('sale_date', req.query.date_from);
   if (req.query.date_to)   q = q.lte('sale_date', req.query.date_to);
-  const { data } = await q;
+  const { data, error } = await q;
+  if (error) logger.error('PORTAL', `sales browse failed: ${error.message}`);
   return respond(data, { next_offset: (data?.length === limit) ? offset + limit : null });
 }));
 
