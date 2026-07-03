@@ -7,6 +7,8 @@ const LEVEL_COLORS = {
   closer_manager:      { bg: '#8b5cf6', light: 'rgba(139,92,246,0.1)', label: 'Closer Manager' },
   operations_manager:  { bg: '#3b82f6', light: 'rgba(59,130,246,0.1)', label: 'Ops Manager' },
   compliance_manager:  { bg: '#f97316', light: 'rgba(249,115,22,0.1)', label: 'Compliance' },
+  qa_manager:          { bg: '#14b8a6', light: 'rgba(20,184,166,0.1)', label: 'QA Manager' },
+  qa_agent:            { bg: '#0ea5e9', light: 'rgba(14,165,233,0.1)', label: 'QA Agent' },
   company_admin:       { bg: '#ef4444', light: 'rgba(239,68,68,0.1)',  label: 'Company Admin' },
   readonly_admin:      { bg: '#6b7280', light: 'rgba(107,114,128,0.1)', label: 'Readonly Admin' },
   superadmin:          { bg: '#1e293b', light: 'rgba(30,41,59,0.1)',   label: 'SuperAdmin' },

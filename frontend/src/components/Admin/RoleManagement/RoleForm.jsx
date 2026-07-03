@@ -280,9 +280,11 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           <option value="company_admin">Company Admin</option>
           <option value="operations_manager">Operations Manager</option>
           <option value="compliance_manager">Compliance Manager</option>
+          <option value="qa_manager">QA Manager</option>
           <option value="closer_manager">Closer Manager</option>
           <option value="fronter_manager">Fronter Manager</option>
           <option value="closer">Closer</option>
+          <option value="qa_agent">QA Agent</option>
           <option value="fronter">Fronter</option>
         </select>
       </FormField>
