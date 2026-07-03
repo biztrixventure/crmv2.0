@@ -129,6 +129,13 @@ const SaleSearch = ({ companyId, user }) => {
                   <div className="flex items-center gap-2 mb-1">
                     <User size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                     <p className="font-bold text-text truncate">{s.customer_name || '—'}</p>
+                    {s.group_count > 1 && (
+                      <span title="Multi-vehicle bundle — this is one car of one deal"
+                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0"
+                        style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                        {s.group_count}-car deal
+                      </span>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
                     {s.customer_phone && <span>📞 {s.customer_phone}</span>}

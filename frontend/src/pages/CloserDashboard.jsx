@@ -106,9 +106,14 @@ const CloserDashboard = () => {
     setSaleLoading(true);
     setSaleError('');
     try {
-      await createSale(formData);
+      const res = await createSale(formData);
       setModalOpen(false);
-      setSaleSuccess(`Sale created! Ref: ${formData.reference_no || 'Generated'}`);
+      // Item 4 — server-side advisory: even if the closer outran the banner,
+      // the response says the customer holds an active policy.
+      const advisory = res?.advisory?.active_policy
+        ? ' ⚠ Note: this customer holds an active policy — check the Resell flow if this duplicates coverage.'
+        : '';
+      setSaleSuccess(`Sale created! Ref: ${formData.reference_no || 'Generated'}${advisory}`);
       fetchStats();
       fetchTransfers({ date_from, date_to });
       fetchSales({ date_from, date_to });
@@ -486,6 +491,13 @@ const CloserDashboard = () => {
                         <Badge variant={saleBadge[s.status] || 'secondary'} size="sm">
                           {saleLabel[s.status] || s.status}
                         </Badge>
+                        {s.group_count > 1 && (
+                          <span title="Multi-vehicle bundle — this is one car of one deal"
+                            className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap"
+                            style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                            {s.group_count}-car deal
+                          </span>
+                        )}
                         {s.monthly_payment && hasPermission('view_financial_data') && (
                           <span className="text-xs font-semibold text-success-600">
                             ${s.monthly_payment}/mo

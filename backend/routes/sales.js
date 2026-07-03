@@ -91,7 +91,7 @@ router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, r
 
   let searchQuery = supabaseAdmin
     .from('sales')
-    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at,closer_disposition,charge_at', { count: 'exact' });
+    .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at,closer_disposition,charge_at,sale_group_id', { count: 'exact' });
   if (companyId) searchQuery = searchQuery.eq('company_id', companyId);
   const { data, error, count } = await searchQuery
     .or(filter)
@@ -101,7 +101,14 @@ router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, r
   if (error) return res.status(500).json({ error: error.message });
 
   logger.info('SEARCH_SALES', `q="${q}", hits=${count}, user=${userId}`);
-  res.json({ sales: data || [], total: count || 0 });
+  // Item 5.2 — bundle sizes for the result page ("N-car deal" chip).
+  const searchGroupIds = [...new Set((data || []).map(s => s.sale_group_id).filter(Boolean))];
+  const searchGroupCount = {};
+  if (searchGroupIds.length) {
+    const { data: g } = await supabaseAdmin.from('sales').select('sale_group_id').in('sale_group_id', searchGroupIds);
+    (g || []).forEach(r => { searchGroupCount[r.sale_group_id] = (searchGroupCount[r.sale_group_id] || 0) + 1; });
+  }
+  res.json({ sales: (data || []).map(s => ({ ...s, group_count: s.sale_group_id ? (searchGroupCount[s.sale_group_id] || 0) : 0 })), total: count || 0 });
 }));
 
 // ============================================================================
@@ -238,12 +245,21 @@ router.get(
       (profiles || []).forEach(p => { closerProfileMap[p.user_id] = p; });
     }
 
+    // Item 5.2 — bundle sizes for this page (one set-based count query) so the
+    // closer's own list can chip "N-car deal". No-op pre-mig-165.
+    const listGroupIds = [...new Set((data || []).map(s => s.sale_group_id).filter(Boolean))];
+    const listGroupCount = {};
+    if (listGroupIds.length) {
+      const { data: g } = await supabaseAdmin.from('sales').select('sale_group_id').in('sale_group_id', listGroupIds);
+      (g || []).forEach(r => { listGroupCount[r.sale_group_id] = (listGroupCount[r.sale_group_id] || 0) + 1; });
+    }
+
     const enriched = (data || []).map(s => {
       const profile = closerProfileMap[s.closer_id];
       const closer_name = profile
         ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
         : null;
-      return { ...s, closer_name: closer_name || 'Unknown' };
+      return { ...s, closer_name: closer_name || 'Unknown', group_count: s.sale_group_id ? (listGroupCount[s.sale_group_id] || 0) : 0 };
     });
 
     res.json({
@@ -406,44 +422,109 @@ router.post(
       }
     }
 
+    // ── Customer identity, resolved ONCE (shared by the cancel-cooldown guard
+    // and the Item-4 active-policy recompute below). Cheap single lookup.
+    let customerAnchorUuid = null;
+    if (customer_phone) {
+      const digitsOnly = String(customer_phone).replace(/\D/g, '');
+      const normPhone = digitsOnly.length === 11 && digitsOnly.startsWith('1') ? digitsOnly.slice(1) : digitsOnly;
+      if (normPhone.length >= 7) {
+        const { data: anchor } = await supabaseAdmin
+          .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+          .or(`customer_phone.eq.${normPhone},customer_phone.eq.+1${normPhone}`)
+          .limit(1).maybeSingle();
+        customerAnchorUuid = anchor?.customer_uuid || null;
+      }
+    }
+
     // FIX 3 (sale-lifecycle audit) — cancel-then-fresh-sell no longer dodges
-    // the resell cooldown. If this customer (customer_uuid via phone) has a
-    // sale CANCELLED within resell.cooldown_days, a brand-new sale is blocked
-    // with a pointer to the Resell flow — the same window POST /:id/resell
-    // enforces. Compliance/superadmin bypass (they correct records post-hoc);
-    // a legitimate repeat goes through the Resell button, which carries the
-    // chain + its own guards.
-    if (!['compliance_manager', 'superadmin'].includes(req.user.role) && customer_phone) {
+    // the resell cooldown. If this customer has a sale CANCELLED within
+    // resell.cooldown_days, a brand-new sale is blocked with a pointer to the
+    // Resell flow — the same window POST /:id/resell enforces. Compliance/
+    // superadmin bypass (they correct records post-hoc).
+    if (!['compliance_manager', 'superadmin'].includes(req.user.role) && customerAnchorUuid) {
       const cooldownDays = parseInt(await getConfig(companyId, 'resell.cooldown_days', 7), 10) || 0;
       if (cooldownDays > 0) {
-        const digitsOnly = String(customer_phone).replace(/\D/g, '');
-        const normPhone = digitsOnly.length === 11 && digitsOnly.startsWith('1') ? digitsOnly.slice(1) : digitsOnly;
-        if (normPhone.length >= 7) {
-          const { data: anchor } = await supabaseAdmin
-            .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
-            .or(`customer_phone.eq.${normPhone},customer_phone.eq.+1${normPhone}`)
-            .limit(1).maybeSingle();
-          if (anchor?.customer_uuid) {
-            const cutoff = new Date(Date.now() - cooldownDays * 86400000).toISOString().slice(0, 10);
-            const { data: recentCancels } = await supabaseAdmin
-              .from('sales')
-              .select('id, reference_no, status, cancellation_date, updated_at')
-              .eq('customer_uuid', anchor.customer_uuid)
-              .eq('status', 'cancelled')
-              .or(`cancellation_date.gte.${cutoff},and(cancellation_date.is.null,updated_at.gte.${cutoff}T00:00:00Z)`)
-              .limit(1);
-            if (recentCancels?.length) {
-              const rc = recentCancels[0];
-              return res.status(409).json({
-                error: `This customer has a sale cancelled within the last ${cooldownDays} day(s) (ref ${rc.reference_no || rc.id.slice(0, 8)}). A fresh sale this soon after a cancel must go through the Resell flow on that sale — open it from the phone search and pick the intent there.`,
-                code: 'CANCEL_COOLDOWN',
-                cancelled_sale_id: rc.id,
-              });
-            }
-          }
+        const cutoff = new Date(Date.now() - cooldownDays * 86400000).toISOString().slice(0, 10);
+        const { data: recentCancels } = await supabaseAdmin
+          .from('sales')
+          .select('id, reference_no, status, cancellation_date, updated_at')
+          .eq('customer_uuid', customerAnchorUuid)
+          .eq('status', 'cancelled')
+          .or(`cancellation_date.gte.${cutoff},and(cancellation_date.is.null,updated_at.gte.${cutoff}T00:00:00Z)`)
+          .limit(1);
+        if (recentCancels?.length) {
+          const rc = recentCancels[0];
+          // Item 3 (UX audit) — blocked attempts leave a trace. One disposition
+          // row per attempt (reportable via every existing disposition
+          // surface); when the SAME closer trips the block a 2nd time in this
+          // window for this customer, managers get a one-time bell (fires
+          // exactly at attempt #2 — ===, not >=, so it can't re-fire on every
+          // later attempt). Fire-and-forget.
+          (async () => {
+            try {
+              const oldRef = rc.reference_no || rc.id.slice(0, 8);
+              const note = `Sale blocked: cancel-cooldown (ref ${oldRef}, ${cooldownDays}-day window)`;
+              if (transfer_id) {
+                await supabaseAdmin.from('disposition_actions').insert({
+                  transfer_id, company_id: companyId, user_id: userId,
+                  disposition_name: 'Blocked: cancel-cooldown', color: '#dc2626',
+                  note, setter_role: req.user.role || null,
+                });
+                const cutoffIso = new Date(Date.now() - cooldownDays * 86400000).toISOString();
+                const { count } = await supabaseAdmin.from('disposition_actions')
+                  .select('id', { count: 'exact', head: true })
+                  .eq('user_id', userId)
+                  .eq('disposition_name', 'Blocked: cancel-cooldown')
+                  .ilike('note', `%ref ${oldRef}%`)
+                  .gte('created_at', cutoffIso);
+                if ((count || 0) === 2) {
+                  const { data: prof } = await supabaseAdmin
+                    .from('user_profiles').select('first_name, last_name').eq('user_id', userId).maybeSingle();
+                  const closerName = `${prof?.first_name || ''} ${prof?.last_name || ''}`.trim() || 'A closer';
+                  await notifications.notifyManagers(companyId, {
+                    type: 'cooldown_bypass_attempts',
+                    title: 'Repeated resell-flow bypass attempts',
+                    message: `${closerName} tried twice to create a fresh sale for a customer cancelled within ${cooldownDays} days (old ref ${oldRef}). The Resell flow is the sanctioned path — worth a look.`,
+                    data: { closer_id: userId, cancelled_sale_id: rc.id, reference_no: oldRef },
+                    dedupBase: `cooldown_abuse_${userId}_${rc.id}`,
+                  });
+                }
+              } else {
+                logger.warn('CANCEL_COOLDOWN', `blocked (no transfer): closer=${userId} customer_uuid=${customerAnchorUuid} old_ref=${oldRef} window=${cooldownDays}d`);
+              }
+            } catch (e) { logger.warn('CANCEL_COOLDOWN', `attempt-log failed: ${e.message}`); }
+          })();
+          return res.status(409).json({
+            error: `This customer has a sale cancelled within the last ${cooldownDays} day(s) (ref ${rc.reference_no || rc.id.slice(0, 8)}). A fresh sale this soon after a cancel must go through the Resell flow on that sale — open it from the phone search and pick the intent there.`,
+            code: 'CANCEL_COOLDOWN',
+            cancelled_sale_id: rc.id,
+          });
         }
       }
     }
+
+    // Item 4 (UX audit) — SERVER-SIDE active-policy recompute at create time.
+    // The banner is informational and outrunnable (async fetch, fail-silent),
+    // so the trail can't depend on the client: recompute here, for every
+    // creator, and (a) seed an 'active_policy_warning_shown' edit_history
+    // entry on the new sale rows, (b) return a non-blocking advisory the UI
+    // surfaces post-create. Variant: 'scoped' = this closer's own active
+    // policy, 'unscoped' = another agent's, 'both' = both. Counts only.
+    let activeAdvisory = null;
+    if (customerAnchorUuid) {
+      const ACTIVE_POLICY = new Set(['closed_won', 'sold']);
+      const { data: activeRowsAll } = await supabaseAdmin
+        .from('sales').select('closer_id, status').eq('customer_uuid', customerAnchorUuid);
+      const act = (activeRowsAll || []).filter(r => ACTIVE_POLICY.has(r.status));
+      const activeAll = act.length;
+      const activeOwn = act.filter(r => r.closer_id === userId).length;
+      if (activeAll > 0) {
+        const variant = activeOwn > 0 ? (activeAll > activeOwn ? 'both' : 'scoped') : 'unscoped';
+        activeAdvisory = { active_policy: true, active_count: activeAll, variant };
+      }
+    }
+
 
     // G22 — vehicle eligibility for the primary car + every additional car.
     const { enforceOrAttach: enforceEligibility } = require('../utils/vehicleEligibility');
@@ -481,6 +562,14 @@ router.post(
       sale_date:   saleDate,
       // Scheduled charge for a post-dated sale (null for normal sales).
       charge_at:   charge_at || null,
+      // Item 4 — the active-policy warning leaves a trail on the sale itself,
+      // recomputed server-side (immune to the banner's fetch race / a hidden
+      // client). A manager can later see the closer proceeded despite it.
+      ...(activeAdvisory ? { edit_history: [{
+        edited_at: new Date().toISOString(), at: new Date().toISOString(), by: userId, role: req.user.role,
+        action: 'active_policy_warning_shown', variant: activeAdvisory.variant,
+        note: `Customer held ${activeAdvisory.active_count} active polic${activeAdvisory.active_count === 1 ? 'y' : 'ies'} (${activeAdvisory.variant}) at creation`,
+      }] } : {}),
     }, userId);
 
     // Build the per-vehicle portion of a sale row from a car payload.
@@ -556,6 +645,9 @@ router.post(
       sale: primarySale,
       sales: createdSales,
       count: createdSales.length,
+      // Item 4 — non-blocking post-create advisory (UI surfaces it): even a
+      // closer who outran the banner learns the customer holds an active policy.
+      advisory: activeAdvisory,
     });
   })
 );
@@ -786,7 +878,19 @@ router.get('/customer-history/by-phone/:phone', asyncHandler(async (req, res) =>
     chargebacks: rows.filter(r => r.status === 'chargeback').length,
     chargeback_total: rows.reduce((sum, r) => sum + (parseFloat(r.chargeback_amount) || 0), 0),
   };
-  res.json({ customer_uuid: anchor.customer_uuid, history: rows, summary });
+
+  // Item 4 (UX audit) — scope-safe aggregate across the FULL customer history,
+  // regardless of viewer scope. COUNTS ONLY: no names, refs, amounts, dates or
+  // companies. Lets the banner say "an active policy exists through another
+  // agent — details restricted" in the cross-closer blind-spot case without
+  // widening what the viewer can actually read.
+  const ACTIVE_POLICY = new Set(['closed_won', 'sold']);
+  const { data: allRows } = await supabaseAdmin
+    .from('sales').select('id, status').eq('customer_uuid', anchor.customer_uuid);
+  const unscoped_total_count  = (allRows || []).length;
+  const unscoped_active_count = (allRows || []).filter(r => ACTIVE_POLICY.has(r.status)).length;
+
+  res.json({ customer_uuid: anchor.customer_uuid, history: rows, summary, unscoped_total_count, unscoped_active_count });
 }));
 
 // ============================================================================
@@ -1249,9 +1353,13 @@ router.put(
       if (reasonKey) updates.cancellation_reason_key = reasonKey;
       if (!existing.cancellation_date) updates.cancellation_date = new Date().toISOString().slice(0, 10);
       const hist = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+      const nowIso = new Date().toISOString();
       updates.edit_history = [...hist, {
-        at: new Date().toISOString(), by: userId, role: userRole,
+        // edited_at is the canonical timestamp key (the drawer's Audit Trail
+        // renders it); `at` kept for older readers of the same vocabulary.
+        edited_at: nowIso, at: nowIso, by: userId, editor_id: userId, role: userRole,
         action: `status:${existing.status}→${status}`,
+        previous_status: existing.status, new_status: status,
         cancellation_reason_key: reasonKey || null,
         note: String(req.body.cancellation_reason_note || '').trim().slice(0, 500) || null,
       }];
@@ -1340,6 +1448,39 @@ router.put(
       return res.status(500).json({ error: updateError.message });
     }
 
+    // Item 2 (UX audit) — a closer self-cancel is no longer silent: the sale's
+    // fronter + the company's managers get a bell/push with the reason LABEL.
+    // Only fires on non-compliance transitions INTO 'cancelled' (compliance has
+    // its own onComplianceUpdate path; closed_lost is a lost deal, not a
+    // cancellation). Config-gated like the other notification events; deduped
+    // per sale so retries can't double-notify. Fire-and-forget.
+    if (becomingCancelLike && status === 'cancelled' && !isCompliance) {
+      (async () => {
+        try {
+          if (!(await getConfig(existing.company_id, 'notifications.sale_cancelled', true))) return;
+          const reasonKey = String(req.body.cancellation_reason_key || '').trim();
+          const catalog = await getConfig(null, 'cancellation_reasons', []);
+          const reasonLabel = (Array.isArray(catalog) ? catalog : []).find(r => r?.key === reasonKey)?.label
+            || (reasonKey ? reasonKey.replace(/_/g, ' ') : 'no reason recorded');
+          const { data: prof } = await supabaseAdmin
+            .from('user_profiles').select('first_name, last_name').eq('user_id', userId).maybeSingle();
+          const closerName = `${prof?.first_name || ''} ${prof?.last_name || ''}`.trim() || 'A closer';
+          const refNo = updated.reference_no || updated.id.slice(0, 8).toUpperCase();
+          const payload = {
+            type: 'sale_cancelled',
+            title: `Sale cancelled — ${updated.customer_name || 'Customer'}`,
+            message: `${closerName} cancelled ${updated.customer_name || 'the sale'} (Ref: ${refNo}). Reason: ${reasonLabel}.`,
+            data: { sale_id: updated.id, reference_no: refNo, cancellation_reason_key: reasonKey || null },
+            dedupBase: `sale_cancelled_${updated.id}`,
+          };
+          const targets = new Set();
+          if (updated.fronter_id && updated.fronter_id !== userId) targets.add(updated.fronter_id);
+          if (targets.size) await notifications.notifyUsers([...targets], { ...payload, companyId: updated.company_id });
+          await notifications.notifyManagers(updated.company_id, payload);
+        } catch (e) { logger.warn('SALE_CANCEL_NOTIF', e.message); }
+      })();
+    }
+
     logger.success('UPDATE_SALE', `Sale updated: ${id}`);
     res.json({ sale: updated });
   })
@@ -1384,7 +1525,8 @@ router.patch('/:id/reassign', asyncHandler(async (req, res) => {
   if (!Object.keys(changes).length) return res.status(400).json({ error: 'No ownership changes provided' });
 
   const history = Array.isArray(existing.edit_history) ? existing.edit_history : [];
-  updates.edit_history = [...history, { at: new Date().toISOString(), by: req.user.id, action: 'reassign', changes }];
+  const reassignAt = new Date().toISOString();
+  updates.edit_history = [...history, { edited_at: reassignAt, at: reassignAt, by: req.user.id, action: 'reassign', changes }];
   updates.updated_at = new Date().toISOString();
 
   const { data: updated, error } = await supabaseAdmin

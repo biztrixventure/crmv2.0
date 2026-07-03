@@ -40,11 +40,17 @@ export default function CustomerHistoryBanner({ phone, className = '' }) {
   }, [phone]);
 
   const rows = data?.history || [];
-  if (!data || !data.summary?.total || !rows.length) return null;
-
   const activeRows = rows.filter(r => ACTIVE_STATUSES.has(r.status));
-  const hasActive = activeRows.length > 0;
-  const s = data.summary;
+  // Item 4 — cross-closer blind spot: the endpoint also returns scope-safe
+  // COUNTS across the full customer history. When more active policies exist
+  // than this viewer can see, a "details restricted" line renders — even when
+  // the scoped list is completely empty (the exact case that used to hide the
+  // banner entirely).
+  const hiddenActive = Math.max(0, (data?.unscoped_active_count || 0) - activeRows.length);
+  if (!data || (!rows.length && hiddenActive === 0)) return null;
+
+  const hasActive = activeRows.length > 0 || hiddenActive > 0;
+  const s = data.summary || { total: 0, active: 0, cancelled: 0, chargebacks: 0 };
 
   const bits = [];
   if (s.active) bits.push(`${s.active} active`);
@@ -62,15 +68,22 @@ export default function CustomerHistoryBanner({ phone, className = '' }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold" style={{ color: hasActive ? 'var(--color-error-700, #b91c1c)' : 'var(--color-warning-700, #b45309)' }}>
           {hasActive
-            ? `Active policy exists — this customer already holds ${activeRows.length === 1 ? 'an approved policy' : `${activeRows.length} approved policies`}`
+            ? `Active policy exists — this customer already holds ${(activeRows.length + hiddenActive) === 1 ? 'an approved policy' : `${activeRows.length + hiddenActive} approved policies`}`
             : `Returning customer — ${s.total} prior sale${s.total === 1 ? '' : 's'} on this number`}
         </p>
-        <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-          {s.total} prior sale{s.total === 1 ? '' : 's'}{bits.length ? ` — ${bits.join(', ')}` : ''}.
-          {hasActive
-            ? ' Selling this customer again on the same coverage risks a duplicate — use the Resell flow on the existing sale for renewals, additional cars, or replacements.'
-            : ' Review the history before creating a new sale; the Resell flow handles legitimate repeats.'}
-        </p>
+        {rows.length > 0 && (
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {s.total} prior sale{s.total === 1 ? '' : 's'}{bits.length ? ` — ${bits.join(', ')}` : ''}.
+            {hasActive
+              ? ' Selling this customer again on the same coverage risks a duplicate — use the Resell flow on the existing sale for renewals, additional cars, or replacements.'
+              : ' Review the history before creating a new sale; the Resell flow handles legitimate repeats.'}
+          </p>
+        )}
+        {hiddenActive > 0 && (
+          <p className="text-xs mt-1 font-bold" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+            An active policy exists with this customer through another agent — details restricted. Use the Resell flow or ask a manager.
+          </p>
+        )}
         <div className="mt-1.5 flex flex-col gap-0.5">
           {rows.slice(0, 3).map(r => (
             <div key={r.id} className="flex items-center gap-2 text-[11px] flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>

@@ -175,6 +175,13 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
       const r = await client.post('compliance/recordings/confirm', { sale_id: saleId, clips, apply_to_group: applyGroup || undefined });
       const extra = r.data?.group_applied ? ` (+ applied to ${r.data.group_applied} other car${r.data.group_applied === 1 ? '' : 's'} in this deal)` : '';
       toast.success(`Confirmed ${clips.length} recording${clips.length === 1 ? '' : 's'}${extra}`);
+      // Item 5.3 — a failed sibling copy is loud: the reviewer must never
+      // believe the whole deal is confirmed when it isn't.
+      if (applyGroup && r.data?.group_apply_failed > 0) {
+        toast.error(`Applying to ${r.data.group_apply_failed} sibling car${r.data.group_apply_failed === 1 ? '' : 's'} FAILED — they remain pending. Confirm them individually.`, { duration: 10000 });
+      } else if (applyGroup && r.data?.group_apply_failed === -1) {
+        toast.error('This sale is not part of a multi-car deal anymore — nothing to apply the confirmation to.');
+      }
       onConfirmed(saleId);
     } catch (e) { toast.error(e.response?.data?.error || 'Could not confirm'); }
     finally { setSaving(false); }

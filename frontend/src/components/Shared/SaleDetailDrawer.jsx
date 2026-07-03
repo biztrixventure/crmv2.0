@@ -10,6 +10,7 @@ import CustomerTimeline from './CustomerTimeline';
 import NumberRiskCheck from './NumberRiskCheck';
 import ReassignOwnership from './ReassignOwnership';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
+import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
@@ -73,9 +74,22 @@ const Section = ({ title, children }) => (
   </div>
 );
 
-export default function SaleDetailDrawer({ sale, onClose, onResold }) {
+export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) {
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections } = useDrawerLayout('sale');
+  // Reason keys → readable labels (same catalog the cancel modals use).
+  const { labelOf: reasonLabelOf } = useCancellationReasons();
+  // Item 5.1 — bundle-sibling navigation: clicking a sibling swaps the viewed
+  // sale locally (the parent still owns open/close via the prop). Every data
+  // effect below keys on sale.id, so chain/lifetime/group refetch on swap.
+  const [viewSale, setViewSale] = useState(null);
+  useEffect(() => { setViewSale(null); }, [saleProp?.id]);
+  const sale = viewSale || saleProp;
+  const openSibling = (id) => {
+    client.get(`sales/${id}`)
+      .then(r => { if (r.data?.sale) setViewSale(r.data.sale); })
+      .catch(() => { /* permission/404 — stay on the current sale */ });
+  };
   const [resellOpen, setResellOpen]       = useState(false);
   const [copied, setCopied]               = useState(false);
   const [enabledStatuses, setEnabledStatuses] = useState(null);
@@ -239,6 +253,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
     sale_date: sale.sale_date ? <Row key="sale_date" label="Sale Date" value={fmtSaleDate(sale.sale_date)} /> : null,
     status:  <Row key="status" label="Status" value={SALE_LABEL[sale.status] || sale.status} />,
     cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" /> : null,
+    cancellation_reason: sale.cancellation_reason_key ? <Row key="cancellation_reason" label="Cancellation Reason" value={reasonLabelOf(sale.cancellation_reason_key)} highlight="var(--color-error-600, #dc2626)" /> : null,
     closer_disposition: sale.closer_disposition ? <Row key="closer_disposition" label="Closer Disposition" value={sale.closer_disposition} highlight="var(--color-primary-600)" /> : null,
     monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="#16a34a" /> : null,
     down_payment:     (canFinancial && sale.down_payment)     ? <Row key="down_payment" label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} /> : null,
@@ -256,7 +271,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   const DEFAULT_FIELDS = {
     customer:  ['name', 'phone', 'phone_2', 'email', 'address'],
     vehicle:   ['year', 'make', 'model', 'miles', 'vin'],
-    sale_info: ['client', 'plan', 'sale_date', 'status', 'cancellation_date', 'closer_disposition'],
+    sale_info: ['client', 'plan', 'sale_date', 'status', 'cancellation_date', 'cancellation_reason', 'closer_disposition'],
     financial: ['monthly_payment', 'down_payment', 'payment_due_note'],
     people:    ['closer', 'fronter'],
     timeline:  ['created', 'updated', 'submitted_for_review', 'compliance_reviewed'],
@@ -362,6 +377,15 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
           </div>
         )}
 
+        {/* Item 5.1 — viewing a bundle sibling: one-tap return to the original */}
+        {viewSale && (
+          <button type="button" onClick={() => setViewSale(null)}
+            className="w-full text-left text-xs font-bold px-5 py-2 flex-shrink-0 hover:opacity-80"
+            style={{ background: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700, #4338ca)', borderBottom: '1px solid var(--color-border)' }}>
+            ← Back to {saleProp?.customer_name || 'the original sale'}{saleProp?.reference_no ? ` · #${saleProp.reference_no}` : ''}
+          </button>
+        )}
+
         {/* Scrollable body — section order + visibility from useDrawerLayout
             (SuperAdmin configures per role in Business Rules → Drawer Layout).
             Unknown sections (e.g. 'compliance_actions' for compliance role) are
@@ -425,9 +449,11 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
               </p>
               <div className="space-y-1.5">
                 {groupSiblings.map(g => (
-                  <div key={g.id} className="rounded-xl p-2.5 flex items-center gap-2.5 flex-wrap"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                    <span className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
+                  <button key={g.id} type="button" onClick={() => openSibling(g.id)}
+                    title="Open this sale"
+                    className="w-full text-left rounded-xl p-2.5 flex items-center gap-2.5 flex-wrap transition-colors hover:bg-bg-secondary"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', cursor: 'pointer' }}>
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--color-primary-600)' }}>
                       {[g.car_year, g.car_make, g.car_model].filter(Boolean).join(' ') || 'Vehicle'}
                     </span>
                     <code className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
@@ -437,7 +463,7 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                     <span className="text-[10px] uppercase tracking-wide font-bold ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
                       {(g.status || '').replace(/_/g, ' ')}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -526,18 +552,27 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                   const actionColor = h.action === 'approved' ? '#16a34a'
                     : h.action === 'returned' ? '#d97706'
                     : 'var(--color-text-secondary)';
+                  // Entry vocabulary converged on edited_at, but older writers
+                  // (reassign, the first cancel entries) used `at` — tolerate both
+                  // so no historical row ever renders "Invalid Date".
+                  const when = h.edited_at || h.at;
                   return (
                     <div key={i} className="p-3 rounded-xl text-xs"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                       <div className="flex justify-between mb-1">
                         <span className="font-bold capitalize" style={{ color: actionColor }}>{actionLabel}</span>
                         <span style={{ color: 'var(--color-text-tertiary)' }}>
-                          {new Date(h.edited_at).toLocaleString()}
+                          {when ? new Date(when).toLocaleString() : '—'}
                         </span>
                       </div>
                       {h.previous_status && (
                         <p className="mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                           {h.previous_status} → {h.new_status || h.action}
+                        </p>
+                      )}
+                      {h.cancellation_reason_key && (
+                        <p className="mb-1 font-semibold" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+                          Reason: {reasonLabelOf(h.cancellation_reason_key)}
                         </p>
                       )}
                       {(h.note || h.reason) && (

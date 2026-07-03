@@ -514,9 +514,14 @@ const StaffShell = () => {
         saleFormQueueId.current = null;
         setDialerRefresh(x => x + 1);
       }
-      setSaleSuccess(isPost
+      // Item 4 — server-side advisory: even if the closer outran the banner,
+      // the response says the customer holds an active policy.
+      const advisoryNote = res?.advisory?.active_policy
+        ? ' ⚠ Note: this customer holds an active policy — check the Resell flow if this duplicates coverage.'
+        : '';
+      setSaleSuccess((isPost
         ? 'Post-dated sale saved — in the Post Date tab until you charge it.'
-        : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!'));
+        : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!')) + advisoryNote);
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
       fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) });

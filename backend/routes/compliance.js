@@ -244,6 +244,7 @@ router.post('/recordings/confirm', asyncHandler(async (req, res) => {
   // multi-car bundle (one call usually covers the whole deal). Explicit flag —
   // never automatic, since cars are occasionally discussed on separate calls.
   let groupApplied = 0;
+  let groupApplyFailed = 0;   // Item 5.3 — a failed sibling copy must be LOUD, never silent
   if (req.body.apply_to_group === true) {
     const { data: me } = await supabaseAdmin.from('sales').select('sale_group_id').eq('id', saleId).maybeSingle();
     if (me?.sale_group_id) {
@@ -251,17 +252,21 @@ router.post('/recordings/confirm', asyncHandler(async (req, res) => {
         .select('id').eq('sale_group_id', me.sale_group_id).neq('id', saleId);
       const sibIds = (sibs || []).map(s => s.id);
       if (sibIds.length) {
-        await supabaseAdmin.from('sale_recording_confirmations').delete().in('sale_id', sibIds);
+        const { error: dErr } = await supabaseAdmin.from('sale_recording_confirmations').delete().in('sale_id', sibIds);
         const sibRows = sibIds.flatMap(sid => rows.map(r => ({ ...r, sale_id: sid })));
-        const { error: gErr } = await supabaseAdmin.from('sale_recording_confirmations').insert(sibRows);
-        if (gErr) logger.warn('COMPLIANCE_REC', `group-apply failed for ${saleId}: ${gErr.message}`);
+        const { error: gErr } = dErr ? { error: dErr } : await supabaseAdmin.from('sale_recording_confirmations').insert(sibRows);
+        if (gErr) { groupApplyFailed = sibIds.length; logger.warn('COMPLIANCE_REC', `group-apply FAILED for ${saleId} → ${sibIds.length} sibling(s): ${gErr.message}`); }
         else groupApplied = sibIds.length;
       }
+    } else {
+      // reviewer asked for group-apply but the sale isn't (or is no longer) in
+      // a bundle — report it rather than silently doing nothing
+      groupApplyFailed = -1;
     }
   }
 
   logger.success('COMPLIANCE_REC', `sale ${saleId} ${append ? 'appended' : 'confirmed'} ${rows.length} clip(s) by ${req.user.id}${groupApplied ? ` (+${groupApplied} group sibling(s))` : ''}`);
-  res.json({ ok: true, confirmations: data, group_applied: groupApplied });
+  res.json({ ok: true, confirmations: data, group_applied: groupApplied, group_apply_failed: groupApplyFailed });
 }));
 
 // UNCONFIRM — send a sale back to the pending-review queue
