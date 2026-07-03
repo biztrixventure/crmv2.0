@@ -37,27 +37,29 @@ ON CONFLICT DO NOTHING;
 
 -- ── CHECK 2: RCM frozen sample never re-samples a period ─────────────────────
 -- Run the SAME period twice; the second call must return 0 and add no rows.
--- Wrapped in a TX we ROLLBACK so prod data is untouched.
--- NOTE on the advisory lock: both calls below share ONE session/transaction, so
--- the transaction-scoped advisory lock is re-entrant (the same session re-takes
--- it) — meaning this test exercises the EXISTS(period) freeze guard, and the 2nd
--- call still returns 0. The advisory lock's job is the CROSS-session/replica case
--- (two schedulers racing the same period from different connections); to observe
--- it, run the two SELECTs from two separate psql sessions without COMMITting the
--- first — the second returns 0 with a "lock busy … skipping" NOTICE.
+-- Wrapped in a TX we ROLLBACK so prod data is untouched. The two calls share one
+-- session/transaction — the EXISTS(period) freeze guard makes the 2nd return 0
+-- (the advisory lock covers the CROSS-session/replica race; to observe THAT, run
+-- the two SELECTs from two separate psql sessions, first uncommitted → the 2nd
+-- returns 0 with a "lock busy … skipping" NOTICE).
+-- Auto-picks the busiest company over the last year so `first_run` actually
+-- samples something — no UUID to substitute.
 BEGIN;
-  -- pick a real company + a window that actually has transfers/sales:
+  -- first run — EXPECT: > 0
   SELECT app_qa_materialize_rcm(
-    '00000000-0000-0000-0000-000000000000'::uuid,
+    (SELECT company_id FROM transfers WHERE created_at > now() - interval '365 days'
+       GROUP BY company_id ORDER BY count(*) DESC LIMIT 1),
     ARRAY['fronter'], 'percentage', 20, 'TEST-PERIOD',
-    now() - interval '30 days', now()
-  ) AS first_run_inserted;          -- EXPECT: > 0 (some sample)
+    now() - interval '365 days', now()
+  ) AS first_run_inserted;
 
+  -- second run, same company+period — EXPECT: 0 (frozen)
   SELECT app_qa_materialize_rcm(
-    '00000000-0000-0000-0000-000000000000'::uuid,
+    (SELECT company_id FROM transfers WHERE created_at > now() - interval '365 days'
+       GROUP BY company_id ORDER BY count(*) DESC LIMIT 1),
     ARRAY['fronter'], 'percentage', 20, 'TEST-PERIOD',
-    now() - interval '30 days', now()
-  ) AS second_run_inserted;         -- EXPECT: 0 (frozen — period already materialized)
+    now() - interval '365 days', now()
+  ) AS second_run_inserted;
 
   SELECT count(*) AS rows_for_test_period
   FROM qa_assignments WHERE method='rcm' AND period='TEST-PERIOD';   -- EXPECT: == first_run_inserted

@@ -63,8 +63,6 @@ CREATE OR REPLACE FUNCTION app_qa_materialize_rcm(
 ) RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
   v_lock  bigint;
-  v_total integer;
-  v_n     integer;
   v_count integer;
 BEGIN
   -- SERIALIZE this company+period. Transaction-scoped → auto-released at COMMIT/
@@ -85,9 +83,12 @@ BEGIN
     RETURN 0;
   END IF;
 
-  -- eligible population for this period (fronter transfers + closer sales)
-  CREATE TEMP TABLE _qa_rcm_pool ON COMMIT DROP AS
-  SELECT subject_role, transfer_id, sale_id FROM (
+  -- Single set-based statement — NO temp table, so the function is re-entrant
+  -- within one transaction (an earlier temp-table version collided when called
+  -- twice in the same tx). `pool` is MATERIALIZED so it's computed once; a
+  -- window count + random row_number pick exactly N rows: fixed = value, or
+  -- ceil(value% * total). If N ≥ total, all rows pass (LEAST is implicit).
+  WITH pool AS MATERIALIZED (
     SELECT 'fronter'::text AS subject_role, t.id AS transfer_id, NULL::uuid AS sale_id
     FROM transfers t
     WHERE 'fronter' = ANY(p_covers)
@@ -101,26 +102,22 @@ BEGIN
       AND s.company_id = p_company_id
       AND s.created_at >= p_start AND s.created_at < p_end
       AND NOT EXISTS (SELECT 1 FROM qa_assignments a WHERE a.sale_id = s.id AND a.method = 'rcm')
-  ) pool;
-
-  SELECT COUNT(*) INTO v_total FROM _qa_rcm_pool;
-  IF v_total = 0 THEN RETURN 0; END IF;
-
-  -- sample size
-  IF p_mode = 'fixed' THEN
-    v_n := GREATEST(0, FLOOR(p_value)::int);
-  ELSE  -- percentage
-    v_n := CEIL(p_value / 100.0 * v_total)::int;
-  END IF;
-  v_n := LEAST(v_n, v_total);
-  IF v_n <= 0 THEN RETURN 0; END IF;
-
+  ),
+  ranked AS (
+    SELECT subject_role, transfer_id, sale_id,
+           row_number() OVER (ORDER BY random()) AS rn,
+           count(*)     OVER ()                  AS total
+    FROM pool
+  )
   INSERT INTO qa_assignments (company_id, method, subject_role, transfer_id, sale_id, sampled, period, status)
   SELECT p_company_id, 'rcm', subject_role, transfer_id, sale_id, true, p_period, 'pending'
-  FROM _qa_rcm_pool
-  ORDER BY random()
-  LIMIT v_n
+  FROM ranked
+  WHERE rn <= CASE WHEN p_mode = 'fixed'
+                   THEN GREATEST(FLOOR(p_value)::int, 0)
+                   ELSE CEIL(p_value / 100.0 * total)::int
+              END
   ON CONFLICT DO NOTHING;
+
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
 END $$;
