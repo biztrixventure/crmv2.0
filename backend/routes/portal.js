@@ -42,6 +42,22 @@ async function recordingReviewGateOn() {
 // flip closer_disposition to 'sale' and are no longer matched. NULL-safe.
 const isPostDate = (d) => /post[\s_-]?date|postdate/i.test(String(d || ''));
 
+// Egress governance for recording playback. Portal clients have no CRM role, so
+// we resolve limits/audit under a synthetic role='portal_client' (matches the
+// seeded default), keyed on the portal client's auth user id. Logs every listen
+// (allowed or denied) to export_audit_log — in ADDITION to portal_listens
+// (which stays the client-facing listen audit). Assumption flagged: "minutes"
+// counts the clip's full duration per listen, not seconds actually streamed.
+const { enforceEgress: _enforceEgress } = require('../utils/egressGuard');
+async function enforceRecordingEgress(req, sale, durationSeconds) {
+  return _enforceEgress({
+    user: { id: req.user?.id, company_id: null, role: 'portal_client' },
+    actionType: 'recording_listen', dataset: sale.id, surface: 'portal_recording',
+    durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+    filters: { portal_client_id: req.portalClient?.id, recording_id: null },
+  });
+}
+
 // FIX 1 (sale-lifecycle audit) — DEAD sales never surface to clients, in EITHER
 // gate mode: a cancelled/chargebacked deal's recording must not list or stream
 // on the portal. Same config key the compliance queue reads (seeded by mig 166),
@@ -587,6 +603,10 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     else if (req.query.clip) { const n = parseInt(req.query.clip, 10); if (n >= 1 && n <= confs.length) clip = confs[n - 1]; }
 
     if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
+      // Egress governance: gate + audit-log this listen (recording playback is
+      // external egress). Denied → 429, stream aborts. Same guard as CSV exports.
+      const guard = await enforceRecordingEgress(req, sale, clip.duration);
+      if (!guard.allowed) return res.status(429).json({ error: guard.message, code: 'EGRESS_LIMIT' });
       const { data: prof } = await supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', sale.closer_id).maybeSingle();
       supabaseAdmin.from('portal_listens').insert({
         portal_client_id: req.portalClient.id, sale_id: sale.id, closer_id: sale.closer_id,
@@ -624,6 +644,8 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
     { onConflict: 'sale_id' },
   ).then(() => {}, () => {});
   if (!req.headers.range || /bytes=0-/.test(req.headers.range)) {
+    const guard = await enforceRecordingEgress(req, sale, rec.duration);
+    if (!guard.allowed) return res.status(429).json({ error: guard.message, code: 'EGRESS_LIMIT' });
     supabaseAdmin.from('portal_listens').insert({
       portal_client_id: req.portalClient.id, sale_id: sale.id, closer_id: sale.closer_id,
       closer_name: fullName(prof), customer_name: sale.customer_name, recording_id: rec.recording_id, ip: clientIp(req),

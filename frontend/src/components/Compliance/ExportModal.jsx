@@ -12,6 +12,14 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [selected, setSelected]   = useState(new Set());
   const [loading, setLoading]     = useState(false);
+  const [blocked, setBlocked]     = useState('');   // egress-limit message
+  const [usage, setUsage]         = useState(null); // { limits, used } — pre-check hint
+
+  // Client pre-check (fast UX only — the server is the real gate).
+  useEffect(() => {
+    client.get('egress/my-usage', { params: { action_type: 'csv_export' } })
+      .then(r => setUsage(r.data)).catch(() => setUsage(null));
+  }, []);
 
   const loadUsers = useCallback(async (cid) => {
     setLoadingUsers(true);
@@ -32,10 +40,17 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
   });
 
   const handleExport = async () => {
-    setLoading(true);
+    setLoading(true); setBlocked('');
     try {
       await onExport({ dateFrom, dateTo, company, userIds: userMode === 'select' ? [...selected] : [] });
       onClose();
+    } catch (err) {
+      // Egress limit → keep the modal open and show the reason (server-enforced).
+      if (err?.egressBlocked || err?.response?.data?.code === 'EGRESS_LIMIT') {
+        setBlocked(err.message || err.response?.data?.error || 'Export blocked by your limit.');
+      } else {
+        setBlocked(err?.response?.data?.error || 'Export failed. Try again.');
+      }
     } finally { setLoading(false); }
   };
 
@@ -48,6 +63,14 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
     <Overlay>
       <ModalBox>
         <ModalHeader icon={Download} title={`Export ${TAB_LABELS[tab] || tab}`} onClose={onClose} />
+
+        {usage && (usage.limits?.max_exports_per_day != null || usage.limits?.max_rows_per_export != null) && (
+          <div className="mx-6 mt-4 px-3 py-2 rounded-lg text-xs" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            {usage.limits.max_exports_per_day != null && <>Exports today: <b>{usage.used.exports}/{usage.limits.max_exports_per_day}</b>. </>}
+            {usage.limits.max_rows_per_export != null && <>Max <b>{usage.limits.max_rows_per_export.toLocaleString()}</b> rows per export. </>}
+            Narrow with a date range if you hit the limit.
+          </div>
+        )}
 
         <div className="overflow-y-auto p-6 space-y-5">
 
@@ -131,6 +154,11 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
           </div>
         </div>
 
+        {blocked && (
+          <div className="mx-6 mb-2 px-3 py-2.5 rounded-lg text-sm" style={{ background: 'var(--color-error-50, #fef2f2)', border: '1px solid var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)' }}>
+            {blocked}
+          </div>
+        )}
         <div className="flex gap-3 px-6 pb-6 pt-3 flex-shrink-0"
           style={{ borderTop: '1px solid var(--color-border)' }}>
           <button onClick={onClose}

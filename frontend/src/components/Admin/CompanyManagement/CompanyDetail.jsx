@@ -143,7 +143,8 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
     setExportLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
-      const params = { company_id: companyId, status: status || undefined, limit: 5000, page: 1 };
+      const params = { company_id: companyId, status: status || undefined, limit: 5000, page: 1,
+        __egress: 'csv_export', __dataset: type };   // server enforces + logs
       if (type === 'callbacks') {
         if (priority)   params.priority = priority;
         if (userFilter) params.user_id  = userFilter;
@@ -184,7 +185,9 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
         downloadCSV(rows, ['Customer','Phone','Priority','Fronter','Closer','Status','Scheduled'],
           `callbacks_${companyId}_${today}.csv`);
       }
-    } catch { /* silent */ } finally { setExportLoading(false); }
+    } catch (err) {
+      if (err?.response?.data?.code === 'EGRESS_LIMIT') window.alert(err.response.data.error || 'Export blocked by your limit.');
+    } finally { setExportLoading(false); }
   };
 
   // Sorting is applied server-side across the whole dataset; reset to page 1.

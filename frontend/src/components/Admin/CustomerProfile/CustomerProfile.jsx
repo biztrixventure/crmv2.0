@@ -343,7 +343,12 @@ export default function CustomerProfile() {
           </button>
           <div className="flex items-center gap-2">
             <CopyBtn text={buildSummary(profile)} label="Copy summary" />
-            <button onClick={() => downloadProfileCSV(profile)}
+            <button onClick={async () => {
+                // Egress governance (soft — single-customer export already loaded).
+                try { await client.post('egress/client-log', { dataset: 'customer_profile', row_count: 1, filters: { customer_uuid: profile.customer_uuid } }); }
+                catch (err) { if (err?.response?.data?.code === 'EGRESS_LIMIT') { window.alert(err.response.data.error); return; } }
+                downloadProfileCSV(profile);
+              }}
               className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <Download size={14} /> Export CSV

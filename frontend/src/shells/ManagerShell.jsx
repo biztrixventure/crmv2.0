@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { useListLayout } from "../hooks/useListLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
@@ -94,7 +95,7 @@ import { fmtDateET, todayET, fmtSaleDate } from "../utils/timezone";
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
 const XFER_BADGE  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
-const PAGE_SIZE   = 25;
+const DEFAULT_PAGE_SIZE = 25;   // list.layout override resolves at runtime (useListLayout)
 
 // ── Overview helpers ──────────────────────────────────────────────────────────
 const MEDAL_COLORS    = ['#f59e0b', '#94a3b8', '#b45309'];
@@ -161,6 +162,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict } = useFeatureFlags();
+  // Superadmin-configurable rows-per-page (list.layout.manager.<role>); falls
+  // back to the built-in 25 until configured, so nothing changes on rollout.
+  const { pageSize: PAGE_SIZE } = useListLayout('manager', { pageSize: DEFAULT_PAGE_SIZE });
   const navigate = useNavigate();
   const notifHook = useNotifications();
   const { stats, fetchStats } = useDashboardStats();

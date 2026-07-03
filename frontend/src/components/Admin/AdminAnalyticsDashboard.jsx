@@ -437,8 +437,9 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       // record in the range, not just the first page.
       const fetchAllPages = async (endpoint, baseParams, key) => {
         const PAGE = 1000; let pageN = 1; const all = [];
+        const egress = { __egress: 'csv_export', __dataset: key };  // server enforces + logs (page 1)
         for (;;) {
-          const r = await client.get(endpoint, { params: { ...baseParams, page: pageN, limit: PAGE } });
+          const r = await client.get(endpoint, { params: { ...baseParams, ...egress, page: pageN, limit: PAGE } });
           const batch = r.data[key] || [];
           all.push(...batch);
           if (batch.length < PAGE || pageN >= 200) break;   // safety: ≤ 200k rows
@@ -518,7 +519,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           ['Customer','Phone','Scheduled At','Status','Priority','Notes','Fronter','Closer','Company','Created'],
           `callbacks_${cbType}_export_${today}.csv`);
       }
-    } catch { /* silent — user retries */ } finally {
+    } catch (err) {
+      // Egress limit (or other export failure) → tell the user why.
+      if (err?.egressBlocked || err?.response?.data?.code === 'EGRESS_LIMIT') {
+        window.alert(err.message || err.response?.data?.error || 'Export blocked by your limit.');
+      }
+    } finally {
       setExportLoading(false);
     }
   };

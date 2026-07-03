@@ -168,6 +168,11 @@ router.get('/batches/:id/export', asyncHandler(async (req, res) => {
     if (data.length < 1000) break;
   }
 
+  // Egress governance: gate + log this batch re-export.
+  const { enforceEgress } = require('../utils/egressGuard');
+  const egress = await enforceEgress({ user: req.user, actionType: 'csv_export', dataset: 'upload_batch', surface: 'transfer_upload_batch_export', rowCount: transfers.length, filters: { batch_id: batchId } });
+  if (!egress.allowed) return res.status(429).json({ error: egress.message, code: 'EGRESS_LIMIT', limit: egress.limit });
+
   // Resolve company + fronter names back to the strings the file used.
   const coIds = [...new Set(transfers.map(t => t.company_id).filter(Boolean))];
   const uIds  = [...new Set(transfers.map(t => t.created_by).filter(Boolean))];

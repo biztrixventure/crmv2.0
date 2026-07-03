@@ -274,9 +274,12 @@ const AuditLogView = ({ companyList }) => {
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async () => {
-    const allEntries = await fetchAllForExport('compliance/callback-audit-log',
-      { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined },
-      'entries');
+    let allEntries;
+    try {
+      allEntries = await fetchAllForExport('compliance/callback-audit-log',
+        { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+        'entries', undefined, 'callback_audit');
+    } catch (err) { toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Export failed')); return; }
     const rows = allEntries.map(e => [
       fmtDateTime(e.created_at), e.actor_name || e.actor_id || '—',
       e.customer_name_snapshot || '—', e.customer_phone_snapshot || '—',

@@ -7,17 +7,33 @@ import client from '../../api/client';
 // Loops 5,000-row pages until the server's `total` is reached (or a short page
 // signals the end). Returns the full row array. `onProgress(loaded, total)` is
 // optional for a live count.
-export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress) {
+//
+// EGRESS GOVERNANCE: the page-1 request carries the __egress + __dataset markers
+// so the server's egressAudit middleware enforces limits + logs the export
+// (row cap checked against `total` before the drain). A blocked export returns
+// 429 on page 1 → we surface the server's message as a typed EgressBlockedError.
+// `dataset` names the surface (defaults to dataKey when they match).
+export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress, dataset) {
   const PAGE = 5000;
   const out = [];
-  for (let page = 1; page <= 4000; page++) {   // safety cap (~20M rows)
-    const res = await client.get(endpoint, { params: { ...params, limit: PAGE, page } });
-    const rows = res.data?.[dataKey] || [];
-    out.push(...rows);
-    const total = res.data?.total;
-    if (onProgress) onProgress(out.length, typeof total === 'number' ? total : out.length);
-    if (rows.length < PAGE) break;                        // last (short) page
-    if (typeof total === 'number' && out.length >= total) break;
+  const egressMarker = { __egress: 'csv_export', __dataset: dataset || dataKey };
+  try {
+    for (let page = 1; page <= 4000; page++) {   // safety cap (~20M rows)
+      const res = await client.get(endpoint, { params: { ...params, ...egressMarker, limit: PAGE, page } });
+      const rows = res.data?.[dataKey] || [];
+      out.push(...rows);
+      const total = res.data?.total;
+      if (onProgress) onProgress(out.length, typeof total === 'number' ? total : out.length);
+      if (rows.length < PAGE) break;                        // last (short) page
+      if (typeof total === 'number' && out.length >= total) break;
+    }
+  } catch (err) {
+    if (err?.response?.status === 429 && err.response.data?.code === 'EGRESS_LIMIT') {
+      const e = new Error(err.response.data.error || 'Export blocked by your limit.');
+      e.egressBlocked = true;
+      throw e;
+    }
+    throw err;
   }
   return out;
 }

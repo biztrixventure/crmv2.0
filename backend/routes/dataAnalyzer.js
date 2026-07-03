@@ -334,6 +334,21 @@ router.post('/export', asyncHandler(async (req, res) => {
   const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
   const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
   const all = await fetchAll(dataset, filters);
+
+  // ── Egress governance (server-side): enforce row cap + daily count BEFORE
+  // building/streaming, and log allow/deny. Reuses the same guard as every
+  // other surface. (The fetch already ran — a pre-count would need to replicate
+  // the analyzer's filter application, so we enforce on the fetched length;
+  // flagged as a known minor inefficiency, correctness is unaffected.)
+  const { enforceEgress } = require('../utils/egressGuard');
+  const { resolveExportColumns } = require('../utils/egressConfig');
+  const egress = await enforceEgress({
+    user: req.user, actionType: 'csv_export', dataset: 'data_analyzer',
+    surface: `data_analyzer:${dataset}`, rowCount: all.length,
+    filters: { dataset, filters },
+  });
+  if (!egress.allowed) return res.status(429).json({ error: egress.message, code: 'EGRESS_LIMIT', limit: egress.limit });
+
   const enriched = await enrichNames(all, dataset);
 
   // Pull form_fields so JSONB keys get a human label and a stable column order
@@ -437,7 +452,16 @@ router.post('/export', asyncHandler(async (req, res) => {
     cols.push({ typed: false, variants: [...semVariants.get(s)], label });
   }
 
-  const headerLabels = cols.map(c => c.label);
+  // ── Field selection: keep only columns whose LABEL is in the configured
+  // allow-list for this role (export.columns.data_analyzer.<role>). No config →
+  // all columns (unchanged). Analyzer columns are dynamic, so we match on the
+  // human label the admin UI presents.
+  const allowedLabels = await resolveExportColumns({ companyId: req.user?.company_id, dataset: 'data_analyzer', role: req.user?.role });
+  const exportCols = (allowedLabels && allowedLabels.length)
+    ? cols.filter(c => allowedLabels.includes(c.label))
+    : cols;
+
+  const headerLabels = exportCols.map(c => c.label);
   const valFor = (row, c) => {
     if (c.typed) return row[c.key];
     const fd = row.form_data;
@@ -446,7 +470,7 @@ router.post('/export', asyncHandler(async (req, res) => {
     return undefined;
   };
 
-  const rows = enriched.map(r => cols.map(c => valFor(r, c)));
+  const rows = enriched.map(r => exportCols.map(c => valFor(r, c)));
   const csv = [headerLabels, ...rows].map(r => r.map(esc).join(',')).join('\n');
 
   const stamp = new Date().toISOString().slice(0, 10);

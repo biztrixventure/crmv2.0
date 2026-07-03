@@ -129,7 +129,10 @@ const NumbersIntelligence = () => {
   const byStatus = {};
   numbers.forEach(n => { byStatus[n.status] = (byStatus[n.status] || 0) + 1; });
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    // Egress governance (soft — data is already loaded): log + daily-cap check.
+    try { await client.post('egress/client-log', { dataset: 'numbers', row_count: numbers.length }); }
+    catch (err) { if (err?.response?.data?.code === 'EGRESS_LIMIT') { window.alert(err.response.data.error); return; } }
     const headers = ['phone_number', 'customer_name', 'status', 'list_name', 'assignment_day', 'fronter_name', 'company_name', 'transferred_at'];
     downloadCSV(numbers, headers, `numbers-intelligence-${new Date().toISOString().slice(0,10)}.csv`);
   };
