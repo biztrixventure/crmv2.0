@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, LogOut, Loader2, Headphones,
   Calendar, User, Search, RefreshCw, AudioLines, Sparkles, X, Download, Clock, Sun, Moon,
+  ChevronDown, Layers,
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -58,6 +59,8 @@ export default function ClientPortal() {
   const [part, setPart]              = useState(0);     // current clip index for split (multi-part) sales
   const [clipMeta, setClipMeta]      = useState([]);   // per-clip [{clip_order, duration, recording_id}] for the selected sale
   const [durations, setDurations]    = useState({});   // sale id → length (s)
+  const [expandedId, setExpandedId]  = useState(null); // multi-clip sale expanded INLINE in the list
+  const [clipsBySale, setClipsBySale] = useState({});  // sale id → [clips] (cached per sale)
   const [noRec, setNoRec]            = useState({});   // sale id → true once resolved with no recording (gate OFF)
   const [downloading, setDownloading] = useState(null); // sale id currently downloading
   const [dark, setDark] = useState(() => localStorage.getItem('portalTheme') !== 'light');
@@ -216,16 +219,51 @@ export default function ClientPortal() {
   };
   const goPart = (idx) => { if (selected && idx >= 0 && idx < clipCount) { setPart(idx); loadPart(selected, idx); } };
 
+  // Fetch + cache a sale's confirmed clip list (labels + stored durations).
+  const fetchClips = useCallback((saleId) => {
+    if (clipsBySale[saleId]) return Promise.resolve(clipsBySale[saleId]);
+    return client.get(`portal/sales/${saleId}/clips`)
+      .then(r => { const cl = r.data.clips || []; setClipsBySale(m => ({ ...m, [saleId]: cl })); return cl; })
+      .catch(() => []);
+  }, [clipsBySale]);
+
   const playSale = (sale) => {
     setSelected(sale);
     setPart(0);
     setClipMeta([]);
-    // Multi-clip sale → pull the confirmed clip list (labels + stored durations)
-    // so the dropdown can show "Call 1 (4:32)" etc.
-    if (!sale.isTest && (sale.clips || 0) > 1) {
-      client.get(`portal/sales/${sale.id}/clips`).then(r => setClipMeta(r.data.clips || [])).catch(() => {});
-    }
+    if (!sale.isTest && (sale.clips || 0) > 1) fetchClips(sale.id).then(setClipMeta);
     loadPart(sale, sale.isTest ? null : 0);
+  };
+
+  // Multi-clip sale → expand INLINE in the list (not a dialog); lazy-load clips.
+  const toggleExpand = (sale) => {
+    if (expandedId === sale.id) { setExpandedId(null); return; }
+    setExpandedId(sale.id);
+    fetchClips(sale.id);
+  };
+
+  // Play one specific clip of a sale (from the inline expanded list).
+  const playClip = (sale, i) => {
+    setSelected(sale);
+    setPart(i);
+    fetchClips(sale.id).then(setClipMeta);
+    loadPart(sale, i);
+  };
+
+  // Download one specific clip of a multi-part sale.
+  const downloadClip = async (sale, i, e) => {
+    e?.stopPropagation();
+    if (downloading) return;
+    setDownloading(`${sale.id}:${i}`);
+    try {
+      const res = await client.get(`portal/sales/${sale.id}/recording`, { params: { clip: i + 1 }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      const safe = String(sale.customer_name || 'recording').replace(/\W+/g, '_');
+      a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}_part${i + 1}.mp3`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { /* surfaced via the player error path when played */ }
+    finally { setDownloading(null); }
   };
 
   // Download the recording to the CLIENT'S device. It streams from the dialer
@@ -357,34 +395,85 @@ export default function ClientPortal() {
             <div className="space-y-2">
               {filtered.map(s => {
                 const on = selected?.id === s.id;
+                const multi = (s.clips || 0) > 1;
+                const expanded = expandedId === s.id;
+                const clips = clipsBySale[s.id] || [];
                 return (
-                  <div key={s.id} className="flex items-center gap-1 rounded-xl transition-all"
-                    style={{ background: on ? P.active : P.tint, border: `1px solid ${on ? P.borderOn : P.border}`, transform: on ? 'translateX(2px)' : 'none' }}>
-                    <button onClick={() => playSale(s)} className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? P.grad : P.tint2 }}>
-                        {on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : P.sub }} />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate" style={{ color: P.text }}>{s.customer_name}</div>
-                        <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: P.sub }}>
-                          <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
-                          <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
-                          {durations[s.id]
-                            ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span>
-                            : s.review_status === 'pending_review'
-                              ? <span className="flex items-center gap-1 italic" style={{ color: P.muted }}><Clock size={11} />being verified</span>
-                              : (noRec[s.id] || s.review_status === 'confirmed')
-                                ? null
-                                : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
-                          {s.clips > 1 ? <span className="font-semibold" style={{ color: P.accent }}>{s.clips} parts</span> : null}
-                          {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
+                  <div key={s.id} className="rounded-xl transition-all overflow-hidden"
+                    style={{ background: on || expanded ? P.active : P.tint, border: `1px solid ${on || expanded ? P.borderOn : P.border}`, transform: on ? 'translateX(2px)' : 'none' }}>
+                    {/* header row — single-clip plays; multi-clip expands inline */}
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => (multi ? toggleExpand(s) : playSale(s))} className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left">
+                        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? P.grad : P.tint2 }}>
+                          {multi
+                            ? <Layers size={15} style={{ color: on ? '#fff' : P.accent }} />
+                            : on && audioLoading ? <Loader2 size={15} className="animate-spin text-white" /> : on && playing ? <Pause size={15} className="text-white" /> : <Play size={15} style={{ color: on ? '#fff' : P.sub }} />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate" style={{ color: P.text }}>{s.customer_name}</div>
+                          <div className="flex items-center gap-3 text-[11px] mt-0.5 flex-wrap" style={{ color: P.sub }}>
+                            <span className="flex items-center gap-1"><User size={11} />{s.closer_name}</span>
+                            <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(s.sale_date)}</span>
+                            {durations[s.id] && !multi
+                              ? <span className="flex items-center gap-1 tabular-nums font-semibold" style={{ color: P.accent }}><Clock size={11} />{fmt(durations[s.id])}</span>
+                              : s.review_status === 'pending_review'
+                                ? <span className="flex items-center gap-1 italic" style={{ color: P.muted }}><Clock size={11} />being verified</span>
+                                : (multi || noRec[s.id] || s.review_status === 'confirmed')
+                                  ? null
+                                  : <span className="flex items-center gap-1" style={{ color: P.muted }}><Loader2 size={10} className="animate-spin" />length…</span>}
+                            {multi ? <span className="inline-flex items-center gap-1 font-bold px-1.5 py-0.5 rounded-full" style={{ background: P.tint2, color: P.accent }}><Layers size={10} />{s.clips} recordings</span> : null}
+                            {s.phone ? <span className="tabular-nums">{s.phone}</span> : null}
+                          </div>
+                        </div>
+                      </button>
+                      {/* download whole sale (single) */}
+                      {!multi && (
+                        <button onClick={(e) => downloadSale(s, e)} disabled={downloading === s.id}
+                          className="p-2.5 rounded-lg hover:bg-white/5 flex-shrink-0" title="Download recording to your device">
+                          {downloading === s.id ? <Loader2 size={16} className="animate-spin" style={{ color: P.sub }} /> : <Download size={16} style={{ color: P.accent }} />}
+                        </button>
+                      )}
+                      {/* chevron — the "expandable" affordance for multi-clip sales */}
+                      {multi && (
+                        <button onClick={() => toggleExpand(s)} className="p-2.5 mr-1.5 rounded-lg hover:bg-white/5 flex-shrink-0" title={expanded ? 'Collapse' : 'Show recordings'}>
+                          <ChevronDown size={18} style={{ color: P.accent, transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'none' }} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* inline expanded clip list (no dialog) */}
+                    {multi && expanded && (
+                      <div className="px-3 pb-3 pt-1">
+                        <div className="rounded-xl p-1.5 space-y-1" style={{ background: P.tint, border: `1px solid ${P.border}` }}>
+                          {clips.length === 0 ? (
+                            <div className="flex items-center justify-center gap-2 py-4 text-xs" style={{ color: P.muted }}>
+                              <Loader2 size={13} className="animate-spin" /> Loading recordings…
+                            </div>
+                          ) : clips.map((c, i) => {
+                            const activeClip = on && part === i;
+                            return (
+                              <div key={i} className="flex items-center gap-2 rounded-lg transition-all"
+                                style={{ background: activeClip ? P.active : 'transparent', border: `1px solid ${activeClip ? P.borderOn : 'transparent'}` }}>
+                                <button onClick={() => playClip(s, i)} className="flex-1 min-w-0 flex items-center gap-3 px-2.5 py-2.5 text-left">
+                                  <span className="flex items-center justify-center rounded-full flex-shrink-0"
+                                    style={{ width: 28, height: 28, background: activeClip ? P.grad : P.tint2, color: activeClip ? '#fff' : P.accent, boxShadow: activeClip ? P.shadow : 'none' }}>
+                                    {activeClip && audioLoading ? <Loader2 size={13} className="animate-spin" /> : activeClip && playing ? <Pause size={13} /> : activeClip ? <Play size={13} /> : <span className="text-[11px] font-extrabold">{i + 1}</span>}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[13px] font-semibold" style={{ color: P.text }}>Recording {i + 1}</div>
+                                    <div className="text-[11px] tabular-nums" style={{ color: P.sub }}>{c.duration ? fmt(c.duration) : '—'}{activeClip ? ' · now playing' : ''}</div>
+                                  </div>
+                                </button>
+                                <button onClick={(e) => downloadClip(s, i, e)} disabled={downloading === `${s.id}:${i}`}
+                                  className="p-2 mr-1.5 rounded-lg hover:bg-white/5 flex-shrink-0" title={`Download recording ${i + 1}`}>
+                                  {downloading === `${s.id}:${i}` ? <Loader2 size={15} className="animate-spin" style={{ color: P.sub }} /> : <Download size={15} style={{ color: P.accent }} />}
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    </button>
-                    <button onClick={(e) => downloadSale(s, e)} disabled={downloading === s.id}
-                      className="p-2.5 mr-2 rounded-lg hover:bg-white/5 flex-shrink-0" title="Download recording to your device">
-                      {downloading === s.id ? <Loader2 size={16} className="animate-spin" style={{ color: P.sub }} /> : <Download size={16} style={{ color: P.accent }} />}
-                    </button>
+                    )}
                   </div>
                 );
               })}
