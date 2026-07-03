@@ -72,6 +72,24 @@ router.get('/audit', superOnly, asyncHandler(async (req, res) => {
   });
 }));
 
+// today's headline counts for the audit summary tiles
+router.get('/audit/stats', superOnly, asyncHandler(async (req, res) => {
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const count = async (extra) => {
+    let q = supabaseAdmin.from('export_audit_log').select('id', { count: 'exact', head: true }).gte('created_at', startOfDay.toISOString());
+    for (const [k, v] of Object.entries(extra)) q = q.eq(k, v);
+    const { count: c } = await q; return c || 0;
+  };
+  const [exportsAllowed, denied, recordings, distinctUsers] = await Promise.all([
+    count({ action_type: 'csv_export', status: 'allowed' }),
+    count({ status: 'denied' }),
+    count({ action_type: 'recording_listen', status: 'allowed' }),
+    supabaseAdmin.from('export_audit_log').select('user_id').gte('created_at', startOfDay.toISOString()).limit(5000)
+      .then(r => new Set((r.data || []).map(x => x.user_id).filter(Boolean)).size),
+  ]);
+  res.json({ today: { exports: exportsAllowed, denied, recordings, users: distinctUsers } });
+}));
+
 router.get('/audit/meta', superOnly, asyncHandler(async (req, res) => {
   // distinct action_types + datasets for the filter dropdowns (bounded scan)
   const { data } = await supabaseAdmin.from('export_audit_log').select('action_type, dataset').limit(5000);

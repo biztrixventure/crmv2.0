@@ -1,7 +1,54 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
-import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, Trash2, ChevronDown, ChevronRight, Check } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, Trash2, ChevronDown, ChevronRight, Check, User, Building2, X, AlertTriangle, Headphones } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
+
+// Searchable "pick a user" control (name → id) backed by the recipients
+// directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
+function UserSearchPicker({ onPick }) {
+  const [q, setQ] = useState('');
+  const [users, setUsers] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const boxRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    const t = setTimeout(() => {
+      client.get('distribution-batches/recipients', { params: { q } })
+        .then(r => setUsers(r.data.users || [])).catch(() => setUsers([])).finally(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, open]);
+  useEffect(() => {
+    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc); return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+  return (
+    <div ref={boxRef} className="relative flex-1 min-w-[220px]">
+      <div className="relative">
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+        <input value={q} onChange={e => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+          placeholder="Search a person by name…"
+          style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px 6px 30px', fontSize: 13, width: '100%' }} />
+      </div>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-xl overflow-hidden max-h-56 overflow-y-auto"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.15))' }}>
+          {loading ? <div className="text-center py-4"><Loader2 size={15} className="animate-spin inline" /></div>
+            : users.length === 0 ? <div className="px-3 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No matching users</div>
+            : users.map(u => (
+              <button key={u.id} onMouseDown={e => { e.preventDefault(); onPick(u); setQ(''); setOpen(false); }}
+                className="w-full text-left px-3 py-2 hover:bg-bg-secondary transition-colors">
+                <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{u.name}</div>
+                <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{(u.role || '—').replace(/_/g, ' ')}{u.company_name ? ` · ${u.company_name}` : ''}</div>
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Data-egress governance (superadmin) ──────────────────────────────────────
 // Three tabs: Audit (export/recording log), Limits (numeric caps per
@@ -34,9 +81,11 @@ function AuditTab() {
   const [meta, setMeta] = useState({ actions: [], datasets: [] });
   const [f, setF] = useState({ action_type: '', dataset: '', status: '', date_from: '', date_to: '', user_id: '' });
   const [open, setOpen] = useState(null);
+  const [stats, setStats] = useState(null);
   const PAGE = 50;
 
   useEffect(() => { client.get('egress/audit/meta').then(r => setMeta(r.data)).catch(() => {}); }, []);
+  useEffect(() => { client.get('egress/audit/stats').then(r => setStats(r.data.today)).catch(() => {}); }, []);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -50,8 +99,28 @@ function AuditTab() {
   useEffect(() => { load(); }, [load]);
   const setFilter = (k, v) => { setPage(1); setF(p => ({ ...p, [k]: v })); };
 
+  const tiles = [
+    { label: 'Exports today', value: stats?.exports, Icon: Download, tint: 'var(--color-primary-600)' },
+    { label: 'Denied today', value: stats?.denied, Icon: AlertTriangle, tint: '#dc2626' },
+    { label: 'Recordings today', value: stats?.recordings, Icon: Headphones, tint: '#7c3aed' },
+    { label: 'Active users', value: stats?.users, Icon: User, tint: '#059669' },
+  ];
+
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {tiles.map(t => (
+          <div key={t.label} className="p-3 flex items-center gap-3" style={box}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-bg-secondary)' }}>
+              <t.Icon size={16} style={{ color: t.tint }} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{t.value == null ? '—' : t.value.toLocaleString()}</div>
+              <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
       <div className="flex flex-wrap items-end gap-2 p-3" style={box}>
         <label className="text-xs">Action
           <select value={f.action_type} onChange={e => setFilter('action_type', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
@@ -127,6 +196,8 @@ function AuditTab() {
 function LimitsTab() {
   const [limits, setLimits] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [companies, setCompanies] = useState([]);
+  const [picked, setPicked] = useState(null);   // { id, name } chosen scope target
   const [draft, setDraft] = useState({ scope_type: 'user', scope_id: '', action_type: 'csv_export', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' });
 
   const load = useCallback(async () => {
@@ -134,6 +205,9 @@ function LimitsTab() {
     try { const r = await client.get('egress/limits'); setLimits(r.data.limits || []); } catch { setLimits([]); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { client.get('compliance/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
+  // reset the picked target when switching User↔Company mode
+  const setScopeType = (t) => { setPicked(null); setDraft(d => ({ ...d, scope_type: t, scope_id: '' })); };
 
   const save = async (row) => {
     try {
@@ -147,10 +221,23 @@ function LimitsTab() {
   const overrideRows = limits.filter(l => l.scope_type !== 'role');
 
   const cell = (row, field) => (
-    <input type="number" min="0" defaultValue={numOrBlank(row[field])} placeholder="∞"
-      onBlur={e => { const v = e.target.value; if (v !== numOrBlank(row[field])) save({ ...row, [field]: v === '' ? null : +v }); }}
-      style={{ ...inp, width: 90 }} />
+    <div className="relative" style={{ width: 96 }}>
+      <input type="number" min="0" defaultValue={numOrBlank(row[field])} placeholder="∞"
+        onBlur={e => { const v = e.target.value; if (v !== numOrBlank(row[field])) save({ ...row, [field]: v === '' ? null : +v }); }}
+        title={row[field] == null ? 'Unlimited' : `${row[field].toLocaleString()}`}
+        style={{ ...inp, width: 96, textAlign: 'right' }} />
+      {row[field] == null && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>∞ unlimited</span>}
+    </div>
   );
+
+  const addOverride = () => {
+    if (!picked?.id) return toast.error(`Pick a ${draft.scope_type} first`);
+    save({ ...draft, scope_id: picked.id,
+      max_rows_per_export: draft.max_rows_per_export || null,
+      max_exports_per_day: draft.max_exports_per_day || null,
+      max_recording_minutes_per_day: draft.max_recording_minutes_per_day || null });
+    setPicked(null); setDraft(d => ({ ...d, scope_id: '', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' }));
+  };
 
   return (
     <div className="space-y-5">
@@ -180,25 +267,48 @@ function LimitsTab() {
 
       <div>
         <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Per-user / per-company overrides <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>(rare — beats the role default wholesale)</span></p>
-        <div className="flex flex-wrap items-end gap-2 p-3 mb-2" style={box}>
-          <label className="text-xs">Scope
-            <select value={draft.scope_type} onChange={e => setDraft(d => ({ ...d, scope_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
-              <option value="user">User</option><option value="company">Company</option>
-            </select>
-          </label>
-          <label className="text-xs flex-1 min-w-[220px]">{draft.scope_type === 'user' ? 'User ID' : 'Company ID'}
-            <input value={draft.scope_id} onChange={e => setDraft(d => ({ ...d, scope_id: e.target.value }))} placeholder="uuid" style={{ ...inp, display: 'block', marginTop: 4, width: '100%' }} />
-          </label>
-          <label className="text-xs">Action
-            <select value={draft.action_type} onChange={e => setDraft(d => ({ ...d, action_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
-              {ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </label>
-          <label className="text-xs">Rows<input type="number" min="0" value={draft.max_rows_per_export} onChange={e => setDraft(d => ({ ...d, max_rows_per_export: e.target.value }))} placeholder="∞" style={{ ...inp, display: 'block', marginTop: 4, width: 80 }} /></label>
-          <label className="text-xs">Exports/day<input type="number" min="0" value={draft.max_exports_per_day} onChange={e => setDraft(d => ({ ...d, max_exports_per_day: e.target.value }))} placeholder="∞" style={{ ...inp, display: 'block', marginTop: 4, width: 90 }} /></label>
-          <label className="text-xs">Rec min/day<input type="number" min="0" value={draft.max_recording_minutes_per_day} onChange={e => setDraft(d => ({ ...d, max_recording_minutes_per_day: e.target.value }))} placeholder="∞" style={{ ...inp, display: 'block', marginTop: 4, width: 90 }} /></label>
-          <button onClick={() => { if (!draft.scope_id.trim()) return toast.error('Enter a scope id'); save({ ...draft, max_rows_per_export: draft.max_rows_per_export || null, max_exports_per_day: draft.max_exports_per_day || null, max_recording_minutes_per_day: draft.max_recording_minutes_per_day || null }); setDraft(d => ({ ...d, scope_id: '' })); }}
-            className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 text-white" style={{ background: 'var(--gradient-sidebar)' }}><Plus size={14} /> Add</button>
+        <div className="p-3 mb-2 space-y-3" style={box}>
+          {/* who: user↔company toggle + a real picker (no raw UUIDs) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              {[['user', 'User', User], ['company', 'Company', Building2]].map(([t, label, Icon]) => (
+                <button key={t} onClick={() => setScopeType(t)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
+                  style={{ background: draft.scope_type === t ? 'var(--gradient-sidebar)' : 'transparent', color: draft.scope_type === t ? '#fff' : 'var(--color-text-secondary)' }}>
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
+            {picked ? (
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--color-primary-100,#e0e7ff)', color: 'var(--color-primary-700,#4338ca)' }}>
+                {draft.scope_type === 'user' ? <User size={13} /> : <Building2 size={13} />} {picked.name}
+                <button onClick={() => setPicked(null)} className="hover:opacity-70"><X size={13} /></button>
+              </span>
+            ) : draft.scope_type === 'user' ? (
+              <UserSearchPicker onPick={u => setPicked({ id: u.id, name: u.name })} />
+            ) : (
+              <select value="" onChange={e => { const c = companies.find(x => x.id === e.target.value); if (c) setPicked({ id: c.id, name: c.name }); }}
+                style={{ ...inp, flex: 1, minWidth: 220 }}>
+                <option value="">Choose a company…</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+          </div>
+          {/* what + how much */}
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs">Action
+              <select value={draft.action_type} onChange={e => setDraft(d => ({ ...d, action_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
+                {ACTIONS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
+              </select>
+            </label>
+            <label className="text-xs">Max rows / export<input type="number" min="0" value={draft.max_rows_per_export} onChange={e => setDraft(d => ({ ...d, max_rows_per_export: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+            <label className="text-xs">Max exports / day<input type="number" min="0" value={draft.max_exports_per_day} onChange={e => setDraft(d => ({ ...d, max_exports_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+            {draft.action_type === 'recording_listen' && (
+              <label className="text-xs">Max rec. min / day<input type="number" min="0" value={draft.max_recording_minutes_per_day} onChange={e => setDraft(d => ({ ...d, max_recording_minutes_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+            )}
+            <button onClick={addOverride} disabled={!picked}
+              className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}><Plus size={14} /> Add override</button>
+          </div>
+          <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Blank = unlimited for that field. A user/company override beats the role default wholesale for that action.</p>
         </div>
         <div className="rounded-xl overflow-x-auto" style={box}>
           <table className="w-full text-sm">
@@ -209,8 +319,13 @@ function LimitsTab() {
               {overrideRows.length === 0 ? <tr><td colSpan={7} className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No overrides. Role defaults apply to everyone.</td></tr>
                 : overrideRows.map(r => (
                   <tr key={r.id} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <td className="px-3 py-2 capitalize">{r.scope_type}</td>
-                    <td className="px-3 py-2 text-xs font-mono">{r.scope_name || r.scope_id}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1.5 capitalize">
+                        {r.scope_type === 'user' ? <User size={13} style={{ color: 'var(--color-text-tertiary)' }} /> : <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
+                        {r.scope_type}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs font-semibold">{r.scope_name || r.scope_id}</td>
                     <td className="px-3 py-2">{r.action_type}</td>
                     <td className="px-3 py-2">{cell(r, 'max_rows_per_export')}</td>
                     <td className="px-3 py-2">{cell(r, 'max_exports_per_day')}</td>
