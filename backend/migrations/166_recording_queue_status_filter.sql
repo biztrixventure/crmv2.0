@@ -116,7 +116,7 @@ BEGIN
     ) gc ON TRUE
     WHERE (($5 = 'all') OR ($5 = 'pending' AND COALESCE(cc.n,0) = 0) OR ($5 = 'confirmed' AND COALESCE(cc.n,0) > 0))
       AND (s.closer_disposition IS NULL OR s.closer_disposition NOT ILIKE '%%post%%date%%')
-      AND ($7 IS NULL OR NOT (s.status = ANY($7)))            -- FIX 1: dead statuses out
+      AND ($7 IS NULL OR NOT (s.status::text = ANY($7)))      -- FIX 1: dead statuses out (status is the sale_status ENUM → cast for text[] compare)
       AND ($1 IS NULL OR s.company_id = ANY($1))
       AND ($2 IS NULL OR s.sale_date >= $2)
       AND ($3 IS NULL OR s.sale_date <= $3)
