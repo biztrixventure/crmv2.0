@@ -1,10 +1,16 @@
 # Sale Lifecycle — how it actually works today
 
-Traced from code on 2026-07-03 (no code changed for this document). Covers: creation,
-duplicate-customer handling, multi-vehicle sales, cancellation, resell, what each role
-actually sees, and — honestly — where the system relies on humans instead of data.
+Traced from code on 2026-07-03. Covers: creation, duplicate-customer handling,
+multi-vehicle sales, cancellation, resell, what each role actually sees, and — honestly —
+where the system relies on humans instead of data.
 
 File references are the source of truth; when this doc and the code disagree, the code won.
+
+> **Update 2026-07-03 — audit gaps fixed.** This doc was first written as a pre-fix
+> audit. The four HIGH/MEDIUM gaps it flagged have since been closed (migs **165** +
+> **166**). Sections tagged **✅ FIXED** below carry the current behavior; §7 tracks
+> what shipped vs. what is still open. To manually test every fix, see
+> **[manual-testing-guide.md](manual-testing-guide.md)**.
 
 ---
 
@@ -125,10 +131,15 @@ same phone through a fresh transfer inserts silently. The only creation-time sig
 the passive "already sold" badge on *other transfer cards* in the phone search — if the
 closer scrolls past them, nothing else warns.
 
-Notably: `GET /sales/customer-history/by-phone/:phone` (sales.js:653) was built exactly
-for this — a role-scoped "returning customer" summary whose comment says it's "used by
-closers in PhoneSearch" — **but no frontend code calls it** (grep: zero consumers).
-Dead endpoint; the warning it was meant to power doesn't exist in the UI.
+**✅ FIXED (FIX 2).** `GET /sales/customer-history/by-phone/:phone` (sales.js:653) — the
+role-scoped "returning customer" summary — is now wired into the closer flow via
+`CustomerHistoryBanner.jsx`, rendered in **PhoneSearch results** and at **SaleForm open**.
+It shows a red "active policy exists" callout when the customer already holds a
+`closed_won`/`sold` policy (the double-sell risk), an amber "returning customer" callout
+otherwise, and — scope-safe — a "details restricted / active policy through another agent"
+line when more active policies exist than this viewer may see (so it fires even when the
+closer's own scoped list is empty). Informational, never blocking; the Resell flow still
+handles legitimate repeats.
 
 ### 2.3 Is there a customer profile aggregating all sales?
 
@@ -167,8 +178,12 @@ adding a vehicle later goes through the Resell flow's `additional_car` intent (�
 ### 3.2 Storage and treatment
 
 - No vehicles table, no JSONB array: `car_year/make/model/miles/vin` are columns **on
-  each sales row**. The rows are tied together only by `transfer_id` (+ shared
-  `customer_uuid`) — there is **no "sale group" id**.
+  each sales row**. **✅ FIXED (mig 165):** a multi-car submit now stamps a shared
+  `sale_group_id` (one uuid) across all rows of the deal, in addition to the shared
+  `transfer_id` + `customer_uuid`. `POST /sales` sets it (falls back to ungrouped if the
+  column is missing); list/search/detail endpoints return a `group_count`, and
+  `GET /sales/:id/siblings` returns the other cars in the bundle. Zero behavior change to
+  pricing/compliance — it's a grouping key downstream surfaces can now use.
 - Pricing/compliance/commission treat **each row independently**: own plan, own
   down/monthly payment, own auto-generated `reference_no`, own status journey through
   compliance. Nothing aggregates "this was one 3-car deal".
@@ -199,10 +214,13 @@ There are **three distinct paths** with very different rigor:
 - **Guards**: blocked while `pending_review` (unless it's a post-dated sale), blocked
   once `closed_won`/`closed_lost`, blocked past the compliance lock window
   (`compliance.lock_window_days`, default 90, anchored on sale_date).
-- **What it records**: `status='cancelled'` and… that's it. `cancellation_date` and
-  `cancellation_reason_key` are **compliance-only** fields in this route (sales.js:1161,
-  1174) — a closer self-cancel stores **no reason and no cancellation date**.
-- **Approval step: none.** Within the guards above it's unilateral.
+- **What it records** — **✅ FIXED (FIX 3, sales.js:1333-1366):** any transition into a
+  cancel-like status (`cancelled`/`closed_lost`) through this route now **always stamps
+  `cancellation_date`** (default today), **requires a canonical `cancellation_reason_key`**
+  for a true `cancelled` (non-compliance callers get `400 CANCEL_REASON_REQUIRED`; optional
+  for `closed_lost`), and appends who/when/reason to `edit_history`. Closer cancels are no
+  longer invisible to cancellation analytics.
+- **Approval step: none** — still unilateral within the guards, but now fully attributed.
 
 ### 4.2 Compliance cancellation — `POST /sales/:id/compliance`
 
@@ -226,12 +244,13 @@ lifetime rollups, and reporting.
   with a red/grey "Cancelled" badge. Nothing is hidden.
 - **SPIFF**: `spiffOnSalesChanged()` recalcs on status transitions (sales.js:1591 and
   the compliance bulk paths) — cancellations do flow into spiff metrics.
-- **Recording review queue: cancelled sales do NOT drop out.** The queue RPC
-  (mig 163) filters only post-dated sales; there is **no sale-status filter**, so a
-  cancelled (or needs_revision) sale still sits in "pending review" asking for a
-  recording confirmation. Reviewers burn time on dead deals.
-- **Client portal**: browse scoping filters by closers/clients/post-date — not by
-  cancelled status. In hybrid (gate-off) mode a cancelled sale can still list and play.
+- **Recording review queue** — **✅ FIXED (mig 166):** the queue RPC now carries a
+  sale-status filter, so cancelled / `closed_lost` / dead-status sales drop out of
+  "pending review" instead of inflating the count forever.
+- **Client portal** — **✅ FIXED (portal.js `deadStatusesForQuery`):** `/portal/sales`
+  now excludes dead statuses (intersected with the real `sale_status` enum members, so a
+  bad config value like `expired` can't crash the whole query — see the enum gotcha in
+  CLAUDE.md). A cancelled sale no longer lists or plays to a client, even in hybrid mode.
 
 ---
 
@@ -350,13 +369,24 @@ matching phones/dates, not because the UI groups them.
 10. **Cancellation reasons are catalog-enforced only on the compliance path**, so the
     "top cancellation reasons" report is really "top *compliance-observed* reasons".
 
-### Cheapest high-leverage fixes (if/when wanted — not done in this pass)
+### Fixes applied 2026-07-03 (this pass — migs 165 + 166)
 
-- Wire the existing `customer-history` endpoint into PhoneSearch + SaleForm open
-  (one banner: "3 prior sales for this customer — 1 active, 1 cancelled, 1 chargeback").
-- Add `AND (status-filter)` to the recording-queue RPC (one migration, mirrors the
-  post-date exclusion pattern).
-- Require a reason (or at least stamp `cancellation_date`) on the closer self-cancel
-  path; or route closer cancels through a lightweight compliance ack.
-- A `sale_group_id` stamped by `POST /sales` on multi-car inserts (one uuid, zero
-  behavior change) would let every downstream surface group bundles later.
+All four "cheapest high-leverage fixes" originally listed here shipped:
+
+- **✅ Gap 2 — customer-history wired.** `CustomerHistoryBanner` renders the returning-
+  customer / active-policy warning in PhoneSearch + SaleForm (§2.2). Scope-safe count
+  even when the closer's own list is empty.
+- **✅ Gap 3 — recording queue + portal ignore dead deals.** Mig 166 adds a status filter
+  to the queue RPC; `portal.js` filters dead statuses (enum-safe) so cancelled sales stop
+  playing to clients (§4.4).
+- **✅ Gap 1 — closer self-cancel is accountable.** `PUT /sales/:id` now stamps
+  `cancellation_date` + requires a `cancellation_reason_key` and logs to `edit_history`
+  (§4.1).
+- **✅ Gap 5 — multi-car bundles have a group id.** Mig 165 adds `sale_group_id`;
+  `group_count` + `GET /sales/:id/siblings` expose the bundle (§3.2).
+
+**Still open** (not addressed this pass): Gap 4 (hard delete has no tombstone), Gap 6
+(fronter-side blindness by design), Gap 7 (`other`/`renewal` resell intents cancel/expire
+the old policy), and the LOW/friction items 8–10.
+
+See **[manual-testing-guide.md](manual-testing-guide.md)** to verify each fix by hand.
