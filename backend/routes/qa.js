@@ -23,6 +23,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
+const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
 const { listCandidatesByLeadId, locationForRecording } = require('../utils/dialerBoxes');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -203,11 +204,83 @@ async function resolveScorecard(companyId, method) {
   return g || null;
 }
 
+// ── helpers shared by review submit + edit ────────────────────────────────────
+// subject: TRA/fronter → transfer.created_by; closer → sale.closer_id / assigned closer
+async function resolveSubjectUser(a) {
+  if (a.subject_role === 'fronter' && a.transfer_id) {
+    const { data: t } = await supabaseAdmin.from('transfers').select('created_by').eq('id', a.transfer_id).maybeSingle();
+    return t?.created_by || null;
+  }
+  if (a.subject_role === 'closer') {
+    if (a.sale_id) { const { data: s } = await supabaseAdmin.from('sales').select('closer_id').eq('id', a.sale_id).maybeSingle(); return s?.closer_id || null; }
+    if (a.transfer_id) { const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id').eq('id', a.transfer_id).maybeSingle(); return t?.assigned_closer_id || null; }
+  }
+  return null;
+}
+
+// feedback-to-agent: reviewed agent + their managers (never the reviewer)
+async function notifyReviewed(a, subjectUserId, reviewerId, title, message, data) {
+  try {
+    const recipients = new Set();
+    if (subjectUserId) recipients.add(subjectUserId);
+    const mgrLevels = a.subject_role === 'fronter'
+      ? ['fronter_manager', 'operations_manager', 'company_admin']
+      : ['closer_manager', 'operations_manager', 'company_admin'];
+    (await getUserIdsByLevel(a.company_id, mgrLevels)).forEach(id => recipients.add(id));
+    recipients.delete(reviewerId);
+    if (recipients.size) {
+      notifyUsers([...recipients], { companyId: a.company_id, type: 'qa_review', title, message, data }).catch(() => {});
+    }
+  } catch (e) { logger.warn('QA', `notify: ${e.message}`); }
+}
+
+// sheet model: persist every field's RAW entered value + derived contribution
+async function replaceSheetScores(reviewId, cfg, values, out) {
+  const rows = [];
+  const add = (key, raw, points) => {
+    if (raw === undefined) return;
+    rows.push({ review_id: reviewId, criterion_key: key, raw_value: raw == null ? null : String(raw), points: points ?? 0, note: null });
+  };
+  for (const rc of (cfg.rating_criteria || [])) {
+    const n = parseInt(values[rc.key], 10);
+    add(rc.key, values[rc.key], Number.isFinite(n) ? Math.max(0, Math.min(rc.scale ?? 4, n)) : 0);
+  }
+  for (const f of ((cfg.autofail || {}).fields || [])) add(f.key, values[f.key], 0);
+  for (const f of (cfg.penalty_flags  || [])) add(f.key, values[f.key], isY(values[f.key]) ? (f.penalty ?? -5) : 0);
+  for (const f of (cfg.tracking_flags || [])) add(f.key, values[f.key], 0);              // tracking-only, no formula
+  for (const f of ((cfg.quality_score || {}).fields || [])) add(f.key, values[f.key], isY(values[f.key]) ? 1 : 0);
+  if (cfg.call_outcome) add(cfg.call_outcome.key, values[cfg.call_outcome.key], out.call_outcome_score ?? 0);
+  await supabaseAdmin.from('qa_review_scores').delete().eq('review_id', reviewId);
+  if (rows.length) {
+    const { error } = await supabaseAdmin.from('qa_review_scores').insert(rows);
+    if (error) logger.warn('QA', `scores insert: ${error.message}`);
+  }
+}
+
+// engine outputs → qa_reviews column patch (sheet model). total/max kept
+// populated (final or quality as %, max 100) so /qa/reports stays meaningful.
+function sheetComputedCols(cfg, values, out) {
+  return {
+    total_score: out.final_score ?? out.quality_score ?? 0, max_score: 100,
+    passed: out.passed,                                       // null for Closer (no pass/fail in the sheet)
+    base_score: out.base_score, autofail_result: out.autofail_result,
+    total_penalty: out.total_penalty, final_score: out.final_score,
+    quality_score: out.quality_score,
+    call_outcome: cfg.call_outcome ? (values[cfg.call_outcome.key] ?? null) : null,
+    call_outcome_score: out.call_outcome_score,
+  };
+}
+
 // ── submit a review ───────────────────────────────────────────────────────────
+// Two scorecard models: sheet_v2 (WaveTech replication — body carries values{}
+// keyed by field) and legacy weighted (body carries scores[]).
 router.post('/reviews', asyncHandler(async (req, res) => {
   if (!(await can(req, 'submit_qa_review'))) return res.status(403).json({ error: 'Forbidden' });
   const { assignment_id, scores, overall_notes } = req.body || {};
-  if (!assignment_id || !Array.isArray(scores)) return res.status(400).json({ error: 'assignment_id and scores[] are required' });
+  const values = (req.body && req.body.values && typeof req.body.values === 'object') ? req.body.values : null;
+  if (!assignment_id || (!Array.isArray(scores) && !values)) {
+    return res.status(400).json({ error: 'assignment_id and scores[] (legacy) or values{} (sheet) are required' });
+  }
 
   const { data: a } = await supabaseAdmin.from('qa_assignments')
     .select('id, company_id, method, subject_role, transfer_id, sale_id').eq('id', assignment_id).maybeSingle();
@@ -217,8 +290,39 @@ router.post('/reviews', asyncHandler(async (req, res) => {
 
   const scorecard = await resolveScorecard(a.company_id, a.method);
   if (!scorecard) return res.status(400).json({ error: 'No active scorecard for this method' });
+
+  // ── sheet_v2 path (WaveTech) — formula engine is the single source of truth ─
+  if (isSheetConfig(scorecard.criteria)) {
+    const cfg = scorecard.criteria;
+    const vals = values || {};
+    const out = computeSheetReview(cfg, vals);
+    const subjectUserId = await resolveSubjectUser(a);
+    const reviewRow = {
+      assignment_id: a.id, company_id: a.company_id, method: a.method, subject_role: a.subject_role,
+      subject_user_id: subjectUserId, reviewer_id: req.user.id, scorecard_id: scorecard.id,
+      ...sheetComputedCols(cfg, vals, out),
+      meta: (req.body.meta && typeof req.body.meta === 'object') ? req.body.meta : {},
+      overall_notes: (overall_notes || '').slice(0, 4000) || null,
+      status: 'submitted',
+    };
+    const { data: review, error: rErr } = await supabaseAdmin.from('qa_reviews')
+      .upsert(reviewRow, { onConflict: 'assignment_id' }).select().single();
+    if (rErr) return res.status(500).json({ error: rErr.message });
+    await replaceSheetScores(review.id, cfg, vals, out);
+    await supabaseAdmin.from('qa_assignments').update({ status: 'scored' }).eq('id', a.id);
+    const label = out.final_score != null
+      ? `${out.passed ? 'Pass' : 'FAIL'} — Final ${out.final_score}`
+      : (out.quality_score != null ? `Quality ${out.quality_score}%` : `Auto-Fail: ${out.autofail_result}`);
+    await notifyReviewed(a, subjectUserId, req.user.id,
+      `QA review: ${label}`,
+      `${a.method.toUpperCase()} review completed${overall_notes ? ' — see notes' : ''}.`,
+      { review_id: review.id, assignment_id: a.id, passed: out.passed, final_score: out.final_score, quality_score: out.quality_score });
+    return res.json({ review, computed: out });
+  }
+
+  // ── legacy weighted path (unchanged behavior) ───────────────────────────────
+  if (!Array.isArray(scores)) return res.status(400).json({ error: 'scores[] required for this scorecard' });
   const criteria = Array.isArray(scorecard.criteria) ? scorecard.criteria : [];
-  const byKey = Object.fromEntries(criteria.map(c => [c.key, c]));
 
   // total + max + auto-fail. Points are clamped to [0, criterion.max_points].
   let total = 0, max = 0, autoFailed = false;
@@ -230,22 +334,12 @@ router.post('/reviews', asyncHandler(async (req, res) => {
     const pts = Math.max(0, Math.min(maxPts, Number.isFinite(+submitted?.points) ? +submitted.points : 0));
     total += pts;
     if (c.auto_fail && pts <= 0) autoFailed = true;
-    cleanScores.push({ criterion_key: c.key, points: pts, note: (submitted?.note || '').slice(0, 1000) || null });
+    cleanScores.push({ criterion_key: c.key, points: pts, raw_value: String(submitted?.points ?? ''), note: (submitted?.note || '').slice(0, 1000) || null });
   }
   const pct = max > 0 ? (total / max) * 100 : 0;
   const passed = !autoFailed && pct >= (Number.isFinite(+scorecard.pass_threshold) ? +scorecard.pass_threshold : 80);
+  const subjectUserId = await resolveSubjectUser(a);
 
-  // subject: TRA/fronter → transfer.created_by; closer → sale.closer_id
-  let subjectUserId = null;
-  if (a.subject_role === 'fronter' && a.transfer_id) {
-    const { data: t } = await supabaseAdmin.from('transfers').select('created_by').eq('id', a.transfer_id).maybeSingle();
-    subjectUserId = t?.created_by || null;
-  } else if (a.subject_role === 'closer') {
-    if (a.sale_id) { const { data: s } = await supabaseAdmin.from('sales').select('closer_id').eq('id', a.sale_id).maybeSingle(); subjectUserId = s?.closer_id || null; }
-    else if (a.transfer_id) { const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id').eq('id', a.transfer_id).maybeSingle(); subjectUserId = t?.assigned_closer_id || null; }
-  }
-
-  // upsert the review header (one per assignment), then replace its scores
   const reviewRow = {
     assignment_id: a.id, company_id: a.company_id, method: a.method, subject_role: a.subject_role,
     subject_user_id: subjectUserId, reviewer_id: req.user.id, scorecard_id: scorecard.id,
@@ -262,28 +356,103 @@ router.post('/reviews', asyncHandler(async (req, res) => {
     if (sErr) logger.warn('QA', `scores insert: ${sErr.message}`);
   }
   await supabaseAdmin.from('qa_assignments').update({ status: 'scored' }).eq('id', a.id);
-
-  // feedback-to-agent: notify the reviewed agent + their managers (the discovery's
-  // stated future goal, made live now rather than deferred).
-  try {
-    const recipients = new Set();
-    if (subjectUserId) recipients.add(subjectUserId);
-    const mgrLevels = a.subject_role === 'fronter'
-      ? ['fronter_manager', 'operations_manager', 'company_admin']
-      : ['closer_manager', 'operations_manager', 'company_admin'];
-    (await getUserIdsByLevel(a.company_id, mgrLevels)).forEach(id => recipients.add(id));
-    recipients.delete(req.user.id);
-    if (recipients.size) {
-      notifyUsers([...recipients], {
-        companyId: a.company_id, type: 'qa_review',
-        title: `QA review: ${passed ? 'Passed' : 'Needs attention'} (${Math.round(pct)}%)`,
-        message: `${a.method.toUpperCase()} review completed${overall_notes ? ' — see notes' : ''}.`,
-        data: { review_id: review.id, assignment_id: a.id, passed, score_pct: Math.round(pct) },
-      }).catch(() => {});
-    }
-  } catch (e) { logger.warn('QA', `notify: ${e.message}`); }
+  await notifyReviewed(a, subjectUserId, req.user.id,
+    `QA review: ${passed ? 'Passed' : 'Needs attention'} (${Math.round(pct)}%)`,
+    `${a.method.toUpperCase()} review completed${overall_notes ? ' — see notes' : ''}.`,
+    { review_id: review.id, assignment_id: a.id, passed, score_pct: Math.round(pct) });
 
   res.json({ review, passed, total_score: total, max_score: max, score_pct: Math.round(pct) });
+}));
+
+// ── load a review (with raw values + its scorecard) for the edit screen ───────
+router.get('/reviews/by-assignment/:assignmentId', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: review } = await supabaseAdmin.from('qa_reviews').select('*').eq('assignment_id', req.params.assignmentId).maybeSingle();
+  if (!review) return res.status(404).json({ error: 'No review for this assignment yet' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(review.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  const [scoresRes, cardRes] = await Promise.all([
+    supabaseAdmin.from('qa_review_scores').select('criterion_key, raw_value, points, note').eq('review_id', review.id),
+    review.scorecard_id
+      ? supabaseAdmin.from('qa_scorecards').select('*').eq('id', review.scorecard_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  res.json({ review, scores: scoresRes.data || [], scorecard: cardRes.data || null });
+}));
+
+// ── edit / override a review (audited) ────────────────────────────────────────
+// qa_agent: own review only, and only while status='submitted'.
+// qa_manager (override_qa_review) / superadmin: ANY review, any status; may also
+// change status ('finalized' locks it for the agent). Every change appends a
+// {who, when, override, changes:{field:{from,to}}} entry to edit_history.
+router.put('/reviews/:id', asyncHandler(async (req, res) => {
+  const { data: review } = await supabaseAdmin.from('qa_reviews').select('*').eq('id', req.params.id).maybeSingle();
+  if (!review) return res.status(404).json({ error: 'Review not found' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(review.company_id)) return res.status(403).json({ error: 'Forbidden' });
+
+  const superadmin = await isSuperAdmin(req.user.id);
+  const canOverride = superadmin || await hasPermission(req.user.id, req.user.company_id, 'override_qa_review');
+  const isOwn = review.reviewer_id === req.user.id;
+  const canEdit = canOverride || (isOwn && review.status === 'submitted' && await can(req, 'submit_qa_review'));
+  if (!canEdit) {
+    return res.status(403).json({
+      error: isOwn && review.status !== 'submitted'
+        ? 'This review is finalized — only a QA manager can change it.'
+        : 'You can only edit your own reviews while they are still submitted.',
+    });
+  }
+
+  const changes = {};
+  const patch = {};
+  const values = (req.body && req.body.values && typeof req.body.values === 'object') ? req.body.values : null;
+  let sheet = null;
+
+  if (values) {
+    const { data: sc } = await supabaseAdmin.from('qa_scorecards').select('*').eq('id', review.scorecard_id).maybeSingle();
+    if (!sc || !isSheetConfig(sc.criteria)) return res.status(400).json({ error: 'Editing is only supported for sheet-model scorecards' });
+    const cfg = sc.criteria;
+    const { data: prevScores } = await supabaseAdmin.from('qa_review_scores').select('criterion_key, raw_value').eq('review_id', review.id);
+    const prev = Object.fromEntries((prevScores || []).map(r => [r.criterion_key, r.raw_value]));
+    for (const k of new Set([...Object.keys(prev), ...Object.keys(values)])) {
+      const from = prev[k] ?? null;
+      const to = (values[k] == null || values[k] === '') ? null : String(values[k]);
+      if (String(from ?? '') !== String(to ?? '')) changes[k] = { from, to };
+    }
+    const out = computeSheetReview(cfg, values);
+    Object.assign(patch, sheetComputedCols(cfg, values, out));
+    sheet = { cfg, out, values };
+  }
+  if (req.body.overall_notes !== undefined) {
+    const to = String(req.body.overall_notes || '').slice(0, 4000) || null;
+    if (to !== review.overall_notes) { changes.overall_notes = { from: review.overall_notes, to }; patch.overall_notes = to; }
+  }
+  if (req.body.meta !== undefined && req.body.meta && typeof req.body.meta === 'object') {
+    if (JSON.stringify(req.body.meta) !== JSON.stringify(review.meta || {})) {
+      changes.meta = { from: review.meta || {}, to: req.body.meta };
+      patch.meta = req.body.meta;
+    }
+  }
+  if (req.body.status !== undefined && req.body.status !== review.status) {
+    if (!canOverride) return res.status(403).json({ error: 'Only a QA manager can change review status' });
+    if (!['submitted', 'finalized', 'disputed', 'void'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid status' });
+    changes.status = { from: review.status, to: req.body.status };
+    patch.status = req.body.status;
+    if (req.body.status === 'finalized') { patch.finalized_at = new Date().toISOString(); patch.finalized_by = req.user.id; }
+  }
+
+  if (!Object.keys(changes).length) return res.json({ review, changed: false });
+
+  const hist = Array.isArray(review.edit_history) ? review.edit_history : [];
+  patch.edit_history = [...hist, {
+    edited_at: new Date().toISOString(), by: req.user.id, role: req.user.role,
+    override: !isOwn, changes,
+  }];
+
+  const { data: updated, error } = await supabaseAdmin.from('qa_reviews').update(patch).eq('id', review.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (sheet) await replaceSheetScores(review.id, sheet.cfg, sheet.values, sheet.out);
+  res.json({ review: updated, changed: true, computed: sheet ? sheet.out : null });
 }));
 
 // ── scorecards CRUD ───────────────────────────────────────────────────────────

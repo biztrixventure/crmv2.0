@@ -7,6 +7,8 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
+import SheetScoreRow from '../components/QA/SheetScoreRow';
+import { isSheetConfig } from '../utils/qaSheetFormula';
 
 // ============================================================================
 // QA Shell — isolated shell for qa_manager / qa_agent (mirrors ComplianceShell).
@@ -103,6 +105,28 @@ function ScoreForm({ assignment, onScored }) {
   if (scorecard === null) return <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   if (!scorecard) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>No active scorecard for {assignment.method.toUpperCase()}. Ask a QA manager to configure one.</div>;
 
+  // sheet_v2 (WaveTech replication) → horizontal spreadsheet-row scoring UI
+  if (isSheetConfig(scorecard.criteria)) {
+    return (
+      <SheetScoreRow
+        config={scorecard.criteria}
+        busy={busy}
+        onSubmit={async (payload) => {
+          setBusy(true);
+          try {
+            const r = await client.post('qa/reviews', { assignment_id: assignment.id, ...payload });
+            const c = r.data.computed || {};
+            toast.success(c.final_score != null
+              ? `Review submitted — ${c.passed ? 'Pass' : 'FAIL'} (Final ${c.final_score})`
+              : `Review submitted — Quality ${c.quality_score == null ? 'N/A' : `${c.quality_score}%`}`);
+            onScored?.();
+          } catch (e) { toast.error(e.response?.data?.error || 'Could not submit review'); }
+          finally { setBusy(false); }
+        }}
+      />
+    );
+  }
+
   const criteria = scorecard.criteria || [];
   const max = criteria.reduce((s, c) => s + (+c.max_points || 0), 0);
   const total = criteria.reduce((s, c) => s + (Math.max(0, Math.min(+c.max_points || 0, +scores[c.key] || 0))), 0);
@@ -153,8 +177,81 @@ function ScoreForm({ assignment, onScored }) {
   );
 }
 
+// ── Review editor — view/edit a SUBMITTED review (agent: own while submitted;
+// qa_manager with override_qa_review: any field of any review, fully audited) ──
+function ReviewEditor({ assignment, selfId, canOverride, onSaved }) {
+  const [data, setData] = useState(null);   // { review, scores, scorecard }
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    setData(null);
+    client.get(`qa/reviews/by-assignment/${assignment.id}`)
+      .then(r => setData(r.data))
+      .catch(() => setData({ error: true }));
+  }, [assignment.id]);
+  useEffect(() => { load(); }, [load]);
+
+  if (!data) return <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  if (data.error || !data.review) return <div className="py-3 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Could not load the review.</div>;
+
+  const { review, scores, scorecard } = data;
+  const sheet = scorecard && isSheetConfig(scorecard.criteria);
+  const editable = canOverride || (review.reviewer_id === selfId && review.status === 'submitted');
+  const initialValues = {
+    ...Object.fromEntries((scores || []).map(s => [s.criterion_key, s.raw_value ?? ''])),
+    ...(review.meta || {}),
+  };
+
+  const save = async (payload) => {
+    setBusy(true);
+    try {
+      const r = await client.put(`qa/reviews/${review.id}`, payload);
+      toast.success(r.data.changed ? 'Review updated' : 'No changes to save');
+      load(); onSaved?.();
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+        <span className="font-bold px-1.5 py-0.5 rounded uppercase"
+          style={{ background: 'var(--color-surface-hover)', color: review.status === 'finalized' ? 'var(--color-success-600)' : 'var(--color-warning-600)' }}>{review.status}</span>
+        {review.final_score != null && <span className="font-bold tabular-nums">Final {review.final_score}</span>}
+        {review.quality_score != null && <span className="font-bold tabular-nums">Quality {review.quality_score}%</span>}
+        {review.autofail_result && <span>Auto-Fail: {review.autofail_result}</span>}
+        {!editable && <span className="italic">read-only{review.status === 'finalized' ? ' (finalized)' : ''}</span>}
+        {canOverride && review.status === 'submitted' && (
+          <button onClick={() => save({ status: 'finalized' })} disabled={busy}
+            className="ml-auto text-[11px] font-bold px-2 py-1 rounded"
+            style={{ background: 'var(--color-surface-hover)', color: 'var(--color-success-600)' }}>Finalize (lock)</button>
+        )}
+      </div>
+      {sheet ? (
+        <SheetScoreRow key={review.id + review.status + (review.edit_history || []).length}
+          config={scorecard.criteria} initialValues={initialValues} initialNotes={review.overall_notes || ''}
+          readOnly={!editable} busy={busy} submitLabel="Save changes" onSubmit={save} />
+      ) : (
+        <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Legacy scorecard review — editing is available for sheet-model reviews only.</div>
+      )}
+      {(review.edit_history || []).length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Edit history</div>
+          <div className="space-y-1 max-h-40 overflow-auto">
+            {[...review.edit_history].reverse().map((h, i) => (
+              <div key={i} className="text-[11px] p-1.5 rounded" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                <span className="font-bold">{new Date(h.edited_at).toLocaleString()}</span>{h.override ? ' · OVERRIDE' : ''} — {Object.entries(h.changes || {}).map(([k, c]) => `${k}: ${c.from ?? '—'} → ${c.to ?? '—'}`).join(' · ')}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Queue tab ─────────────────────────────────────────────────────────────────
-function QueueTab({ canAssign, selfId }) {
+function QueueTab({ canAssign, canOverride, selfId }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ method: '', status: 'pending', subject_role: '', mine: '' });
@@ -208,19 +305,24 @@ function QueueTab({ canAssign, selfId }) {
             </div>}
       </div>
 
-      {/* review drawer */}
+      {/* review drawer — wide, to fit the horizontal sheet row */}
       {open && (
-        <div className="w-[440px] flex-shrink-0 rounded-xl p-4 overflow-auto" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', maxHeight: '100%' }}>
+        <div className="flex-shrink-0 rounded-xl p-4 overflow-auto" style={{ width: 'min(860px, 92vw)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', maxHeight: '100%' }}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
-          {canAssign && !open.assigned_to && (
+          {canAssign && !open.assigned_to && open.status !== 'scored' && (
             <button onClick={async () => { try { await client.post(`qa/assignments/${open.id}/assign`, { assigned_to: selfId }); toast.success('Assigned to you'); setOpen({ ...open, assigned_to: selfId }); load(); } catch { toast.error('Assign failed'); } }}
               className="w-full mb-3 px-3 py-2 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}>Assign to me</button>
           )}
           <div className="mb-4"><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Recordings</div><Candidates assignmentId={open.id} /></div>
-          <div><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Scorecard</div><ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} /></div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{open.status === 'scored' ? 'Review (submitted)' : 'Scorecard'}</div>
+            {open.status === 'scored'
+              ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
+              : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
+          </div>
         </div>
       )}
     </div>
@@ -364,6 +466,7 @@ export default function QAShell() {
   const canManage = isSuper || hasPermission('manage_qa_config');
   const canReports = isSuper || hasPermission('view_qa_reports');
   const canAssign = isSuper || hasPermission('assign_qa_tasks');
+  const canOverride = isSuper || hasPermission('override_qa_review');
   const [tab, setTab] = useState('queue');
 
   const tabs = [
@@ -390,7 +493,7 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'queue' && <QueueTab canAssign={canAssign} selfId={user?.id} />}
+        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} selfId={user?.id} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}
       </main>
