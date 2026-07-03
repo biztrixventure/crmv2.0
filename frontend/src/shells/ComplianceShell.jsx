@@ -59,6 +59,21 @@ const CODE_TABS = [
   { key: 'card_validator', label: 'Card Validator',  icon: CreditCard, flag: 'tool_card_validator' },
 ];
 
+// ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
+// 18 flat tabs were unusable — group them into 6 task-shaped clusters. This is
+// pure chrome: tab KEYS, content rendering, admin layout (useShellLayout),
+// deep-links and persistence are untouched. Tabs the admin layout hides simply
+// drop out of their group; a key we don't recognize (future tabs) lands in
+// "More" so nothing can ever disappear.
+const TAB_GROUPS = [
+  { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar'] },
+  { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'bulk_status'] },
+  { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
+  { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'roster', 'numbers'] },
+  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'questions', 'scripts', 'faqs'] },
+  { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
+];
+
 const ComplianceShell = () => {
   const { user, logout, updateUser } = useAuth();
   const { theme, toggleTheme }       = useTheme();
@@ -105,6 +120,30 @@ const ComplianceShell = () => {
   }, [TABS, activeTab, complianceDefaultTab]);
   const [tabInit, setTabInit]       = useState({});
   const [infoOpen, setInfoOpen]     = useState(false);
+
+  // Group the (admin-filtered, admin-ordered) TABS into the fixed clusters,
+  // preserving the layout's order inside each group. Unknown keys → "More".
+  const groups = useMemo(() => {
+    const groupOf = new Map();
+    TAB_GROUPS.forEach(g => g.keys.forEach(k => groupOf.set(k, g.id)));
+    const byId = Object.fromEntries(TAB_GROUPS.map(g => [g.id, { ...g, tabs: [] }]));
+    const more = { id: 'more', label: 'More', icon: ListChecks, tabs: [] };
+    TABS.forEach(t => { const gid = groupOf.get(t.key); (gid ? byId[gid] : more).tabs.push(t); });
+    const list = TAB_GROUPS.map(g => byId[g.id]).filter(g => g.tabs.length);
+    if (more.tabs.length) list.push(more);
+    return list;
+  }, [TABS]);
+
+  // The group that owns the active tab (dispo:* tabs live beside All Sales).
+  const dispoHostId = useMemo(
+    () => groups.find(g => g.tabs.some(t => t.key === 'sales'))?.id || groups[0]?.id,
+    [groups],
+  );
+  const activeGroupId = useMemo(() => {
+    if (activeTab.startsWith('dispo:')) return dispoHostId;
+    return groups.find(g => g.tabs.some(t => t.key === activeTab))?.id || groups[0]?.id;
+  }, [groups, activeTab, dispoHostId]);
+  const activeGroup = groups.find(g => g.id === activeGroupId);
 
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
@@ -168,40 +207,34 @@ const ComplianceShell = () => {
       <EngagementBanners />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        {/* Tab bar (+ superadmin numbers-info button) */}
-        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
-        <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-              style={{
-                background: activeTab === t.key ? 'var(--gradient-sidebar)' : 'transparent',
-                color:      activeTab === t.key ? 'white' : 'var(--color-text-secondary)',
-                boxShadow:  activeTab === t.key ? 'var(--shadow-sm)' : 'none',
-              }}>
-              <t.icon size={14} />
-              {t.label}
-            </button>
-          ))}
-          {/* Dynamic disposition tabs (e.g. Post Date), sit beside All Sales. */}
-          {dispoTabs.map(d => {
-            const k = `dispo:${d.value}`;
-            const active = activeTab === k;
-            return (
-              <button key={k} onClick={() => setActiveTab(k)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-                style={{
-                  background: active ? 'var(--gradient-sidebar)' : 'transparent',
-                  color:      active ? 'white' : 'var(--color-text-secondary)',
-                  boxShadow:  active ? 'var(--shadow-sm)' : 'none',
-                }}>
-                <CalendarClock size={14} />
-                {d.label}
-              </button>
-            );
-          })}
-        </div>
+        {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
+            Clicking a group jumps straight to its first tab (no dead clicks). */}
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
+            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {groups.map(g => {
+              const active = g.id === activeGroupId;
+              return (
+                <button key={g.id}
+                  onClick={() => { if (!active && g.tabs[0]) setActiveTab(g.tabs[0].key); }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all"
+                  style={{
+                    background: active ? 'var(--gradient-sidebar)' : 'transparent',
+                    color:      active ? 'white' : 'var(--color-text-secondary)',
+                    boxShadow:  active ? 'var(--shadow-sm)' : 'none',
+                  }}>
+                  <g.icon size={15} />
+                  {g.label}
+                  {g.tabs.length > 1 && (
+                    <span className="text-[10px] font-bold px-1.5 rounded-full"
+                      style={{ background: active ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: active ? '#fff' : 'var(--color-text-tertiary)' }}>
+                      {g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
           {user?.role === 'superadmin' && (
             <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
@@ -210,6 +243,43 @@ const ComplianceShell = () => {
             </button>
           )}
         </div>
+
+        {/* Second tier — the active group's tabs (+ dispo tabs beside All Sales). */}
+        {activeGroup && (activeGroup.tabs.length > 1 || (activeGroupId === dispoHostId && dispoTabs.length > 0)) && (
+          <div className="flex flex-wrap gap-1 mb-6 w-fit">
+            {activeGroup.tabs.map(t => (
+              <button key={t.key} onClick={() => setActiveTab(t.key)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all"
+                style={{
+                  background: activeTab === t.key ? 'var(--color-primary-100, #e0e7ff)' : 'transparent',
+                  color:      activeTab === t.key ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)',
+                  border:     `1px solid ${activeTab === t.key ? 'var(--color-primary-300, #c7d2fe)' : 'var(--color-border)'}`,
+                }}>
+                <t.icon size={13} />
+                {t.label}
+              </button>
+            ))}
+            {/* Dynamic disposition tabs (e.g. Post Date) sit beside All Sales. */}
+            {activeGroupId === dispoHostId && dispoTabs.map(d => {
+              const k = `dispo:${d.value}`;
+              const active = activeTab === k;
+              return (
+                <button key={k} onClick={() => setActiveTab(k)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all"
+                  style={{
+                    background: active ? 'var(--color-primary-100, #e0e7ff)' : 'transparent',
+                    color:      active ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)',
+                    border:     `1px solid ${active ? 'var(--color-primary-300, #c7d2fe)' : 'var(--color-border)'}`,
+                  }}>
+                  <CalendarClock size={13} />
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {/* single-tab group still needs its bottom margin */}
+        {activeGroup && activeGroup.tabs.length <= 1 && !(activeGroupId === dispoHostId && dispoTabs.length > 0) && <div className="mb-3" />}
 
         {infoOpen && <ComplianceInfoModal onClose={() => setInfoOpen(false)} />}
 
