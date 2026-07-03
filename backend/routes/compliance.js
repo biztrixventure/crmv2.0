@@ -9,9 +9,19 @@ const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 
+const { getConfig } = require('../utils/businessConfig');
+
 const router = express.Router();
 
 const NO_MATCH = '00000000-0000-0000-0000-000000000000';
+
+// FIX 1 — statuses that make a sale DEAD for recording review (code default;
+// business_config 'recording_review.excluded_statuses' overrides). Mirrors the
+// vocabulary in sales.js validators + the compliance status set.
+const RECORDING_DEAD_STATUSES = [
+  'cancelled', 'compliance_cancelled', 'chargeback', 'dispute',
+  'closed_lost', 'expired', 'needs_revision',
+];
 
 // Resolve a search term to matching row ids via the app_record_search RPC
 // (matches the full record id, every form_data cell, and the key typed
@@ -112,9 +122,18 @@ async function annotateCandidates(cands, saleCloserAgentIds = []) {
 router.get('/recordings/candidates', asyncHandler(async (req, res) => {
   if (req.query.sale_id) {
     const { data: sale } = await supabaseAdmin.from('sales')
-      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id, company_id, plan, monthly_payment, reference_no, status')
+      .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id, company_id, plan, monthly_payment, reference_no, status, sale_group_id')
       .eq('id', req.query.sale_id).maybeSingle();
     if (!sale) return res.status(404).json({ error: 'Sale not found' });
+    // FIX 4 — multi-car bundle siblings, so the reviewer can copy one
+    // confirmation to the whole deal instead of reviewing the same call N times.
+    let groupSiblings = [];
+    if (sale.sale_group_id) {
+      const { data: sibs } = await supabaseAdmin.from('sales')
+        .select('id, reference_no, car_year, car_make, car_model, plan, status')
+        .eq('sale_group_id', sale.sale_group_id).neq('id', sale.id);
+      groupSiblings = sibs || [];
+    }
     const [{ data: prof }, { data: tr }, { data: co }] = await Promise.all([
       supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').eq('user_id', sale.closer_id).maybeSingle(),
       sale.transfer_id ? supabaseAdmin.from('transfers').select('vicidial_vendor_code, created_at').eq('id', sale.transfer_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -132,6 +151,8 @@ router.get('/recordings/candidates', asyncHandler(async (req, res) => {
         company_id: sale.company_id, company_name: co?.name || null,
         plan: sale.plan, monthly_payment: sale.monthly_payment, reference_no: sale.reference_no, status: sale.status,
         closer_agent_ids: agentIds, vendor_code: tr?.vicidial_vendor_code || null,
+        sale_group_id: sale.sale_group_id || null,
+        group_siblings: groupSiblings,
       },
       candidates, existing: existing || [],
     });
@@ -218,8 +239,29 @@ router.post('/recordings/confirm', asyncHandler(async (req, res) => {
   if (!append) await supabaseAdmin.from('sale_recording_confirmations').delete().eq('sale_id', saleId);
   const { data, error } = await supabaseAdmin.from('sale_recording_confirmations').insert(rows).select();
   if (error) return res.status(500).json({ error: error.message });
-  logger.success('COMPLIANCE_REC', `sale ${saleId} ${append ? 'appended' : 'confirmed'} ${rows.length} clip(s) by ${req.user.id}`);
-  res.json({ ok: true, confirmations: data });
+
+  // FIX 4 — opt-in: copy this confirmation to every other sale in the same
+  // multi-car bundle (one call usually covers the whole deal). Explicit flag —
+  // never automatic, since cars are occasionally discussed on separate calls.
+  let groupApplied = 0;
+  if (req.body.apply_to_group === true) {
+    const { data: me } = await supabaseAdmin.from('sales').select('sale_group_id').eq('id', saleId).maybeSingle();
+    if (me?.sale_group_id) {
+      const { data: sibs } = await supabaseAdmin.from('sales')
+        .select('id').eq('sale_group_id', me.sale_group_id).neq('id', saleId);
+      const sibIds = (sibs || []).map(s => s.id);
+      if (sibIds.length) {
+        await supabaseAdmin.from('sale_recording_confirmations').delete().in('sale_id', sibIds);
+        const sibRows = sibIds.flatMap(sid => rows.map(r => ({ ...r, sale_id: sid })));
+        const { error: gErr } = await supabaseAdmin.from('sale_recording_confirmations').insert(sibRows);
+        if (gErr) logger.warn('COMPLIANCE_REC', `group-apply failed for ${saleId}: ${gErr.message}`);
+        else groupApplied = sibIds.length;
+      }
+    }
+  }
+
+  logger.success('COMPLIANCE_REC', `sale ${saleId} ${append ? 'appended' : 'confirmed'} ${rows.length} clip(s) by ${req.user.id}${groupApplied ? ` (+${groupApplied} group sibling(s))` : ''}`);
+  res.json({ ok: true, confirmations: data, group_applied: groupApplied });
 }));
 
 // UNCONFIRM — send a sale back to the pending-review queue
@@ -341,7 +383,7 @@ router.get('/recordings/queue', asyncHandler(async (req, res) => {
   const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 300);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const { data, error } = await supabaseAdmin.rpc('app_recording_review_queue', {
+  const params = {
     p_company_ids: companyId ? [companyId] : null,
     p_date_from: req.query.date_from || null,
     p_date_to: req.query.date_to || null,
@@ -350,7 +392,20 @@ router.get('/recordings/queue', asyncHandler(async (req, res) => {
     p_search: (req.query.search || '').trim() || null,
     p_sort: sort, p_dir: dir,
     p_limit: limit, p_offset: offset,
+  };
+  // FIX 1 — dead sale statuses drop out of the queue. Config-driven (same
+  // pattern as resell.enabled_statuses) so compliance policy changes without a
+  // migration; 166's RPC takes it as a param.
+  const excluded = await getConfig(null, 'recording_review.excluded_statuses', RECORDING_DEAD_STATUSES);
+  let { data, error } = await supabaseAdmin.rpc('app_recording_review_queue', {
+    ...params,
+    p_excluded_statuses: (Array.isArray(excluded) && excluded.length) ? excluded : null,
   });
+  // Pre-166 fallback: the 163 signature has no p_excluded_statuses — retry
+  // without it so the queue keeps working until the migration is applied.
+  if (error && /p_excluded_statuses|function .* does not exist/i.test(error.message || '')) {
+    ({ data, error } = await supabaseAdmin.rpc('app_recording_review_queue', params));
+  }
   if (error) return res.status(500).json({ error: error.message });
   // Y3: the RPC only computes the window count on page 1 (offset 0); later pages
   // return 0. Send null past page 1 so the client keeps the page-1 total (same

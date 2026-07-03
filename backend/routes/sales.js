@@ -406,6 +406,45 @@ router.post(
       }
     }
 
+    // FIX 3 (sale-lifecycle audit) — cancel-then-fresh-sell no longer dodges
+    // the resell cooldown. If this customer (customer_uuid via phone) has a
+    // sale CANCELLED within resell.cooldown_days, a brand-new sale is blocked
+    // with a pointer to the Resell flow — the same window POST /:id/resell
+    // enforces. Compliance/superadmin bypass (they correct records post-hoc);
+    // a legitimate repeat goes through the Resell button, which carries the
+    // chain + its own guards.
+    if (!['compliance_manager', 'superadmin'].includes(req.user.role) && customer_phone) {
+      const cooldownDays = parseInt(await getConfig(companyId, 'resell.cooldown_days', 7), 10) || 0;
+      if (cooldownDays > 0) {
+        const digitsOnly = String(customer_phone).replace(/\D/g, '');
+        const normPhone = digitsOnly.length === 11 && digitsOnly.startsWith('1') ? digitsOnly.slice(1) : digitsOnly;
+        if (normPhone.length >= 7) {
+          const { data: anchor } = await supabaseAdmin
+            .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+            .or(`customer_phone.eq.${normPhone},customer_phone.eq.+1${normPhone}`)
+            .limit(1).maybeSingle();
+          if (anchor?.customer_uuid) {
+            const cutoff = new Date(Date.now() - cooldownDays * 86400000).toISOString().slice(0, 10);
+            const { data: recentCancels } = await supabaseAdmin
+              .from('sales')
+              .select('id, reference_no, status, cancellation_date, updated_at')
+              .eq('customer_uuid', anchor.customer_uuid)
+              .eq('status', 'cancelled')
+              .or(`cancellation_date.gte.${cutoff},and(cancellation_date.is.null,updated_at.gte.${cutoff}T00:00:00Z)`)
+              .limit(1);
+            if (recentCancels?.length) {
+              const rc = recentCancels[0];
+              return res.status(409).json({
+                error: `This customer has a sale cancelled within the last ${cooldownDays} day(s) (ref ${rc.reference_no || rc.id.slice(0, 8)}). A fresh sale this soon after a cancel must go through the Resell flow on that sale — open it from the phone search and pick the intent there.`,
+                code: 'CANCEL_COOLDOWN',
+                cancelled_sale_id: rc.id,
+              });
+            }
+          }
+        }
+      }
+    }
+
     // G22 — vehicle eligibility for the primary car + every additional car.
     const { enforceOrAttach: enforceEligibility } = require('../utils/vehicleEligibility');
     const allCarsForCheck = [
@@ -469,12 +508,25 @@ router.post(
       ...(Array.isArray(additional_cars) ? additional_cars : []),
     ];
 
-    const rows = carPayloads.map(buildCarRow);
+    // FIX 4 — one group id per multi-car submit so every surface can see the
+    // bundle. Single-car sales stay NULL (NULL = "not a bundle"; keeps
+    // group-count lookups off the common case).
+    const saleGroupId = carPayloads.length > 1 ? require('crypto').randomUUID() : null;
 
-    const { data: createdSales, error: saleError } = await supabaseAdmin
+    // Attach the group id only on bundles (single-car inserts never carry the
+    // key, so they can't trip on a not-yet-applied mig 165).
+    const rows = carPayloads.map(buildCarRow).map(r => (saleGroupId ? { ...r, sale_group_id: saleGroupId } : r));
+
+    let { data: createdSales, error: saleError } = await supabaseAdmin
       .from('sales')
       .insert(rows)
       .select();
+    // Pre-165 fallback: column missing → retry ungrouped rather than failing the sale.
+    if (saleError && saleGroupId && /sale_group_id/i.test(saleError.message || '')) {
+      logger.warn('CREATE_SALE', 'sale_group_id column missing (mig 165 not applied) — inserting ungrouped');
+      ({ data: createdSales, error: saleError } = await supabaseAdmin
+        .from('sales').insert(carPayloads.map(buildCarRow)).select());
+    }
 
     if (saleError || !createdSales?.length) {
       logger.error('CREATE_SALE', 'Insert failed', saleError);
@@ -578,15 +630,60 @@ router.get('/compliance', asyncHandler(async (req, res) => {
   (profilesRes.data  || []).forEach(p => { profileMap[p.user_id] = p; });
   (companiesRes.data || []).forEach(c => { companyMap[c.id]       = c; });
 
+  // FIX 4 — bundle sizes for this page's groups (one set-based count query),
+  // so the list can chip "N-car deal". Absent pre-mig-165 (no column → no ids).
+  const groupIds = [...new Set((data || []).map(s => s.sale_group_id).filter(Boolean))];
+  const groupCount = {};
+  if (groupIds.length) {
+    const { data: g } = await supabaseAdmin.from('sales').select('sale_group_id').in('sale_group_id', groupIds);
+    (g || []).forEach(r => { groupCount[r.sale_group_id] = (groupCount[r.sale_group_id] || 0) + 1; });
+  }
+
   const enriched = (data || []).map(s => ({
     ...s,
     user_profiles: profileMap[s.closer_id]  || null,
     companies:     companyMap[s.company_id] || null,
     closer_name:  profileMap[s.closer_id]  ? `${profileMap[s.closer_id].first_name  || ''} ${profileMap[s.closer_id].last_name  || ''}`.trim() || null : null,
     fronter_name: profileMap[s.fronter_id] ? `${profileMap[s.fronter_id].first_name || ''} ${profileMap[s.fronter_id].last_name || ''}`.trim() || null : null,
+    group_count:  s.sale_group_id ? (groupCount[s.sale_group_id] || 0) : 0,
   }));
 
   res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+}));
+
+// ============================================================================
+// GET /sales/:id/group — sibling sales of a multi-car bundle (FIX 4).
+// Same scoping philosophy as /:id/chain: the caller must reach the anchor,
+// then siblings are role-trimmed so nothing leaks beyond the list views.
+// ============================================================================
+router.get('/:id/group', asyncHandler(async (req, res) => {
+  const role = req.user.role;
+  const userId = req.user.id;
+  const companyId = req.user.company_id;
+
+  const { data: anchor } = await supabaseAdmin
+    .from('sales').select('id, sale_group_id').eq('id', req.params.id).maybeSingle();
+  if (!anchor) return res.status(404).json({ error: 'Sale not found' });
+  if (!anchor.sale_group_id) return res.json({ sale_group_id: null, siblings: [] });
+
+  let query = supabaseAdmin
+    .from('sales')
+    .select('id, reference_no, status, sale_date, plan, car_year, car_make, car_model, car_vin, monthly_payment, closer_id, fronter_id, company_id, is_resell')
+    .eq('sale_group_id', anchor.sale_group_id)
+    .neq('id', anchor.id)
+    .order('created_at', { ascending: true });
+
+  if (role === 'fronter') query = query.eq('fronter_id', userId).eq('is_resell', false);
+  else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (role === 'closer') query = query.eq('closer_id', userId);
+  else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
+  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+    return res.status(403).json({ error: 'Not permitted' });
+  }
+
+  const { data: siblings, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ sale_group_id: anchor.sale_group_id, siblings: siblings || [] });
 }));
 
 // ============================================================================
@@ -1128,6 +1225,37 @@ router.put(
 
     const updates = await stampActor('sales', { updated_at: new Date().toISOString() }, userId);
     if (status !== undefined)          updates.status           = status;
+
+    // FIX 3 (sale-lifecycle audit) — closer self-cancel accountability.
+    // Any transition INTO a cancel-like status through this route:
+    //   * always stamps cancellation_date (default today) no matter who cancels,
+    //   * requires the SAME canonical cancellation_reason_key vocabulary the
+    //     compliance route enforces (non-compliance callers get a clear 400),
+    //   * appends who/when/reason to edit_history.
+    // PUT's status validator allows 'cancelled' + 'closed_lost' of the
+    // cancel-like set; the reason is REQUIRED for 'cancelled' (a true
+    // cancellation) and optional for 'closed_lost' (a lost deal, not a
+    // cancellation) — flagged interpretation.
+    const CANCEL_LIKE_PUT = new Set(['cancelled', 'closed_lost']);
+    const becomingCancelLike = status !== undefined && CANCEL_LIKE_PUT.has(status) && status !== existing.status;
+    if (becomingCancelLike) {
+      const reasonKey = String(req.body.cancellation_reason_key || '').trim();
+      if (status === 'cancelled' && !isCompliance && !reasonKey) {
+        return res.status(400).json({
+          error: 'A cancellation reason is required. Pick one from the cancellation reasons list and try again.',
+          code: 'CANCEL_REASON_REQUIRED',
+        });
+      }
+      if (reasonKey) updates.cancellation_reason_key = reasonKey;
+      if (!existing.cancellation_date) updates.cancellation_date = new Date().toISOString().slice(0, 10);
+      const hist = Array.isArray(existing.edit_history) ? existing.edit_history : [];
+      updates.edit_history = [...hist, {
+        at: new Date().toISOString(), by: userId, role: userRole,
+        action: `status:${existing.status}→${status}`,
+        cancellation_reason_key: reasonKey || null,
+        note: String(req.body.cancellation_reason_note || '').trim().slice(0, 500) || null,
+      }];
+    }
     if (customer_name !== undefined)   updates.customer_name    = titleCase(customer_name);
     if (customer_phone !== undefined)  updates.customer_phone   = customer_phone;
     if (customer_phone_2 !== undefined) updates.customer_phone_2 = customer_phone_2;

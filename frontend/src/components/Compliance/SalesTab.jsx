@@ -370,6 +370,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                               ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                             </span>
                           )}
+                          {s.group_count > 1 && (
+                            <span title="Multi-vehicle bundle — this row is one car of one deal"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                              {s.group_count}-car deal
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>

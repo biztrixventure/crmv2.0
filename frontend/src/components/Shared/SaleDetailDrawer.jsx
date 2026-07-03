@@ -89,6 +89,19 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
   // (mig 079 backfilled it). Surfaces cross-company activity from the
   // /sales/lifetime/by-phone endpoint, role-scoped server-side.
   const [lifetime, setLifetime] = useState(null);
+  // FIX 4 — multi-vehicle bundle siblings (shared sale_group_id, mig 165).
+  const [groupSiblings, setGroupSiblings] = useState([]);
+  useEffect(() => {
+    setGroupSiblings([]);
+    if (!sale?.id) return;
+    // The row may come from a caller that doesn't select sale_group_id, so ask
+    // the endpoint regardless — it returns [] instantly for ungrouped sales.
+    let cancelled = false;
+    client.get(`sales/${sale.id}/group`)
+      .then(r => { if (!cancelled) setGroupSiblings(r.data?.siblings || []); })
+      .catch(() => { /* pre-mig-165 or no access — section just hides */ });
+    return () => { cancelled = true; };
+  }, [sale?.id]);
 
   // Pull resell.enabled_statuses once so the button hides for statuses the
   // superadmin has disabled. Falls back to a safe default when offline.
@@ -398,6 +411,34 @@ export default function SaleDetailDrawer({ sale, onClose, onResold }) {
                 <p className="mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   Same phone has produced sales at multiple fronter / closer companies. Cross-co rollups in the lifetime endpoint show every term — visible to compliance and parent-co.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* FIX 4 — multi-vehicle bundle siblings: the other cars sold in the
+              SAME submit (shared sale_group_id). Small list, alongside (not
+              inside) the resell chain — a bundle is one deal, not a lineage. */}
+          {groupSiblings.length > 0 && (
+            <div className="mb-5">
+              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#065f46' }}>
+                Multi-Vehicle Deal · {groupSiblings.length + 1} cars
+              </p>
+              <div className="space-y-1.5">
+                {groupSiblings.map(g => (
+                  <div key={g.id} className="rounded-xl p-2.5 flex items-center gap-2.5 flex-wrap"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
+                      {[g.car_year, g.car_make, g.car_model].filter(Boolean).join(' ') || 'Vehicle'}
+                    </span>
+                    <code className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                      {g.reference_no || g.id.slice(0, 8)}
+                    </code>
+                    {g.plan && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.plan}</span>}
+                    <span className="text-[10px] uppercase tracking-wide font-bold ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
+                      {(g.status || '').replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

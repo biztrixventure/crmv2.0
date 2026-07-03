@@ -14,6 +14,7 @@ import { AppHeader } from "../components/Layout";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
+import { useCancellationReasons } from "../hooks/useCancellationReasons";
 import { useNotifications } from "../hooks/useNotifications";
 import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
@@ -128,6 +129,30 @@ const CloserDashboard = () => {
       await updateSale(saleId, { status });
       fetchStats();
     } catch {}
+  };
+
+  // FIX 3 — cancelling now requires a canonical reason (same catalog compliance
+  // uses). The Cancel button opens this mini-modal instead of firing directly.
+  const { activeReasons } = useCancellationReasons();
+  const [cancelTarget, setCancelTarget] = useState(null);   // the sale being cancelled
+  const [cancelKey, setCancelKey]       = useState('');
+  const [cancelNote, setCancelNote]     = useState('');
+  const [cancelBusy, setCancelBusy]     = useState(false);
+  const [cancelErr, setCancelErr]       = useState('');
+  const submitCancel = async () => {
+    if (!cancelKey) { setCancelErr('Pick a cancellation reason.'); return; }
+    setCancelBusy(true); setCancelErr('');
+    try {
+      await updateSale(cancelTarget.id, {
+        status: 'cancelled',
+        cancellation_reason_key: cancelKey,
+        cancellation_reason_note: cancelNote.trim() || undefined,
+      });
+      fetchStats();
+      setCancelTarget(null); setCancelKey(''); setCancelNote('');
+    } catch (err) {
+      setCancelErr(err.response?.data?.error || err.message || 'Failed to cancel');
+    } finally { setCancelBusy(false); }
   };
 
   const handleSubmitForReview = async (saleId) => {
@@ -486,7 +511,7 @@ const CloserDashboard = () => {
                           </button>
                           {s.status === 'open' && (
                             <button
-                              onClick={() => handleUpdateSale(s.id, 'cancelled')}
+                              onClick={() => { setCancelTarget(s); setCancelKey(''); setCancelNote(''); setCancelErr(''); }}
                               className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border transition-all hover:bg-error-50"
                               style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}
                             >
@@ -504,6 +529,36 @@ const CloserDashboard = () => {
         </div>
         </div>}
       </main>
+
+      {/* FIX 3 — cancel-with-reason modal (same canonical catalog compliance uses) */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onClick={() => !cancelBusy && setCancelTarget(null)}>
+          <div className="w-full max-w-sm rounded-2xl border p-5" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold text-base mb-1" style={{ color: 'var(--color-text)' }}>Cancel this sale?</h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+              {cancelTarget.customer_name || 'Sale'}{cancelTarget.reference_no ? ` · #${cancelTarget.reference_no}` : ''} — a reason is required and is recorded in the audit history.
+            </p>
+            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
+            <select value={cancelKey} onChange={e => setCancelKey(e.target.value)} className="input text-sm w-full mb-3">
+              <option value="">— pick a reason —</option>
+              {activeReasons.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Note (optional)</label>
+            <AutoResizeTextarea value={cancelNote} onChange={e => setCancelNote(e.target.value)} rows={2}
+              className="input text-sm w-full mb-3" placeholder="Anything compliance should know…" />
+            {cancelErr && <p className="text-xs mb-2" style={{ color: '#dc2626' }}>{cancelErr}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => setCancelTarget(null)} disabled={cancelBusy}
+                className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>Keep sale</button>
+              <button onClick={submitCancel} disabled={cancelBusy || !cancelKey}
+                className="flex-1 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>{cancelBusy ? 'Cancelling…' : 'Cancel sale'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sale Modal */}
       <SaleModal

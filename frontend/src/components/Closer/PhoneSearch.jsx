@@ -5,6 +5,7 @@ import client from '../../api/client';
 import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '../../utils/timezone';
 import ResellModal from './ResellModal';
 import ManualEntryModal from './ManualEntryModal';
+import CustomerHistoryBanner from './CustomerHistoryBanner';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -512,6 +513,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
   const [resellTarget,       setResellTarget]       = useState(null);   // existing sale-like object
   const [resellStatuses,     setResellStatuses]     = useState(null);
   const [manualEntryOpen,    setManualEntryOpen]    = useState(false);
+  const [searchedPhone,      setSearchedPhone]      = useState('');     // drives the history banner (only after a search)
 
   // Pull eligible statuses once so the "New on lead" button only appears for
   // sales the closer can actually resell per business_config.
@@ -558,6 +560,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
     lastQuery.current = q;
     setError('');
     setResults(null);
+    setSearchedPhone(q);   // FIX 2 — history banner keys off the searched number
     await runSearch(q);
   };
 
@@ -625,6 +628,10 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
       {/* Results */}
       {results !== null && (
         <>
+          {/* FIX 2 — returning-customer warning (role-scoped server-side).
+              Informational only; the strong variant fires on an active policy. */}
+          <CustomerHistoryBanner phone={searchedPhone} className="mt-3" />
+
           {/* Manual-entry CTA — always visible at the top of the result block
               (above the records) so the closer doesn't scroll past every
               transfer to find it. Use case: fronter forgot to log the lead;

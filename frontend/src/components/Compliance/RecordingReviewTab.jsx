@@ -137,6 +137,9 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
   const [chosen, setChosen] = useState([]);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  // FIX 4 — opt-in: copy the confirmation to the bundle's other sales (one call
+  // usually covers the whole multi-car deal). Never automatic.
+  const [applyGroup, setApplyGroup] = useState(false);
   // FIX 2 — manual phone-search fallback when the auto lookup finds nothing
   const [manualMode, setManualMode] = useState(false);
   const [manualCands, setManualCands] = useState(null);
@@ -169,8 +172,9 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
     setSaving(true);
     try {
       const clips = chosen.map((rid, i) => { const c = byId.get(rid); return c && { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location, agent_user: c.agent_user, start_time: c.start_time, duration: c.duration, note: i === 0 ? (note || null) : null }; }).filter(Boolean);
-      await client.post('compliance/recordings/confirm', { sale_id: saleId, clips });
-      toast.success(`Confirmed ${clips.length} recording${clips.length === 1 ? '' : 's'}`);
+      const r = await client.post('compliance/recordings/confirm', { sale_id: saleId, clips, apply_to_group: applyGroup || undefined });
+      const extra = r.data?.group_applied ? ` (+ applied to ${r.data.group_applied} other car${r.data.group_applied === 1 ? '' : 's'} in this deal)` : '';
+      toast.success(`Confirmed ${clips.length} recording${clips.length === 1 ? '' : 's'}${extra}`);
       onConfirmed(saleId);
     } catch (e) { toast.error(e.response?.data?.error || 'Could not confirm'); }
     finally { setSaving(false); }
@@ -214,6 +218,14 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
       </div>}
       footer={
         <>
+          {(sale.group_siblings || []).length > 0 && (
+            <label className="flex items-center gap-1.5 text-xs font-semibold flex-shrink-0 cursor-pointer"
+              title={`Copies these clips to: ${(sale.group_siblings || []).map(g => [g.car_year, g.car_make, g.car_model].filter(Boolean).join(' ') || g.reference_no || g.id.slice(0, 8)).join(' · ')}`}
+              style={{ color: applyGroup ? 'var(--color-success-600)' : 'var(--color-text-secondary)' }}>
+              <input type="checkbox" checked={applyGroup} onChange={e => setApplyGroup(e.target.checked)} />
+              Apply to {(sale.group_siblings || []).length} other car{(sale.group_siblings || []).length === 1 ? '' : 's'} in this deal
+            </label>
+          )}
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="Optional note (e.g. call dropped at 3min, continued on clip 2)"
             className="flex-1 min-w-0" style={{ ...inp }} />
           {hadExisting && <button onClick={unconfirm} disabled={saving} className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1 flex-shrink-0" style={{ color: 'var(--color-error-600)' }}><Trash2 size={13} /> Pending</button>}
@@ -576,7 +588,14 @@ function QueueView({ companyList }) {
               <tr key={r.sale_id} className="border-t hover:bg-black/[0.02] cursor-pointer" style={{ borderColor: 'var(--color-border)' }} onClick={() => setActive(r.sale_id)}>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDate(r.sale_date)}</td>
                 <td className="px-3 py-2 font-medium" style={{ color: 'var(--color-text)' }}>
-                  {r.customer_name || '—'}
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    {r.customer_name || '—'}
+                    {r.group_count > 1 && (
+                      <span title="Multi-vehicle bundle — one call likely covers all its cars"
+                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap"
+                        style={{ background: '#d1fae5', color: '#065f46' }}>{r.group_count}-car deal</span>
+                    )}
+                  </span>
                   {r.recording_ids && <div className="text-[10px] font-mono mt-0.5 truncate max-w-[220px]" title={r.recording_ids} style={{ color: 'var(--color-text-tertiary)' }}>rec {r.recording_ids}</div>}
                 </td>
                 <td className="px-3 py-2 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>

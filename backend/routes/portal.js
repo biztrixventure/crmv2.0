@@ -42,6 +42,19 @@ async function recordingReviewGateOn() {
 // flip closer_disposition to 'sale' and are no longer matched. NULL-safe.
 const isPostDate = (d) => /post[\s_-]?date|postdate/i.test(String(d || ''));
 
+// FIX 1 (sale-lifecycle audit) — DEAD sales never surface to clients, in EITHER
+// gate mode: a cancelled/chargebacked deal's recording must not list or stream
+// on the portal. Same config key the compliance queue reads (seeded by mig 166),
+// same code default.
+const DEAD_STATUS_DEFAULT = [
+  'cancelled', 'compliance_cancelled', 'chargeback', 'dispute',
+  'closed_lost', 'expired', 'needs_revision',
+];
+async function deadStatuses() {
+  const v = await getConfig(null, 'recording_review.excluded_statuses', DEAD_STATUS_DEFAULT);
+  return (Array.isArray(v) && v.length) ? v : DEAD_STATUS_DEFAULT;
+}
+
 // Pipe an upstream audio URL → client (Range-aware), hiding the source. Shared
 // by the recording proxy and the test-audio proxy. `reresolve` (optional) is
 // called once if the URL fails — a confirmed clip's stored location can go
@@ -405,12 +418,15 @@ router.get('/sales', authMiddleware, requirePortalClient, asyncHandler(async (re
     ? 'id, customer_name, customer_phone, sale_date, closer_id, client_name, sale_recording_confirmations!inner(sale_id)'
     : 'id, customer_name, customer_phone, sale_date, closer_id, client_name';
 
-  // Scope every query to this portal's closers AND/OR clients, and hide un-charged
-  // post-dated sales (sales-only portal). NULL-safe OR keeps normal/charged rows.
+  // Scope every query to this portal's closers AND/OR clients, hide un-charged
+  // post-dated sales (sales-only portal), and drop DEAD statuses (FIX 1 — a
+  // cancelled sale must not list on the portal in either gate mode).
+  const dead = await deadStatuses();
   const scope = (q) => {
     if (closerFilter.length) q = q.in('closer_id', closerFilter);
     if (clients.length)      q = q.in('client_name', clients);
     q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
+    q = q.not('status', 'in', `(${dead.join(',')})`);
     return q;
   };
   // Pseudonyms + recording length per sale (zero dialer calls). HYBRID per sale:
@@ -501,8 +517,9 @@ router.post('/sales/recording-meta', authMiddleware, requirePortalClient, asyncH
   // HYBRID: confirmed sales come straight from compliance's linked clips; only
   // the UNCONFIRMED ones fall through to the bounded live-resolve (skipped when
   // the strict gate is ON — those report 'pending_review').
-  const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition', 'id', ids);
-  const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name)) && !isPostDate(s.closer_disposition);
+  const srows = await fetchIn('sales', 'id, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition, status', 'id', ids);
+  const deadMeta = await deadStatuses();
+  const inScope = (s) => (!closers.length || closers.includes(s.closer_id)) && (!clients.length || clients.includes(s.client_name)) && !isPostDate(s.closer_disposition) && !deadMeta.includes(String(s.status || ''));
   const sales = (srows || []).filter(inScope);
   if (!sales.length) return res.json({ meta: {}, pending: [] });
   const confs = await fetchIn('sale_recording_confirmations', 'sale_id, duration', 'sale_id', sales.map(s => s.id));
@@ -546,13 +563,15 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
   const clients = req.portalClient.client_names || [];
   const { data: sale } = await supabaseAdmin
     .from('sales')
-    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition')
+    .select('id, customer_name, customer_phone, sale_date, closer_id, client_name, transfer_id, closer_disposition, status')
     .eq('id', req.params.id)
     .maybeSingle();
   const okCloser = !closers.length || closers.includes(sale?.closer_id);
   const okClient = !clients.length || clients.includes(sale?.client_name);
   // Sales-only: never stream an un-charged post-dated sale (not in the client's list).
   if (sale && isPostDate(sale.closer_disposition)) return res.status(404).json({ error: 'Not available' });
+  // FIX 1 — never stream a DEAD (cancelled/chargeback/…) sale in either gate mode.
+  if (sale && (await deadStatuses()).includes(String(sale.status || ''))) return res.status(404).json({ error: 'Not available' });
   if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient) {
     return res.status(404).json({ error: 'Not available' });
   }
@@ -620,10 +639,11 @@ router.get('/sales/:id/recording', authMiddleware, requirePortalClient, asyncHan
 router.get('/sales/:id/clips', authMiddleware, requirePortalClient, asyncHandler(async (req, res) => {
   const closers = req.portalClient.closer_ids || [];
   const clients = req.portalClient.client_names || [];
-  const { data: sale } = await supabaseAdmin.from('sales').select('id, closer_id, client_name, closer_disposition').eq('id', req.params.id).maybeSingle();
+  const { data: sale } = await supabaseAdmin.from('sales').select('id, closer_id, client_name, closer_disposition, status').eq('id', req.params.id).maybeSingle();
   const okCloser = !closers.length || closers.includes(sale?.closer_id);
   const okClient = !clients.length || clients.includes(sale?.client_name);
-  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient || isPostDate(sale.closer_disposition)) return res.status(404).json({ error: 'Not available' });
+  if (!sale || (!closers.length && !clients.length) || !okCloser || !okClient || isPostDate(sale.closer_disposition)
+      || (await deadStatuses()).includes(String(sale.status || ''))) return res.status(404).json({ error: 'Not available' });
   // Hybrid: return the compliance-confirmed clips whenever they exist (a linked
   // sale gets its multi-clip dropdown even while the strict gate is OFF).
   const { data: confs } = await supabaseAdmin

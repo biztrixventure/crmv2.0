@@ -9,6 +9,7 @@ import ComboInput from '../UI/ComboInput';
 import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, classify as classifyField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
+import CustomerHistoryBanner from './CustomerHistoryBanner';
 import CalendarDateInput from '../Form/CalendarDateInput';
 import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
 import { useUserColors } from '../../hooks/useUserColors';
@@ -682,8 +683,20 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   // the superadmin has marked at least one field as repeats_per_car.
   const allowMultiCar = !existingSale && carFieldsSorted.length > 0;
 
+  // FIX 2 — returning-customer phone for the history banner. Only on CREATE
+  // (an edit is the same customer by definition). Transfer's phone first,
+  // else whatever the form's phone field currently holds.
+  const historyPhone = !existingSale
+    ? (transfer?.form_data?.customer_phone || transfer?.form_data?.Phone
+       || formData.customer_phone || formData.Phone || formData.phone || '')
+    : '';
+
   return (
     <form onSubmit={handleSubmit} className="space-y-0">
+
+      {/* FIX 2 — prior-sales warning at the exact moment of sale creation
+          (role-scoped server-side; strong variant when an active policy exists). */}
+      {historyPhone && <CustomerHistoryBanner phone={historyPhone} className="mb-5" />}
 
       {/* Vehicle eligibility preview — surfaces the same verdict the
           backend POST/PUT will run. Red when blocked, amber when warn-
