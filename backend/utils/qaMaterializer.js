@@ -60,6 +60,44 @@ async function enabledCompanies() {
   return out;
 }
 
+// Materialize ONE company's worklist right now (used by the hourly job AND the
+// on-demand "Pull calls now" button / the auto-pull when QA is toggled on).
+// `methods` optional — resolved from config if omitted. Returns {tra, rcm}.
+async function materializeCompany(companyId, methods) {
+  if (!methods) {
+    const m = await getConfig(companyId, 'qa.methods', []);
+    methods = Array.isArray(m) ? m : [];
+  }
+  let tra = 0, rcm = 0;
+  if (methods.includes('tra')) {
+    try {
+      const pop = await getConfig(companyId, 'qa.tra.population', { statuses: ['all'] });
+      const statuses = Array.isArray(pop?.statuses) && pop.statuses.length ? pop.statuses : ['all'];
+      const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_tra', { p_company_id: companyId, p_statuses: statuses });
+      if (error) logger.warn('QA_JOBS', `TRA ${companyId}: ${error.message}`);
+      else tra = data || 0;
+    } catch (e) { logger.warn('QA_JOBS', `TRA ${companyId} error: ${e.message}`); }
+  }
+  if (methods.includes('rcm')) {
+    try {
+      const covers = await getConfig(companyId, 'qa.rcm.covers', ['fronter']);
+      const sample = await getConfig(companyId, 'qa.rcm.sample', { mode: 'percentage', value: 10, period: 'week' });
+      const kind = sample?.period === 'day' ? 'day' : 'week';
+      const { label, start, end } = previousPeriod(kind);
+      const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_rcm', {
+        p_company_id: companyId,
+        p_covers: Array.isArray(covers) && covers.length ? covers : ['fronter'],
+        p_mode: sample?.mode === 'fixed' ? 'fixed' : 'percentage',
+        p_value: Number.isFinite(+sample?.value) ? +sample.value : 10,
+        p_period: label, p_start: start.toISOString(), p_end: end.toISOString(),
+      });
+      if (error) logger.warn('QA_JOBS', `RCM ${companyId}: ${error.message}`);
+      else rcm = data || 0;
+    } catch (e) { logger.warn('QA_JOBS', `RCM ${companyId} error: ${e.message}`); }
+  }
+  return { tra, rcm };
+}
+
 async function runQaMaterialization() {
   let companies;
   try { companies = await enabledCompanies(); }
@@ -68,42 +106,12 @@ async function runQaMaterialization() {
 
   let traTotal = 0, rcmTotal = 0;
   for (const { companyId, methods } of companies) {
-    // TRA — full coverage
-    if (methods.includes('tra')) {
-      try {
-        const pop = await getConfig(companyId, 'qa.tra.population', { statuses: ['all'] });
-        const statuses = Array.isArray(pop?.statuses) && pop.statuses.length ? pop.statuses : ['all'];
-        const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_tra', {
-          p_company_id: companyId, p_statuses: statuses,
-        });
-        if (error) logger.warn('QA_JOBS', `TRA ${companyId}: ${error.message}`);
-        else traTotal += (data || 0);
-      } catch (e) { logger.warn('QA_JOBS', `TRA ${companyId} error: ${e.message}`); }
-    }
-    // RCM — frozen sample of the previous complete period
-    if (methods.includes('rcm')) {
-      try {
-        const covers = await getConfig(companyId, 'qa.rcm.covers', ['fronter']);
-        const sample = await getConfig(companyId, 'qa.rcm.sample', { mode: 'percentage', value: 10, period: 'week' });
-        const kind = sample?.period === 'day' ? 'day' : 'week';
-        const { label, start, end } = previousPeriod(kind);
-        const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_rcm', {
-          p_company_id: companyId,
-          p_covers: Array.isArray(covers) && covers.length ? covers : ['fronter'],
-          p_mode: sample?.mode === 'fixed' ? 'fixed' : 'percentage',
-          p_value: Number.isFinite(+sample?.value) ? +sample.value : 10,
-          p_period: label,
-          p_start: start.toISOString(),
-          p_end: end.toISOString(),
-        });
-        if (error) logger.warn('QA_JOBS', `RCM ${companyId}: ${error.message}`);
-        else rcmTotal += (data || 0);
-      } catch (e) { logger.warn('QA_JOBS', `RCM ${companyId} error: ${e.message}`); }
-    }
+    const r = await materializeCompany(companyId, methods);
+    traTotal += r.tra; rcmTotal += r.rcm;
   }
   if (traTotal || rcmTotal) {
     logger.info('QA_JOBS', `QA materialize: +${traTotal} TRA, +${rcmTotal} RCM across ${companies.length} co(s)`);
   }
 }
 
-module.exports = { runQaMaterialization, previousPeriod };
+module.exports = { runQaMaterialization, materializeCompany, previousPeriod };

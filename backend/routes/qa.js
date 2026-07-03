@@ -25,6 +25,7 @@ const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/hel
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
 const { listCandidatesByLeadId, locationForRecording } = require('../utils/dialerBoxes');
+const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const axios = require('axios');
@@ -559,7 +560,29 @@ router.put('/config', asyncHandler(async (req, res) => {
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(company_id)) return res.status(403).json({ error: 'Forbidden' });
   await setConfig(`company:${company_id}`, key, value, req.user.id);
-  res.json({ ok: true, key, value });
+
+  // Turning a method ON should fill the queue immediately — no waiting for the
+  // hourly job. Materialize right away for the methods now enabled.
+  let materialized = null;
+  if (key === 'qa.methods' && Array.isArray(value) && value.length) {
+    try { materialized = await materializeCompany(company_id, value); } catch (e) { logger.warn('QA', `auto-materialize: ${e.message}`); }
+  }
+  res.json({ ok: true, key, value, materialized });
+}));
+
+// ── on-demand "Pull calls now" — run materialization for a company immediately
+// (TRA full coverage + RCM sample), instead of waiting for the hourly job. ──────
+router.post('/materialize', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.body?.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  const methods = await getConfig(companyId, 'qa.methods', []);
+  if (!Array.isArray(methods) || !methods.length) {
+    return res.status(400).json({ error: 'QA is not enabled for this company — turn on TRA and/or RCM first.', code: 'QA_OFF' });
+  }
+  const result = await materializeCompany(companyId, methods);
+  res.json({ ok: true, ...result });
 }));
 
 module.exports = router;

@@ -251,9 +251,10 @@ function ReviewEditor({ assignment, selfId, canOverride, onSaved }) {
 }
 
 // ── Queue tab ─────────────────────────────────────────────────────────────────
-function QueueTab({ canAssign, canOverride, selfId }) {
+function QueueTab({ canAssign, canOverride, canManage, selfId }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pulling, setPulling] = useState(false);
   const [filters, setFilters] = useState({ method: '', status: 'pending', subject_role: '', mine: '' });
   const [open, setOpen] = useState(null);   // selected assignment
 
@@ -269,6 +270,17 @@ function QueueTab({ canAssign, canOverride, selfId }) {
   }, [filters]);
   useEffect(() => { load(); }, [load]);
 
+  const pullNow = async () => {
+    setPulling(true);
+    try {
+      const r = await client.post('qa/materialize', {});
+      toast.success(`Pulled ${r.data.tra || 0} TRA + ${r.data.rcm || 0} RCM call(s) into the queue`);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Could not pull calls');
+    } finally { setPulling(false); }
+  };
+
   return (
     <div className="flex gap-4 h-full">
       {/* list */}
@@ -278,10 +290,26 @@ function QueueTab({ canAssign, canOverride, selfId }) {
           <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))} style={inp}><option value="">Any status</option><option value="pending">Pending</option><option value="in_review">In review</option><option value="scored">Scored</option></select>
           <select value={filters.subject_role} onChange={e => setFilters(f => ({ ...f, subject_role: e.target.value }))} style={inp}><option value="">Fronter + closer</option><option value="fronter">Fronter</option><option value="closer">Closer</option></select>
           <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={filters.mine === 'true'} onChange={e => setFilters(f => ({ ...f, mine: e.target.checked ? 'true' : '' }))} /> Mine only</label>
-          <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }}><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+          <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+          {canManage && (
+            <button onClick={pullNow} disabled={pulling} className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white"
+              style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: pulling ? 0.6 : 1 }} title="Load this company's calls into the queue right now">
+              {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull calls now
+            </button>
+          )}
         </div>
         {loading ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
-          : items.length === 0 ? <div className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No assignments. (QA must be enabled for a company before its calls appear here.)</div>
+          : items.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="text-sm mb-3" style={{ color: 'var(--color-text-tertiary)' }}>No calls in the queue yet.</div>
+              {canManage
+                ? <button onClick={pullNow} disabled={pulling} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: pulling ? 0.6 : 1 }}>
+                    {pulling ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Pull calls now
+                  </button>
+                : <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Ask your QA manager to enable QA / pull calls for this company.</div>}
+              <div className="text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>Calls come from this company's transfers/sales — enable TRA/RCM in Scorecards &amp; Config first.</div>
+            </div>
+          )
           : <div className="space-y-2 overflow-auto">
               {items.map(a => (
                 <button key={a.id} onClick={() => setOpen(a)} className="w-full text-left flex items-center gap-3 p-3 rounded-xl" style={{ background: open?.id === a.id ? 'var(--color-surface-hover)' : 'var(--color-surface)', border: `1px solid ${open?.id === a.id ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
@@ -385,7 +413,15 @@ function ConfigTab({ companyId }) {
     try { await client.post('qa/scorecards', { company_id: companyId, method: draft.method, name: draft.name, pass_threshold: +draft.pass_threshold, criteria }); toast.success('Scorecard saved'); setDraft(d => ({ ...d, name: '' })); loadCards(); }
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
-  const setCfgKey = async (key, value) => { try { await client.put('qa/config', { company_id: companyId, key, value }); toast.success('Config updated'); loadCfg(); } catch { toast.error('Config update failed'); } };
+  const setCfgKey = async (key, value) => {
+    try {
+      const r = await client.put('qa/config', { company_id: companyId, key, value });
+      const m = r.data.materialized;
+      if (m && (m.tra || m.rcm)) toast.success(`Enabled — pulled ${m.tra || 0} TRA + ${m.rcm || 0} RCM call(s) into the queue`);
+      else toast.success('Config updated');
+      loadCfg();
+    } catch { toast.error('Config update failed'); }
+  };
 
   const methods = Array.isArray(cfg?.['qa.methods']) ? cfg['qa.methods'] : [];
   return (
@@ -493,7 +529,7 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} selfId={user?.id} />}
+        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}
       </main>
