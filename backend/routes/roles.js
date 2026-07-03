@@ -203,7 +203,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager", "closer"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager", "closer", "qa_manager", "qa_agent"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],
