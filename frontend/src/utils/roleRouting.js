@@ -24,6 +24,10 @@ export const ROLE_ROUTES = {
 
   compliance_manager:  '/compliance',
 
+  // QA department — isolated shell (like compliance), qa_manager + qa_agent.
+  qa_manager:          '/qa',
+  qa_agent:            '/qa',
+
   company_admin:       '/operations',
   operations_manager:  '/operations',
 
@@ -46,12 +50,14 @@ const ROLE_HIERARCHY = {
   superadmin:          0,
   readonly_admin:      1,
   compliance_manager:  2,
+  qa_manager:          2, // QA dept lead — isolated shell, gated in hasRoleAccess
   company_admin:       3,
   operations_manager:  4,
   closer_manager:      5,
   fronter_manager:     6,
   manager:             6, // legacy alias, same level as fronter_manager
   closer:              7,
+  qa_agent:            7, // QA reviewer — isolated shell, gated in hasRoleAccess
   fronter:             8,
 };
 
@@ -106,6 +112,13 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   // Compliance manager: only /compliance
   if (normUser === 'compliancemanager') {
     return normRequired === 'compliancemanager';
+  }
+
+  // QA roles: only the isolated /qa shell. Both qa_manager and qa_agent land in
+  // the same shell (tabs gate themselves by permission), so either QA user may
+  // reach a route guarded by either QA level.
+  if (normUser === 'qamanager' || normUser === 'qaagent') {
+    return normRequired === 'qamanager' || normRequired === 'qaagent';
   }
 
   // Portal client: ONLY the recording portal — never any CRM shell.

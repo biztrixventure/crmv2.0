@@ -21,6 +21,7 @@ const AdminPanel      = lazy(() => import("./pages/AdminPanel"));
 const StaffShell      = lazy(() => import("./shells/StaffShell"));
 const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
 const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
+const QAShell         = lazy(() => import("./shells/QAShell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
@@ -88,6 +89,11 @@ const AppContent = () => {
           {/* Compliance Manager */}
           <Route path="/compliance/*" element={
             <ProtectedRoute requiredRole="compliance_manager"><ComplianceShell /></ProtectedRoute>
+          } />
+
+          {/* QA Department — isolated shell for qa_manager + qa_agent */}
+          <Route path="/qa/*" element={
+            <ProtectedRoute requiredRole="qa_agent"><QAShell /></ProtectedRoute>
           } />
 
           {/* Staff Shell — closer / fronter */}

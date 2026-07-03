@@ -14,7 +14,9 @@ const ROLE_HIERARCHY = {
   fronter_manager:     4,
   closer_manager:      4,
   compliance_manager:  4,
+  qa_manager:          4,   // QA dept lead — same tier as compliance_manager
   closer:              5,
+  qa_agent:            5,   // QA reviewer — same tier as closer
   fronter:             6,
 };
 
@@ -292,10 +294,15 @@ const getTeamMembers = async (managerId, companyId) => {
 };
 
 // Single source of truth for which role levels are valid per company type.
+// QA roles (qa_manager / qa_agent) are assignable under BOTH company types:
+// TRA reviews FRONTER transfers, RCM optionally reviews CLOSER calls, and one QA
+// org may cover a fronter company AND a closer company. Since role is granted
+// per-company (one user_company_roles row each), the qa levels must be valid on
+// whichever company the QA user is being attached to — so both lists include them.
 const getCompanyTypeLevels = (companyType) =>
   companyType === 'fronter'
-    ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin']
-    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
+    ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent']
+    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent'];
 
 // Is this user an ACTIVE member of this company? Used to stop a non-superadmin
 // from scoping a list to a company they don't belong to (cross-tenant leak).

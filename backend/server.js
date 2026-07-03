@@ -62,6 +62,7 @@ const eventsRoutes              = require('./routes/events');
 const searchRoutes              = require('./routes/search');
 const customerProfileRoutes     = require('./routes/customerProfile');
 const egressRoutes              = require('./routes/egress');
+const qaRoutes                  = require('./routes/qa');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
@@ -292,6 +293,9 @@ app.use('/api/feature-flags',     authMiddleware, readonlyGuard, featureFlagsRou
 app.use('/api/business-config',   authMiddleware, readonlyGuard, businessConfigRoutes);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, complianceRoutes);
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
+// QA Department — recording review + scoring. egressAudit so QA recording plays
+// are governed like the rest; each route guards itself by qa_* permission.
+app.use('/api/qa',                authMiddleware, readonlyGuard, egressAudit, qaRoutes);
 app.use('/api/audit',             authMiddleware, readonlyGuard, auditRoutes);
 app.use('/api/user-preferences',  authMiddleware, userPreferencesRoutes);
 app.use('/api/activity-logs',       authMiddleware, readonlyGuard, activityLogsRoutes);
