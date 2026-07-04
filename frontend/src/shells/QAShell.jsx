@@ -360,9 +360,9 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
             </div>}
       </div>
 
-      {/* review panel — docks at the BOTTOM, full width, so the horizontal sheet is easy to read */}
+      {/* review panel — STICKY bottom sheet (fixed to viewport bottom), full width */}
       {open && (
-        <div className="flex-shrink-0 rounded-xl p-4 overflow-auto w-full" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-primary-600)', maxHeight: '58vh', boxShadow: '0 -8px 24px rgba(0,0,0,0.12)' }}>
+        <div className="p-4 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '64vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
@@ -847,6 +847,131 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   );
 }
 
+// ── Completed reviews as a Google-Sheets-style grid (per method/day) ──────────
+const GROUP_TINT2 = { rating: 'rgba(37,99,235,0.10)', autofail: 'rgba(220,38,38,0.10)', penalty: 'rgba(217,119,6,0.10)', quality: 'rgba(22,163,74,0.10)', tracking: 'rgba(107,114,128,0.12)', outcome: 'rgba(124,58,237,0.10)', computed: 'rgba(22,163,74,0.16)', meta: 'var(--color-surface-hover)' };
+function flattenFields(cfg) {
+  if (!cfg || Array.isArray(cfg)) return [];
+  const f = [];
+  (cfg.rating_criteria || []).forEach(c => f.push({ ...c, group: 'rating', kind: 'rating' }));
+  ((cfg.autofail || {}).fields || []).forEach(c => f.push({ ...c, group: 'autofail', kind: 'yn' }));
+  (cfg.penalty_flags || []).forEach(c => f.push({ ...c, group: 'penalty', kind: 'yn' }));
+  ((cfg.quality_score || {}).fields || []).forEach(c => f.push({ ...c, group: 'quality', kind: 'yn' }));
+  (cfg.tracking_flags || []).forEach(c => f.push({ ...c, group: 'tracking', kind: 'yn' }));
+  if (cfg.call_outcome) f.push({ key: cfg.call_outcome.key, label: cfg.call_outcome.label, group: 'outcome', kind: 'text' });
+  return f;
+}
+const CellVal = ({ f, v }) => {
+  if (v == null || v === '') return <span style={{ color: 'var(--color-text-tertiary)' }}>·</span>;
+  if (f.kind === 'yn') { const y = String(v).trim().toUpperCase() === 'Y'; return <span className="font-bold" style={{ color: y ? '#059669' : 'var(--color-text-tertiary)' }}>{y ? 'Y' : 'N'}</span>; }
+  if (f.kind === 'rating') return <span className="font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{v}</span>;
+  return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;
+};
+function ReviewsSheet({ scorecard, reviews, managerView }) {
+  const cfg = scorecard?.criteria;
+  const fields = flattenFields(cfg);
+  const hasFinal = cfg?.final_score_formula === 'base_plus_penalty_truncated';
+  const hasPenalty = (cfg?.penalty_flags || []).length > 0;
+  const hasQuality = !!cfg?.quality_score;
+  const th = (label, group) => <th className="px-2 py-1.5 text-[9px] font-bold text-left whitespace-nowrap align-bottom" style={{ background: GROUP_TINT2[group], color: 'var(--color-text-secondary)', minWidth: group === 'meta' ? 90 : 54, maxWidth: 120 }}>{label}</th>;
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-2">
+        <MethodPill m={scorecard?.method} />
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{scorecard?.name || 'Reviews'}</span>
+        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {reviews.length} review{reviews.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+        <table className="text-[12px]" style={{ borderCollapse: 'collapse', minWidth: 'max-content' }}>
+          <thead className="sticky top-0 z-10">
+            <tr>
+              {th('Reviewed', 'meta')}{th('Call date', 'meta')}{th('Customer', 'meta')}{th('Phone', 'meta')}{th('Agent', 'meta')}
+              {managerView && th('Reviewer', 'meta')}
+              {fields.map(f => th(f.label, f.group))}
+              {th('Base', 'computed')}{th('Auto-Fail', 'computed')}{hasPenalty && th('Penalty', 'computed')}{hasFinal && th('Final', 'computed')}{hasQuality && th('Quality', 'computed')}{th('Status', 'computed')}
+            </tr>
+          </thead>
+          <tbody>
+            {reviews.map(r => (
+              <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(r.reviewed_at)}</td>
+                <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDate(r.call_date)}</td>
+                <td className="px-2 py-1.5 truncate" style={{ color: 'var(--color-text)', maxWidth: 120 }}>{r.customer_name || '—'}</td>
+                <td className="px-2 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>
+                <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.agent || '—'}</td>
+                {managerView && <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewer_name || '—'}</td>}
+                {fields.map(f => <td key={f.key} className="px-2 py-1.5 text-center"><CellVal f={f} v={r.values[f.key]} /></td>)}
+                <td className="px-2 py-1.5 text-center tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{r.base_score != null ? `${Math.round(r.base_score * 100 * 10) / 10}%` : '—'}</td>
+                <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.autofail_result === 'Pass' ? '#059669' : '#dc2626' }}>{r.autofail_result || '—'}</td>
+                {hasPenalty && <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: (r.total_penalty || 0) < 0 ? '#dc2626' : 'var(--color-text)' }}>{r.total_penalty ?? 0}</td>}
+                {hasFinal && <td className="px-2 py-1.5 text-center tabular-nums font-extrabold" style={{ color: 'var(--color-text)' }}>{r.final_score ?? '—'}</td>}
+                {hasQuality && <td className="px-2 py-1.5 text-center tabular-nums font-extrabold" style={{ color: 'var(--color-text)' }}>{r.quality_score == null ? 'N/A' : `${r.quality_score}%`}</td>}
+                <td className="px-2 py-1.5 text-center">
+                  {r.passed == null ? <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
+                    : <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded" style={r.passed ? { background: 'rgba(16,185,129,0.12)', color: '#059669' } : { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }}>{r.passed ? 'PASS' : 'FAIL'}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CompletedTab({ managerView, companyId }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [method, setMethod] = useState('');
+  const [reviewerId, setReviewerId] = useState('');
+  const [agents, setAgents] = useState([]);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = { date_from: from, date_to: to };
+    if (method) params.method = method;
+    if (reviewerId) params.reviewer_id = reviewerId;
+    if (!managerView) params.mine = 'true';
+    client.get('qa/reviews', { params }).then(r => setData(r.data)).catch(() => setData({ reviews: [], scorecards: {} })).finally(() => setLoading(false));
+  }, [from, to, method, reviewerId, managerView]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (managerView) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [managerView, companyId]);
+
+  const groups = {};
+  for (const r of (data?.reviews || [])) { (groups[r.scorecard_id] = groups[r.scorecard_id] || []).push(r); }
+  const scorecards = data?.scorecards || {};
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'All completed reviews' : 'My completed reviews'}</span>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
+        <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} style={inp} />
+        <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
+        <input type="date" value={to} max={today} onChange={e => setTo(e.target.value)} style={inp} />
+        <button onClick={() => { setFrom(today); setTo(today); }} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Today</button>
+        <select value={method} onChange={e => setMethod(e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+        {managerView && (
+          <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={inp}>
+            <option value="">All QA agents</option>
+            {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
+        <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        {data && <span className="text-xs ml-1" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{data.reviews.length}</b> reviews</span>}
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+          : !data || !data.reviews.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No completed reviews in this range. Score calls in the Queue and they appear here as a sheet.</div>
+          : Object.entries(groups).map(([scId, revs]) => <ReviewsSheet key={scId} scorecard={scorecards[scId]} reviews={revs} managerView={managerView} />)}
+      </div>
+    </div>
+  );
+}
+
 // ── Shell ─────────────────────────────────────────────────────────────────────
 export default function QAShell() {
   const { user, hasPermission, logout } = useAuth();
@@ -861,6 +986,7 @@ export default function QAShell() {
   const tabs = [
     { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: true },
+    { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: true },
     { key: 'config', label: 'Scorecards & Config', icon: Settings2, show: canManage },
     { key: 'reports', label: 'Reports', icon: BarChart3, show: canReports },
   ].filter(t => t.show);
@@ -885,6 +1011,7 @@ export default function QAShell() {
       <main className="flex-1 p-5 overflow-hidden">
         {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
         {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={user?.company_id} />}
+        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={user?.company_id} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}
       </main>

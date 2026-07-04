@@ -599,6 +599,77 @@ router.get('/reviews/by-assignment/:assignmentId', asyncHandler(async (req, res)
   res.json({ review, scores: scoresRes.data || [], scorecard: cardRes.data || null });
 }));
 
+// ── completed-reviews grid (the "Google Sheet" view) ─────────────────────────
+// One row per SCORED review with its raw per-field values + computed columns +
+// call meta, grouped so the client renders a spreadsheet per method. qa_agent
+// sees OWN reviews; a manager (view_qa_reports) sees all + can filter by agent.
+router.get('/reviews', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const managerView = (await isSuperAdmin(req.user.id)) || await hasPermission(req.user.id, req.user.company_id, 'view_qa_reports') || await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews');
+
+  let q = supabaseAdmin.from('qa_reviews').select('*').order('created_at', { ascending: false }).limit(2000);
+  const allowed = await allowedCompanyIds(req);
+  if (allowed) { if (!allowed.length) return res.json({ reviews: [], scorecards: {} }); q = q.in('company_id', allowed); }
+  if (req.query.mine === 'true' || !managerView) q = q.eq('reviewer_id', req.user.id);
+  if (req.query.company_id)  q = q.eq('company_id', req.query.company_id);
+  if (req.query.method)      q = q.eq('method', req.query.method);
+  if (req.query.reviewer_id && managerView) q = q.eq('reviewer_id', req.query.reviewer_id);
+  if (req.query.date_from)   q = q.gte('created_at', req.query.date_from);
+  if (req.query.date_to)     q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
+  const { data: reviews, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  if (!reviews.length) return res.json({ reviews: [], scorecards: {}, manager_view: managerView });
+
+  const rIds = reviews.map(r => r.id);
+  const aIds = [...new Set(reviews.map(r => r.assignment_id).filter(Boolean))];
+  const scIds = [...new Set(reviews.map(r => r.scorecard_id).filter(Boolean))];
+  const userIds = [...new Set([...reviews.map(r => r.reviewer_id), ...reviews.map(r => r.subject_user_id)].filter(Boolean))];
+
+  const [scoreRes, cardRes, assignRes, profRes] = await Promise.all([
+    supabaseAdmin.from('qa_review_scores').select('review_id, criterion_key, raw_value, points').in('review_id', rIds),
+    scIds.length ? supabaseAdmin.from('qa_scorecards').select('id, name, method, criteria, pass_threshold').in('id', scIds) : Promise.resolve({ data: [] }),
+    aIds.length ? supabaseAdmin.from('qa_assignments').select('id, transfer_id, sale_id, recording_ref, subject_agent, recording_date').in('id', aIds) : Promise.resolve({ data: [] }),
+    userIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds) : Promise.resolve({ data: [] }),
+  ]);
+  const scoresByReview = {};
+  for (const s of scoreRes.data || []) { (scoresByReview[s.review_id] = scoresByReview[s.review_id] || {})[s.criterion_key] = s.raw_value; }
+  const scorecards = Object.fromEntries((cardRes.data || []).map(c => [c.id, c]));
+  const assignById = Object.fromEntries((assignRes.data || []).map(a => [a.id, a]));
+  const nameById = Object.fromEntries((profRes.data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.user_id]));
+
+  // hydrate customer/phone from recording_ref → transfer → sale (batched)
+  const tIds = [...new Set(Object.values(assignById).map(a => a.transfer_id).filter(Boolean))];
+  const sIds = [...new Set(Object.values(assignById).map(a => a.sale_id).filter(Boolean))];
+  const [tRes, sRes] = await Promise.all([
+    tIds.length ? supabaseAdmin.from('transfers').select('id, customer_name, normalized_phone, created_at').in('id', tIds) : Promise.resolve({ data: [] }),
+    sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date').in('id', sIds) : Promise.resolve({ data: [] }),
+  ]);
+  const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
+  const sById = Object.fromEntries((sRes.data || []).map(s => [s.id, s]));
+
+  const out = reviews.map(r => {
+    const a = assignById[r.assignment_id] || {};
+    const rec = a.recording_ref || null;
+    const t = a.transfer_id ? tById[a.transfer_id] : null;
+    const s = a.sale_id ? sById[a.sale_id] : null;
+    return {
+      id: r.id, assignment_id: r.assignment_id, method: r.method, subject_role: r.subject_role,
+      scorecard_id: r.scorecard_id, status: r.status, reviewed_at: r.created_at,
+      reviewer_id: r.reviewer_id, reviewer_name: nameById[r.reviewer_id] || null,
+      subject_user_id: r.subject_user_id, subject_name: nameById[r.subject_user_id] || null,
+      agent: a.subject_agent || rec?.agent_user || null,
+      customer_name: rec?.phone ? (t?.customer_name || s?.customer_name || null) : (t?.customer_name || s?.customer_name || null),
+      customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
+      call_date: a.recording_date || rec?.start_time || t?.created_at || s?.sale_date || null,
+      base_score: r.base_score, autofail_result: r.autofail_result, total_penalty: r.total_penalty,
+      final_score: r.final_score, quality_score: r.quality_score, passed: r.passed, call_outcome: r.call_outcome,
+      values: scoresByReview[r.id] || {},
+      overall_notes: r.overall_notes,
+    };
+  });
+  res.json({ reviews: out, scorecards, manager_view: managerView });
+}));
+
 // ── edit / override a review (audited) ────────────────────────────────────────
 // qa_agent: own review only, and only while status='submitted'.
 // qa_manager (override_qa_review) / superadmin: ANY review, any status; may also
