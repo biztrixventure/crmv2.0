@@ -872,7 +872,8 @@ function ReviewsSheet({ scorecard, reviews, managerView }) {
   const hasFinal = cfg?.final_score_formula === 'base_plus_penalty_truncated';
   const hasPenalty = (cfg?.penalty_flags || []).length > 0;
   const hasQuality = !!cfg?.quality_score;
-  const th = (label, group) => <th className="px-2 py-1.5 text-[9px] font-bold text-left whitespace-nowrap align-bottom" style={{ background: GROUP_TINT2[group], color: 'var(--color-text-secondary)', minWidth: group === 'meta' ? 90 : 54, maxWidth: 120 }}>{label}</th>;
+  const pretty = (s) => String(s ?? '').replace(/_/g, ' ').trim();
+  const th = (label, group) => { const n = pretty(label); return <th className="px-2 py-1.5 text-[9px] font-bold text-left align-bottom leading-tight" title={n} style={{ background: GROUP_TINT2[group], color: 'var(--color-text-secondary)', minWidth: group === 'meta' ? 84 : 46, maxWidth: 96, whiteSpace: 'normal', wordBreak: 'break-word' }}>{n}</th>; };
   return (
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-2">

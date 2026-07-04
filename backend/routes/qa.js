@@ -273,18 +273,29 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
   }
   const dispoOf = (r) => r.lead_id ? (dispoMap.get(`${r.box_id}|${r.lead_id}`) || null) : null;
 
+  // transferred = a real transfer for this LEAD: CRM lead-match OR dialer XFER dispo.
+  const transferredOf = (r) => {
+    const c = cls.get(r.box_id + '|' + r.recording_id) || {};
+    return c.transferred || isXferDispo(dispoOf(r));
+  };
+
   const search = String(req.query.search || '').replace(/\D/g, '');
   const filtered = search ? rows.filter(r => (r.phone || '').includes(search) || String(r.lead_id || '').includes(search)) : rows;
   // dispo counts (over ALL rows, for the filter dropdown)
   const dispoCounts = {};
   for (const r of rows) { const d = dispoOf(r); if (d) dispoCounts[d] = (dispoCounts[d] || 0) + 1; }
+  // transferred count = DISTINCT transferred leads (a transfer has 2 recording
+  // legs + redials; count the transfer once, not every recording of it).
+  const transferredLeads = new Set();
+  for (const r of rows) if (transferredOf(r) && r.lead_id) transferredLeads.add(`${r.box_id}|${r.lead_id}`);
   res.json({
     date, agents: ids.length, total: rows.length, shown: filtered.length,
-    transferred_count: rows.filter(r => cls.get(r.box_id + '|' + r.recording_id)?.transferred).length,
+    transferred_count: transferredLeads.size,           // distinct transferred leads (≈ dialer XFER count)
+    transferred_recordings: rows.filter(transferredOf).length,   // recordings tagged (legs+redials) — for context
     dispo_counts: dispoCounts,
     recordings: filtered.map(r => {
       const c = cls.get(r.box_id + '|' + r.recording_id) || {};
-      return { ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null, transferred: c.transferred || false, transfer_id: c.transfer_id || null, dispo: dispoOf(r) };
+      return { ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null, transferred: transferredOf(r), transfer_id: c.transfer_id || null, dispo: dispoOf(r) };
     }),
   });
 }));
@@ -320,11 +331,14 @@ async function classifyTransferred(rows, companyId, date) {
     const key = r.box_id + '|' + r.recording_id;
     const leadHit = r.lead_id ? byBoxLead.get(`${r.box_id}|${r.lead_id}`) : null;
     const phoneHit = r.phone ? byPhone.get(String(r.phone).replace(/\D/g, '').slice(-10)) : null;
-    const transfer_id = leadHit || phoneHit || null;
-    out.set(key, { transferred: !!transfer_id, transfer_id });
+    // `transferred` = LEAD-based only (a real transfer for THIS lead). phone is
+    // kept ONLY as a weak transfer_id link for assignment — NOT as the badge, so
+    // redials to a once-transferred number don't inflate the transferred count.
+    out.set(key, { transferred: !!leadHit, transfer_id: leadHit || phoneHit || null });
   }
   return out;
 }
+const isXferDispo = (d) => { const s = String(d || '').toUpperCase(); return s === 'XFER' || s === 'TRANSFER' || s === 'XFERA'; };
 
 // ── QA agents in a company (for the manager's assign dropdown) ───────────────
 // Two-step (no cross-table embed — user_company_roles has no FK to user_profiles,

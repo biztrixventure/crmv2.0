@@ -28,12 +28,16 @@ const GROUP_TINT = {
   computed: 'rgba(22,163,74,0.16)',
 };
 
-function Col({ label, group, children, w = CELL_W }) {
+// keep the stored label but display it readable: Customer_Product_X → "Customer Product X"
+const pretty = (s) => String(s ?? '').replace(/_/g, ' ').trim();
+
+function Col({ label, suffix, group, children, w = CELL_W }) {
+  const nice = pretty(label);
   return (
     <div className="flex-shrink-0 flex flex-col" style={{ width: w, borderRight: '1px solid var(--color-border)' }}>
-      <div className="px-1.5 pt-1 pb-0.5 text-[9px] font-bold leading-tight break-words flex items-end"
+      <div className="px-1.5 pt-1 pb-0.5 text-[9px] font-bold leading-tight break-words flex items-end" title={nice}
         style={{ color: 'var(--color-text-secondary)', background: GROUP_TINT[group] || 'var(--color-surface-hover)', height: 46 }}>
-        {label}
+        {nice}{suffix ? <span className="font-normal opacity-70">{suffix}</span> : null}
       </div>
       <div className="px-1.5 py-1.5 flex items-center" style={{ minHeight: 44 }}>{children}</div>
     </div>
