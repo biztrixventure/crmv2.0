@@ -705,7 +705,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const load = async () => {
     setLoading(true); setData(null); setSel({});
     try {
-      const r = await client.get('qa/day-recordings', { params: { date, scope }, timeout: 150000 });
+      const r = await client.get('qa/day-recordings', { params: { date, scope }, timeout: 280000 });
       setData(r.data);
       if (!r.data.total) toast.message('No recordings found for that day.');
     } catch (e) { toast.error(e.response?.data?.error || 'Could not load recordings'); }

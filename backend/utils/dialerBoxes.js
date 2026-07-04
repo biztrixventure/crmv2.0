@@ -494,7 +494,7 @@ async function leadStatusSearch(box, status, date) {
 // Per-lead status via lead_field_info (the completeness fallback: catches leads
 // whose status code isn't in the bulk lead_status_search set — e.g. custom
 // campaign codes — so EVERY recording can get a disposition). Cached like LSS.
-async function leadFieldStatus(box, leadId) {
+async function _leadFieldOnBox(box, leadId) {
   const key = `lf|${box.id}|${leadId}`;
   const hit = _lssCache.get(key);
   if (hit && Date.now() - hit.at < LSS_TTL) return hit.status;
@@ -507,13 +507,25 @@ async function leadFieldStatus(box, leadId) {
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (text && !/^ERROR|^NOTICE/i.test(text)) status = (text.split(/\r?\n/)[0].trim() || null);
   } catch { /* box unreachable → null */ }
+  status = status ? status.toUpperCase() : null;
   _lssCache.set(key, { at: Date.now(), status });
-  return (status ? status.toUpperCase() : null);
+  return status;
+}
+
+// A lead's status via lead_field_info. Tries the recording's own box first, then
+// falls back to the OTHER boxes (cross-cluster leads whose lead_id resolves on a
+// different box), so nothing is left blank.
+async function leadFieldStatus(box, leadId) {
+  let s = await _leadFieldOnBox(box, leadId);
+  if (s) return s;
+  for (const b of BOXES) { if (b.id === box.id) continue; s = await _leadFieldOnBox(b, leadId); if (s) return s; }
+  return null;
 }
 
 // Fill status for a set of (boxId, leadId) pairs — deduped, concurrency-pooled.
-// Returns Map<`${boxId}|${leadId}`, statusCode>.
-async function fillLeadStatuses(pairs = [], { concurrency = 15, cap = 2500 } = {}) {
+// Uncapped by default (completeness > speed; cached 15 min so re-loads are
+// instant). Returns Map<`${boxId}|${leadId}`, statusCode>.
+async function fillLeadStatuses(pairs = [], { concurrency = 24, cap = 20000 } = {}) {
   const uniq = [...new Map((pairs || []).filter(p => p && p.boxId && p.leadId).map(p => [`${p.boxId}|${p.leadId}`, p])).values()].slice(0, cap);
   const out = new Map();
   let idx = 0;
