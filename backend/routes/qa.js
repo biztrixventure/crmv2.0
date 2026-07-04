@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -185,6 +185,60 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
     }
   };
   return pipe(url, false);
+}));
+
+// ── agent-id resolution for the day-recording browser ────────────────────────
+// company scope = agent ids of the company's users; all scope = every mapped id.
+async function agentIdsForCompany(companyId) {
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+  const uids = [...new Set((ucr || []).map(r => r.user_id))];
+  if (!uids.length) return { ids: [], nameByAgent: {} };
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids').in('user_id', uids);
+  return foldAgents(profs);
+}
+async function allAgentIds() {
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').not('vicidial_agent_ids', 'is', null);
+  return foldAgents(profs);
+}
+function foldAgents(profs) {
+  const ids = new Set(); const nameByAgent = {};
+  for (const p of profs || []) for (const a of (p.vicidial_agent_ids || [])) {
+    const A = String(a).toUpperCase(); if (!A) continue;
+    ids.add(A); nameByAgent[A] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || A;
+  }
+  return { ids: [...ids], nameByAgent };
+}
+
+// ── whole-day recording browser ──────────────────────────────────────────────
+// GET /qa/day-recordings?date=YYYY-MM-DD&scope=company|all&company_id=&search=
+// Pulls EVERY recording for a day across the (company's, or all mapped) agents
+// and boxes — the "load the day, then search any number" surface. Cached 15 min.
+router.get('/day-recordings', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const date = String(req.query.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
+
+  let ids = [], nameByAgent = {};
+  if (req.query.scope === 'all') {
+    if (!(await isSuperAdmin(req.user.id)) && !(await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews'))) {
+      return res.status(403).json({ error: 'Not allowed to load recordings across all companies' });
+    }
+    ({ ids, nameByAgent } = await allAgentIds());
+  } else {
+    const companyId = req.query.company_id || req.user.company_id;
+    const allowed = await allowedCompanyIds(req);
+    if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+    ({ ids, nameByAgent } = await agentIdsForCompany(companyId));
+  }
+  if (!ids.length) return res.json({ date, agents: 0, total: 0, recordings: [], note: 'No dialer agent ids mapped for this company.' });
+
+  const rows = await listDayRecordings({ date, agentIds: ids });
+  const search = String(req.query.search || '').replace(/\D/g, '');
+  const filtered = search ? rows.filter(r => (r.phone || '').includes(search) || String(r.lead_id || '').includes(search)) : rows;
+  res.json({
+    date, agents: ids.length, total: rows.length, shown: filtered.length,
+    recordings: filtered.map(r => ({ ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null })),
+  });
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter

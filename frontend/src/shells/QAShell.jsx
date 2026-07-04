@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
-  ChevronRight, Send, Shield, Star,
+  ChevronRight, Send, Shield, Star, Search, Headphones, Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -83,25 +83,30 @@ function Candidates({ assignmentId }) {
 
 // ── scorecard form ────────────────────────────────────────────────────────────
 function ScoreForm({ assignment, onScored }) {
-  const [scorecard, setScorecard] = useState(null);
-  const [scores, setScores] = useState({});      // key → points
+  const [scorecard, setScorecard] = useState(null);   // null = loading, false = none, obj = loaded
+  const [loadErr, setLoadErr] = useState('');
+  const [scores, setScores] = useState({});      // key → points (legacy weighted only)
   const [notes, setNotes] = useState({});         // key → note
   const [overall, setOverall] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setScorecard(null); setScores({}); setNotes({}); setOverall('');
+    setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall('');
     client.get('qa/scorecards', { params: { method: assignment.method, company_id: assignment.company_id } })
       .then(r => {
         const list = r.data.scorecards || [];
         // company-scoped active first, else global template
         const pick = list.find(s => s.company_id === assignment.company_id && s.is_active) || list.find(s => !s.company_id && s.is_active) || list[0] || null;
-        setScorecard(pick);
-        if (pick) { const init = {}; (pick.criteria || []).forEach(c => { init[c.key] = c.max_points; }); setScores(init); }
+        setScorecard(pick || false);
+        // legacy weighted cards use an ARRAY of criteria — prefill max_points.
+        // sheet_v2 cards use an OBJECT (SheetScoreRow handles its own defaults),
+        // so DON'T call .forEach on it (that threw → infinite spinner before).
+        if (pick && Array.isArray(pick.criteria)) { const init = {}; pick.criteria.forEach(c => { init[c.key] = c.max_points; }); setScores(init); }
       })
-      .catch(() => setScorecard(null));
+      .catch(e => setLoadErr(e.response?.data?.error || 'Could not load the scorecard (check QA permissions).'));
   }, [assignment.id]);
 
+  if (loadErr) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>{loadErr}</div>;
   if (scorecard === null) return <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   if (!scorecard) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>No active scorecard for {assignment.method.toUpperCase()}. Ask a QA manager to configure one.</div>;
 
@@ -495,6 +500,126 @@ function RcmConfig({ value, covers, onSample, onCovers }) {
   );
 }
 
+// ── Day Recordings tab — pick a date → EVERY call that day, search any number ─
+function DayRecordingsTab({ canAll }) {
+  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const [date, setDate] = useState(yesterday);
+  const [scope, setScope] = useState('company');
+  const [data, setData] = useState(null);        // { recordings, total, agents }
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const audioRef = useRef(null); const urlRef = useRef(null);
+  const [loadingRid, setLoadingRid] = useState(null);
+  const [playingRid, setPlayingRid] = useState(null);
+
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+
+  const load = async () => {
+    setLoading(true); setData(null);
+    try {
+      const r = await client.get('qa/day-recordings', { params: { date, scope }, timeout: 150000 });
+      setData(r.data);
+      if (!r.data.total) toast.message('No recordings found for that day.');
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not load recordings'); }
+    finally { setLoading(false); }
+  };
+
+  const play = async (c) => {
+    const a = audioRef.current; if (!a) return;
+    if (a.dataset.rid === c.recording_id) { a.paused ? a.play() : a.pause(); return; }
+    setLoadingRid(c.recording_id);
+    try {
+      const res = await client.get('qa/recordings/stream', { params: { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      const url = URL.createObjectURL(res.data); urlRef.current = url;
+      a.src = url; a.dataset.rid = c.recording_id; a.load(); a.play().catch(() => {});
+    } catch { toast.error('Could not load that recording'); }
+    finally { setLoadingRid(null); }
+  };
+
+  const allRows = (data?.recordings || []).filter(r => {
+    if (!search) return true;
+    const q = search.replace(/\D/g, '');
+    if (q) return (r.phone || '').includes(q) || String(r.lead_id || '').includes(q);
+    const s = search.toLowerCase();
+    return (r.agent_name || '').toLowerCase().includes(s) || (r.agent_user || '').toLowerCase().includes(s);
+  });
+  const CAP = 1000;                       // protect the browser on huge days
+  const rows = allRows.slice(0, CAP);
+  const capped = allRows.length > CAP;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <label className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={14} />Date</label>
+        <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
+        <button onClick={() => setDate(yesterday)} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Yesterday</button>
+        {canAll && (
+          <select value={scope} onChange={e => setScope(e.target.value)} style={inp}>
+            <option value="company">My company's agents</option>
+            <option value="all">All companies (heavy)</option>
+          </select>
+        )}
+        <button onClick={load} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white"
+          style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: loading ? 0.6 : 1 }}>
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <Headphones size={15} />} Load day
+        </button>
+        {data && (
+          <div className="flex items-center gap-2 ml-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{data.total}</span> recordings · {data.agents} agents
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-1.5 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+          <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+          <input placeholder="Search number / lead / agent" value={search} onChange={e => setSearch(e.target.value)}
+            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', fontSize: 13, padding: '6px 2px', width: 220, outline: 'none' }} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16">
+          <Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} />
+          <div className="text-xs mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Pulling the day's recordings from every agent + dialer… (first load can take a moment)</div>
+        </div>
+      ) : !data ? (
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Pick a date and click <b>Load day</b> to see every call from that day. Then search any number.</div>
+      ) : (
+        <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+          <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+            <thead className="sticky top-0" style={{ background: 'var(--color-surface-hover)' }}>
+              <tr>{['', 'Time', 'Phone', 'Lead ID', 'Agent', 'Length', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map(c => {
+                const on = playingRid === c.recording_id;
+                return (
+                  <tr key={c.box_id + c.recording_id} style={{ borderTop: '1px solid var(--color-border)', background: on ? 'var(--color-surface-hover)' : 'transparent' }}>
+                    <td className="px-2 py-1.5">
+                      <button onClick={() => play(c)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
+                        {loadingRid === c.recording_id ? <Loader2 size={13} className="animate-spin" color="#fff" /> : on ? <Pause size={13} color="#fff" /> : <Play size={13} color="#fff" />}
+                      </button>
+                    </td>
+                    <td className="px-3 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(c.start_time)}</td>
+                    <td className="px-3 py-1.5 tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{c.phone || '—'}</td>
+                    <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{c.lead_id || '—'}</td>
+                    <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user}</td>
+                    <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{fmtDur(c.duration)}</td>
+                    <td className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.box_id}</td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search ? 'No recordings match that search.' : 'No recordings for this day.'}</td></tr>}
+              {capped && <tr><td colSpan={7} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search a number to narrow.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <audio ref={audioRef} controls className="w-full mt-2" style={{ display: urlRef.current ? 'block' : 'none' }}
+        onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)} />
+    </div>
+  );
+}
+
 // ── Shell ─────────────────────────────────────────────────────────────────────
 export default function QAShell() {
   const { user, hasPermission, logout } = useAuth();
@@ -505,8 +630,10 @@ export default function QAShell() {
   const canOverride = isSuper || hasPermission('override_qa_review');
   const [tab, setTab] = useState('queue');
 
+  const canAll = isSuper || hasPermission('view_all_qa_reviews');
   const tabs = [
     { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
+    { key: 'day', label: 'Day Recordings', icon: Headphones, show: true },
     { key: 'config', label: 'Scorecards & Config', icon: Settings2, show: canManage },
     { key: 'reports', label: 'Reports', icon: BarChart3, show: canReports },
   ].filter(t => t.show);
@@ -530,6 +657,7 @@ export default function QAShell() {
       </header>
       <main className="flex-1 p-5 overflow-hidden">
         {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
+        {tab === 'day' && <DayRecordingsTab canAll={canAll} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}
       </main>

@@ -401,6 +401,57 @@ async function resolveLeadIdByAgentDate({ boxId, agent, date, phone }) {
   return hit ? { lead_id: hit.lead_id, box: box.id, prefix: box.prefix } : null;
 }
 
+// ── Phone number from a recording filename ──────────────────────────────────
+// e.g. .../20260703-111359_7137754668-all.mp3 → 7137754668. The basename holds
+// yyyymmdd (8) + hhmmss (6) + PHONE (10-11) + optional agent ext (≤4); pick the
+// 10/11-digit group (the phone), last one wins.
+function phoneFromLocation(loc) {
+  const base = String(loc || '').split(/[/\\]/).pop() || '';
+  const groups = base.match(/\d{7,15}/g) || [];
+  const phones = groups.filter(g => g.length === 10 || g.length === 11);
+  return phones.length ? phones[phones.length - 1] : null;
+}
+
+// ── Whole-day recording browser (QA) ────────────────────────────────────────
+// VICIdial's recording_lookup has NO date-only mode (returns INVALID SEARCH
+// PARAMETERS), so a full day is built by fanning out agent_user × box × date.
+// Concurrency-pooled; deduped by box|recording_id; a 15-min day-cache keyed on
+// (date + agent set) makes re-opening instant (past days are immutable anyway).
+// Returns rows enriched with the customer phone parsed from the filename.
+const _dayCache = new Map();   // key → { at, rows }
+const DAY_TTL = 15 * 60 * 1000;
+async function listDayRecordings({ date, agentIds = [], concurrency = 15 } = {}) {
+  const day = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  const ids = [...new Set((agentIds || []).filter(Boolean).map(a => String(a).toUpperCase()))];
+  if (!ids.length) return [];
+
+  const key = day + '|' + ids.slice().sort().join(',');
+  const hit = _dayCache.get(key);
+  if (hit && Date.now() - hit.at < DAY_TTL) return hit.rows;
+
+  const boxes = BOXES;
+  const tasks = [];
+  for (const box of boxes) for (const a of ids) tasks.push({ box, a });
+  const byId = new Map();
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const { box, a } = tasks[idx++];
+      const rows = await recordingLookup(box, { agent_user: a, date: day });
+      for (const r of rows) { const k = box.id + '|' + r.recording_id; if (!byId.has(k)) byId.set(k, { ...r, box_id: box.id }); }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+
+  const rows = [...byId.values()].map(r => ({
+    box_id: r.box_id, start_time: r.start, agent_user: r.user, recording_id: r.recording_id,
+    lead_id: r.lead_id, duration: r.duration, location: r.location, phone: phoneFromLocation(r.location),
+  })).sort((a, b) => String(b.start_time).localeCompare(String(a.start_time)));   // newest first
+  _dayCache.set(key, { at: Date.now(), rows });
+  return rows;
+}
+
 // NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
 // get the LIVE list/prefixes, not a stale snapshot captured at require-time.
 module.exports = {
@@ -410,4 +461,5 @@ module.exports = {
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
+  listDayRecordings, phoneFromLocation,
 };
