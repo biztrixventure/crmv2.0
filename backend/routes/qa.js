@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -91,17 +91,30 @@ router.get('/queue', asyncHandler(async (req, res) => {
     const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', assignees);
     names = Object.fromEntries((up || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
   }
+  // attach the SCORE for any already-scored rows (so the Queue shows a scoreboard)
+  const aIds = (data || []).map(r => r.id);
+  let reviewByAssign = {};
+  if (aIds.length) {
+    const { data: revs } = await supabaseAdmin.from('qa_reviews')
+      .select('assignment_id, final_score, quality_score, passed, autofail_result, status, total_score, max_score').in('assignment_id', aIds);
+    reviewByAssign = Object.fromEntries((revs || []).map(r => [r.assignment_id, r]));
+  }
 
   const items = (data || []).map(r => {
     const t = r.transfer_id ? tById[r.transfer_id] : null;
     const s = r.sale_id ? sById[r.sale_id] : null;
+    const rec = r.recording_ref || null;
+    const rv = reviewByAssign[r.id] || null;
     return {
       ...r,
       customer_name: t?.customer_name || s?.customer_name || null,
-      customer_phone: t?.normalized_phone || s?.customer_phone || null,
-      subject_date: t?.created_at || s?.sale_date || r.created_at,
+      customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
+      subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
+      agent_display: r.subject_agent || null,
+      duration: rec?.duration ?? null,
       assignee_name: r.assigned_to ? (names[r.assigned_to] || null) : null,
+      review: rv,   // { final_score, quality_score, passed, autofail_result, status } or null
     };
   });
   res.json({ items, total: offset === 0 ? (count || 0) : null, page, limit });
@@ -132,22 +145,35 @@ router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
 router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to').eq('id', req.params.id).maybeSingle();
+    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref').eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
 
-  // resolve the transfer that carries the dialer lead code (closer path goes via sale)
-  let transferId = a.transfer_id;
-  if (!transferId && a.sale_id) {
-    const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
-    transferId = s?.transfer_id || null;
-  }
   let candidates = [];
-  if (transferId) {
-    const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', transferId).maybeSingle();
-    const lead = leadDigits(t?.vicidial_vendor_code);
-    if (lead) { try { candidates = await listCandidatesByLeadId(lead); } catch (e) { logger.warn('QA', `candidates ${lead}: ${e.message}`); } }
+  if (a.recording_ref && a.recording_ref.recording_id) {
+    // day-recording assignment — the EXACT clip is known. Show it, plus any other
+    // legs on the same lead (so the reviewer has the fronter/closer context).
+    const rec = a.recording_ref;
+    candidates = [{ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true }];
+    if (rec.lead_id) {
+      try {
+        const legs = await listCandidatesByLeadId(rec.lead_id);
+        for (const l of legs) if (!candidates.some(c => c.box_id === l.box_id && c.recording_id === l.recording_id)) candidates.push(l);
+      } catch { /* keep the exact clip */ }
+    }
+  } else {
+    // materialized assignment — resolve via the transfer's dialer lead code
+    let transferId = a.transfer_id;
+    if (!transferId && a.sale_id) {
+      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
+      transferId = s?.transfer_id || null;
+    }
+    if (transferId) {
+      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', transferId).maybeSingle();
+      const lead = leadDigits(t?.vicidial_vendor_code);
+      if (lead) { try { candidates = await listCandidatesByLeadId(lead); } catch (e) { logger.warn('QA', `candidates ${lead}: ${e.message}`); } }
+    }
   }
   // first open by the assignee moves it into 'in_review' (progress signal)
   if (a.status === 'pending' && a.assigned_to === req.user.id) {
@@ -233,12 +259,111 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
   if (!ids.length) return res.json({ date, agents: 0, total: 0, recordings: [], note: 'No dialer agent ids mapped for this company.' });
 
   const rows = await listDayRecordings({ date, agentIds: ids });
+  const cls = await classifyTransferred(rows, req.query.company_id || req.user.company_id, date);
   const search = String(req.query.search || '').replace(/\D/g, '');
   const filtered = search ? rows.filter(r => (r.phone || '').includes(search) || String(r.lead_id || '').includes(search)) : rows;
   res.json({
     date, agents: ids.length, total: rows.length, shown: filtered.length,
-    recordings: filtered.map(r => ({ ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null })),
+    transferred_count: rows.filter(r => cls.get(r.box_id + '|' + r.recording_id)?.transferred).length,
+    recordings: filtered.map(r => {
+      const c = cls.get(r.box_id + '|' + r.recording_id) || {};
+      return { ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null, transferred: c.transferred || false, transfer_id: c.transfer_id || null };
+    }),
   });
+}));
+
+// Tag each day-recording as Transferred (→ TRA) or not (→ RCM), FREE: match its
+// (box, lead_id) or (phone, ~date) against this company's transfers — no extra
+// dialer calls. lead_id+box avoids same-number-different-cluster false hits;
+// phone is the strong fallback when a transfer's vendor code is missing/messy.
+async function classifyTransferred(rows, companyId, date) {
+  const out = new Map();
+  if (!rows.length) return out;
+  const prefixToBox = Object.fromEntries((getBoxes() || []).map(b => [String(b.prefix || '').toUpperCase(), b.id]));
+  const from = new Date(date + 'T00:00:00Z'); from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(date + 'T00:00:00Z'); to.setUTCDate(to.getUTCDate() + 2);
+  const { data: transfers } = await supabaseAdmin.from('transfers')
+    .select('id, vicidial_vendor_code, normalized_phone, created_at')
+    .eq('company_id', companyId)
+    .gte('created_at', from.toISOString()).lt('created_at', to.toISOString())
+    .limit(20000);
+  const byBoxLead = new Map();   // `${boxId}|${leadId}` -> transfer id
+  const byPhone = new Map();     // last10 -> transfer id
+  for (const t of transfers || []) {
+    const m = String(t.vicidial_vendor_code || '').match(/^([A-Za-z]+)(\d+)$/);
+    if (m) { const box = prefixToBox[m[1].toUpperCase()]; if (box) byBoxLead.set(`${box}|${m[2]}`, t.id); }
+    const ph = String(t.normalized_phone || '').replace(/\D/g, ''); if (ph.length >= 10) byPhone.set(ph.slice(-10), t.id);
+  }
+  for (const r of rows) {
+    const key = r.box_id + '|' + r.recording_id;
+    const leadHit = r.lead_id ? byBoxLead.get(`${r.box_id}|${r.lead_id}`) : null;
+    const phoneHit = r.phone ? byPhone.get(String(r.phone).replace(/\D/g, '').slice(-10)) : null;
+    const transfer_id = leadHit || phoneHit || null;
+    out.set(key, { transferred: !!transfer_id, transfer_id });
+  }
+  return out;
+}
+
+// ── QA agents in a company (for the manager's assign dropdown) ───────────────
+router.get('/agents', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  const { data } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level), user_profiles(first_name, last_name)')
+    .eq('company_id', companyId).eq('is_active', true);
+  const agents = (data || [])
+    .filter(r => ['qa_agent', 'qa_manager'].includes(r.custom_roles?.level))
+    .map(r => ({ id: r.user_id, name: `${r.user_profiles?.first_name || ''} ${r.user_profiles?.last_name || ''}`.trim() || r.user_id, role: r.custom_roles.level }));
+  res.json({ agents });
+}));
+
+// ── manager assigns raw day-recordings to a qa_agent as TRA/RCM tasks ─────────
+router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id, assigned_to, method, date } = req.body || {};
+  const recordings = Array.isArray(req.body?.recordings) ? req.body.recordings : [];
+  const subject_role = ['fronter', 'closer'].includes(req.body?.subject_role) ? req.body.subject_role : 'fronter';
+  const companyId = company_id || req.user.company_id;
+  if (!['tra', 'rcm'].includes(method) || !recordings.length) return res.status(400).json({ error: 'method (tra|rcm) and recordings[] are required' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+
+  const now = new Date().toISOString();
+  const rows = recordings.filter(r => r && r.box_id && r.recording_id).map(r => ({
+    company_id: companyId, method, subject_role, source: 'day_recording',
+    transfer_id: r.transfer_id || null,
+    recording_ref: { box_id: r.box_id, recording_id: String(r.recording_id), lead_id: r.lead_id || null, location: r.location || null, agent_user: r.agent_user || null, start_time: r.start_time || null, duration: r.duration ?? null, phone: r.phone || null },
+    recording_date: date || (r.start_time ? String(r.start_time).slice(0, 10) : null),
+    subject_agent: r.agent_user || null,
+    assigned_to: assigned_to || null, assigned_by: req.user.id, assigned_at: now,
+    sampled: method === 'rcm', status: 'pending',
+  }));
+  if (!rows.length) return res.status(400).json({ error: 'No valid recordings' });
+
+  // insert; unique (method, box, recording_id) drops any already-assigned ones
+  const { data, error } = await supabaseAdmin.from('qa_assignments').insert(rows, { count: 'exact' }).select('id');
+  if (error && !/duplicate key|unique/i.test(error.message)) return res.status(500).json({ error: error.message });
+  // on partial conflict PostgREST errors the whole batch — retry row-by-row so the
+  // non-duplicates still land.
+  let inserted = data ? data.length : 0, skipped = 0;
+  if (error) {
+    inserted = 0;
+    for (const row of rows) {
+      const { error: e1 } = await supabaseAdmin.from('qa_assignments').insert(row);
+      if (e1) skipped++; else inserted++;
+    }
+  }
+  if (assigned_to && inserted) {
+    notifyUsers([assigned_to], {
+      companyId, type: 'qa_assignment',
+      title: `${inserted} ${method.toUpperCase()} call(s) assigned for QA`,
+      message: 'A QA manager assigned recordings for you to review.',
+      data: { method, count: inserted },
+    }).catch(() => {});
+  }
+  res.json({ ok: true, inserted, skipped });
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter
@@ -264,11 +389,19 @@ async function resolveScorecard(companyId, method) {
 async function resolveSubjectUser(a) {
   if (a.subject_role === 'fronter' && a.transfer_id) {
     const { data: t } = await supabaseAdmin.from('transfers').select('created_by').eq('id', a.transfer_id).maybeSingle();
-    return t?.created_by || null;
+    if (t?.created_by) return t.created_by;
   }
   if (a.subject_role === 'closer') {
-    if (a.sale_id) { const { data: s } = await supabaseAdmin.from('sales').select('closer_id').eq('id', a.sale_id).maybeSingle(); return s?.closer_id || null; }
-    if (a.transfer_id) { const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id').eq('id', a.transfer_id).maybeSingle(); return t?.assigned_closer_id || null; }
+    if (a.sale_id) { const { data: s } = await supabaseAdmin.from('sales').select('closer_id').eq('id', a.sale_id).maybeSingle(); if (s?.closer_id) return s.closer_id; }
+    if (a.transfer_id) { const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id').eq('id', a.transfer_id).maybeSingle(); if (t?.assigned_closer_id) return t.assigned_closer_id; }
+  }
+  // day-recording task: map the dialer agent id → the CRM user who owns it
+  const agent = a.subject_agent || a.recording_ref?.agent_user;
+  if (agent) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, vicidial_agent_ids').contains('vicidial_agent_ids', [String(agent).toUpperCase()]);
+    if (profs && profs.length) return profs[0].user_id;
+    const { data: p2 } = await supabaseAdmin.from('user_profiles').select('user_id, vicidial_agent_ids').contains('vicidial_agent_ids', [String(agent)]);
+    if (p2 && p2.length) return p2[0].user_id;
   }
   return null;
 }
@@ -338,7 +471,7 @@ router.post('/reviews', asyncHandler(async (req, res) => {
   }
 
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id').eq('id', assignment_id).maybeSingle();
+    .select('id, company_id, method, subject_role, transfer_id, sale_id, subject_agent, recording_ref').eq('id', assignment_id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });

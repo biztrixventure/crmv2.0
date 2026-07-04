@@ -3,6 +3,7 @@ import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, Send, Shield, Star, Search, Headphones, Clock,
+  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -255,6 +256,23 @@ function ReviewEditor({ assignment, selfId, canOverride, onSaved }) {
   );
 }
 
+// The "scoreboard" cell shown per queue row: the computed result once scored.
+function ScoreCell({ a }) {
+  const r = a.review;
+  if (a.status !== 'scored' || !r) return <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
+  // Fronter/TRA → Final + Pass/Fail; Closer/RCM → Quality %
+  if (r.final_score != null) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="text-sm font-extrabold tabular-nums" style={{ color: r.passed ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{r.final_score}</span>
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={r.passed ? { background: 'rgba(16,185,129,0.12)', color: '#059669' } : { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }}>{r.passed ? 'PASS' : 'FAIL'}</span>
+      </span>
+    );
+  }
+  if (r.quality_score != null) return <span className="text-sm font-extrabold tabular-nums" style={{ color: 'var(--color-text)' }}>{r.quality_score}%<span className="text-[10px] font-normal ml-1" style={{ color: 'var(--color-text-tertiary)' }}>quality</span></span>;
+  return <span className="text-[11px] font-bold" style={{ color: r.autofail_result === 'Fail' ? 'var(--color-error-600)' : 'var(--color-text-secondary)' }}>{r.autofail_result || 'scored'}</span>;
+}
+
 // ── Queue tab ─────────────────────────────────────────────────────────────────
 function QueueTab({ canAssign, canOverride, canManage, selfId }) {
   const [items, setItems] = useState([]);
@@ -315,26 +333,30 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
               <div className="text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>Calls come from this company's transfers/sales — enable TRA/RCM in Scorecards &amp; Config first.</div>
             </div>
           )
-          : <div className="space-y-2 overflow-auto">
-              {items.map(a => (
-                <button key={a.id} onClick={() => setOpen(a)} className="w-full text-left flex items-center gap-3 p-3 rounded-xl" style={{ background: open?.id === a.id ? 'var(--color-surface-hover)' : 'var(--color-surface)', border: `1px solid ${open?.id === a.id ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <MethodPill m={a.method} />
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{a.subject_role}</span>
-                      <StatusPill s={a.status} />
-                      {a.sampled && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ background: 'var(--color-warning-50, rgba(217,119,6,0.12))', color: 'var(--color-warning-600)' }}><Star size={10} />sampled</span>}
-                    </div>
-                    <div className="text-sm font-semibold mt-1 truncate" style={{ color: 'var(--color-text)' }}>{a.customer_name || '—'}</div>
-                    <div className="flex items-center gap-3 text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                      {a.customer_phone && <span className="flex items-center gap-1"><Phone size={11} />{a.customer_phone}</span>}
-                      <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(a.subject_date)}</span>
-                      {a.assignee_name && <span className="flex items-center gap-1"><User size={11} />{a.assignee_name}</span>}
-                    </div>
-                  </div>
-                  <ChevronRight size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-                </button>
-              ))}
+          : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+              <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+                <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
+                  <tr>{['Method', 'Customer / Phone', 'Date', 'Agent', 'Assignee', 'Status', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {items.map(a => (
+                    <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
+                      style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                      <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{a.subject_role}</span></td>
+                      <td className="px-3 py-2">
+                        <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{a.customer_name || a.agent_display || '—'}</div>
+                        {a.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{a.customer_phone}</div>}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDate(a.subject_date)}</td>
+                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.agent_display || '—'}</td>
+                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.assignee_name || <span style={{ color: 'var(--color-text-tertiary)' }}>pool</span>}</td>
+                      <td className="px-3 py-2"><StatusPill s={a.status} /></td>
+                      <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={a} /></td>
+                      <td className="px-2 py-2"><ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>}
       </div>
 
@@ -500,22 +522,37 @@ function RcmConfig({ value, covers, onSample, onCovers }) {
   );
 }
 
-// ── Day Recordings tab — pick a date → EVERY call that day, search any number ─
-function DayRecordingsTab({ canAll }) {
+// ── Day Recordings tab — pick a date → EVERY call, tag Transferred (TRA) vs not
+// (RCM), select, and (manager) ASSIGN to a QA agent as tasks. ─────────────────
+const TransferBadge = ({ t }) => (
+  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
+    style={t ? { background: 'rgba(16,185,129,0.12)', color: '#059669' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>
+    {t ? <><ArrowRightLeft size={10} />Transferred</> : 'Not transferred'}
+  </span>
+);
+
+function DayRecordingsTab({ canAll, canManage, companyId }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
   const [date, setDate] = useState(yesterday);
   const [scope, setScope] = useState('company');
-  const [data, setData] = useState(null);        // { recordings, total, agents }
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [xfilter, setXfilter] = useState('all');    // all | transferred | not
+  const [sel, setSel] = useState({});                // key → recording (selected)
+  const [agents, setAgents] = useState([]);
+  const [assignTo, setAssignTo] = useState('');
+  const [assignMethod, setAssignMethod] = useState('tra');
+  const [assigning, setAssigning] = useState(false);
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [loadingRid, setLoadingRid] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+  useEffect(() => { if (canManage) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [canManage, companyId]);
 
   const load = async () => {
-    setLoading(true); setData(null);
+    setLoading(true); setData(null); setSel({});
     try {
       const r = await client.get('qa/day-recordings', { params: { date, scope }, timeout: 150000 });
       setData(r.data);
@@ -537,16 +574,43 @@ function DayRecordingsTab({ canAll }) {
     finally { setLoadingRid(null); }
   };
 
+  const keyOf = c => c.box_id + '|' + c.recording_id;
   const allRows = (data?.recordings || []).filter(r => {
+    if (xfilter === 'transferred' && !r.transferred) return false;
+    if (xfilter === 'not' && r.transferred) return false;
     if (!search) return true;
     const q = search.replace(/\D/g, '');
     if (q) return (r.phone || '').includes(q) || String(r.lead_id || '').includes(q);
     const s = search.toLowerCase();
     return (r.agent_name || '').toLowerCase().includes(s) || (r.agent_user || '').toLowerCase().includes(s);
   });
-  const CAP = 1000;                       // protect the browser on huge days
+  const CAP = 1000;
   const rows = allRows.slice(0, CAP);
   const capped = allRows.length > CAP;
+  const selCount = Object.keys(sel).length;
+
+  const toggle = (c) => setSel(m => { const k = keyOf(c); const n = { ...m }; if (n[k]) delete n[k]; else n[k] = c; return n; });
+  const selectAllShown = () => setSel(m => { const n = { ...m }; rows.forEach(c => { n[keyOf(c)] = c; }); return n; });
+  const clearSel = () => setSel({});
+
+  // suggest method from selection: all transferred → TRA, else RCM
+  useEffect(() => {
+    const s = Object.values(sel);
+    if (!s.length) return;
+    setAssignMethod(s.every(r => r.transferred) ? 'tra' : s.every(r => !r.transferred) ? 'rcm' : assignMethod);
+  }, [selCount]); // eslint-disable-line
+
+  const assign = async () => {
+    if (!assignTo) return toast.error('Pick a QA agent');
+    setAssigning(true);
+    try {
+      const recordings = Object.values(sel).map(c => ({ box_id: c.box_id, recording_id: c.recording_id, lead_id: c.lead_id, location: c.location, agent_user: c.agent_user, start_time: c.start_time, duration: c.duration, phone: c.phone, transfer_id: c.transfer_id || null }));
+      const r = await client.post('qa/assignments/from-recordings', { company_id: companyId, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
+      toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}`);
+      clearSel();
+    } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
+    finally { setAssigning(false); }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -566,15 +630,43 @@ function DayRecordingsTab({ canAll }) {
         </button>
         {data && (
           <div className="flex items-center gap-2 ml-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{data.total}</span> recordings · {data.agents} agents
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{data.total}</span> recs · <span className="font-bold" style={{ color: '#059669' }}>{data.transferred_count}</span> transferred
           </div>
+        )}
+        {data && (
+          <select value={xfilter} onChange={e => setXfilter(e.target.value)} style={inp} title="Filter by transferred">
+            <option value="all">All calls</option>
+            <option value="transferred">Transferred → TRA</option>
+            <option value="not">Not transferred → RCM</option>
+          </select>
         )}
         <div className="ml-auto flex items-center gap-1.5 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
           <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} />
           <input placeholder="Search number / lead / agent" value={search} onChange={e => setSearch(e.target.value)}
-            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', fontSize: 13, padding: '6px 2px', width: 220, outline: 'none' }} />
+            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', fontSize: 13, padding: '6px 2px', width: 200, outline: 'none' }} />
         </div>
       </div>
+
+      {/* assign bar (manager) */}
+      {canManage && selCount > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-primary-600)' }}>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{selCount} selected</span>
+          <button onClick={clearSel} className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>
+          <ArrowRightLeft size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+          <select value={assignMethod} onChange={e => setAssignMethod(e.target.value)} style={inp}>
+            <option value="tra">as TRA</option><option value="rcm">as RCM</option>
+          </select>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>to</span>
+          <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 170 }}>
+            <option value="">Select QA agent…</option>
+            {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.role === 'qa_manager' ? ' (mgr)' : ''}</option>)}
+          </select>
+          <button onClick={assign} disabled={assigning || !assignTo} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+            style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: (assigning || !assignTo) ? 0.5 : 1 }}>
+            {assigning ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Assign
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-16">
@@ -582,18 +674,22 @@ function DayRecordingsTab({ canAll }) {
           <div className="text-xs mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Pulling the day's recordings from every agent + dialer… (first load can take a moment)</div>
         </div>
       ) : !data ? (
-        <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Pick a date and click <b>Load day</b> to see every call from that day. Then search any number.</div>
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Pick a date and click <b>Load day</b> to see every call. Transferred calls = TRA, the rest = RCM. Then select + assign to your QA agents.</div>
       ) : (
         <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
-            <thead className="sticky top-0" style={{ background: 'var(--color-surface-hover)' }}>
-              <tr>{['', 'Time', 'Phone', 'Lead ID', 'Agent', 'Length', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+            <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
+              <tr>
+                {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.every(c => sel[keyOf(c)]) && rows.length ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(c => sel[keyOf(c)]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
+                {['', 'Time', 'Phone', 'Type', 'Agent', 'Length', 'Lead', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
+              </tr>
             </thead>
             <tbody>
               {rows.map(c => {
-                const on = playingRid === c.recording_id;
+                const on = playingRid === c.recording_id; const k = keyOf(c); const checked = !!sel[k];
                 return (
-                  <tr key={c.box_id + c.recording_id} style={{ borderTop: '1px solid var(--color-border)', background: on ? 'var(--color-surface-hover)' : 'transparent' }}>
+                  <tr key={k} style={{ borderTop: '1px solid var(--color-border)', background: checked ? 'var(--color-surface-hover)' : on ? 'var(--color-surface-hover)' : 'transparent' }}>
+                    {canManage && <td className="px-2 py-1.5"><button onClick={() => toggle(c)}>{checked ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>}
                     <td className="px-2 py-1.5">
                       <button onClick={() => play(c)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
                         {loadingRid === c.recording_id ? <Loader2 size={13} className="animate-spin" color="#fff" /> : on ? <Pause size={13} color="#fff" /> : <Play size={13} color="#fff" />}
@@ -601,15 +697,16 @@ function DayRecordingsTab({ canAll }) {
                     </td>
                     <td className="px-3 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(c.start_time)}</td>
                     <td className="px-3 py-1.5 tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{c.phone || '—'}</td>
-                    <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{c.lead_id || '—'}</td>
+                    <td className="px-3 py-1.5"><TransferBadge t={c.transferred} /></td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user}</td>
                     <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{fmtDur(c.duration)}</td>
+                    <td className="px-3 py-1.5 tabular-nums text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.lead_id || '—'}</td>
                     <td className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.box_id}</td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search ? 'No recordings match that search.' : 'No recordings for this day.'}</td></tr>}
-              {capped && <tr><td colSpan={7} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search a number to narrow.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={canManage ? 9 : 8} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' ? 'No recordings match.' : 'No recordings for this day.'}</td></tr>}
+              {capped && <tr><td colSpan={canManage ? 9 : 8} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search / filter to narrow.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -657,7 +754,7 @@ export default function QAShell() {
       </header>
       <main className="flex-1 p-5 overflow-hidden">
         {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
-        {tab === 'day' && <DayRecordingsTab canAll={canAll} />}
+        {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={user?.company_id} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}
       </main>
