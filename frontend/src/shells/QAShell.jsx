@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
-  ChevronRight, Send, Shield, Star, Search, Headphones, Clock,
+  ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
   UserPlus, Filter, CheckSquare, Square, ArrowRightLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -649,6 +649,34 @@ const DispoBadge = ({ d }) => {
   const c = DISPO_COLOR[String(d).toUpperCase()] || '#6b7280';
   return <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded" style={{ background: c + '22', color: c }}>{d}</span>;
 };
+// group a day's recordings by NUMBER + AGENT: multiple dials of the same number
+// by the same agent become ONE record with expandable sub-parts (like the client
+// portal). Different agents on the same number stay SEPARATE records.
+const DRANK = ['SALE', 'XFER', 'TRANSFER', 'CALLBK', 'CB', 'CBHOLD', 'NI', 'NINTERESTED', 'DNQ', 'DEC', 'LVM', 'AM', 'DNC', 'DC', 'WN', 'NP'];
+const drank = (d) => { const i = DRANK.indexOf(String(d || '').toUpperCase()); return i < 0 ? 999 : i; };
+function groupRecordings(recs) {
+  const m = new Map();
+  for (const r of recs) {
+    const key = (r.agent_user || '?') + '|' + (r.phone || ('rec:' + r.recording_id));  // no phone → its own group
+    let g = m.get(key);
+    if (!g) { g = { key, phone: r.phone, agent_user: r.agent_user, agent_name: r.agent_name, box_id: r.box_id, parts: [], transferred: false, dispo: null }; m.set(key, g); }
+    g.parts.push(r);
+    if (r.transferred) g.transferred = true;
+    if (r.dispo && drank(r.dispo) < drank(g.dispo)) g.dispo = r.dispo;
+    if (r.transfer_id && !g.transfer_id) g.transfer_id = r.transfer_id;
+  }
+  const out = [];
+  for (const g of m.values()) {
+    g.parts.sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+    g.count = g.parts.length;
+    g.latest = g.parts[g.parts.length - 1]?.start_time;
+    g.totalDur = g.parts.reduce((s, p) => s + (p.duration || 0), 0);
+    // primary clip to review = the transferred leg, else the longest
+    g.primary = g.parts.find(p => p.transferred) || g.parts.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a), g.parts[0]);
+    out.push(g);
+  }
+  return out.sort((a, b) => String(b.latest || '').localeCompare(String(a.latest || '')));
+}
 
 function DayRecordingsTab({ canAll, canManage, companyId }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -659,7 +687,8 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [search, setSearch] = useState('');
   const [xfilter, setXfilter] = useState('all');    // all | transferred | not
   const [dfilter, setDfilter] = useState('');       // '' = any dispo, else a code
-  const [sel, setSel] = useState({});                // key → recording (selected)
+  const [sel, setSel] = useState({});                // group key → group (selected)
+  const [expanded, setExpanded] = useState({});      // group key → true (sub-parts open)
   const [agents, setAgents] = useState([]);
   const [assignTo, setAssignTo] = useState('');
   const [assignMethod, setAssignMethod] = useState('tra');
@@ -694,39 +723,50 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     finally { setLoadingRid(null); }
   };
 
-  const keyOf = c => c.box_id + '|' + c.recording_id;
-  const allRows = (data?.recordings || []).filter(r => {
-    if (xfilter === 'transferred' && !r.transferred) return false;
-    if (xfilter === 'not' && r.transferred) return false;
-    if (dfilter === '__has' && !r.dispo) return false;
-    if (dfilter && dfilter !== '__has' && r.dispo !== dfilter) return false;
+  // group first, then filter at the GROUP level (a number's dispo = its best; a
+  // number is transferred if ANY of its dials transferred).
+  const allGroups = groupRecordings(data?.recordings || []).filter(g => {
+    if (xfilter === 'transferred' && !g.transferred) return false;
+    if (xfilter === 'not' && g.transferred) return false;
+    if (dfilter === '__has' && !g.dispo) return false;
+    if (dfilter && dfilter !== '__has' && g.dispo !== dfilter) return false;
     if (!search) return true;
     const q = search.replace(/\D/g, '');
-    if (q) return (r.phone || '').includes(q) || String(r.lead_id || '').includes(q);
+    if (q) return g.parts.some(p => (p.phone || '').includes(q) || String(p.lead_id || '').includes(q));
     const s = search.toLowerCase();
-    return (r.agent_name || '').toLowerCase().includes(s) || (r.agent_user || '').toLowerCase().includes(s);
+    return (g.agent_name || '').toLowerCase().includes(s) || (g.agent_user || '').toLowerCase().includes(s);
   });
   const CAP = 1000;
-  const rows = allRows.slice(0, CAP);
-  const capped = allRows.length > CAP;
+  const rows = allGroups.slice(0, CAP);
+  const capped = allGroups.length > CAP;
   const selCount = Object.keys(sel).length;
 
-  const toggle = (c) => setSel(m => { const k = keyOf(c); const n = { ...m }; if (n[k]) delete n[k]; else n[k] = c; return n; });
-  const selectAllShown = () => setSel(m => { const n = { ...m }; rows.forEach(c => { n[keyOf(c)] = c; }); return n; });
+  const toggle = (g) => setSel(m => { const n = { ...m }; if (n[g.key]) delete n[g.key]; else n[g.key] = g; return n; });
+  const selectAllShown = () => setSel(m => { const n = { ...m }; rows.forEach(g => { n[g.key] = g; }); return n; });
   const clearSel = () => setSel({});
+  const toggleExpand = (key) => setExpanded(m => ({ ...m, [key]: !m[key] }));
 
   // suggest method from selection: all transferred → TRA, else RCM
   useEffect(() => {
     const s = Object.values(sel);
     if (!s.length) return;
-    setAssignMethod(s.every(r => r.transferred) ? 'tra' : s.every(r => !r.transferred) ? 'rcm' : assignMethod);
+    setAssignMethod(s.every(g => g.transferred) ? 'tra' : s.every(g => !g.transferred) ? 'rcm' : assignMethod);
   }, [selCount]); // eslint-disable-line
 
   const assign = async () => {
     if (!assignTo) return toast.error('Pick a QA agent');
     setAssigning(true);
     try {
-      const recordings = Object.values(sel).map(c => ({ box_id: c.box_id, recording_id: c.recording_id, lead_id: c.lead_id, location: c.location, agent_user: c.agent_user, start_time: c.start_time, duration: c.duration, phone: c.phone, transfer_id: c.transfer_id || null }));
+      // one task per selected group: the primary clip + all its dials as parts
+      const recordings = Object.values(sel).map(g => {
+        const p = g.primary;
+        return {
+          box_id: p.box_id, recording_id: p.recording_id, lead_id: p.lead_id, location: p.location,
+          agent_user: g.agent_user, start_time: p.start_time, duration: p.duration, phone: g.phone,
+          transfer_id: g.transfer_id || p.transfer_id || null,
+          parts: g.parts.map(x => ({ box_id: x.box_id, recording_id: x.recording_id, lead_id: x.lead_id, location: x.location, start_time: x.start_time, duration: x.duration, agent_user: x.agent_user })),
+        };
+      });
       const r = await client.post('qa/assignments/from-recordings', { company_id: companyId, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
       toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}`);
       clearSel();
@@ -752,7 +792,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
         </button>
         {data && (
           <div className="flex items-center gap-2 ml-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{data.total}</span> recs · <span className="font-bold" style={{ color: '#059669' }}>{data.transferred_count}</span> transferred
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{allGroups.length}</span> numbers · {data.total} recs · <span className="font-bold" style={{ color: '#059669' }}>{data.transferred_count}</span> transferred
           </div>
         )}
         {data && (
@@ -809,34 +849,62 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
           <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
             <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
               <tr>
-                {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.every(c => sel[keyOf(c)]) && rows.length ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(c => sel[keyOf(c)]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
-                {['', 'Time', 'Phone', 'Dispo', 'Type', 'Agent', 'Length', 'Lead', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
+                {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.length && rows.every(g => sel[g.key]) ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(g => sel[g.key]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
+                {['', 'Time', 'Phone', 'Dispo', 'Type', 'Agent', 'Calls', 'Length', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
-              {rows.map(c => {
-                const on = playingRid === c.recording_id; const k = keyOf(c); const checked = !!sel[k];
+              {rows.map(g => {
+                const checked = !!sel[g.key]; const isOpen = !!expanded[g.key]; const multi = g.count > 1;
+                const p = g.primary; const on = playingRid === p.recording_id;
                 return (
-                  <tr key={k} style={{ borderTop: '1px solid var(--color-border)', background: checked ? 'var(--color-surface-hover)' : on ? 'var(--color-surface-hover)' : 'transparent' }}>
-                    {canManage && <td className="px-2 py-1.5"><button onClick={() => toggle(c)}>{checked ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>}
-                    <td className="px-2 py-1.5">
-                      <button onClick={() => play(c)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
-                        {loadingRid === c.recording_id ? <Loader2 size={13} className="animate-spin" color="#fff" /> : on ? <Pause size={13} color="#fff" /> : <Play size={13} color="#fff" />}
-                      </button>
-                    </td>
-                    <td className="px-3 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(c.start_time)}</td>
-                    <td className="px-3 py-1.5 tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{c.phone || '—'}</td>
-                    <td className="px-3 py-1.5"><DispoBadge d={c.dispo} /></td>
-                    <td className="px-3 py-1.5"><TransferBadge t={c.transferred} /></td>
-                    <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user}</td>
-                    <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{fmtDur(c.duration)}</td>
-                    <td className="px-3 py-1.5 tabular-nums text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.lead_id || '—'}</td>
-                    <td className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.box_id}</td>
-                  </tr>
+                  <Fragment key={g.key}>
+                    <tr style={{ borderTop: '1px solid var(--color-border)', background: checked ? 'var(--color-surface-hover)' : 'transparent' }}>
+                      {canManage && <td className="px-2 py-1.5"><button onClick={() => toggle(g)}>{checked ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>}
+                      <td className="px-2 py-1.5">
+                        <button onClick={() => play(p)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
+                          {loadingRid === p.recording_id ? <Loader2 size={13} className="animate-spin" color="#fff" /> : on ? <Pause size={13} color="#fff" /> : <Play size={13} color="#fff" />}
+                        </button>
+                      </td>
+                      <td className="px-3 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(g.latest)}</td>
+                      <td className="px-3 py-1.5 tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{g.phone || '—'}</td>
+                      <td className="px-3 py-1.5"><DispoBadge d={g.dispo} /></td>
+                      <td className="px-3 py-1.5"><TransferBadge t={g.transferred} /></td>
+                      <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{g.agent_name || g.agent_user}</td>
+                      <td className="px-3 py-1.5">
+                        {multi
+                          ? <button onClick={() => toggleExpand(g.key)} className="inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>{g.count} calls <ChevronDown size={12} style={{ transition: 'transform .15s', transform: isOpen ? 'rotate(180deg)' : 'none' }} /></button>
+                          : <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>1</span>}
+                      </td>
+                      <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{fmtDur(multi ? g.totalDur : p.duration)}</td>
+                      <td className="px-2 py-1.5">{multi && <button onClick={() => toggleExpand(g.key)}><ChevronDown size={15} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: isOpen ? 'rotate(180deg)' : 'none' }} /></button>}</td>
+                    </tr>
+                    {multi && isOpen && g.parts.map((c, i) => {
+                      const pon = playingRid === c.recording_id;
+                      return (
+                        <tr key={c.box_id + c.recording_id} style={{ background: 'var(--color-bg)' }}>
+                          {canManage && <td />}
+                          <td className="px-2 py-1" style={{ paddingLeft: 18 }}>
+                            <button onClick={() => play(c)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: c.transferred ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'var(--color-surface-hover)' }}>
+                              {loadingRid === c.recording_id ? <Loader2 size={12} className="animate-spin" color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} /> : pon ? <Pause size={12} color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} /> : <Play size={12} color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} />}
+                            </button>
+                          </td>
+                          <td className="px-3 py-1 tabular-nums whitespace-nowrap text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)}</td>
+                          <td className="px-3 py-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>call {i + 1}</td>
+                          <td className="px-3 py-1"><DispoBadge d={c.dispo} /></td>
+                          <td className="px-3 py-1">{c.transferred && <TransferBadge t />}</td>
+                          <td className="px-3 py-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.agent_user}</td>
+                          <td className="px-3 py-1" />
+                          <td className="px-3 py-1 tabular-nums text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDur(c.duration)}</td>
+                          <td />
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' ? 'No recordings match.' : 'No recordings for this day.'}</td></tr>}
-              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search / filter to narrow.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' || dfilter ? 'No calls match.' : 'No recordings for this day.'}</td></tr>}
+              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allGroups.length} numbers — search / filter to narrow.</td></tr>}
             </tbody>
           </table>
         </div>

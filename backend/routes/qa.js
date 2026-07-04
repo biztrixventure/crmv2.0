@@ -152,16 +152,17 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
 
   let candidates = [];
   if (a.recording_ref && a.recording_ref.recording_id) {
-    // day-recording assignment — the EXACT clip is known. Show it, plus any other
-    // legs on the same lead (so the reviewer has the fronter/closer context).
+    // day-recording assignment — the EXACT clip is known. Show it + its grouped
+    // parts (all dials of this number by this agent) + any other legs on the lead.
     const rec = a.recording_ref;
-    candidates = [{ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true }];
-    if (rec.lead_id) {
-      try {
-        const legs = await listCandidatesByLeadId(rec.lead_id);
-        for (const l of legs) if (!candidates.some(c => c.box_id === l.box_id && c.recording_id === l.recording_id)) candidates.push(l);
-      } catch { /* keep the exact clip */ }
+    const push = (x) => { if (x && x.recording_id && !candidates.some(c => c.box_id === x.box_id && c.recording_id === x.recording_id)) candidates.push(x); };
+    push({ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true });
+    for (const p of (rec.parts || [])) push({ box_id: p.box_id, start_time: p.start_time, recording_id: p.recording_id, lead_id: p.lead_id, duration: p.duration, location: p.location, agent_user: p.agent_user, phone_matches: true });
+    const leadIds = [...new Set([rec.lead_id, ...(rec.parts || []).map(p => p.lead_id)].filter(Boolean))];
+    for (const lid of leadIds) {
+      try { const legs = await listCandidatesByLeadId(lid); for (const l of legs) push(l); } catch { /* keep known clips */ }
     }
+    candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   } else {
     // materialized assignment — resolve via the transfer's dialer lead code
     let transferId = a.transfer_id;
@@ -376,10 +377,19 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
 
   const now = new Date().toISOString();
+  const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
   const rows = recordings.filter(r => r && r.box_id && r.recording_id).map(r => ({
     company_id: companyId, method, subject_role, source: 'day_recording',
     transfer_id: r.transfer_id || null,
-    recording_ref: { box_id: r.box_id, recording_id: String(r.recording_id), lead_id: r.lead_id || null, location: r.location || null, agent_user: r.agent_user || null, start_time: r.start_time || null, duration: r.duration ?? null, phone: r.phone || null },
+    // recording_ref = the primary clip + its sibling legs/redials (grouped by
+    // number+agent) as `parts`, so the reviewer can hear every attempt like the
+    // client portal multi-recording expand.
+    recording_ref: {
+      box_id: r.box_id, recording_id: String(r.recording_id), lead_id: r.lead_id || null,
+      location: r.location || null, agent_user: r.agent_user || null, start_time: r.start_time || null,
+      duration: r.duration ?? null, phone: r.phone || null,
+      parts: Array.isArray(r.parts) && r.parts.length > 1 ? r.parts.filter(p => p && p.box_id && p.recording_id).map(cleanPart) : undefined,
+    },
     recording_date: date || (r.start_time ? String(r.start_time).slice(0, 10) : null),
     subject_agent: r.agent_user || null,
     assigned_to: assigned_to || null, assigned_by: req.user.id, assigned_at: now,
