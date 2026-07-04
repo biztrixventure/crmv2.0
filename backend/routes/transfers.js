@@ -158,6 +158,11 @@ router.get('/', asyncHandler(async (req, res) => {
       }
       // fronter_manager, operations_manager, company_admin — see all transfers for company
     }
+    // Company-wide manager roles rely solely on the company_id filter above — a
+    // missing company_id must NOT produce an unscoped (global) query.
+    if (!['fronter', 'closer', 'closer_manager', 'compliance_manager'].includes(userRole) && !companyId) {
+      return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+    }
   }
 
   // Agent filter: managers can scope to a specific fronter or closer

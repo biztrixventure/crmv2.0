@@ -164,19 +164,25 @@ router.get(
     } else if (userRole === 'closer') {
       // Closer: their own sales only, regardless of which company_id the sale has
       query = query.eq('closer_id', userId);
+    } else if (userRole === 'fronter') {
+      // Individual FRONTER: only the sales they are CREDITED for (fronter_id),
+      // NOT the whole fronter company — matches how stats + transfers scope a
+      // fronter. (Previously this fell into the company branch below and leaked
+      // every closer's sales in the company.) Resells belong to the closer's
+      // company, so hide them per config.
+      query = query.eq('fronter_id', userId);
+      if (await shouldHideResellsForUser(userRole, companyId, 'fronter')) {
+        query = query.eq('is_resell', false);
+      }
     } else if (companyId) {
       // Detect company type to determine scoping strategy
       const { data: co } = await supabaseAdmin
         .from('companies').select('company_type').eq('id', companyId).single();
 
       if (co?.company_type === 'fronter') {
-        // Fronter-side: sales whose company_id matches the fronter company
-        // (sales created from this company's transfers inherit its company_id)
+        // Fronter-side MANAGERS (fronter_manager / ops / company_admin): the whole
+        // fronter company's downstream sales (inherit its company_id).
         query = query.eq('company_id', companyId);
-        // Resell privacy — hide is_resell=true rows from fronter views per
-        // business_config (resell.hide_from_fronter / _manager). Fronters get
-        // credit only for the ORIGINAL sale on a lead; subsequent resells
-        // belong to the closer's company.
         if (await shouldHideResellsForUser(userRole, companyId, 'fronter')) {
           query = query.eq('is_resell', false);
         }
@@ -193,6 +199,10 @@ router.get(
           return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
         }
       }
+    } else {
+      // Non-privileged user with no resolvable company → never fall through to an
+      // unscoped (global) query. Return nothing.
+      return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
     }
 
     // Agent filter: managers can scope to a specific closer
