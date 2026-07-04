@@ -236,54 +236,84 @@ function foldAgents(profs) {
   return { ids: [...ids], nameByAgent };
 }
 
+// Resolve the day-recording agent set for a request (company scope, or all with
+// the right permission). Returns {ids, nameByAgent} or { error, status }.
+async function resolveDayAgents(req) {
+  if (req.query.scope === 'all') {
+    if (!(await isSuperAdmin(req.user.id)) && !(await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews'))) {
+      return { error: 'Not allowed to load recordings across all companies', status: 403 };
+    }
+    return await allAgentIds();
+  }
+  const companyId = req.query.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return { error: 'Forbidden', status: 403 };
+  return await agentIdsForCompany(companyId);
+}
+
+// Build the disposition map (box|lead → code) for a set of recordings: bulk
+// lead_status_search first, then per-lead lead_field_info fill so NONE are blank.
+async function buildDispoMap(rows, companyId, date) {
+  let dispoMap = new Map();
+  const boxIds = [...new Set(rows.map(r => r.box_id))];
+  const statuses = await getConfig(companyId, 'qa.dispo.statuses', DEFAULT_DISPO_STATUSES);
+  try { dispoMap = await listDayDispositions({ date, statuses: Array.isArray(statuses) ? statuses : DEFAULT_DISPO_STATUSES, boxIds }); }
+  catch (e) { logger.warn('QA', `dispo lookup: ${e.message}`); }
+  const missing = rows.filter(r => r.lead_id && !dispoMap.has(`${r.box_id}|${r.lead_id}`)).map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
+  if (missing.length) {
+    try { const filled = await fillLeadStatuses(missing); for (const [k, v] of filled) if (!dispoMap.has(k)) dispoMap.set(k, v); }
+    catch (e) { logger.warn('QA', `dispo fill: ${e.message}`); }
+  }
+  return dispoMap;
+}
+
+// ── dispositions only (progressive load) ─────────────────────────────────────
+// GET /qa/day-dispositions?date=&scope=&company_id= — returns the box|lead → code
+// map + counts for a day. The frontend loads recordings first (fast), then calls
+// this to fill in dispositions without a long blocking spinner. Recordings are
+// cached from the first call, so this just does the dispo enrichment.
+router.get('/day-dispositions', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const date = String(req.query.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
+  const agentRes = await resolveDayAgents(req);
+  if (agentRes.error) return res.status(agentRes.status || 400).json({ error: agentRes.error });
+  if (!agentRes.ids.length) return res.json({ date, dispos: {}, dispo_counts: {} });
+
+  const rows = await listDayRecordings({ date, agentIds: agentRes.ids });   // cached
+  const companyId = req.query.company_id || req.user.company_id;
+  const dispoMap = await buildDispoMap(rows, companyId, date);
+  const dispos = {}; const dispo_counts = {};
+  for (const r of rows) {
+    if (!r.lead_id) continue;
+    const d = dispoMap.get(`${r.box_id}|${r.lead_id}`);
+    if (d) { dispos[`${r.box_id}|${r.recording_id}`] = d; dispo_counts[d] = (dispo_counts[d] || 0) + 1; }
+  }
+  res.json({ date, dispos, dispo_counts });
+}));
+
 // ── whole-day recording browser ──────────────────────────────────────────────
 // GET /qa/day-recordings?date=YYYY-MM-DD&scope=company|all&company_id=&search=
-// Pulls EVERY recording for a day across the (company's, or all mapped) agents
-// and boxes — the "load the day, then search any number" surface. Cached 15 min.
+// &dispo=0 skips the (slow) disposition enrichment for a fast first paint.
 router.get('/day-recordings', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const date = String(req.query.date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
 
-  let ids = [], nameByAgent = {};
-  if (req.query.scope === 'all') {
-    if (!(await isSuperAdmin(req.user.id)) && !(await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews'))) {
-      return res.status(403).json({ error: 'Not allowed to load recordings across all companies' });
-    }
-    ({ ids, nameByAgent } = await allAgentIds());
-  } else {
-    const companyId = req.query.company_id || req.user.company_id;
-    const allowed = await allowedCompanyIds(req);
-    if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
-    ({ ids, nameByAgent } = await agentIdsForCompany(companyId));
-  }
+  const agentRes = await resolveDayAgents(req);
+  if (agentRes.error) return res.status(agentRes.status || 400).json({ error: agentRes.error });
+  const { ids, nameByAgent } = agentRes;
   if (!ids.length) return res.json({ date, agents: 0, total: 0, recordings: [], note: 'No dialer agent ids mapped for this company.' });
 
   const rows = await listDayRecordings({ date, agentIds: ids });
   const cls = await classifyTransferred(rows, req.query.company_id || req.user.company_id, date);
 
-  // Bulk dispositions (lead_status_search) — one call per outcome status, mapped
-  // by lead_id. Only the boxes that actually had recordings, only the configured
-  // QA-review statuses (no-contact codes like A/N are intentionally excluded).
-  let dispoMap = new Map();
-  if (req.query.dispo !== '0') {
-    const boxIds = [...new Set(rows.map(r => r.box_id))];
-    const statuses = await getConfig(req.query.company_id || req.user.company_id, 'qa.dispo.statuses', DEFAULT_DISPO_STATUSES);
-    try { dispoMap = await listDayDispositions({ date, statuses: Array.isArray(statuses) ? statuses : DEFAULT_DISPO_STATUSES, boxIds }); }
-    catch (e) { logger.warn('QA', `dispo lookup: ${e.message}`); }
-
-    // COMPLETENESS PASS — any recording whose lead didn't match a bulk status
-    // (e.g. a custom campaign code) gets its status fetched directly via
-    // lead_field_info, so NO recording is left without a disposition.
-    if (req.query.fill !== '0') {
-      const missing = rows.filter(r => r.lead_id && !dispoMap.has(`${r.box_id}|${r.lead_id}`))
-        .map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
-      if (missing.length) {
-        try { const filled = await fillLeadStatuses(missing); for (const [k, v] of filled) if (!dispoMap.has(k)) dispoMap.set(k, v); }
-        catch (e) { logger.warn('QA', `dispo fill: ${e.message}`); }
-      }
-    }
-  }
+  // Disposition enrichment (bulk + per-lead fill). Skipped with ?dispo=0 so the
+  // frontend can paint recordings instantly and fetch dispositions separately
+  // via GET /qa/day-dispositions (progressive load — no long blocking spinner).
+  const dispoMap = req.query.dispo === '0'
+    ? new Map()
+    : await buildDispoMap(rows, req.query.company_id || req.user.company_id, date);
   const dispoOf = (r) => r.lead_id ? (dispoMap.get(`${r.box_id}|${r.lead_id}`) || null) : null;
 
   // transferred = a real transfer for this LEAD: CRM lead-match OR dialer XFER dispo.

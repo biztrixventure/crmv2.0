@@ -644,6 +644,7 @@ const TransferBadge = ({ t }) => (
   </span>
 );
 const DISPO_COLOR = { SALE: '#059669', XFER: '#2563eb', TRANSFER: '#2563eb', CALLBK: '#d97706', CB: '#d97706', CBHOLD: '#d97706', NI: '#6b7280', DNC: '#dc2626', DNQ: '#dc2626', DC: '#dc2626', WN: '#6b7280', LVM: '#7c3aed', AM: '#7c3aed', DEC: '#6b7280', NP: '#6b7280' };
+const isXferCode = (d) => { const s = String(d || '').toUpperCase(); return s === 'XFER' || s === 'TRANSFER' || s === 'XFERA'; };
 const DispoBadge = ({ d }) => {
   if (!d) return <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
   const c = DISPO_COLOR[String(d).toUpperCase()] || '#6b7280';
@@ -684,6 +685,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [scope, setScope] = useState('company');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [dispoLoading, setDispoLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [xfilter, setXfilter] = useState('all');    // all | transferred | not
   const [dfilter, setDfilter] = useState('');       // '' = any dispo, else a code
@@ -703,11 +705,27 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   useEffect(() => { if (canManage) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [canManage, companyId]);
 
   const load = async () => {
-    setLoading(true); setData(null); setSel({});
+    setLoading(true); setData(null); setSel({}); setDispoLoading(false);
     try {
-      const r = await client.get('qa/day-recordings', { params: { date, scope }, timeout: 280000 });
+      // 1) recordings FIRST (skip the slow dispo pass) → instant paint
+      const r = await client.get('qa/day-recordings', { params: { date, scope, dispo: 0 }, timeout: 120000 });
       setData(r.data);
-      if (!r.data.total) toast.message('No recordings found for that day.');
+      if (!r.data.total) { toast.message('No recordings found for that day.'); return; }
+      // 2) dispositions in the BACKGROUND → merge in when ready (no long spinner)
+      setDispoLoading(true);
+      client.get('qa/day-dispositions', { params: { date, scope }, timeout: 280000 })
+        .then(dr => {
+          const dispos = dr.data.dispos || {};
+          setData(prev => prev ? {
+            ...prev, dispo_counts: dr.data.dispo_counts || {},
+            recordings: (prev.recordings || []).map(x => {
+              const d = dispos[`${x.box_id}|${x.recording_id}`] || null;
+              return { ...x, dispo: d, transferred: x.transferred || isXferCode(d) };
+            }),
+          } : prev);
+        })
+        .catch(() => {})
+        .finally(() => setDispoLoading(false));
     } catch (e) { toast.error(e.response?.data?.error || 'Could not load recordings'); }
     finally { setLoading(false); }
   };
@@ -805,7 +823,8 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
         </button>
         {data && (
           <div className="flex items-center gap-2 ml-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{allGroups.length}</span> numbers · {data.total} recs · <span className="font-bold" style={{ color: '#059669' }}>{data.transferred_count}</span> transferred
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{allGroups.length}</span> numbers · {data.total} recs · <span className="font-bold" style={{ color: '#059669' }}>{allGroups.filter(g => g.transferred).length}</span> transferred
+            {dispoLoading && <span className="inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}><Loader2 size={12} className="animate-spin" />dispositions…</span>}
           </div>
         )}
         {data && (
