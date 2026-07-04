@@ -643,6 +643,12 @@ const TransferBadge = ({ t }) => (
     {t ? <><ArrowRightLeft size={10} />Transferred</> : 'Not transferred'}
   </span>
 );
+const DISPO_COLOR = { SALE: '#059669', XFER: '#2563eb', TRANSFER: '#2563eb', CALLBK: '#d97706', CB: '#d97706', CBHOLD: '#d97706', NI: '#6b7280', DNC: '#dc2626', DNQ: '#dc2626', DC: '#dc2626', WN: '#6b7280', LVM: '#7c3aed', AM: '#7c3aed', DEC: '#6b7280', NP: '#6b7280' };
+const DispoBadge = ({ d }) => {
+  if (!d) return <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
+  const c = DISPO_COLOR[String(d).toUpperCase()] || '#6b7280';
+  return <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded" style={{ background: c + '22', color: c }}>{d}</span>;
+};
 
 function DayRecordingsTab({ canAll, canManage, companyId }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -652,6 +658,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [xfilter, setXfilter] = useState('all');    // all | transferred | not
+  const [dfilter, setDfilter] = useState('');       // '' = any dispo, else a code
   const [sel, setSel] = useState({});                // key → recording (selected)
   const [agents, setAgents] = useState([]);
   const [assignTo, setAssignTo] = useState('');
@@ -691,6 +698,8 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const allRows = (data?.recordings || []).filter(r => {
     if (xfilter === 'transferred' && !r.transferred) return false;
     if (xfilter === 'not' && r.transferred) return false;
+    if (dfilter === '__has' && !r.dispo) return false;
+    if (dfilter && dfilter !== '__has' && r.dispo !== dfilter) return false;
     if (!search) return true;
     const q = search.replace(/\D/g, '');
     if (q) return (r.phone || '').includes(q) || String(r.lead_id || '').includes(q);
@@ -753,6 +762,13 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
             <option value="not">Not transferred → RCM</option>
           </select>
         )}
+        {data && (
+          <select value={dfilter} onChange={e => setDfilter(e.target.value)} style={inp} title="Filter by disposition">
+            <option value="">Any disposition</option>
+            <option value="__has">Has a disposition</option>
+            {Object.entries(data.dispo_counts || {}).sort((a, b) => b[1] - a[1]).map(([d, n]) => <option key={d} value={d}>{d} ({n})</option>)}
+          </select>
+        )}
         <div className="ml-auto flex items-center gap-1.5 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
           <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} />
           <input placeholder="Search number / lead / agent" value={search} onChange={e => setSearch(e.target.value)}
@@ -794,7 +810,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
             <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
               <tr>
                 {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.every(c => sel[keyOf(c)]) && rows.length ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(c => sel[keyOf(c)]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
-                {['', 'Time', 'Phone', 'Type', 'Agent', 'Length', 'Lead', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
+                {['', 'Time', 'Phone', 'Dispo', 'Type', 'Agent', 'Length', 'Lead', 'Box'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -810,6 +826,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
                     </td>
                     <td className="px-3 py-1.5 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(c.start_time)}</td>
                     <td className="px-3 py-1.5 tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{c.phone || '—'}</td>
+                    <td className="px-3 py-1.5"><DispoBadge d={c.dispo} /></td>
                     <td className="px-3 py-1.5"><TransferBadge t={c.transferred} /></td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user}</td>
                     <td className="px-3 py-1.5 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{fmtDur(c.duration)}</td>
@@ -818,8 +835,8 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={canManage ? 9 : 8} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' ? 'No recordings match.' : 'No recordings for this day.'}</td></tr>}
-              {capped && <tr><td colSpan={canManage ? 9 : 8} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search / filter to narrow.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' ? 'No recordings match.' : 'No recordings for this day.'}</td></tr>}
+              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allRows.length} — search / filter to narrow.</td></tr>}
             </tbody>
           </table>
         </div>

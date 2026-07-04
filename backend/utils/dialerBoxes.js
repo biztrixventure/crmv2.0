@@ -452,6 +452,73 @@ async function listDayRecordings({ date, agentIds = [], concurrency = 15 } = {})
   return rows;
 }
 
+// ── Bulk dispositions for a day (lead_status_search) ────────────────────────
+// The efficient RCM path: instead of one API call per number, we call
+// lead_status_search(status, date) ONCE per outcome status (returns up to ~2000
+// leads that had that status that day) and map recordings → dispo by lead_id on
+// the server. ~a dozen calls for a whole day instead of thousands.
+//
+// IMPORTANT: the disposition of a call = the STATUS WE SEARCHED UNDER (the
+// call-log outcome), keyed by lead_id — NOT the returned `status` field (that's
+// the lead's *current* status, which may differ after later redials).
+// Response format: records separated by ";---------- START OF RECORD N ----------",
+// each a block of "key => value" lines.
+const _lssCache = new Map();   // `${boxId}|${status}|${date}` → { at, leadIds:Set }
+const LSS_TTL = 15 * 60 * 1000;
+// most-significant first — used to pick ONE dispo when a lead had several that day
+const DISPO_RANK = ['SALE', 'XFER', 'TRANSFER', 'CALLBK', 'CB', 'CBHOLD', 'NI', 'NINTERESTED', 'DNQ', 'DEC', 'LVM', 'AM', 'DNC', 'DC', 'WN', 'NP'];
+const rankOf = (s) => { const i = DISPO_RANK.indexOf(String(s || '').toUpperCase()); return i < 0 ? 999 : i; };
+
+async function leadStatusSearch(box, status, date) {
+  const key = `${box.id}|${status}|${date}`;
+  const hit = _lssCache.get(key);
+  if (hit && Date.now() - hit.at < LSS_TTL) return hit.leadIds;
+  const leadIds = new Set();
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_status_search', status, date: String(date).slice(0, 10), custom_fields: 'N' },
+      timeout: 30000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (!/^ERROR|NO RESULTS|PERMISSION|INVALID/i.test(text)) {
+      for (const block of text.split(/;-+\s*START OF RECORD\s+\d+\s*-+/i).slice(1)) {
+        const m = block.match(/^\s*lead_id\s*=>\s*(\d+)/mi);
+        if (m) leadIds.add(m[1]);
+      }
+    }
+  } catch { /* box unreachable → empty */ }
+  _lssCache.set(key, { at: Date.now(), leadIds });
+  return leadIds;
+}
+
+// Returns Map<`${boxId}|${leadId}`, dispoCode>. Only queries the given boxes
+// (those that actually had recordings) × the given statuses. Concurrency-pooled.
+async function listDayDispositions({ date, statuses = [], boxIds = null, concurrency = 12 } = {}) {
+  const day = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return new Map();
+  const boxes = boxIds ? BOXES.filter(b => boxIds.includes(b.id)) : BOXES;
+  const codes = [...new Set((statuses || []).map(s => String(s || '').trim().toUpperCase()).filter(Boolean))];
+  if (!boxes.length || !codes.length) return new Map();
+
+  const tasks = [];
+  for (const box of boxes) for (const code of codes) tasks.push({ box, code });
+  const map = new Map();   // box|lead → dispo (best rank wins)
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const { box, code } = tasks[idx++];
+      const leadIds = await leadStatusSearch(box, code, day);
+      for (const lead of leadIds) {
+        const k = `${box.id}|${lead}`;
+        const cur = map.get(k);
+        if (!cur || rankOf(code) < rankOf(cur)) map.set(k, code);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+  return map;
+}
+
 // NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
 // get the LIVE list/prefixes, not a stale snapshot captured at require-time.
 module.exports = {
@@ -461,5 +528,5 @@ module.exports = {
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
-  listDayRecordings, phoneFromLocation,
+  listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
 };

@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, listDayDispositions } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -260,17 +260,39 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
 
   const rows = await listDayRecordings({ date, agentIds: ids });
   const cls = await classifyTransferred(rows, req.query.company_id || req.user.company_id, date);
+
+  // Bulk dispositions (lead_status_search) — one call per outcome status, mapped
+  // by lead_id. Only the boxes that actually had recordings, only the configured
+  // QA-review statuses (no-contact codes like A/N are intentionally excluded).
+  let dispoMap = new Map();
+  if (req.query.dispo !== '0') {
+    const boxIds = [...new Set(rows.map(r => r.box_id))];
+    const statuses = await getConfig(req.query.company_id || req.user.company_id, 'qa.dispo.statuses', DEFAULT_DISPO_STATUSES);
+    try { dispoMap = await listDayDispositions({ date, statuses: Array.isArray(statuses) ? statuses : DEFAULT_DISPO_STATUSES, boxIds }); }
+    catch (e) { logger.warn('QA', `dispo lookup: ${e.message}`); }
+  }
+  const dispoOf = (r) => r.lead_id ? (dispoMap.get(`${r.box_id}|${r.lead_id}`) || null) : null;
+
   const search = String(req.query.search || '').replace(/\D/g, '');
   const filtered = search ? rows.filter(r => (r.phone || '').includes(search) || String(r.lead_id || '').includes(search)) : rows;
+  // dispo counts (over ALL rows, for the filter dropdown)
+  const dispoCounts = {};
+  for (const r of rows) { const d = dispoOf(r); if (d) dispoCounts[d] = (dispoCounts[d] || 0) + 1; }
   res.json({
     date, agents: ids.length, total: rows.length, shown: filtered.length,
     transferred_count: rows.filter(r => cls.get(r.box_id + '|' + r.recording_id)?.transferred).length,
+    dispo_counts: dispoCounts,
     recordings: filtered.map(r => {
       const c = cls.get(r.box_id + '|' + r.recording_id) || {};
-      return { ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null, transferred: c.transferred || false, transfer_id: c.transfer_id || null };
+      return { ...r, agent_name: nameByAgent[String(r.agent_user || '').toUpperCase()] || null, transferred: c.transferred || false, transfer_id: c.transfer_id || null, dispo: dispoOf(r) };
     }),
   });
 }));
+
+// QA-review-worthy dialer dispositions (outcome codes). No-contact codes
+// (A/N/B/NA/DROP/…) are deliberately excluded — 1000s per day, nothing to review.
+// Superadmin can override per company via business_config 'qa.dispo.statuses'.
+const DEFAULT_DISPO_STATUSES = ['SALE', 'XFER', 'TRANSFER', 'CALLBK', 'CB', 'CBHOLD', 'NI', 'NINTERESTED', 'DNQ', 'DEC', 'LVM', 'AM', 'DNC', 'DC', 'WN', 'NP'];
 
 // Tag each day-recording as Transferred (→ TRA) or not (→ RCM), FREE: match its
 // (box, lead_id) or (phone, ~date) against this company's transfers — no extra
