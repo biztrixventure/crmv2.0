@@ -522,24 +522,44 @@ async function leadFieldStatus(box, leadId) {
   return null;
 }
 
-// Fill status for a set of (boxId, leadId) pairs — deduped, concurrency-pooled.
-// Uncapped by default (completeness > speed; cached 15 min so re-loads are
-// instant). Returns Map<`${boxId}|${leadId}`, statusCode>.
-async function fillLeadStatuses(pairs = [], { concurrency = 24, cap = 20000 } = {}) {
-  const uniq = [...new Map((pairs || []).filter(p => p && p.boxId && p.leadId).map(p => [`${p.boxId}|${p.leadId}`, p])).values()].slice(0, cap);
-  const out = new Map();
+// Resolve dispositions for (boxId, leadId) pairs INCREMENTALLY. Cached-final
+// leads (incl. resolved-null) are returned instantly; up to `budget` NEW leads
+// are fetched this call. Returns { map, remaining, total } so the caller can
+// poll until remaining === 0 — this keeps each request fast + avoids timeouts on
+// a full company's day (thousands of leads = thousands of 1-call lookups).
+const _dispoFinal = new Map();   // `${boxId}|${leadId}` → { at, status (may be null) }
+const DISPO_FINAL_TTL = 30 * 60 * 1000;   // past days are immutable
+async function resolveDispos(pairs = [], { budget = 800, concurrency = 30 } = {}) {
+  const uniq = [...new Map((pairs || []).filter(p => p && p.boxId && p.leadId).map(p => [`${p.boxId}|${p.leadId}`, p])).values()];
+  const map = new Map();
+  const todo = [];
+  for (const p of uniq) {
+    const k = `${p.boxId}|${p.leadId}`;
+    const c = _dispoFinal.get(k);
+    if (c && Date.now() - c.at < DISPO_FINAL_TTL) { if (c.status) map.set(k, c.status); }
+    else todo.push(p);
+  }
+  const batch = todo.slice(0, budget);
   let idx = 0;
   async function worker() {
-    while (idx < uniq.length) {
-      const { boxId, leadId } = uniq[idx++];
+    while (idx < batch.length) {
+      const { boxId, leadId } = batch[idx++];
       const box = BOXES.find(b => b.id === boxId);
       if (!box) continue;
-      const s = await leadFieldStatus(box, leadId);
-      if (s) out.set(`${boxId}|${leadId}`, s);
+      const s = await leadFieldStatus(box, leadId);          // own box, then cross-box
+      _dispoFinal.set(`${boxId}|${leadId}`, { at: Date.now(), status: s });   // cache final (incl null → no re-hammer)
+      if (s) map.set(`${boxId}|${leadId}`, s);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, uniq.length) }, worker));
-  return out;
+  await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, worker));
+  return { map, remaining: todo.length - batch.length, total: uniq.length };
+}
+
+// Fill status for a set of pairs in one shot (uncapped) — thin wrapper over
+// resolveDispos for the synchronous path. Returns Map<`${boxId}|${leadId}`, code>.
+async function fillLeadStatuses(pairs = []) {
+  const { map } = await resolveDispos(pairs, { budget: 100000 });
+  return map;
 }
 
 // Returns Map<`${boxId}|${leadId}`, dispoCode>. Only queries the given boxes
@@ -580,5 +600,5 @@ module.exports = {
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
-  leadFieldStatus, fillLeadStatuses,
+  leadFieldStatus, fillLeadStatuses, resolveDispos,
 };

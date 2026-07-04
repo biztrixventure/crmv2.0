@@ -698,36 +698,51 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [sortKey, setSortKey] = useState('time');
   const [sortDir, setSortDir] = useState('desc');
   const audioRef = useRef(null); const urlRef = useRef(null);
+  const loadTokenRef = useRef(0);
+  const [dispoRemaining, setDispoRemaining] = useState(0);
   const [loadingRid, setLoadingRid] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
   useEffect(() => { if (canManage) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [canManage, companyId]);
 
+  // Poll dispositions in budgeted batches until every recording has one. Each
+  // response is cumulative (cached + newly resolved), so we just apply the
+  // latest map. Cancels if a new load starts (loadToken).
+  const pollDispos = async (token) => {
+    setDispoLoading(true);
+    for (let i = 0; i < 50; i++) {
+      if (loadTokenRef.current !== token) return;
+      let dr;
+      try { dr = await client.get('qa/day-dispositions', { params: { date, scope }, timeout: 120000 }); }
+      catch { break; }
+      if (loadTokenRef.current !== token) return;
+      const dispos = dr.data.dispos || {};
+      setDispoRemaining(dr.data.remaining || 0);
+      setData(prev => prev ? {
+        ...prev, dispo_counts: dr.data.dispo_counts || prev.dispo_counts,
+        recordings: (prev.recordings || []).map(x => {
+          const d = dispos[`${x.box_id}|${x.recording_id}`] || null;
+          return { ...x, dispo: d, transferred: x.transferred || isXferCode(d) };
+        }),
+      } : prev);
+      if (dr.data.done) break;
+    }
+    if (loadTokenRef.current === token) setDispoLoading(false);
+  };
+
   const load = async () => {
-    setLoading(true); setData(null); setSel({}); setDispoLoading(false);
+    const token = ++loadTokenRef.current;
+    setLoading(true); setData(null); setSel({}); setDispoLoading(false); setDispoRemaining(0);
     try {
       // 1) recordings FIRST (skip the slow dispo pass) → instant paint
       const r = await client.get('qa/day-recordings', { params: { date, scope, dispo: 0 }, timeout: 120000 });
+      if (loadTokenRef.current !== token) return;
       setData(r.data);
       if (!r.data.total) { toast.message('No recordings found for that day.'); return; }
-      // 2) dispositions in the BACKGROUND → merge in when ready (no long spinner)
-      setDispoLoading(true);
-      client.get('qa/day-dispositions', { params: { date, scope }, timeout: 280000 })
-        .then(dr => {
-          const dispos = dr.data.dispos || {};
-          setData(prev => prev ? {
-            ...prev, dispo_counts: dr.data.dispo_counts || {},
-            recordings: (prev.recordings || []).map(x => {
-              const d = dispos[`${x.box_id}|${x.recording_id}`] || null;
-              return { ...x, dispo: d, transferred: x.transferred || isXferCode(d) };
-            }),
-          } : prev);
-        })
-        .catch(() => {})
-        .finally(() => setDispoLoading(false));
-    } catch (e) { toast.error(e.response?.data?.error || 'Could not load recordings'); }
-    finally { setLoading(false); }
+      pollDispos(token);   // 2) stream dispositions in the background
+    } catch (e) { if (loadTokenRef.current === token) toast.error(e.response?.data?.error || 'Could not load recordings'); }
+    finally { if (loadTokenRef.current === token) setLoading(false); }
   };
 
   const play = async (c) => {
@@ -824,7 +839,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
         {data && (
           <div className="flex items-center gap-2 ml-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
             <span className="font-bold" style={{ color: 'var(--color-text)' }}>{allGroups.length}</span> numbers · {data.total} recs · <span className="font-bold" style={{ color: '#059669' }}>{allGroups.filter(g => g.transferred).length}</span> transferred
-            {dispoLoading && <span className="inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}><Loader2 size={12} className="animate-spin" />dispositions…</span>}
+            {dispoLoading && <span className="inline-flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}><Loader2 size={12} className="animate-spin" />dispositions{dispoRemaining ? ` · ${dispoRemaining} left` : '…'}</span>}
           </div>
         )}
         {data && (

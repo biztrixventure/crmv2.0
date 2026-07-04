@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, listDayDispositions, fillLeadStatuses } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -251,45 +251,37 @@ async function resolveDayAgents(req) {
   return await agentIdsForCompany(companyId);
 }
 
-// Build the disposition map (box|lead → code) for a set of recordings: bulk
-// lead_status_search first, then per-lead lead_field_info fill so NONE are blank.
-async function buildDispoMap(rows, companyId, date) {
-  let dispoMap = new Map();
-  const boxIds = [...new Set(rows.map(r => r.box_id))];
-  const statuses = await getConfig(companyId, 'qa.dispo.statuses', DEFAULT_DISPO_STATUSES);
-  try { dispoMap = await listDayDispositions({ date, statuses: Array.isArray(statuses) ? statuses : DEFAULT_DISPO_STATUSES, boxIds }); }
-  catch (e) { logger.warn('QA', `dispo lookup: ${e.message}`); }
-  const missing = rows.filter(r => r.lead_id && !dispoMap.has(`${r.box_id}|${r.lead_id}`)).map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
-  if (missing.length) {
-    try { const filled = await fillLeadStatuses(missing); for (const [k, v] of filled) if (!dispoMap.has(k)) dispoMap.set(k, v); }
-    catch (e) { logger.warn('QA', `dispo fill: ${e.message}`); }
-  }
-  return dispoMap;
+// Disposition map (box|lead → code) for a set of recordings — per-lead
+// lead_field_info (cross-box), fully filled. Used by the synchronous path.
+async function buildDispoMap(rows) {
+  const pairs = rows.filter(r => r.lead_id).map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
+  try { return await fillLeadStatuses(pairs); } catch (e) { logger.warn('QA', `dispo fill: ${e.message}`); return new Map(); }
 }
 
-// ── dispositions only (progressive load) ─────────────────────────────────────
-// GET /qa/day-dispositions?date=&scope=&company_id= — returns the box|lead → code
-// map + counts for a day. The frontend loads recordings first (fast), then calls
-// this to fill in dispositions without a long blocking spinner. Recordings are
-// cached from the first call, so this just does the dispo enrichment.
+// ── dispositions only (progressive / polled load) ────────────────────────────
+// GET /qa/day-dispositions?date=&scope=&company_id= — resolves a BUDGET of leads
+// per call and returns { dispos, dispo_counts, remaining, done }. The frontend
+// loads recordings first (instant), then polls this until done, merging each
+// batch — so a full company's day fills in progressively, never timing out.
 router.get('/day-dispositions', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const date = String(req.query.date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
   const agentRes = await resolveDayAgents(req);
   if (agentRes.error) return res.status(agentRes.status || 400).json({ error: agentRes.error });
-  if (!agentRes.ids.length) return res.json({ date, dispos: {}, dispo_counts: {} });
+  if (!agentRes.ids.length) return res.json({ date, dispos: {}, dispo_counts: {}, remaining: 0, done: true });
 
   const rows = await listDayRecordings({ date, agentIds: agentRes.ids });   // cached
-  const companyId = req.query.company_id || req.user.company_id;
-  const dispoMap = await buildDispoMap(rows, companyId, date);
+  const pairs = rows.filter(r => r.lead_id).map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
+  const { map, remaining, total } = await resolveDispos(pairs, { budget: 900 });
+
   const dispos = {}; const dispo_counts = {};
   for (const r of rows) {
     if (!r.lead_id) continue;
-    const d = dispoMap.get(`${r.box_id}|${r.lead_id}`);
+    const d = map.get(`${r.box_id}|${r.lead_id}`);
     if (d) { dispos[`${r.box_id}|${r.recording_id}`] = d; dispo_counts[d] = (dispo_counts[d] || 0) + 1; }
   }
-  res.json({ date, dispos, dispo_counts });
+  res.json({ date, dispos, dispo_counts, total, remaining, done: remaining === 0 });
 }));
 
 // ── whole-day recording browser ──────────────────────────────────────────────
@@ -311,9 +303,7 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
   // Disposition enrichment (bulk + per-lead fill). Skipped with ?dispo=0 so the
   // frontend can paint recordings instantly and fetch dispositions separately
   // via GET /qa/day-dispositions (progressive load — no long blocking spinner).
-  const dispoMap = req.query.dispo === '0'
-    ? new Map()
-    : await buildDispoMap(rows, req.query.company_id || req.user.company_id, date);
+  const dispoMap = req.query.dispo === '0' ? new Map() : await buildDispoMap(rows);
   const dispoOf = (r) => r.lead_id ? (dispoMap.get(`${r.box_id}|${r.lead_id}`) || null) : null;
 
   // transferred = a real transfer for this LEAD: CRM lead-match OR dialer XFER dispo.
