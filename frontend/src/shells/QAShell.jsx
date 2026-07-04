@@ -693,6 +693,8 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [assignTo, setAssignTo] = useState('');
   const [assignMethod, setAssignMethod] = useState('tra');
   const [assigning, setAssigning] = useState(false);
+  const [sortKey, setSortKey] = useState('time');
+  const [sortDir, setSortDir] = useState('desc');
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [loadingRid, setLoadingRid] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
@@ -736,6 +738,17 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     const s = search.toLowerCase();
     return (g.agent_name || '').toLowerCase().includes(s) || (g.agent_user || '').toLowerCase().includes(s);
   });
+  // click-to-sort on any column
+  const sortVal = (g) => ({
+    time: g.latest || '', phone: g.phone || '', dispo: drank(g.dispo) + '', type: g.transferred ? 1 : 0,
+    agent: (g.agent_name || g.agent_user || '').toLowerCase(), calls: g.count, length: g.totalDur,
+  }[sortKey]);
+  allGroups.sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    const c = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+    return sortDir === 'asc' ? c : -c;
+  });
+  const sortBy = (k) => { if (sortKey === k) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir('asc'); } };
   const CAP = 1000;
   const rows = allGroups.slice(0, CAP);
   const capped = allGroups.length > CAP;
@@ -850,7 +863,13 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
             <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
               <tr>
                 {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.length && rows.every(g => sel[g.key]) ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(g => sel[g.key]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
-                {['', 'Time', 'Phone', 'Dispo', 'Type', 'Agent', 'Calls', 'Length', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}
+                <th />
+                {[['Time', 'time'], ['Phone', 'phone'], ['Dispo', 'dispo'], ['Type', 'type'], ['Agent', 'agent'], ['Calls', 'calls'], ['Length', 'length']].map(([label, key]) => (
+                  <th key={key} className="text-left px-3 py-2 text-[11px] font-bold uppercase select-none cursor-pointer" style={{ color: sortKey === key ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }} onClick={() => sortBy(key)}>
+                    <span className="inline-flex items-center gap-0.5">{label}{sortKey === key && <ChevronDown size={11} style={{ transform: sortDir === 'asc' ? 'rotate(180deg)' : 'none' }} />}</span>
+                  </th>
+                ))}
+                <th />
               </tr>
             </thead>
             <tbody>

@@ -301,10 +301,19 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
   });
 }));
 
-// QA-review-worthy dialer dispositions (outcome codes). No-contact codes
-// (A/N/B/NA/DROP/…) are deliberately excluded — 1000s per day, nothing to review.
-// Superadmin can override per company via business_config 'qa.dispo.statuses'.
-const DEFAULT_DISPO_STATUSES = ['SALE', 'XFER', 'TRANSFER', 'CALLBK', 'CB', 'CBHOLD', 'NI', 'NINTERESTED', 'DNQ', 'DEC', 'LVM', 'AM', 'DNC', 'DC', 'WN', 'NP'];
+// FULL dialer disposition set — so EVERY recording shows its real status (not
+// just outcomes). Empty statuses cost a fast miss (~0.6s), so a broad superset is
+// cheap. Superadmin can trim/add custom codes per company via 'qa.dispo.statuses'.
+const DEFAULT_DISPO_STATUSES = [
+  // human / outcome
+  'SALE', 'XFER', 'TRANSFER', 'XFERA', 'CALLBK', 'CB', 'CBHOLD', 'NI', 'NINTERESTED', 'NOTINT',
+  'DNQ', 'DEC', 'DECISION', 'LVM', 'AM', 'MSG', 'WN', 'WRONGNUM', 'LANG', 'QCFAIL', 'QC',
+  'NOSALE', 'PITCHED', 'SUCCESS', 'DISPO', 'DNC', 'DNCL', 'DC', 'DISC', 'HANGUP',
+  // no-contact / system (INCLUDED now so nothing shows blank)
+  'A', 'AA', 'AB', 'AL', 'ADC', 'AFTHRS', 'B', 'DAIR', 'DROP', 'PDROP', 'XDROP',
+  'N', 'NA', 'NANQUE', 'PU', 'PM', 'LB', 'TIMEOT', 'MAXCAL', 'NEW', 'NP', 'QUEUE',
+  'INCALL', 'RQXFER', 'IVRXFR', 'CXHNGP', 'ERI',
+];
 
 // Tag each day-recording as Transferred (→ TRA) or not (→ RCM), FREE: match its
 // (box, lead_id) or (phone, ~date) against this company's transfers — no extra
