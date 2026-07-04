@@ -29,7 +29,7 @@ export default function PaymentRemindersPanel() {
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg]         = useState(null);
-  const [targetMonth, setTargetMonth] = useState('');
+  const [windowMonths, setWindowMonths] = useState(2);
   const [busy, setBusy]       = useState(null);
   const [selected, setSelected] = useState(null);   // row open in the detail drawer
   const [noteText, setNoteText] = useState('');
@@ -37,7 +37,7 @@ export default function PaymentRemindersPanel() {
   const load = useCallback(() => {
     setLoading(true); setMsg(null);
     client.get('payment-reminders/upcoming')
-      .then(r => { setRows(r.data.followups || []); setTargetMonth(r.data.target_month || ''); })
+      .then(r => { setRows(r.data.followups || []); setWindowMonths(r.data.window_months || 2); })
       .catch(e => setMsg({ type: 'err', text: e.response?.data?.error || 'Failed to load' }))
       .finally(() => setLoading(false));
   }, []);
@@ -62,12 +62,12 @@ export default function PaymentRemindersPanel() {
           <h2 className="text-2xl font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <CalendarClock size={22} style={{ color: 'var(--color-primary-600)' }} />
             {isCompliance ? 'Payments at risk' : 'Monthly payments due'}
-            {!isCompliance && targetMonth && <span className="text-sm font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700)' }}>{targetMonth}</span>}
+            {!isCompliance && <span className="text-sm font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700)' }}>last {windowMonths} mo</span>}
           </h2>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             {isCompliance
               ? 'Policies a closer could not collect — review for cancellation.'
-              : `Active policies with a monthly payment due in ${targetMonth || 'this month'} — call each customer to collect this month's payment.`}
+              : `Customers who closed in the last ${windowMonths} month${windowMonths === 1 ? '' : 's'} — call each to collect their upcoming monthly payment.`}
           </p>
         </div>
         <button onClick={load} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5"
@@ -252,14 +252,14 @@ function SuperSettings({ onSaved }) {
 
   useEffect(() => {
     if (!open || cfg) return;
-    client.get('payment-reminders/settings').then(r => setCfg(r.data)).catch(() => setCfg({ enabled: true, targetMonth: 'current', notifyRoles: ['closer'] }));
+    client.get('payment-reminders/settings').then(r => setCfg(r.data)).catch(() => setCfg({ enabled: true, windowMonths: 2, notifyRoles: ['closer'] }));
   }, [open, cfg]);
 
   const save = async () => {
     try {
       await client.put('payment-reminders/settings', {
         enabled: cfg.enabled,
-        target_month: cfg.targetMonth || 'current',
+        window_months: cfg.windowMonths || 2,
         notify_roles: cfg.notifyRoles,
       });
       setSaved(true); setTimeout(() => setSaved(false), 1500); onSaved?.();
@@ -267,7 +267,6 @@ function SuperSettings({ onSaved }) {
   };
 
   const ROLES = [['closer_manager', 'Closer managers'], ['compliance_manager', 'Compliance'], ['operations_manager', 'Operations'], ['company_admin', 'Company admin']];
-  const useCurrent = !cfg?.targetMonth || cfg.targetMonth === 'current';
 
   return (
     <div className="rounded-xl border" style={{ borderColor: 'var(--color-primary-200, #c7d2fe)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
@@ -281,18 +280,13 @@ function SuperSettings({ onSaved }) {
             Enabled
           </label>
           <div className="rounded-lg p-2.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>Collection month</div>
-            <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Only policies whose monthly payment date falls in this month are shown to closers + trigger the monthly reminder. Set it each cycle to run one round of collections.</div>
-            <label className="flex items-center gap-2 text-sm mb-2" style={{ color: 'var(--color-text)' }}>
-              <input type="checkbox" checked={useCurrent} onChange={e => setCfg({ ...cfg, targetMonth: e.target.checked ? 'current' : new Date().toISOString().slice(0, 7) })} />
-              Always use the current month
-            </label>
-            {!useCurrent && (
-              <div className="flex items-center gap-2 text-sm">
-                <span style={{ color: 'var(--color-text-secondary)' }}>Month</span>
-                <input type="month" value={/^\d{4}-\d{2}$/.test(cfg.targetMonth) ? cfg.targetMonth : new Date().toISOString().slice(0, 7)} onChange={e => setCfg({ ...cfg, targetMonth: e.target.value })} className="input text-sm py-1" />
-              </div>
-            )}
+            <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>Collection window</div>
+            <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Only sales closed within the last N months (from today) are chased for their monthly payment. Older policies drop out.</div>
+            <div className="flex items-center gap-2 text-sm">
+              <span style={{ color: 'var(--color-text-secondary)' }}>Chase sales closed in the last</span>
+              <input type="number" min={1} max={12} value={cfg.windowMonths ?? 2} onChange={e => setCfg({ ...cfg, windowMonths: Math.max(1, Math.min(parseInt(e.target.value, 10) || 1, 12)) })} className="input text-sm py-1 w-20" />
+              <span style={{ color: 'var(--color-text-tertiary)' }}>month(s)</span>
+            </div>
           </div>
           <div className="text-sm">
             <span style={{ color: 'var(--color-text-secondary)' }}>Also notify (the closer is always notified):</span>
