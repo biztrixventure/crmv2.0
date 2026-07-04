@@ -491,6 +491,45 @@ async function leadStatusSearch(box, status, date) {
   return leadIds;
 }
 
+// Per-lead status via lead_field_info (the completeness fallback: catches leads
+// whose status code isn't in the bulk lead_status_search set — e.g. custom
+// campaign codes — so EVERY recording can get a disposition). Cached like LSS.
+async function leadFieldStatus(box, leadId) {
+  const key = `lf|${box.id}|${leadId}`;
+  const hit = _lssCache.get(key);
+  if (hit && Date.now() - hit.at < LSS_TTL) return hit.status;
+  let status = null;
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'status', lead_id: leadId },
+      timeout: 15000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (text && !/^ERROR|^NOTICE/i.test(text)) status = (text.split(/\r?\n/)[0].trim() || null);
+  } catch { /* box unreachable → null */ }
+  _lssCache.set(key, { at: Date.now(), status });
+  return (status ? status.toUpperCase() : null);
+}
+
+// Fill status for a set of (boxId, leadId) pairs — deduped, concurrency-pooled.
+// Returns Map<`${boxId}|${leadId}`, statusCode>.
+async function fillLeadStatuses(pairs = [], { concurrency = 15, cap = 2500 } = {}) {
+  const uniq = [...new Map((pairs || []).filter(p => p && p.boxId && p.leadId).map(p => [`${p.boxId}|${p.leadId}`, p])).values()].slice(0, cap);
+  const out = new Map();
+  let idx = 0;
+  async function worker() {
+    while (idx < uniq.length) {
+      const { boxId, leadId } = uniq[idx++];
+      const box = BOXES.find(b => b.id === boxId);
+      if (!box) continue;
+      const s = await leadFieldStatus(box, leadId);
+      if (s) out.set(`${boxId}|${leadId}`, s);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniq.length) }, worker));
+  return out;
+}
+
 // Returns Map<`${boxId}|${leadId}`, dispoCode>. Only queries the given boxes
 // (those that actually had recordings) × the given statuses. Concurrency-pooled.
 async function listDayDispositions({ date, statuses = [], boxIds = null, concurrency = 12 } = {}) {
@@ -529,4 +568,5 @@ module.exports = {
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
+  leadFieldStatus, fillLeadStatuses,
 };

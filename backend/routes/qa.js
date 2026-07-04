@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, listDayDispositions } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, listDayDispositions, fillLeadStatuses } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -271,6 +271,18 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
     const statuses = await getConfig(req.query.company_id || req.user.company_id, 'qa.dispo.statuses', DEFAULT_DISPO_STATUSES);
     try { dispoMap = await listDayDispositions({ date, statuses: Array.isArray(statuses) ? statuses : DEFAULT_DISPO_STATUSES, boxIds }); }
     catch (e) { logger.warn('QA', `dispo lookup: ${e.message}`); }
+
+    // COMPLETENESS PASS — any recording whose lead didn't match a bulk status
+    // (e.g. a custom campaign code) gets its status fetched directly via
+    // lead_field_info, so NO recording is left without a disposition.
+    if (req.query.fill !== '0') {
+      const missing = rows.filter(r => r.lead_id && !dispoMap.has(`${r.box_id}|${r.lead_id}`))
+        .map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
+      if (missing.length) {
+        try { const filled = await fillLeadStatuses(missing); for (const [k, v] of filled) if (!dispoMap.has(k)) dispoMap.set(k, v); }
+        catch (e) { logger.warn('QA', `dispo fill: ${e.message}`); }
+      }
+    }
   }
   const dispoOf = (r) => r.lead_id ? (dispoMap.get(`${r.box_id}|${r.lead_id}`) || null) : null;
 
