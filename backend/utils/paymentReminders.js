@@ -86,6 +86,34 @@ function daysUntil(due, from = new Date()) {
 
 const isoDate = (d) => d.toISOString().slice(0, 10);
 
+/**
+ * Resolve the superadmin's target month. 'current' → this month; 'YYYY-MM' → that
+ * month. Returns the month index + inclusive date bounds + a label.
+ */
+function resolveMonth(target) {
+  let y, mIdx;
+  const m = /^(\d{4})-(\d{2})$/.exec(String(target || '').trim());
+  if (m) { y = +m[1]; mIdx = +m[2] - 1; }
+  else { const now = new Date(); y = now.getUTCFullYear(); mIdx = now.getUTCMonth(); }
+  const start = new Date(Date.UTC(y, mIdx, 1));
+  const end = new Date(Date.UTC(y, mIdx + 1, 0));
+  return { year: y, monthIdx: mIdx, start: isoDate(start), end: isoDate(end), label: `${y}-${String(mIdx + 1).padStart(2, '0')}` };
+}
+
+/**
+ * The monthly due date for a sale WITHIN a specific month (the billing day, or
+ * sale's day-of-month, clamped to that month's length). Returns null if it would
+ * fall before the sale existed (a sale made mid-month whose first cycle is later).
+ */
+function dueInMonth(saleDate, year, monthIdx, billingDay = null) {
+  const sd = toDateOnly(saleDate);
+  if (!sd) return null;
+  const day = (billingDay != null && billingDay >= 1 && billingDay <= 31) ? billingDay : sd.getUTCDate();
+  const clamped = Math.min(day, daysInMonth(year, monthIdx));
+  const due = new Date(Date.UTC(year, monthIdx, clamped));
+  return due < sd ? null : due;
+}
+
 // ── config ──────────────────────────────────────────────────────────────────
 async function settings() {
   return {
@@ -93,71 +121,72 @@ async function settings() {
     windowDays:  parseInt(await getConfig(null, `${CFG}.window_days`, 7), 10) || 7,
     offsets:     await getConfig(null, `${CFG}.reminder_offsets`, [7, 3, 1]),
     notifyRoles: await getConfig(null, `${CFG}.notify_roles`, ['closer']),
+    targetMonth: await getConfig(null, `${CFG}.target_month`, 'current'),
   };
 }
 
 // Active policy = closed_won, not superseded. (pending_review intentionally out.)
 const ACTIVE = (q) => q.eq('status', 'closed_won').is('superseded_by', null);
 
-// ── scan + notify (called by the scheduler, daily-ish) ───────────────────────
+// ── scan + notify (month-based; called by the scheduler ~3h) ─────────────────
+// For the superadmin's TARGET MONTH, every active policy with a monthly payment
+// gets ONE follow-up on its monthly due date in that month, and each closer gets
+// ONE summary notification ("N customers to collect this month"). The goal: make
+// at least one monthly collection call per active customer that month.
 async function runPaymentReminderScan() {
   const cfg = await settings();
   if (!cfg.enabled) return { scanned: 0, due: 0, notified: 0, skipped: 'disabled' };
+  const { year, monthIdx, label } = resolveMonth(cfg.targetMonth);
 
-  const today = new Date();
-  const horizon = Math.max(cfg.windowDays, ...(Array.isArray(cfg.offsets) ? cfg.offsets : [0]), 0);
-
-  // Active sales with a sale_date + a monthly payment.
+  // Active policies with a monthly payment.
   const { data: sales, error } = await ACTIVE(
     supabaseAdmin.from('sales')
       .select('id, company_id, closer_id, customer_uuid, customer_name, sale_date, monthly_payment, payment_due_note')
-  ).not('sale_date', 'is', null).limit(20000);
+  ).not('sale_date', 'is', null).limit(50000);
   if (error) { logger.warn('PAY_REMINDER', `scan query failed: ${error.message}`); return { error: error.message }; }
 
-  let due = 0, notified = 0;
-  const offsets = (Array.isArray(cfg.offsets) ? cfg.offsets : [7, 3, 1]).map(Number).filter(n => n >= 0);
-
+  const now = new Date().toISOString();
+  const rows = [];
+  const byCloser = new Map();   // closer_id → { companyId, count }
   for (const s of (sales || [])) {
-    const nextDue = nextPaymentDue(s.sale_date, today, billingDayFromNote(s.payment_due_note));
-    if (!nextDue) continue;
-    const d = daysUntil(nextDue, today);
-    if (d < 0 || d > horizon) continue;               // outside the look-ahead
-    due++;
-    const dueStr = isoDate(nextDue);
-
-    // Upsert the followup row for this cycle (status preserved if it exists).
-    await supabaseAdmin.from('payment_followups')
-      .upsert({
-        sale_id: s.id, company_id: s.company_id, closer_id: s.closer_id,
-        customer_uuid: s.customer_uuid, due_date: dueStr, status: 'pending',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'sale_id,due_date', ignoreDuplicates: true })
-      .then(() => {}, () => {});
-
-    // Fire reminders at the configured offsets (dedupKey makes each fire once).
-    if (offsets.includes(d) && s.closer_id) {
-      const recipients = new Set([s.closer_id]);
-      const extraLevels = (cfg.notifyRoles || []).filter(r => r !== 'closer');
-      if (extraLevels.length && s.company_id) {
-        const mgrs = await notifications.getUserIdsByLevel(s.company_id, extraLevels).catch(() => []);
-        (mgrs || []).forEach(id => recipients.add(id));
-      }
-      await notifications.notifyUsers([...recipients], {
-        companyId: s.company_id,
-        type: 'payment_reminder',
-        title: d === 0 ? 'Monthly payment due today' : `Monthly payment due in ${d} day${d === 1 ? '' : 's'}`,
-        message: `${s.customer_name || 'A customer'} — call to confirm their monthly payment (due ${dueStr}).`,
-        data: { sale_id: s.id, due_date: dueStr, customer_uuid: s.customer_uuid },
-        dedupKey: `payment_reminder:${s.id}:${dueStr}:${d}`,
-      }).then(() => { notified++; }, () => {});
-    }
+    // only policies that actually carry a monthly payment
+    if (s.monthly_payment == null || +s.monthly_payment <= 0) continue;
+    const due = dueInMonth(s.sale_date, year, monthIdx, billingDayFromNote(s.payment_due_note));
+    if (!due) continue;
+    rows.push({ sale_id: s.id, company_id: s.company_id, closer_id: s.closer_id, customer_uuid: s.customer_uuid, due_date: isoDate(due), status: 'pending', updated_at: now });
+    if (s.closer_id) { const c = byCloser.get(s.closer_id) || { companyId: s.company_id, count: 0 }; c.count++; byCloser.set(s.closer_id, c); }
   }
 
-  logger.info('PAY_REMINDER', `scan: ${(sales || []).length} active, ${due} due within ${horizon}d, ${notified} notified`);
-  return { scanned: (sales || []).length, due, notified };
+  // Bulk upsert (ignoreDuplicates → existing collected/at_risk rows are preserved).
+  for (let i = 0; i < rows.length; i += 1000) {
+    await supabaseAdmin.from('payment_followups')
+      .upsert(rows.slice(i, i + 1000), { onConflict: 'sale_id,due_date', ignoreDuplicates: true })
+      .then(() => {}, (e) => logger.warn('PAY_REMINDER', `upsert chunk: ${e?.message}`));
+  }
+
+  // One summary notification per closer for the month (deduped).
+  let notified = 0;
+  for (const [closerId, { companyId, count }] of byCloser) {
+    const recipients = new Set([closerId]);
+    const extraLevels = (cfg.notifyRoles || []).filter(r => r !== 'closer');
+    if (extraLevels.length && companyId) {
+      const mgrs = await notifications.getUserIdsByLevel(companyId, extraLevels).catch(() => []);
+      (mgrs || []).forEach(id => recipients.add(id));
+    }
+    await notifications.notifyUsers([...recipients], {
+      companyId, type: 'payment_reminder',
+      title: `Monthly payments to collect — ${label}`,
+      message: `You have ${count} customer${count === 1 ? '' : 's'} to call this month for their monthly payment.`,
+      data: { month: label, count },
+      dedupKey: `payment_reminder:${closerId}:${label}`,
+    }).then(() => { notified++; }, () => {});
+  }
+
+  logger.info('PAY_REMINDER', `scan ${label}: ${(sales || []).length} active, ${rows.length} due this month, ${notified} closers notified`);
+  return { scanned: (sales || []).length, due: rows.length, notified, month: label };
 }
 
 module.exports = {
   toDateOnly, daysInMonth, nextPaymentDue, billingDayFromNote, daysUntil, isoDate,
-  settings, runPaymentReminderScan, ACTIVE, CFG,
+  resolveMonth, dueInMonth, settings, runPaymentReminderScan, ACTIVE, CFG,
 };

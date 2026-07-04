@@ -11,7 +11,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
 const { isSuperAdmin } = require('../models/helpers');
 const { setConfig } = require('../utils/businessConfig');
-const { settings, isoDate, runPaymentReminderScan, CFG } = require('../utils/paymentReminders');
+const { settings, isoDate, runPaymentReminderScan, resolveMonth, CFG } = require('../utils/paymentReminders');
 const notifications = require('../utils/notificationService');
 
 const router = express.Router();
@@ -27,24 +27,21 @@ router.get('/upcoming', asyncHandler(async (req, res) => {
   const sa     = await isSA(req);
   const cfg    = await settings();
 
-  const today = isoDate(new Date());
-  const end   = new Date(); end.setUTCDate(end.getUTCDate() + (cfg.windowDays || 7));
-  const endStr = isoDate(end);
+  // The payments list is scoped to the superadmin's TARGET MONTH — only policies
+  // whose monthly due date falls in that month, so old/other-month sales drop out.
+  const { start, end, label } = resolveMonth(cfg.targetMonth);
 
   let q = supabaseAdmin.from('payment_followups')
     .select('*, sales(customer_name, customer_phone, customer_email, monthly_payment, down_payment, reference_no, sale_date, plan, client_name, payment_due_note)')
-    .gte('due_date', today)
     .order('due_date', { ascending: true });
 
-  if (sa) {
-    if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
-    q = q.lte('due_date', endStr);
-  } else if (role === 'compliance_manager') {
-    q = q.eq('status', 'at_risk');                 // soft-cancellation queue, any horizon
-  } else if (MANAGER_LEVELS.includes(role)) {
-    q = q.eq('company_id', req.user.company_id).lte('due_date', endStr);   // team window
+  if (role === 'compliance_manager' && !sa) {
+    q = q.eq('status', 'at_risk');                 // soft-cancellation queue, any month
   } else {
-    q = q.eq('closer_id', userId).lte('due_date', endStr);                 // own window
+    q = q.gte('due_date', start).lte('due_date', end);   // the target month
+    if (sa) { if (req.query.company_id) q = q.eq('company_id', req.query.company_id); }
+    else if (MANAGER_LEVELS.includes(role)) q = q.eq('company_id', req.user.company_id);
+    else q = q.eq('closer_id', userId);
   }
 
   const { data, error } = await q.limit(500);
@@ -66,7 +63,7 @@ router.get('/upcoming', asyncHandler(async (req, res) => {
     r.company_name = r.company_id ? (compName.get(r.company_id)  || null) : null;
   });
 
-  res.json({ followups: rows, window_days: cfg.windowDays, today });
+  res.json({ followups: rows, target_month: label, month_start: start, month_end: end, today: isoDate(new Date()) });
 }));
 
 // ── PATCH /:id — log outcome ──────────────────────────────────────────────────
@@ -131,6 +128,12 @@ router.put('/settings', asyncHandler(async (req, res) => {
   const b = req.body || {};
   const ROLES = ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin'];
   if (b.enabled !== undefined)            await setConfig('global', `${CFG}.enabled`, !!b.enabled, req.user.id);
+  // target_month: 'current' or 'YYYY-MM'
+  if (b.target_month !== undefined) {
+    const v = String(b.target_month).trim();
+    if (v === 'current' || /^\d{4}-\d{2}$/.test(v)) await setConfig('global', `${CFG}.target_month`, v, req.user.id);
+    else return res.status(400).json({ error: 'target_month must be "current" or YYYY-MM' });
+  }
   if (b.window_days !== undefined)        await setConfig('global', `${CFG}.window_days`, Math.max(0, Math.min(parseInt(b.window_days, 10) || 7, 60)), req.user.id);
   if (Array.isArray(b.reminder_offsets))  await setConfig('global', `${CFG}.reminder_offsets`, [...new Set(b.reminder_offsets.map(n => parseInt(n, 10)).filter(n => n >= 0 && n <= 60))].sort((x, y) => y - x), req.user.id);
   if (Array.isArray(b.notify_roles))      await setConfig('global', `${CFG}.notify_roles`, [...new Set(b.notify_roles.filter(r => ROLES.includes(r)))], req.user.id);
