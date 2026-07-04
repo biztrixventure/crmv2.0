@@ -305,17 +305,26 @@ async function classifyTransferred(rows, companyId, date) {
 }
 
 // ── QA agents in a company (for the manager's assign dropdown) ───────────────
+// Two-step (no cross-table embed — user_company_roles has no FK to user_profiles,
+// which silently returned an empty list before).
 router.get('/agents', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
-  const { data } = await supabaseAdmin.from('user_company_roles')
-    .select('user_id, custom_roles(level), user_profiles(first_name, last_name)')
-    .eq('company_id', companyId).eq('is_active', true);
-  const agents = (data || [])
-    .filter(r => ['qa_agent', 'qa_manager'].includes(r.custom_roles?.level))
-    .map(r => ({ id: r.user_id, name: `${r.user_profiles?.first_name || ''} ${r.user_profiles?.last_name || ''}`.trim() || r.user_id, role: r.custom_roles.level }));
+
+  const { data: roles, error } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+  if (error) { logger.warn('QA', `agents roles: ${error.message}`); return res.status(500).json({ error: error.message }); }
+  // custom_roles may embed as object or array depending on cardinality
+  const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+  const qaRows = (roles || []).filter(r => ['qa_agent', 'qa_manager'].includes(levelOf(r.custom_roles)));
+  const ids = [...new Set(qaRows.map(r => r.user_id))];
+  if (!ids.length) return res.json({ agents: [] });
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
+  const nameById = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
+  const roleById = Object.fromEntries(qaRows.map(r => [r.user_id, levelOf(r.custom_roles)]));
+  const agents = ids.map(id => ({ id, name: nameById[id] || id, role: roleById[id] }));
   res.json({ agents });
 }));
 
@@ -659,10 +668,12 @@ router.post('/scorecards', asyncHandler(async (req, res) => {
   if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, method, name, criteria, pass_threshold } = req.body || {};
   if (!['tra', 'rcm'].includes(method) || !name) return res.status(400).json({ error: 'method (tra|rcm) and name are required' });
+  // criteria may be an ARRAY (legacy weighted) or an OBJECT (sheet_v2). Keep whichever.
+  const criteriaVal = (Array.isArray(criteria) || (criteria && typeof criteria === 'object')) ? criteria : [];
   const row = {
     company_id: company_id || null, method, name: String(name).slice(0, 200),
-    criteria: Array.isArray(criteria) ? criteria : [],
-    pass_threshold: Number.isFinite(+pass_threshold) ? +pass_threshold : 80,
+    criteria: criteriaVal,
+    pass_threshold: (pass_threshold === null || pass_threshold === '') ? null : (Number.isFinite(+pass_threshold) ? +pass_threshold : 80),
     created_by: req.user.id,
   };
   const { data, error } = await supabaseAdmin.from('qa_scorecards').insert(row).select().single();

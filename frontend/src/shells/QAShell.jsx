@@ -305,9 +305,9 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
   };
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="flex flex-col gap-3 h-full">
       {/* list */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 flex-wrap mb-3">
           <select value={filters.method} onChange={e => setFilters(f => ({ ...f, method: e.target.value }))} style={inp}><option value="">All methods</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
           <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))} style={inp}><option value="">Any status</option><option value="pending">Pending</option><option value="in_review">In review</option><option value="scored">Scored</option></select>
@@ -360,9 +360,9 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
             </div>}
       </div>
 
-      {/* review drawer — wide, to fit the horizontal sheet row */}
+      {/* review panel — docks at the BOTTOM, full width, so the horizontal sheet is easy to read */}
       {open && (
-        <div className="flex-shrink-0 rounded-xl p-4 overflow-auto" style={{ width: 'min(860px, 92vw)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', maxHeight: '100%' }}>
+        <div className="flex-shrink-0 rounded-xl p-4 overflow-auto w-full" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-primary-600)', maxHeight: '58vh', boxShadow: '0 -8px 24px rgba(0,0,0,0.12)' }}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
@@ -426,11 +426,116 @@ function ReportsTab() {
   );
 }
 
+// ── Visual scorecard field editor (sheet_v2) — add/remove/label fields, set
+// which are 0-4 ratings vs Y/N, edit thresholds. Editing a GLOBAL template saves
+// a company-scoped COPY (overrides the template for this company only). ────────
+const slug = s => String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || ('f' + Date.now());
+
+function FieldRows({ title, tint, fields, onChange, extra }) {
+  const set = (i, patch) => onChange(fields.map((f, j) => j === i ? { ...f, ...patch } : f));
+  const remove = i => onChange(fields.filter((_, j) => j !== i));
+  const add = () => onChange([...fields, { key: slug('field ' + (fields.length + 1)), label: 'New field', ...(extra?.defaults || {}) }]);
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-2 h-2 rounded-full" style={{ background: tint }} />
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{extra?.kind}</span>
+        <button onClick={add} className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: tint }}>+ add</button>
+      </div>
+      <div className="space-y-1.5">
+        {fields.map((f, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input value={f.label} onChange={e => set(i, { label: e.target.value, key: f._locked ? f.key : slug(e.target.value) })} style={{ ...inp, flex: 1 }} />
+            {extra?.rating && (
+              <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }} title="Counts toward Base Score">
+                <input type="checkbox" checked={f.included_in_base !== false} onChange={e => set(i, { included_in_base: e.target.checked })} /> in base
+              </label>
+            )}
+            {extra?.penalty && (
+              <input type="number" value={f.penalty ?? -5} onChange={e => set(i, { penalty: +e.target.value })} style={{ ...inp, width: 60 }} title="Penalty points" />
+            )}
+            <button onClick={() => remove(i)} className="p-1 rounded" title="Remove"><XCircle size={15} style={{ color: 'var(--color-error-600)' }} /></button>
+          </div>
+        ))}
+        {!fields.length && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No fields yet — click “+ add”.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
+  const [cfg, setCfg] = useState(() => {
+    const c = JSON.parse(JSON.stringify(scorecard.criteria || {}));
+    c.rating_criteria = c.rating_criteria || [];
+    c.penalty_flags = c.penalty_flags || [];
+    c.tracking_flags = c.tracking_flags || [];
+    c.autofail = c.autofail || { formula_type: 'all_yes', fields: [] };
+    c.autofail.fields = c.autofail.fields || [];
+    return c;
+  });
+  const [name, setName] = useState(scorecard.name);
+  const [passT, setPassT] = useState(scorecard.pass_threshold ?? '');
+  const [busy, setBusy] = useState(false);
+  const isGlobal = !scorecard.company_id;
+  const hasQuality = !!(cfg.quality_score && Array.isArray(cfg.quality_score.fields));
+
+  const patch = fn => setCfg(c => { const n = JSON.parse(JSON.stringify(c)); fn(n); return n; });
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const criteria = { ...cfg, model: 'sheet_v2' };
+      const pt = passT === '' ? null : +passT;
+      if (isGlobal) {
+        await client.post('qa/scorecards', { company_id: companyId, method: scorecard.method, name: name.includes('(custom)') ? name : `${name} (custom)`, criteria, pass_threshold: pt });
+        toast.success('Saved as your company scorecard — it now overrides the template here');
+      } else {
+        await client.put(`qa/scorecards/${scorecard.id}`, { name, criteria, pass_threshold: pt });
+        toast.success('Scorecard updated');
+      }
+      onSaved?.();
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="rounded-2xl p-5 overflow-auto" style={{ width: 'min(720px, 96vw)', maxHeight: '90vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-base font-bold" style={{ color: 'var(--color-text)' }}>Edit scorecard fields <MethodPill m={scorecard.method} /></div>
+          <button onClick={onClose}><XCircle size={20} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+        </div>
+        {isGlobal && <div className="text-[11px] mb-3 p-2 rounded-lg" style={{ background: 'rgba(217,119,6,0.1)', color: 'var(--color-warning-600)' }}>This is the shared template. Saving creates an editable copy for <b>your company only</b> — the template stays intact.</div>}
+
+        <div className="flex gap-2 mb-3">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Scorecard name" style={{ ...inp, flex: 1 }} />
+          <label className="flex items-center gap-1 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={passT} onChange={e => setPassT(e.target.value)} style={{ ...inp, width: 64 }} placeholder="none" />%</label>
+        </div>
+
+        <FieldRows title="Ratings (score 0–4)" tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: '0–4 rating', rating: true }} onChange={v => patch(n => { n.rating_criteria = v; })} />
+        <FieldRows title="Compliance — Auto-Fail (Yes / No)" tint="#dc2626" fields={cfg.autofail.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.autofail.fields = v; })} />
+        <FieldRows title="Penalty flags (Yes = deduct)" tint="#d97706" fields={cfg.penalty_flags} extra={{ kind: 'Y / N', penalty: true, defaults: { penalty: -5 } }} onChange={v => patch(n => { n.penalty_flags = v; })} />
+        {hasQuality && <FieldRows title="Sale-compliance checklist (Yes / No)" tint="#059669" fields={cfg.quality_score.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.quality_score.fields = v; })} />}
+        <FieldRows title="Tracking only (Yes / No, no score effect)" tint="#6b7280" fields={cfg.tracking_flags} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.tracking_flags = v; })} />
+
+        <div className="flex items-center justify-end gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+          <button onClick={save} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: busy ? 0.6 : 1 }}>
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} {isGlobal ? 'Save as my company copy' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Scorecards & Config tab (qa_manager) ─────────────────────────────────────
 function ConfigTab({ companyId }) {
   const [cards, setCards] = useState([]);
   const [cfg, setCfg] = useState(null);
   const [draft, setDraft] = useState({ method: 'tra', name: '', pass_threshold: 80, criteria: '[{"key":"overall","label":"Overall Call Quality","max_points":100,"auto_fail":false}]' });
+  const [editing, setEditing] = useState(null);
   const loadCards = useCallback(() => client.get('qa/scorecards', { params: { company_id: companyId } }).then(r => setCards(r.data.scorecards || [])).catch(() => setCards([])), [companyId]);
   const loadCfg = useCallback(() => client.get('qa/config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({})), [companyId]);
   useEffect(() => { loadCards(); loadCfg(); }, [loadCards, loadCfg]);
@@ -453,6 +558,7 @@ function ConfigTab({ companyId }) {
   const methods = Array.isArray(cfg?.['qa.methods']) ? cfg['qa.methods'] : [];
   return (
     <div className="grid grid-cols-2 gap-5">
+      {editing && <ScorecardEditor scorecard={editing} companyId={companyId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); loadCards(); }} />}
       {/* config */}
       <div>
         <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Company QA config</div>
@@ -481,13 +587,20 @@ function ConfigTab({ companyId }) {
       <div>
         <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Scorecards</div>
         <div className="space-y-2 mb-4">
-          {cards.map(c => (
-            <div key={c.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: c.is_active ? 1 : 0.5 }}>
-              <MethodPill m={c.method} />
-              <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{c.name}{!c.company_id && <span className="text-[10px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>(global)</span>}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{(c.criteria || []).length} criteria · pass ≥ {c.pass_threshold}%</div></div>
-              {c.company_id && c.is_active && <button onClick={() => client.delete(`qa/scorecards/${c.id}`).then(loadCards)} className="text-[11px] font-bold" style={{ color: 'var(--color-error-600)' }}>Disable</button>}
-            </div>
-          ))}
+          {cards.map(c => {
+            const isSheet = c.criteria && !Array.isArray(c.criteria) && c.criteria.model === 'sheet_v2';
+            const fieldCount = isSheet
+              ? ((c.criteria.rating_criteria || []).length + ((c.criteria.autofail || {}).fields || []).length + (c.criteria.penalty_flags || []).length + ((c.criteria.quality_score || {}).fields || []).length + (c.criteria.tracking_flags || []).length)
+              : (Array.isArray(c.criteria) ? c.criteria.length : 0);
+            return (
+              <div key={c.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: c.is_active ? 1 : 0.5 }}>
+                <MethodPill m={c.method} />
+                <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{c.name}{!c.company_id && <span className="text-[10px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>(template)</span>}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fieldCount} fields{c.pass_threshold != null ? ` · pass ≥ ${c.pass_threshold}%` : ''}</div></div>
+                {isSheet && c.is_active && <button onClick={() => setEditing(c)} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>Edit fields</button>}
+                {c.company_id && c.is_active && <button onClick={() => client.delete(`qa/scorecards/${c.id}`).then(loadCards)} className="text-[11px] font-bold" style={{ color: 'var(--color-error-600)' }}>Disable</button>}
+              </div>
+            );
+          })}
         </div>
         <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New scorecard</div>
