@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck } from 'lucide-react';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -18,6 +18,7 @@ const NAV_SECTIONS = [
       { id: 'cc-sales',     label: 'All Sales',     icon: DollarSign,  href: '/compliance', state: { tab: 'sales'     } },
       { id: 'cc-transfers', label: 'All Transfers', icon: ArrowRight,  href: '/compliance', state: { tab: 'transfers' } },
       { id: 'cc-callbacks', label: 'All Callbacks', icon: PhoneCall,   href: '/compliance', state: { tab: 'callbacks' } },
+      { id: 'cc-qa',        label: 'QA Department', icon: ClipboardCheck, href: '/compliance', state: { tab: 'qa_admin' } },
     ],
   },
   {
