@@ -231,7 +231,8 @@ router.get('/queue', asyncHandler(async (req, res) => {
       sale_meta: r.sale_meta || null,
       subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
-      agent_display: r.subject_agent || null,
+      agent_display: r.subject_agent || null,     // reviewed agent's dialer id/login
+      agent_name: rec?.agent_name || null,          // …and their real name
       duration: rec?.duration ?? null,
       assignee_name: r.assigned_to ? (names[r.assigned_to] || null) : null,
       review: rv,   // { final_score, quality_score, passed, autofail_result, status } or null
@@ -559,28 +560,33 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
     // client portal multi-recording expand.
     recording_ref: {
       box_id: r.box_id, recording_id: String(r.recording_id), lead_id: r.lead_id || null,
-      location: r.location || null, agent_user: r.agent_user || null, start_time: r.start_time || null,
+      location: r.location || null, agent_user: r.agent_user || null, agent_name: r.agent_name || null, start_time: r.start_time || null,
       duration: r.duration ?? null, phone: r.phone || null,
       parts: Array.isArray(r.parts) && r.parts.length > 1 ? r.parts.filter(p => p && p.box_id && p.recording_id).map(cleanPart) : undefined,
     },
     recording_date: date || (r.start_time ? String(r.start_time).slice(0, 10) : null),
-    subject_agent: r.agent_user || null,
+    subject_agent: r.agent_user || null,        // the reviewed agent's dialer id/login (name in recording_ref.agent_name)
     assigned_to: assigned_to || null, assigned_by: req.user.id, assigned_at: now,
     sampled: method === 'rcm', status: 'pending',
   }));
   if (!rows.length) return res.status(400).json({ error: 'No valid recordings' });
 
   // ENRICH each row with customer identity — CRM (transfer/sale) first, VICIdial
-  // lead_field_info fallback. Bounded dialer budget so a big batch stays fast; any
-  // rows left null are re-fillable later via POST /qa/enrich-existing.
+  // lead_field_info fallback. Bounded so a huge batch stays fast: inline-enrich up
+  // to ENRICH_CAP rows (parallel, chunked); the rest render fine via the queue's
+  // live form_data hydration and can be persisted later via POST /qa/enrich-existing.
+  const ENRICH_CAP = 400;
   const dialerBudget = { n: 60 };
-  for (const row of rows) {
+  const enrichOne = async (row) => {
     const rec = row.recording_ref || {};
-    const c = await resolveCustomer({
+    Object.assign(row, await resolveCustomer({
       companyId, transferId: row.transfer_id, saleId: row.sale_id || null,
       phone: rec.phone, boxId: rec.box_id, leadId: rec.lead_id, dialerBudget,
-    });
-    Object.assign(row, c);
+    }));
+  };
+  const toEnrich = rows.slice(0, ENRICH_CAP);
+  for (let i = 0; i < toEnrich.length; i += 25) {
+    await Promise.all(toEnrich.slice(i, i + 25).map(enrichOne));   // 25-wide, bounded
   }
 
   // insert; unique (method, box, recording_id) drops any already-assigned ones

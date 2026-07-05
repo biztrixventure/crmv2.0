@@ -348,7 +348,7 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
                         {a.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{a.customer_phone}</div>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDate(a.subject_date)}</td>
-                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.agent_display || '—'}</td>
+                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.agent_name ? <>{a.agent_name}{a.agent_display && <span style={{ color: 'var(--color-text-tertiary)' }}> ({a.agent_display})</span>}</> : (a.agent_display || '—')}</td>
                       <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.assignee_name || <span style={{ color: 'var(--color-text-tertiary)' }}>pool</span>}</td>
                       <td className="px-3 py-2"><StatusPill s={a.status} /></td>
                       <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={a} /></td>
@@ -764,7 +764,10 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     if (xfilter === 'transferred' && !g.transferred) return false;
     if (xfilter === 'not' && g.transferred) return false;
     if (dfilter === '__has' && !g.dispo) return false;
-    if (dfilter && dfilter !== '__has' && g.dispo !== dfilter) return false;
+    // a number is a match if ANY of its dials carries the selected disposition —
+    // g.dispo is only the group's BEST-ranked code, so matching on it alone hid
+    // numbers whose selected code was a secondary dial.
+    if (dfilter && dfilter !== '__has' && !g.parts.some(p => String(p.dispo || '').toUpperCase() === dfilter.toUpperCase())) return false;
     if (!search) return true;
     const q = search.replace(/\D/g, '');
     if (q) return g.parts.some(p => (p.phone || '').includes(q) || String(p.lead_id || '').includes(q));
@@ -783,12 +786,15 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   });
   const sortBy = (k) => { if (sortKey === k) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir('asc'); } };
   const CAP = 1000;
-  const rows = allGroups.slice(0, CAP);
+  const rows = allGroups.slice(0, CAP);   // render cap only (perf) — selection is over ALL filtered groups
   const capped = allGroups.length > CAP;
   const selCount = Object.keys(sel).length;
+  const allSelected = allGroups.length > 0 && allGroups.every(g => sel[g.key]);
 
   const toggle = (g) => setSel(m => { const n = { ...m }; if (n[g.key]) delete n[g.key]; else n[g.key] = g; return n; });
-  const selectAllShown = () => setSel(m => { const n = { ...m }; rows.forEach(g => { n[g.key] = g; }); return n; });
+  // select ALL filtered numbers (not just the 1000 rendered) so a full day can be
+  // assigned in one go.
+  const selectAllFiltered = () => setSel(m => { const n = { ...m }; allGroups.forEach(g => { n[g.key] = g; }); return n; });
   const clearSel = () => setSel({});
   const toggleExpand = (key) => setExpanded(m => ({ ...m, [key]: !m[key] }));
 
@@ -808,7 +814,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
         const p = g.primary;
         return {
           box_id: p.box_id, recording_id: p.recording_id, lead_id: p.lead_id, location: p.location,
-          agent_user: g.agent_user, start_time: p.start_time, duration: p.duration, phone: g.phone,
+          agent_user: g.agent_user, agent_name: g.agent_name || null, start_time: p.start_time, duration: p.duration, phone: g.phone,
           transfer_id: g.transfer_id || p.transfer_id || null,
           parts: g.parts.map(x => ({ box_id: x.box_id, recording_id: x.recording_id, lead_id: x.lead_id, location: x.location, start_time: x.start_time, duration: x.duration, agent_user: x.agent_user })),
         };
@@ -896,7 +902,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
           <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
             <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
               <tr>
-                {canManage && <th className="px-2 py-2 w-8"><button onClick={rows.length && rows.every(g => sel[g.key]) ? clearSel : selectAllShown} title="Select all shown">{rows.length && rows.every(g => sel[g.key]) ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
+                {canManage && <th className="px-2 py-2 w-8"><button onClick={allSelected ? clearSel : selectAllFiltered} title={`Select all ${allGroups.length} numbers`}>{allSelected ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
                 <th />
                 {[['Time', 'time'], ['Phone', 'phone'], ['Dispo', 'dispo'], ['Type', 'type'], ['Agent', 'agent'], ['Calls', 'calls'], ['Length', 'length']].map(([label, key]) => (
                   <th key={key} className="text-left px-3 py-2 text-[11px] font-bold uppercase select-none cursor-pointer" style={{ color: sortKey === key ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }} onClick={() => sortBy(key)}>
@@ -957,7 +963,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
                 );
               })}
               {rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' || dfilter ? 'No calls match.' : 'No recordings for this day.'}</td></tr>}
-              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allGroups.length} numbers — search / filter to narrow.</td></tr>}
+              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allGroups.length} numbers (for speed) — but <b>Select all</b> selects all {allGroups.length}.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1174,25 +1180,28 @@ function AgentsTab({ companyId }) {
 
 // ── AGENT view: a focused "My Tasks" console — only tasks a manager assigned to
 // this agent (server forces self + bound method). No pool, no dialer, no config.
-function AgentTaskCard({ a, fields, onOpen }) {
+
+// Reviewed-agent label: real name + dialer id, e.g. "John Doe (1002)".
+const agentLabel = (a) => a.agent_name ? `${a.agent_name}${a.agent_display ? ` (${a.agent_display})` : ''}` : (a.agent_display || '—');
+
+// Customer + reviewed-agent info, rendered AS THE HEADER OF THE SCORECARD (part of
+// the scoreboard — not a separate block above), per the client's request.
+function ScoreInfoBar({ a, fields }) {
   const show = (k) => fields[k] !== false;
+  const loc = [show('address') && a.customer_address, show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(', ');
+  const cell = (label, value) => value ? (
+    <div key={label}><div className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      <div className="text-[13px] font-semibold" style={{ color: 'var(--color-text)' }}>{value}</div></div>
+  ) : null;
   return (
-    <button onClick={() => onOpen(a)} className="text-left w-full p-3 rounded-xl transition-shadow hover:shadow-md"
-      style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      <div className="flex items-center gap-2 mb-1.5">
-        <MethodPill m={a.method} /><StatusPill s={a.status} />
-        <div className="ml-auto"><ScoreCell a={a} /></div>
-      </div>
-      {show('customer_name') && <div className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.customer_name || '—'}</div>}
-      <div className="mt-1 space-y-0.5 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>
-        {show('customer_phone') && a.customer_phone && <div className="flex items-center gap-1.5"><Phone size={12} />{a.customer_phone}</div>}
-        {(show('zip') || show('state') || show('address')) && (a.customer_zip || a.customer_state || a.customer_address) &&
-          <div className="truncate">{[show('address') && a.customer_address, show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(', ')}</div>}
-        {show('agent') && a.agent_display && <div className="flex items-center gap-1.5"><User size={12} />{a.agent_display}</div>}
-        {show('call_date') && <div className="flex items-center gap-1.5"><Calendar size={12} />{fmtDate(a.subject_date)}</div>}
-        {show('plan') && a.sale_meta && (a.sale_meta.plan || a.sale_meta.vehicle) && <div className="flex items-center gap-1.5"><Layers size={12} />{[a.sale_meta.plan, a.sale_meta.vehicle].filter(Boolean).join(' · ')}</div>}
-      </div>
-    </button>
+    <div className="grid gap-x-5 gap-y-2 p-3 mb-3 rounded-xl" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      {show('customer_name') && cell('Customer', a.customer_name || '—')}
+      {show('customer_phone') && cell('Phone', a.customer_phone)}
+      {(show('zip') || show('state') || show('address')) && cell('Location', loc)}
+      {show('agent') && cell('Agent reviewed', agentLabel(a))}
+      {show('call_date') && cell('Call date', fmtDate(a.subject_date))}
+      {show('plan') && a.sale_meta && cell('Plan / vehicle', [a.sale_meta.plan, a.sale_meta.vehicle].filter(Boolean).join(' · ') || null)}
+    </div>
   );
 }
 
@@ -1206,11 +1215,12 @@ function AgentTasks({ selfId, canOverride, companyId }) {
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('qa/queue', { params: { limit: 100, ...(status ? { status } : {}) } }); setItems(r.data.items || []); }
+    try { const r = await client.get('qa/queue', { params: { limit: 200, ...(status ? { status } : {}) } }); setItems(r.data.items || []); }
     catch { setItems([]); }
     finally { setLoading(false); }
   }, [status]);
   useEffect(() => { load(); }, [load]);
+  const show = (k) => fields[k] !== false;
 
   return (
     <div className="flex flex-col h-full">
@@ -1224,20 +1234,42 @@ function AgentTasks({ selfId, canOverride, companyId }) {
       </div>
       {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
         : !items.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned to you here yet. Your QA manager assigns calls for you to review — they'll show up here.</div>
-        : <div className="flex-1 overflow-auto grid gap-2.5 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', alignContent: 'start' }}>
-            {items.map(a => <AgentTaskCard key={a.id} a={a} fields={fields} onOpen={setOpen} />)}
+        : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+            <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+              <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
+                <tr>{['Method', 'Customer / Phone', 'Agent reviewed', 'Location', 'Date', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {items.map(a => (
+                  <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
+                    style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                    <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <StatusPill s={a.status} /></td>
+                    <td className="px-3 py-2">
+                      <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{show('customer_name') ? (a.customer_name || '—') : '—'}</div>
+                      {show('customer_phone') && a.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{a.customer_phone}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{show('agent') ? agentLabel(a) : '—'}</td>
+                    <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{(show('state') || show('zip')) ? ([show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(' ') || '—') : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{show('call_date') ? fmtDate(a.subject_date) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={a} /></td>
+                    <td className="px-2 py-2"><ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>}
 
       {open && (
         <div className="p-4 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '68vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span>
-              {open.customer_phone && <span className="text-xs font-normal ml-2" style={{ color: 'var(--color-text-tertiary)' }}>{open.customer_phone}</span>}</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Review <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
           <div className="mb-4"><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Recordings</div><Candidates assignmentId={open.id} /></div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{open.status === 'scored' ? 'Review (submitted)' : 'Scorecard'}</div>
+            {/* customer + reviewed-agent info lives INSIDE the scorecard (client ask) */}
+            <ScoreInfoBar a={open} fields={fields} />
             {open.status === 'scored'
               ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
               : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
