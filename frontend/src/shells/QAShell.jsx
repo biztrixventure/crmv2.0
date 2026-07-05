@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
 import SheetScoreRow from '../components/QA/SheetScoreRow';
+import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
 
 // ============================================================================
@@ -400,43 +401,115 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
 }
 
 // ── Reports tab ─────────────────────────────────────────────────────────────────
+const ChartCard = ({ title, children, wide }) => (
+  <div className={`p-4 rounded-2xl ${wide ? 'col-span-full' : ''}`} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <div className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-tertiary)' }}>{title}</div>
+    {children}
+  </div>
+);
+
 function ReportsTab() {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+  const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
   const [data, setData] = useState(null);
-  const [method, setMethod] = useState('');
-  useEffect(() => { setData(null); client.get('qa/reports', { params: method ? { method } : {} }).then(r => setData(r.data)).catch(() => setData({ summary: {}, by_agent: [] })); }, [method]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = {};
+    for (const [k, v] of Object.entries(f)) if (v) params[k] = v;
+    client.get('qa/reports', { params }).then(r => setData(r.data)).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [f]);
+  useEffect(() => { load(); }, [load]);
+  const set = (k, v) => setF(o => ({ ...o, [k]: v }));
+
   const s = data?.summary || {};
+  const ts = data?.time_series || [];
+  const passFail = [
+    { label: 'Pass', value: s.passed || 0, color: '#16a34a' },
+    { label: 'Fail', value: s.failed || 0, color: '#dc2626' },
+  ];
+  const methodSplit = [
+    { label: 'TRA', value: data?.method_split?.tra || 0, color: PALETTE[0] },
+    { label: 'RCM', value: data?.method_split?.rcm || 0, color: PALETTE[4] },
+  ];
+  const bucketBars = (data?.buckets || []).map((b, i) => ({ label: b.label, value: b.n, color: ['#dc2626', '#d97706', '#2563eb', '#16a34a'][i] }));
+  const scoreSeries = [{ name: 'Avg score', color: PALETTE[0], points: ts.map(d => ({ x: d.date, y: d.avg_score })) }];
+  if ((s.passed || 0) + (s.failed || 0) > 0) scoreSeries.push({ name: 'Pass rate', color: '#16a34a', points: ts.map(d => ({ x: d.date, y: d.pass_rate == null ? 0 : d.pass_rate })) });
+  const volMax = Math.max(1, ...ts.map(d => d.reviews));
+  const agentBars = (data?.by_agent || []).slice(0, 10).map(a => ({ label: a.name, value: a.avg_score }));
+  const reviewerBars = (data?.by_reviewer || []).slice(0, 10).map(r => ({ label: r.name, value: r.reviews }));
+
+  const KPI = ({ label, value, tint }) => (
+    <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      <div className="text-2xl font-extrabold" style={{ color: tint || 'var(--color-text)' }}>{value}</div>
+    </div>
+  );
+
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-4">
-        <select value={method} onChange={e => setMethod(e.target.value)} style={inp}><option value="">All methods</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+    <div className="h-full overflow-auto pb-4">
+      {/* filters */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <select value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title="Reviewed agent">
+          <option value="">All agents</option>
+          {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}</option>)}
+        </select>
+        <select value={f.method} onChange={e => set('method', e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+        <select value={f.reviewer} onChange={e => set('reviewer', e.target.value)} style={inp} title="Scored by">
+          <option value="">Any reviewer</option>
+          {(data?.reviewers || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
+        <input type="date" value={f.date_from} max={f.date_to} onChange={e => set('date_from', e.target.value)} style={inp} />
+        <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
+        <input type="date" value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
+        <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
       </div>
-      {!data ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : (
-        <>
-          <div className="grid grid-cols-4 gap-3 mb-5">
-            {[['Reviews', s.reviews || 0], ['Pass rate', `${s.pass_rate || 0}%`], ['Avg score', `${s.avg_score || 0}%`], ['Passed', s.passed || 0]].map(([k, v]) => (
-              <div key={k} className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{k}</div>
-                <div className="text-2xl font-extrabold" style={{ color: 'var(--color-text)' }}>{v}</div>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-            <table className="w-full text-sm">
-              <thead><tr style={{ background: 'var(--color-surface-hover)' }}>{['Agent', 'Reviews', 'Pass rate', 'Avg score'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr></thead>
-              <tbody>{(data.by_agent || []).map(a => (
-                <tr key={a.subject_user_id || a.name} style={{ borderTop: '1px solid var(--color-border)' }}>
-                  <td className="px-3 py-2" style={{ color: 'var(--color-text)' }}>{a.name}</td>
-                  <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{a.reviews}</td>
-                  <td className="px-3 py-2 tabular-nums font-semibold" style={{ color: a.pass_rate >= 80 ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{a.pass_rate}%</td>
-                  <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{a.avg_score}%</td>
-                </tr>
-              ))}
-              {(!data.by_agent || !data.by_agent.length) && <tr><td colSpan={4} className="px-3 py-6 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No reviews yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+
+      {loading && !data ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        : !s.reviews ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No scored reviews in this range. Reports build from the calls your QA team has scored.</div>
+        : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <KPI label="Reviews" value={s.reviews || 0} />
+              <KPI label="Pass rate" value={`${s.pass_rate || 0}%`} tint={(s.pass_rate || 0) >= 80 ? 'var(--color-success-600)' : 'var(--color-error-600)'} />
+              <KPI label="Avg score" value={`${s.avg_score || 0}%`} />
+              <KPI label="Passed" value={s.passed || 0} tint="var(--color-success-600)" />
+              <KPI label="Failed" value={s.failed || 0} tint="var(--color-error-600)" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <ChartCard title="Pass vs Fail"><Donut data={passFail} centerValue={`${s.pass_rate || 0}%`} centerLabel="pass" /></ChartCard>
+              <ChartCard title="Method mix"><Donut data={methodSplit} centerValue={s.reviews} centerLabel="reviews" /></ChartCard>
+              <ChartCard title="Score distribution"><Bars data={bucketBars} /></ChartCard>
+
+              <ChartCard title="Score & pass rate over time" wide><Lines series={scoreSeries} yMax={100} yUnit="%" /></ChartCard>
+              <ChartCard title="Reviews per day" wide><Lines series={[{ name: 'Reviews', color: PALETTE[2], points: ts.map(d => ({ x: d.date, y: d.reviews })) }]} yMax={volMax} /></ChartCard>
+
+              <ChartCard title="By agent — avg score"><Bars data={agentBars} max={100} unit="%" /></ChartCard>
+              <ChartCard title="Who's scoring — reviews"><Bars data={reviewerBars} color={PALETTE[4]} /></ChartCard>
+            </div>
+
+            {/* full breakdown table */}
+            <div className="mt-4 rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              <table className="w-full text-sm">
+                <thead><tr style={{ background: 'var(--color-surface-hover)' }}>{['Agent reviewed', 'Reviews', 'Pass rate', 'Avg score'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr></thead>
+                <tbody>{(data.by_agent || []).map(a => (
+                  <tr key={a.key} onClick={() => set('agent', a.key)} className="cursor-pointer" style={{ borderTop: '1px solid var(--color-border)' }}>
+                    <td className="px-3 py-2" style={{ color: 'var(--color-text)' }}>{a.name}</td>
+                    <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{a.reviews}</td>
+                    <td className="px-3 py-2 tabular-nums font-semibold" style={{ color: a.pass_rate == null ? 'var(--color-text-tertiary)' : a.pass_rate >= 80 ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{a.pass_rate == null ? '—' : `${a.pass_rate}%`}</td>
+                    <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{a.avg_score}%</td>
+                  </tr>
+                ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
     </div>
   );
 }

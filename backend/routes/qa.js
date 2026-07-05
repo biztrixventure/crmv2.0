@@ -1007,48 +1007,83 @@ router.delete('/scorecards/:id', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ── reports (bounded aggregate; convert to RPC/matview if volume grows) ────────
+// ── reports & analytics — built ONLY from scored qa_reviews (the persisted
+// records). Returns summary + rollups + chart series (time, buckets, method,
+// pass/fail) + the reviewed-agent & reviewer lists for the selectors. ──────────
 router.get('/reports', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_reports'))) return res.status(403).json({ error: 'Forbidden' });
+  const EMPTY = { summary: { reviews: 0 }, by_agent: [], by_reviewer: [], time_series: [], buckets: [], method_split: { tra: 0, rcm: 0 }, agents: [], reviewers: [] };
   let q = supabaseAdmin.from('qa_reviews')
-    .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, total_score, max_score, passed, created_at')
+    .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, assignment_id, total_score, max_score, final_score, quality_score, passed, created_at')
     .order('created_at', { ascending: false }).limit(5000);
   const allowed = await allowedCompanyIds(req);
-  if (allowed) { if (!allowed.length) return res.json({ summary: {}, by_agent: [] }); q = q.in('company_id', allowed); }
+  if (allowed) { if (!allowed.length) return res.json(EMPTY); q = q.in('company_id', allowed); }
   if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
   if (req.query.method)     q = q.eq('method', req.query.method);
   if (req.query.date_from)  q = q.gte('created_at', req.query.date_from);
   if (req.query.date_to)    q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
+  let rows = data || [];
+  if (!rows.length) return res.json(EMPTY);
 
-  const rows = data || [];
+  // reviewed-agent identity from the linked assignment (dialer login + real name)
+  const aIds = [...new Set(rows.map(r => r.assignment_id).filter(Boolean))];
+  let asgById = {};
+  if (aIds.length) {
+    const { data: asg } = await supabaseAdmin.from('qa_assignments').select('id, subject_agent, subject_user_id, recording_ref').in('id', aIds);
+    asgById = Object.fromEntries((asg || []).map(a => [a.id, a]));
+  }
+  const agentKey = (r) => { const a = asgById[r.assignment_id] || {}; return String(a.subject_agent || r.subject_user_id || 'unknown'); };
+  // names for subjects + reviewers
+  const userIds = [...new Set([...rows.map(r => r.subject_user_id), ...rows.map(r => r.reviewer_id), ...Object.values(asgById).map(a => a.subject_user_id)].filter(Boolean))];
+  let uname = {};
+  if (userIds.length) {
+    const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds);
+    uname = Object.fromEntries((up || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
+  }
+  const agentName = (r) => { const a = asgById[r.assignment_id] || {}; return (a.recording_ref && a.recording_ref.agent_name) || uname[a.subject_user_id] || uname[r.subject_user_id] || (agentKey(r) === 'unknown' ? 'Unknown' : agentKey(r)); };
+
+  // full reviewed-agent list for the selector (BEFORE applying the agent filter)
+  const agentsMap = {};
+  for (const r of rows) { const k = agentKey(r); if (!agentsMap[k]) agentsMap[k] = agentName(r); }
+  const agents = Object.entries(agentsMap).map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
+  const reviewersMap = {};
+  for (const r of rows) if (r.reviewer_id) reviewersMap[r.reviewer_id] = uname[r.reviewer_id] || 'Unknown';
+  const reviewers = Object.entries(reviewersMap).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+
+  // apply agent / reviewer filters
+  if (req.query.agent)    rows = rows.filter(r => agentKey(r) === String(req.query.agent));
+  if (req.query.reviewer) rows = rows.filter(r => r.reviewer_id === req.query.reviewer);
+
   const pct = r => (r.max_score > 0 ? (r.total_score / r.max_score) * 100 : 0);
+  const scoreOf = r => (r.final_score != null ? r.final_score : (r.quality_score != null ? r.quality_score : Math.round(pct(r))));
+  const decided = rows.filter(r => r.passed === true || r.passed === false);
   const summary = {
     reviews: rows.length,
-    passed: rows.filter(r => r.passed).length,
-    pass_rate: rows.length ? Math.round((rows.filter(r => r.passed).length / rows.length) * 100) : 0,
+    passed: rows.filter(r => r.passed === true).length,
+    failed: rows.filter(r => r.passed === false).length,
+    pass_rate: decided.length ? Math.round((rows.filter(r => r.passed === true).length / decided.length) * 100) : 0,
     avg_score: rows.length ? Math.round(rows.reduce((s, r) => s + pct(r), 0) / rows.length) : 0,
   };
-  const agg = {};
-  for (const r of rows) {
-    const k = r.subject_user_id || 'unknown';
-    (agg[k] ||= { subject_user_id: r.subject_user_id, reviews: 0, passed: 0, sumPct: 0 });
-    agg[k].reviews++; if (r.passed) agg[k].passed++; agg[k].sumPct += pct(r);
-  }
-  const subjectIds = Object.values(agg).map(a => a.subject_user_id).filter(Boolean);
-  let names = {};
-  if (subjectIds.length) {
-    const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', subjectIds);
-    names = Object.fromEntries((up || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
-  }
-  const by_agent = Object.values(agg).map(a => ({
-    subject_user_id: a.subject_user_id, name: a.subject_user_id ? (names[a.subject_user_id] || 'Unknown') : 'Unknown',
-    reviews: a.reviews, passed: a.passed,
-    pass_rate: a.reviews ? Math.round((a.passed / a.reviews) * 100) : 0,
-    avg_score: a.reviews ? Math.round(a.sumPct / a.reviews) : 0,
-  })).sort((x, y) => y.reviews - x.reviews);
-  res.json({ summary, by_agent });
+
+  const roll = (keyFn, nameFn) => {
+    const agg = {};
+    for (const r of rows) { const k = keyFn(r); (agg[k] ||= { key: k, name: nameFn(r), reviews: 0, passed: 0, decided: 0, sumPct: 0 }); agg[k].reviews++; agg[k].sumPct += pct(r); if (r.passed === true) agg[k].passed++; if (r.passed === true || r.passed === false) agg[k].decided++; }
+    return Object.values(agg).map(a => ({ key: a.key, name: a.name, reviews: a.reviews, passed: a.passed, pass_rate: a.decided ? Math.round(a.passed / a.decided * 100) : null, avg_score: a.reviews ? Math.round(a.sumPct / a.reviews) : 0 })).sort((x, y) => y.reviews - x.reviews);
+  };
+  const by_agent = roll(agentKey, agentName);
+  const by_reviewer = roll(r => r.reviewer_id || 'unknown', r => r.reviewer_id ? (uname[r.reviewer_id] || 'Unknown') : 'Unknown').map(x => ({ reviewer_id: x.key === 'unknown' ? null : x.key, name: x.name, reviews: x.reviews, avg_score: x.avg_score, pass_rate: x.pass_rate }));
+
+  const ts = {};
+  for (const r of rows) { const d = String(r.created_at).slice(0, 10); (ts[d] ||= { date: d, reviews: 0, sumPct: 0, passed: 0, decided: 0 }); ts[d].reviews++; ts[d].sumPct += pct(r); if (r.passed === true) ts[d].passed++; if (r.passed === true || r.passed === false) ts[d].decided++; }
+  const time_series = Object.values(ts).map(d => ({ date: d.date, reviews: d.reviews, avg_score: Math.round(d.sumPct / d.reviews), pass_rate: d.decided ? Math.round(d.passed / d.decided * 100) : null })).sort((a, b) => a.date.localeCompare(b.date));
+
+  const buckets = [{ label: '0–59', min: 0, max: 59, n: 0 }, { label: '60–79', min: 60, max: 79, n: 0 }, { label: '80–89', min: 80, max: 89, n: 0 }, { label: '90–100', min: 90, max: 100, n: 0 }];
+  for (const r of rows) { const s = scoreOf(r); const b = buckets.find(b => s >= b.min && s <= b.max); if (b) b.n++; }
+  const method_split = { tra: rows.filter(r => r.method === 'tra').length, rcm: rows.filter(r => r.method === 'rcm').length };
+
+  res.json({ summary, by_agent, by_reviewer, time_series, buckets, method_split, agents, reviewers });
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
