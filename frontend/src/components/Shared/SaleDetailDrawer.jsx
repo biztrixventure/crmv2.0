@@ -85,6 +85,12 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
   // effect below keys on sale.id, so chain/lifetime/group refetch on swap.
   const [viewSale, setViewSale] = useState(null);
   useEffect(() => { setViewSale(null); }, [saleProp?.id]);
+  // Esc closes the drawer (expected UX; overlay-click already does).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   const sale = viewSale || saleProp;
   const openSibling = (id) => {
     client.get(`sales/${id}`)
