@@ -82,6 +82,22 @@ function Candidates({ assignmentId }) {
   );
 }
 
+// Pre-fill a sheet scorecard's meta columns from what we already know about the
+// call, so the agent doesn't retype it (the cells stay editable). Fuzzy-matches
+// the config's meta_field keys → assignment data.
+function metaAutoFill(cfg, a) {
+  const out = {};
+  for (const f of (cfg?.meta_fields || [])) {
+    const k = `${f.key} ${f.label || ''}`.toLowerCase();
+    if (/center/.test(k)) continue;                 // center name isn't ours to guess
+    else if (/name/.test(k)) out[f.key] = a.customer_name || '';
+    else if (/zip|postal/.test(k)) out[f.key] = a.customer_zip || '';
+    else if (/state/.test(k)) out[f.key] = a.customer_state || '';
+    else if (/duration/.test(k)) out[f.key] = a.duration != null ? fmtDur(a.duration) : '';
+  }
+  return out;
+}
+
 // ── scorecard form ────────────────────────────────────────────────────────────
 function ScoreForm({ assignment, onScored }) {
   const [scorecard, setScorecard] = useState(null);   // null = loading, false = none, obj = loaded
@@ -116,6 +132,7 @@ function ScoreForm({ assignment, onScored }) {
     return (
       <SheetScoreRow
         config={scorecard.criteria}
+        initialValues={metaAutoFill(scorecard.criteria, assignment)}
         busy={busy}
         onSubmit={async (payload) => {
           setBusy(true);
@@ -362,22 +379,20 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
 
       {/* review panel — STICKY bottom sheet (fixed to viewport bottom), full width */}
       {open && (
-        <div className="p-4 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '64vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
+        <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
+          <ContextLine a={open} fields={DEFAULT_CARD_FIELDS} />
           {canAssign && !open.assigned_to && open.status !== 'scored' && (
             <button onClick={async () => { try { await client.post(`qa/assignments/${open.id}/assign`, { assigned_to: selfId }); toast.success('Assigned to you'); setOpen({ ...open, assigned_to: selfId }); load(); } catch { toast.error('Assign failed'); } }}
-              className="w-full mb-3 px-3 py-2 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}>Assign to me</button>
+              className="mb-2 px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}>Assign to me</button>
           )}
-          <div className="mb-4"><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Recordings</div><Candidates assignmentId={open.id} /></div>
-          <div>
-            <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{open.status === 'scored' ? 'Review (submitted)' : 'Scorecard'}</div>
-            {open.status === 'scored'
-              ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
-              : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
-          </div>
+          <RecordingsCollapse assignmentId={open.id} />
+          {open.status === 'scored'
+            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
+            : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
         </div>
       )}
     </div>
@@ -1184,23 +1199,35 @@ function AgentsTab({ companyId }) {
 // Reviewed-agent label: real name + dialer id, e.g. "John Doe (1002)".
 const agentLabel = (a) => a.agent_name ? `${a.agent_name}${a.agent_display ? ` (${a.agent_display})` : ''}` : (a.agent_display || '—');
 
-// Customer + reviewed-agent info, rendered AS THE HEADER OF THE SCORECARD (part of
-// the scoreboard — not a separate block above), per the client's request.
-function ScoreInfoBar({ a, fields }) {
+// One-line context strip: the reviewed agent (not a sheet column) + who the call
+// is. Customer/zip/etc are auto-filled INTO the sheet's own meta cells, so this
+// stays a single compact line — not a big box.
+function ContextLine({ a, fields }) {
   const show = (k) => fields[k] !== false;
-  const loc = [show('address') && a.customer_address, show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(', ');
-  const cell = (label, value) => value ? (
-    <div key={label}><div className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
-      <div className="text-[13px] font-semibold" style={{ color: 'var(--color-text)' }}>{value}</div></div>
-  ) : null;
+  const bits = [
+    show('agent') && a && (a.agent_name || a.agent_display) && { icon: <User size={12} />, text: agentLabel(a) },
+    show('customer_name') && a.customer_name && { text: a.customer_name },
+    show('customer_phone') && a.customer_phone && { text: a.customer_phone },
+    show('call_date') && { text: fmtDate(a.subject_date) },
+  ].filter(Boolean);
+  if (!bits.length) return null;
   return (
-    <div className="grid gap-x-5 gap-y-2 p-3 mb-3 rounded-xl" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      {show('customer_name') && cell('Customer', a.customer_name || '—')}
-      {show('customer_phone') && cell('Phone', a.customer_phone)}
-      {(show('zip') || show('state') || show('address')) && cell('Location', loc)}
-      {show('agent') && cell('Agent reviewed', agentLabel(a))}
-      {show('call_date') && cell('Call date', fmtDate(a.subject_date))}
-      {show('plan') && a.sale_meta && cell('Plan / vehicle', [a.sale_meta.plan, a.sale_meta.vehicle].filter(Boolean).join(' · ') || null)}
+    <div className="flex items-center gap-1.5 flex-wrap text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+      {bits.map((b, i) => <span key={i} className="inline-flex items-center gap-1">{i > 0 && <span style={{ color: 'var(--color-text-tertiary)' }}>·</span>}{b.icon}{b.text}</span>)}
+    </div>
+  );
+}
+
+// Recordings, collapsed by default so the scoresheet is front-and-center.
+function RecordingsCollapse({ assignmentId }) {
+  const [openR, setOpenR] = useState(false);
+  return (
+    <div className="mb-3">
+      <button onClick={() => setOpenR(o => !o)} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide px-2 py-1 rounded"
+        style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+        <Headphones size={13} /> Recordings <ChevronDown size={12} style={{ transition: 'transform .15s', transform: openR ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {openR && <div className="mt-2"><Candidates assignmentId={assignmentId} /></div>}
     </div>
   );
 }
@@ -1260,20 +1287,16 @@ function AgentTasks({ selfId, canOverride, companyId }) {
           </div>}
 
       {open && (
-        <div className="p-4 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '68vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Review <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
+        <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
-          <div className="mb-4"><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Recordings</div><Candidates assignmentId={open.id} /></div>
-          <div>
-            <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{open.status === 'scored' ? 'Review (submitted)' : 'Scorecard'}</div>
-            {/* customer + reviewed-agent info lives INSIDE the scorecard (client ask) */}
-            <ScoreInfoBar a={open} fields={fields} />
-            {open.status === 'scored'
-              ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
-              : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
-          </div>
+          <ContextLine a={open} fields={fields} />
+          <RecordingsCollapse assignmentId={open.id} />
+          {open.status === 'scored'
+            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
+            : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
         </div>
       )}
     </div>
