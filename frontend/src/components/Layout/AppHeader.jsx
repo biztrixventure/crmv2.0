@@ -151,7 +151,7 @@ const AppHeader = ({
             {userEmail && (
               <button
                 onClick={() => setProfileOpen(true)}
-                className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 h-9 rounded-xl transition-all duration-200 flex-shrink-0 group"
+                className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all duration-200 flex-shrink-0 group"
                 style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-primary-50, #f5f3ff)'; e.currentTarget.style.borderColor = 'var(--color-primary-300)'; }}
                 onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
