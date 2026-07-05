@@ -1203,4 +1203,124 @@ router.post('/enrich-existing', asyncHandler(async (req, res) => {
   res.json({ ok: true, scanned: (rows || []).length, filled });
 }));
 
+// ── QA DEPARTMENT ADMIN — compliance owns QA (mig 181) ───────────────────────
+// Gated on manage_qa_department (compliance) or superadmin. QA-SCOPED: only ever
+// touches qa_manager / qa_agent roles + qa.* config — never other roles. Uses the
+// GLOBAL qa roles (company_id NULL) so one manager/agent covers many companies.
+async function canAdminQa(req) {
+  if (await isSuperAdmin(req.user.id)) return true;
+  return hasPermission(req.user.id, req.user.company_id, 'manage_qa_department');
+}
+async function globalQaRoleId(level) {
+  const { data } = await supabaseAdmin.from('custom_roles').select('id').is('company_id', null).eq('level', level).limit(1).maybeSingle();
+  return data?.id || null;
+}
+const profName = (p) => `${p?.first_name || ''} ${p?.last_name || ''}`.trim();
+const lvlOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+
+// companies + their QA enablement (methods)
+router.get('/admin/overview', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: companies } = await supabaseAdmin.from('companies').select('id, name, company_type').order('name');
+  const out = [];
+  for (const c of (companies || [])) {
+    const methods = await getConfig(c.id, 'qa.methods', []);
+    out.push({ id: c.id, name: c.name, company_type: c.company_type, methods: Array.isArray(methods) ? methods : [] });
+  }
+  res.json({ companies: out });
+}));
+
+// all QA users (managers + agents) across companies, grouped by user
+router.get('/admin/users', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: rows } = await supabaseAdmin.from('user_company_roles')
+    .select('id, user_id, company_id, is_active, custom_roles(level), companies(name)').eq('is_active', true);
+  const qaRows = (rows || []).filter(r => ['qa_manager', 'qa_agent'].includes(lvlOf(r.custom_roles)));
+  const uids = [...new Set(qaRows.map(r => r.user_id))];
+  let names = {};
+  if (uids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p)]));
+  }
+  const byUser = {};
+  for (const r of qaRows) {
+    (byUser[r.user_id] ||= { user_id: r.user_id, name: names[r.user_id] || r.user_id, levels: new Set(), companies: [] });
+    byUser[r.user_id].levels.add(lvlOf(r.custom_roles));
+    byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level: lvlOf(r.custom_roles) });
+  }
+  res.json({ users: Object.values(byUser).map(u => ({ ...u, levels: [...u.levels] })) });
+}));
+
+// search any user to assign as QA (by name)
+router.get('/admin/user-search', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (q.length < 2) return res.json({ users: [] });
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').limit(500);
+  const hits = (profs || []).filter(p => profName(p).toLowerCase().includes(q)).slice(0, 25);
+  res.json({ users: hits.map(p => ({ user_id: p.user_id, name: profName(p) })) });
+}));
+
+// assign an existing user to a company as a QA role (multi-company = call per co)
+router.post('/admin/assign', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { user_id, company_id, level } = req.body || {};
+  if (!user_id || !company_id || !['qa_manager', 'qa_agent'].includes(level)) return res.status(400).json({ error: 'user_id, company_id, level (qa_manager|qa_agent) required' });
+  const roleId = await globalQaRoleId(level);
+  if (!roleId) return res.status(500).json({ error: 'Global QA role missing — apply migration 181' });
+  const { data: existing } = await supabaseAdmin.from('user_company_roles').select('id, custom_roles(level)').eq('user_id', user_id).eq('company_id', company_id);
+  const qaExisting = (existing || []).find(r => ['qa_manager', 'qa_agent'].includes(lvlOf(r.custom_roles)));
+  if (qaExisting) {
+    await supabaseAdmin.from('user_company_roles').update({ role_id: roleId, is_active: true }).eq('id', qaExisting.id);
+    return res.json({ ok: true, ucr_id: qaExisting.id, updated: true });
+  }
+  const { data, error } = await supabaseAdmin.from('user_company_roles').insert({ user_id, company_id, role_id: roleId, assigned_by: req.user.id, is_active: true }).select('id').single();
+  if (error) return res.status(500).json({ error: /duplicate|unique/i.test(error.message) ? 'That user already has a role in this company.' : error.message });
+  res.json({ ok: true, ucr_id: data.id });
+}));
+
+// remove a QA assignment (deactivate) — QA roles only
+router.delete('/admin/assign/:ucrId', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: row } = await supabaseAdmin.from('user_company_roles').select('id, custom_roles(level)').eq('id', req.params.ucrId).maybeSingle();
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (!['qa_manager', 'qa_agent'].includes(lvlOf(row.custom_roles))) return res.status(400).json({ error: 'Not a QA assignment' });
+  const { error } = await supabaseAdmin.from('user_company_roles').update({ is_active: false }).eq('id', req.params.ucrId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+}));
+
+// enable/disable QA (methods) for ANY company
+router.put('/admin/company-methods', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id } = req.body || {};
+  const methods = Array.isArray(req.body?.methods) ? req.body.methods.filter(m => ['tra', 'rcm'].includes(m)) : [];
+  if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  await setConfig(`company:${company_id}`, 'qa.methods', methods, req.user.id);
+  let materialized = null;
+  if (methods.length) { try { materialized = await materializeCompany(company_id, methods); } catch (e) { logger.warn('QA', `admin materialize: ${e.message}`); } }
+  res.json({ ok: true, methods, materialized });
+}));
+
+// create a NEW QA manager/agent user + assign to companies (QA-scoped)
+router.post('/admin/users', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { email, full_name, password, level } = req.body || {};
+  const companyIds = Array.isArray(req.body?.company_ids) ? req.body.company_ids : [];
+  if (!email || !full_name || !['qa_manager', 'qa_agent'].includes(level)) return res.status(400).json({ error: 'email, full_name, level (qa_manager|qa_agent) required' });
+  const roleId = await globalQaRoleId(level);
+  if (!roleId) return res.status(500).json({ error: 'Global QA role missing — apply migration 181' });
+  const parts = String(full_name).trim().split(/\s+/);
+  const first_name = parts[0]; const last_name = parts.slice(1).join(' ');
+  const pass = (password && String(password).length >= 8) ? password : ('Qa!' + Math.random().toString(36).slice(2, 10) + 'A9');
+
+  const { data: created, error: authErr } = await supabaseAdmin.auth.admin.createUser({ email, password: pass, email_confirm: true });
+  if (authErr || !created?.user) return res.status(400).json({ error: authErr?.message || 'Could not create user' });
+  const uid = created.user.id;
+  await supabaseAdmin.from('user_profiles').insert({ user_id: uid, first_name, last_name, theme_preference: 'light' });
+  const rows = companyIds.map(cid => ({ user_id: uid, company_id: cid, role_id: roleId, assigned_by: req.user.id, is_active: true }));
+  if (rows.length) { const { error: e } = await supabaseAdmin.from('user_company_roles').insert(rows); if (e) logger.warn('QA', `admin create-user assign: ${e.message}`); }
+  res.json({ ok: true, user_id: uid, generated_password: password ? undefined : pass, companies: companyIds.length });
+}));
+
 module.exports = router;

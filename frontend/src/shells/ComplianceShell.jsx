@@ -35,6 +35,7 @@ import ScriptManager      from '../components/Admin/ScriptManager/ScriptManager'
 import FAQManager         from '../components/Admin/FAQManager/FAQManager';
 import CallQuestionsManager from '../components/Compliance/CallQuestionsManager';
 import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
+import QaAdminTab          from '../components/Compliance/QaAdminTab';
 import BatchInbox          from '../components/Distribution/BatchInbox';
 import BatchRoster         from '../components/Distribution/BatchRoster';
 
@@ -57,6 +58,7 @@ const CODE_TABS = [
   { key: 'questions',   label: 'Call Questions',     icon: ClipboardCheck },
   { key: 'dnc',         label: 'DNC Check',          icon: Shield, flag: 'tool_blacklist_lookup' },
   { key: 'card_validator', label: 'Card Validator',  icon: CreditCard, flag: 'tool_card_validator' },
+  { key: 'qa_admin',    label: 'QA Department',      icon: ClipboardCheck, perm: 'manage_qa_department' },
 ];
 
 // ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
@@ -70,12 +72,12 @@ const TAB_GROUPS = [
   { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'roster', 'numbers'] },
-  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'questions', 'scripts', 'faqs'] },
+  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs'] },
   { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
 ];
 
 const ComplianceShell = () => {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, hasPermission } = useAuth();
   const { theme, toggleTheme }       = useTheme();
   const navigate = useNavigate();
   const notifHook = useNotifications();
@@ -88,8 +90,10 @@ const ComplianceShell = () => {
   const isSuperadmin = user?.role === 'superadmin';
   const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
   const TABS = useMemo(
-    () => applyComplianceLayout(CODE_TABS.filter(t => !t.flag || isSuperadmin || isEnabledStrict(t.flag))),
-    [applyComplianceLayout, isEnabledStrict, isSuperadmin],
+    () => applyComplianceLayout(CODE_TABS.filter(t =>
+      (!t.flag || isSuperadmin || isEnabledStrict(t.flag)) &&
+      (!t.perm || isSuperadmin || hasPermission(t.perm)))),
+    [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission],
   );
 
   // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition
@@ -321,6 +325,7 @@ const ComplianceShell = () => {
         {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'card_validator' && <CardValidator />}
+        {activeTab === 'qa_admin' && <QaAdminTab />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab
