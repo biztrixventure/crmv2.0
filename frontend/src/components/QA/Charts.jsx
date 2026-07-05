@@ -1,10 +1,20 @@
+import { useState, useEffect } from 'react';
+
 // ============================================================================
 // Charts.jsx — tiny dependency-free SVG charts for the QA reports tab (no chart
 // library / no external requests). Donut (pie), horizontal Bars, and a multi-
-// series Line chart. Theme-aware via CSS vars.
+// series Line chart. Theme-aware via CSS vars. Each animates in on mount
+// (donut fades+scales, bars grow, lines draw) via CSS transitions — no keyframes.
 // ============================================================================
 
 export const PALETTE = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+
+// flips false→true on the next frame so mount transitions actually run.
+function useMounted() {
+  const [m, setM] = useState(false);
+  useEffect(() => { const id = requestAnimationFrame(() => setM(true)); return () => cancelAnimationFrame(id); }, []);
+  return m;
+}
 
 const polar = (cx, cy, r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 function slicePath(cx, cy, r, a0, a1) {
@@ -16,6 +26,7 @@ function slicePath(cx, cy, r, a0, a1) {
 
 // data: [{ label, value, color? }]
 export function Donut({ data = [], size = 150, centerValue, centerLabel }) {
+  const mounted = useMounted();
   const items = data.filter(d => d.value > 0);
   const total = items.reduce((s, d) => s + d.value, 0);
   const cx = size / 2, cy = size / 2, r = size / 2 - 2;
@@ -23,22 +34,23 @@ export function Donut({ data = [], size = 150, centerValue, centerLabel }) {
   return (
     <div className="flex items-center gap-4">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
-        {total === 0 && <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--color-border)" strokeWidth="14" />}
-        {items.map((d, i) => {
-          const frac = d.value / total;
-          const a0 = a, a1 = a + frac * Math.PI * 2; a = a1;
-          const color = d.color || PALETTE[i % PALETTE.length];
-          // full-circle guard (single slice)
-          if (items.length === 1) return <circle key={i} cx={cx} cy={cy} r={r} fill={color} />;
-          return <path key={i} d={slicePath(cx, cy, r, a0, a1)} fill={color} />;
-        })}
-        <circle cx={cx} cy={cy} r={r * 0.58} fill="var(--color-bg)" />
-        {(centerValue != null) && <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--color-text)">{centerValue}</text>}
-        {centerLabel && <text x={cx} y={cy + size * 0.13} textAnchor="middle" fontSize={size * 0.08} fill="var(--color-text-tertiary)">{centerLabel}</text>}
+        <g style={{ transformOrigin: 'center', transformBox: 'fill-box', transition: 'opacity .5s ease, transform .5s cubic-bezier(.2,.8,.2,1)', opacity: mounted ? 1 : 0, transform: mounted ? 'scale(1) rotate(0deg)' : 'scale(.85) rotate(-25deg)' }}>
+          {total === 0 && <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--color-border)" strokeWidth="14" />}
+          {items.map((d, i) => {
+            const frac = d.value / total;
+            const a0 = a, a1 = a + frac * Math.PI * 2; a = a1;
+            const color = d.color || PALETTE[i % PALETTE.length];
+            if (items.length === 1) return <circle key={i} cx={cx} cy={cy} r={r} fill={color} />;
+            return <path key={i} d={slicePath(cx, cy, r, a0, a1)} fill={color} />;
+          })}
+          <circle cx={cx} cy={cy} r={r * 0.58} fill="var(--color-bg)" />
+        </g>
+        {(centerValue != null) && <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight="800" fill="var(--color-text)" style={{ opacity: mounted ? 1 : 0, transition: 'opacity .6s ease .2s' }}>{centerValue}</text>}
+        {centerLabel && <text x={cx} y={cy + size * 0.13} textAnchor="middle" fontSize={size * 0.08} fill="var(--color-text-tertiary)" style={{ opacity: mounted ? 1 : 0, transition: 'opacity .6s ease .2s' }}>{centerLabel}</text>}
       </svg>
       <div className="space-y-1 min-w-0">
         {items.map((d, i) => (
-          <div key={i} className="flex items-center gap-2 text-xs">
+          <div key={i} className="flex items-center gap-2 text-xs" style={{ opacity: mounted ? 1 : 0, transform: mounted ? 'none' : 'translateX(6px)', transition: `opacity .4s ease ${0.1 + i * 0.05}s, transform .4s ease ${0.1 + i * 0.05}s` }}>
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.color || PALETTE[i % PALETTE.length] }} />
             <span className="truncate" style={{ color: 'var(--color-text-secondary)' }}>{d.label}</span>
             <span className="font-bold tabular-nums ml-auto" style={{ color: 'var(--color-text)' }}>{d.value}</span>
@@ -53,6 +65,7 @@ export function Donut({ data = [], size = 150, centerValue, centerLabel }) {
 
 // data: [{ label, value, color? }]   max optional
 export function Bars({ data = [], max, unit = '', color = PALETTE[0] }) {
+  const mounted = useMounted();
   const hi = max ?? Math.max(1, ...data.map(d => d.value));
   return (
     <div className="space-y-1.5">
@@ -60,7 +73,7 @@ export function Bars({ data = [], max, unit = '', color = PALETTE[0] }) {
         <div key={i} className="flex items-center gap-2">
           <span className="text-[11px] truncate w-28 flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }} title={d.label}>{d.label}</span>
           <div className="flex-1 h-4 rounded" style={{ background: 'var(--color-surface-hover)' }}>
-            <div className="h-4 rounded" style={{ width: `${Math.max(2, (d.value / hi) * 100)}%`, background: d.color || color, transition: 'width .3s' }} />
+            <div className="h-4 rounded" style={{ width: mounted ? `${Math.max(2, (d.value / hi) * 100)}%` : '0%', background: d.color || color, transition: `width .7s cubic-bezier(.2,.8,.2,1) ${i * 0.04}s` }} />
           </div>
           <span className="text-[11px] font-bold tabular-nums w-12 text-right flex-shrink-0" style={{ color: 'var(--color-text)' }}>{d.value}{unit}</span>
         </div>
@@ -72,6 +85,7 @@ export function Bars({ data = [], max, unit = '', color = PALETTE[0] }) {
 
 // series: [{ name, color, points: [{ x(label), y(number) }] }]  — shared x axis
 export function Lines({ series = [], height = 180, yMax = 100, yUnit = '' }) {
+  const mounted = useMounted();
   const W = 560, H = height, padL = 34, padB = 22, padT = 10, padR = 8;
   const xs = series[0]?.points || [];
   const n = xs.length;
@@ -97,8 +111,10 @@ export function Lines({ series = [], height = 180, yMax = 100, yUnit = '' }) {
           const color = s.color || PALETTE[si % PALETTE.length];
           return (
             <g key={si}>
-              {n > 1 && <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
-              {(s.points || []).map((p, i) => <circle key={i} cx={xAt(i)} cy={yAt(p.y ?? 0)} r={n > 40 ? 1.5 : 3} fill={color} />)}
+              {n > 1 && <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+                pathLength="1" strokeDasharray="1" style={{ strokeDashoffset: mounted ? 0 : 1, transition: 'stroke-dashoffset .9s ease' }} />}
+              {(s.points || []).map((p, i) => <circle key={i} cx={xAt(i)} cy={yAt(p.y ?? 0)} r={n > 40 ? 1.5 : 3} fill={color}
+                style={{ opacity: mounted ? 1 : 0, transition: `opacity .3s ease ${0.3 + (i / Math.max(1, n)) * 0.6}s` }} />)}
             </g>
           );
         })}

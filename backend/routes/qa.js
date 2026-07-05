@@ -857,7 +857,8 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   const tIds = [...new Set(Object.values(assignById).map(a => a.transfer_id).filter(Boolean))];
   const sIds = [...new Set(Object.values(assignById).map(a => a.sale_id).filter(Boolean))];
   const [tRes, sRes] = await Promise.all([
-    tIds.length ? supabaseAdmin.from('transfers').select('id, customer_name, normalized_phone, created_at').in('id', tIds) : Promise.resolve({ data: [] }),
+    // transfers have NO customer_name column — derive it from form_data.
+    tIds.length ? supabaseAdmin.from('transfers').select('id, normalized_phone, form_data, created_at').in('id', tIds) : Promise.resolve({ data: [] }),
     sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date').in('id', sIds) : Promise.resolve({ data: [] }),
   ]);
   const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
@@ -873,8 +874,8 @@ router.get('/reviews', asyncHandler(async (req, res) => {
       scorecard_id: r.scorecard_id, status: r.status, reviewed_at: r.created_at,
       reviewer_id: r.reviewer_id, reviewer_name: nameById[r.reviewer_id] || null,
       subject_user_id: r.subject_user_id, subject_name: nameById[r.subject_user_id] || null,
-      agent: a.subject_agent || rec?.agent_user || null,
-      customer_name: rec?.phone ? (t?.customer_name || s?.customer_name || null) : (t?.customer_name || s?.customer_name || null),
+      agent: (rec?.agent_name) || a.subject_agent || rec?.agent_user || null,
+      customer_name: (t ? scanName(t.form_data) : null) || s?.customer_name || null,
       customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
       call_date: a.recording_date || rec?.start_time || t?.created_at || s?.sale_date || null,
       base_score: r.base_score, autofail_result: r.autofail_result, total_penalty: r.total_penalty,
