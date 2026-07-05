@@ -44,6 +44,13 @@ function previousPeriod(kind) {
   return { label, start, end };
 }
 
+// retention window in days — clamp 1..30, default 2.
+function clampRetentionDays(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 2;
+  return Math.min(30, Math.max(1, Math.round(n)));
+}
+
 // Companies with QA turned on = company-scoped qa.methods overrides that aren't
 // empty. One cheap query, no full company scan.
 async function enabledCompanies() {
@@ -68,12 +75,17 @@ async function materializeCompany(companyId, methods) {
     const m = await getConfig(companyId, 'qa.methods', []);
     methods = Array.isArray(m) ? m : [];
   }
+  const retDays = clampRetentionDays(await getConfig(companyId, 'qa.retention_days', 2));
   let tra = 0, rcm = 0;
   if (methods.includes('tra')) {
     try {
       const pop = await getConfig(companyId, 'qa.tra.population', { statuses: ['all'] });
       const statuses = Array.isArray(pop?.statuses) && pop.statuses.length ? pop.statuses : ['all'];
-      const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_tra', { p_company_id: companyId, p_statuses: statuses });
+      // Only materialize RECENT transfers. Untouched TRA rows age out via the
+      // retention purge; bounding materialization to the same window means a
+      // purged row's transfer is out of scope → never recreated (no churn).
+      const since = new Date(Date.now() - retDays * 86400000).toISOString();
+      const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_tra', { p_company_id: companyId, p_statuses: statuses, p_since: since });
       if (error) logger.warn('QA_JOBS', `TRA ${companyId}: ${error.message}`);
       else tra = data || 0;
     } catch (e) { logger.warn('QA_JOBS', `TRA ${companyId} error: ${e.message}`); }
@@ -98,6 +110,29 @@ async function materializeCompany(companyId, methods) {
   return { tra, rcm };
 }
 
+// ── retention purge ─────────────────────────────────────────────────────────
+// Drop QA assignments nobody ever touched: still 'pending' AND unassigned AND
+// older than qa.retention_days. KEEPS everything worked (assigned_to set) or
+// moved past pending (in_review/scored/skipped) forever, plus their reviews.
+// Paired with the TRA lookback window so a purged row is never recreated.
+async function purgeStaleQaAssignments() {
+  const retDays = clampRetentionDays(await getConfig(null, 'qa.retention_days', 2));
+  const cutoff = new Date(Date.now() - retDays * 86400000).toISOString();
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('qa_assignments')
+      .delete()
+      .eq('status', 'pending')
+      .is('assigned_to', null)
+      .lt('created_at', cutoff)
+      .select('id');
+    if (error) { logger.warn('QA_JOBS', `retention purge: ${error.message}`); return 0; }
+    const n = (data || []).length;
+    if (n) logger.info('QA_JOBS', `QA retention: purged ${n} stale unassigned assignment(s) older than ${retDays}d`);
+    return n;
+  } catch (e) { logger.warn('QA_JOBS', `retention purge error: ${e.message}`); return 0; }
+}
+
 async function runQaMaterialization() {
   let companies;
   try { companies = await enabledCompanies(); }
@@ -112,6 +147,8 @@ async function runQaMaterialization() {
   if (traTotal || rcmTotal) {
     logger.info('QA_JOBS', `QA materialize: +${traTotal} TRA, +${rcmTotal} RCM across ${companies.length} co(s)`);
   }
+  // retention runs even if nothing was materialized this tick (backlog drains).
+  await purgeStaleQaAssignments();
 }
 
-module.exports = { runQaMaterialization, materializeCompany, previousPeriod };
+module.exports = { runQaMaterialization, materializeCompany, previousPeriod, purgeStaleQaAssignments };
