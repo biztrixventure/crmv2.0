@@ -61,6 +61,8 @@ async function agentMethods(userId) {
 }
 
 // Pull a zip/state/address value out of a dynamic form_data blob by fuzzy key.
+// (transfers have NO customer_name column — name/zip/state/address all live in
+// form_data: Zip / State / Address / FirstName+LastName / "Full Name".)
 function scanFormData(fd, kind) {
   if (!fd || typeof fd !== 'object') return null;
   const pats = {
@@ -74,6 +76,16 @@ function scanFormData(fd, kind) {
   }
   return null;
 }
+// Customer name from form_data: a full-name field, else First (+Last).
+function scanName(fd) {
+  if (!fd || typeof fd !== 'object') return null;
+  const entries = Object.entries(fd);
+  const val = (re) => { for (const [k, v] of entries) if (v != null && v !== '' && re.test(k)) return String(v).trim(); return ''; };
+  const full = val(/^(full[\s_]?name|customer[\s_]?name|lead[\s_]?name|client[\s_]?name|name)$/i);
+  if (full) return full;
+  const nm = [val(/^first[\s_]?name$/i), val(/^last[\s_]?name$/i)].filter(Boolean).join(' ').trim();
+  return nm || null;
+}
 
 // Resolve customer identity for an assignment: CRM (transfer/sale) FIRST, then a
 // best-effort VICIdial lead_field_info fallback. Returns the denormalized columns.
@@ -81,39 +93,40 @@ async function resolveCustomer({ companyId, transferId, saleId, phone, boxId, le
   const out = { customer_name: null, customer_phone: phone || null, customer_zip: null, customer_state: null, customer_address: null, sale_meta: null };
 
   // 1. CRM transfer — by id, else by normalized phone within the company.
+  // transfers have no customer_name column → derive it from form_data.
   let t = null;
   if (transferId) {
-    const { data } = await supabaseAdmin.from('transfers').select('customer_name, normalized_phone, form_data').eq('id', transferId).maybeSingle();
+    const { data } = await supabaseAdmin.from('transfers').select('normalized_phone, form_data').eq('id', transferId).maybeSingle();
     t = data || null;
   } else if (phone) {
     const digits = String(phone).replace(/\D/g, '').slice(-10);
     if (digits) {
       const { data } = await supabaseAdmin.from('transfers')
-        .select('customer_name, normalized_phone, form_data')
+        .select('normalized_phone, form_data')
         .eq('company_id', companyId).ilike('normalized_phone', `%${digits}`)
         .order('created_at', { ascending: false }).limit(1);
       t = (data && data[0]) || null;
     }
   }
   if (t) {
-    out.customer_name = t.customer_name || out.customer_name;
+    out.customer_name = scanName(t.form_data) || out.customer_name;
     out.customer_phone = out.customer_phone || t.normalized_phone || null;
     out.customer_zip = scanFormData(t.form_data, 'zip');
     out.customer_state = scanFormData(t.form_data, 'state');
     out.customer_address = scanFormData(t.form_data, 'address');
   }
 
-  // 2. Linked sale → name/phone + plan/vehicle meta.
+  // 2. Linked sale → name/phone + plan/vehicle meta (sales HAS these columns).
   if (saleId) {
-    const { data: s } = await supabaseAdmin.from('sales').select('customer_name, customer_phone, form_data').eq('id', saleId).maybeSingle();
+    const { data: s } = await supabaseAdmin.from('sales').select('customer_name, customer_phone, customer_address, plan, form_data').eq('id', saleId).maybeSingle();
     if (s) {
-      out.customer_name = out.customer_name || s.customer_name || null;
-      out.customer_phone = out.customer_phone || s.customer_phone || null;
       const fd = s.form_data || {};
+      out.customer_name = out.customer_name || s.customer_name || scanName(fd);
+      out.customer_phone = out.customer_phone || s.customer_phone || null;
       out.customer_zip = out.customer_zip || scanFormData(fd, 'zip');
       out.customer_state = out.customer_state || scanFormData(fd, 'state');
-      out.customer_address = out.customer_address || scanFormData(fd, 'address');
-      out.sale_meta = { plan: fd.plan || fd.sale_plan || null, vehicle: fd.vehicle || fd.vin || null };
+      out.customer_address = out.customer_address || s.customer_address || scanFormData(fd, 'address');
+      out.sale_meta = { plan: s.plan || fd.SalePlan || fd.plan || null, vehicle: fd.VIN || [fd.CarYear, fd.CarMake, fd.CarModel].filter(Boolean).join(' ') || null };
     }
   }
 
@@ -178,7 +191,8 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const tIds = [...new Set((data || []).map(r => r.transfer_id).filter(Boolean))];
   const sIds = [...new Set((data || []).map(r => r.sale_id).filter(Boolean))];
   const [tRes, sRes, aRes] = await Promise.all([
-    tIds.length ? supabaseAdmin.from('transfers').select('id, customer_name, normalized_phone, vicidial_vendor_code, created_at, created_by').in('id', tIds) : Promise.resolve({ data: [] }),
+    // transfers have NO customer_name column — pull form_data and derive it.
+    tIds.length ? supabaseAdmin.from('transfers').select('id, normalized_phone, form_data, vicidial_vendor_code, created_at, created_by').in('id', tIds) : Promise.resolve({ data: [] }),
     sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id').in('id', sIds) : Promise.resolve({ data: [] }),
     Promise.resolve({ data: [] }),
   ]);
@@ -209,11 +223,11 @@ router.get('/queue', asyncHandler(async (req, res) => {
       ...r,
       // prefer the STORED enrichment (frozen at assign time, incl. day-recording
       // rows with no CRM link); fall back to live transfer/sale hydration.
-      customer_name: r.customer_name || t?.customer_name || s?.customer_name || null,
+      customer_name: r.customer_name || (t ? scanName(t.form_data) : null) || s?.customer_name || null,
       customer_phone: r.customer_phone || rec?.phone || t?.normalized_phone || s?.customer_phone || null,
-      customer_zip: r.customer_zip || null,
-      customer_state: r.customer_state || null,
-      customer_address: r.customer_address || null,
+      customer_zip: r.customer_zip || (t ? scanFormData(t.form_data, 'zip') : null) || null,
+      customer_state: r.customer_state || (t ? scanFormData(t.form_data, 'state') : null) || null,
+      customer_address: r.customer_address || (t ? scanFormData(t.form_data, 'address') : null) || null,
       sale_meta: r.sale_meta || null,
       subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
