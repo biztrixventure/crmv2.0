@@ -229,10 +229,15 @@ app.use((req, res, next) => {
 // STATIC FILES - Serve frontend from dist (single-service Nixpacks)
 // ============================================================================
 const path = require('path');
+const { renderIndex } = require('./utils/htmlBranding');
+const { loadBranding } = require('./routes/branding');
 const frontendDistPath = path.join(__dirname, '../frontend/dist');
 app.use(express.static(frontendDistPath, {
   maxAge: '1y',
   immutable: true,
+  // Don't auto-serve index.html for '/', so the request falls through to the
+  // SPA fallback below where branding/OG meta is injected (link previews).
+  index: false,
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('index.html') || filePath.endsWith('version.json')) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -358,8 +363,10 @@ app.get('*', (req, res, next) => {
     return next();
   }
 
+  // Crawlers (WhatsApp/FB/Twitter/iMessage) send Accept: */* not text/html, and
+  // they're exactly who needs the OG tags — so serve HTML for a bare '/' too.
   const acceptsHtml = (req.headers.accept || '').includes('text/html');
-  if (!acceptsHtml) {
+  if (!acceptsHtml && req.path !== '/' && path.extname(req.path)) {
     return next();
   }
 
@@ -367,11 +374,21 @@ app.get('*', (req, res, next) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      res.status(404).json({ error: 'Not found' });
-    }
-  });
+
+  // Inject branding/SEO/OG meta from the DB into index.html. On any failure fall
+  // back to the raw file — serving must never break because of branding.
+  (async () => {
+    try {
+      const branding = await loadBranding();
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const html = renderIndex(frontendDistPath, branding, `${proto}://${req.get('host')}${req.originalUrl}`);
+      if (html) {
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      }
+    } catch { /* fall through */ }
+    res.sendFile(indexPath, (err) => { if (err) res.status(404).json({ error: 'Not found' }); });
+  })();
 });
 
 // ============================================================================
