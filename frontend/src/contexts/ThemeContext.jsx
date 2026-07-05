@@ -23,6 +23,11 @@ export const ThemeProvider = ({ children }) => {
     } else {
       root.classList.remove("dark");
     }
+    // Drive `color-scheme` from the app theme so NATIVE controls follow it too —
+    // the <audio controls> recording players (QA / compliance review) render
+    // native UA chrome that ignores our CSS vars and would otherwise stay light
+    // in dark mode. Also fixes native scrollbars / date pickers. (issue #5)
+    root.style.colorScheme = theme === "dark" ? "dark" : "light";
     localStorage.setItem("theme", theme);
   }, [theme]);
 
