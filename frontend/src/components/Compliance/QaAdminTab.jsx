@@ -31,6 +31,13 @@ export default function QaAdminTab() {
     catch { toast.error('Update failed'); load(); }
   };
   const removeAssign = async (ucrId) => { try { await client.delete(`qa/admin/assign/${ucrId}`); loadUsers(); } catch { toast.error('Remove failed'); } };
+  // bind an agent's review method(s) for a company (else they see no tasks).
+  const setAgentMethod = async (userId, companyId, current, m) => {
+    const methods = current.includes(m) ? current.filter(x => x !== m) : [...current, m];
+    setUsers(us => us.map(u => u.user_id === userId ? { ...u, companies: u.companies.map(c => c.company_id === companyId ? { ...c, methods } : c) } : u));
+    try { await client.put('qa/agent-methods', { user_id: userId, company_id: companyId, methods }); }
+    catch { toast.error('Method update failed'); loadUsers(); }
+  };
 
   return (
     <div className="space-y-6 pb-6">
@@ -81,8 +88,18 @@ export default function QaAdminTab() {
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {u.companies.map(c => (
-                      <span key={c.ucr_id} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                        {c.company_name || c.company_id.slice(0, 6)} <span style={{ color: 'var(--color-text-tertiary)' }}>· {lvlLabel(c.level)}</span>
+                      <span key={c.ucr_id} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{c.company_name || c.company_id.slice(0, 6)}</span>
+                        {c.level === 'qa_agent' ? (
+                          <span className="inline-flex items-center gap-0.5" title="Which method this agent reviews here — bind at least one or they see no tasks">
+                            {METHODS.map(([k, l]) => {
+                              const on = (c.methods || []).includes(k);
+                              return <button key={k} onClick={() => setAgentMethod(u.user_id, c.company_id, c.methods || [], k)} className="font-bold px-1 rounded uppercase text-[10px]"
+                                style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.18)' : 'rgba(217,119,6,0.18)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' } : { color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>{on ? '✓' : ''}{l}</button>;
+                            })}
+                            {!(c.methods || []).length && <span className="text-[9px]" style={{ color: 'var(--color-error-600)' }}>no method</span>}
+                          </span>
+                        ) : <span className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>MGR</span>}
                         <button onClick={() => removeAssign(c.ucr_id)} title="Remove from this company"><X size={12} style={{ color: 'var(--color-error-600)' }} /></button>
                       </span>
                     ))}

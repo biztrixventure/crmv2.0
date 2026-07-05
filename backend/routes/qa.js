@@ -1242,11 +1242,19 @@ router.get('/admin/users', asyncHandler(async (req, res) => {
     const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
     names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p)]));
   }
+  // each AGENT's bound review method(s) per company (qa_agent_methods) so
+  // compliance can finish setup (assign company + bind TRA/RCM) in one place.
+  let methodsBy = {};   // `${user_id}|${company_id}` → ['tra','rcm']
+  if (uids.length) {
+    const { data: am } = await supabaseAdmin.from('qa_agent_methods').select('user_id, company_id, method').in('user_id', uids);
+    for (const m of (am || [])) (methodsBy[`${m.user_id}|${m.company_id}`] ||= []).push(m.method);
+  }
   const byUser = {};
   for (const r of qaRows) {
+    const level = lvlOf(r.custom_roles);
     (byUser[r.user_id] ||= { user_id: r.user_id, name: names[r.user_id] || r.user_id, levels: new Set(), companies: [] });
-    byUser[r.user_id].levels.add(lvlOf(r.custom_roles));
-    byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level: lvlOf(r.custom_roles) });
+    byUser[r.user_id].levels.add(level);
+    byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level, methods: level === 'qa_agent' ? (methodsBy[`${r.user_id}|${r.company_id}`] || []) : null });
   }
   res.json({ users: Object.values(byUser).map(u => ({ ...u, levels: [...u.levels] })) });
 }));
