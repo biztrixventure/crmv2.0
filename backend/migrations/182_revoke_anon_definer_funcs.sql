@@ -21,3 +21,10 @@ GRANT EXECUTE ON FUNCTION public.rls_auto_enable() TO service_role;
 -- chat RLS helper → authenticated (for policy evaluation) + service_role; no anon
 REVOKE ALL ON FUNCTION public.is_conversation_member(uuid, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) TO authenticated, service_role;
+
+-- Pin search_path on these SECURITY DEFINER functions (prevents search_path
+-- hijacking — the advisor's function_search_path_mutable warning). They only
+-- touch public objects, so an explicit public path is behaviour-preserving.
+ALTER FUNCTION public.refresh_customer_segments()          SET search_path = public;
+ALTER FUNCTION public.rls_auto_enable()                    SET search_path = public;
+ALTER FUNCTION public.is_conversation_member(uuid, uuid)   SET search_path = public;
