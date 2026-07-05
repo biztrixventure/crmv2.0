@@ -627,6 +627,83 @@ router.get('/companies/:id/report', asyncHandler(async (req, res) => {
   });
 }));
 
+// ── GET /compliance/double-sold ───────────────────────────────────────────────
+// Cross-closer double-selling report (issue #6): customers (customer_uuid) whose
+// lead was closed_won by >= 2 distinct closer companies — a resold-lead / double
+// -dip fraud signal. Reads v_double_sold_customers (mig 184); falls back to an
+// inline group query if the view isn't applied yet (089 fallback pattern).
+router.get('/double-sold', asyncHandler(async (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+
+  let rows = null;
+  const { data: viewRows, error: viewErr } = await supabaseAdmin
+    .from('v_double_sold_customers')
+    .select('*')
+    .order('closer_company_count', { ascending: false })
+    .order('last_sale_at', { ascending: false });
+  if (!viewErr && Array.isArray(viewRows)) {
+    rows = viewRows;
+  } else {
+    // Fallback: the view isn't there yet — page sales + group in JS.
+    const all = [];
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabaseAdmin
+        .from('sales')
+        .select('customer_uuid, company_id, customer_name, normalized_phone, created_at')
+        .eq('status', 'closed_won')
+        .not('customer_uuid', 'is', null)
+        .range(from, from + 999);
+      if (error) return res.status(500).json({ error: error.message });
+      all.push(...(data || []));
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    const byUuid = new Map();
+    for (const s of all) {
+      let g = byUuid.get(s.customer_uuid);
+      if (!g) { g = { customer_uuid: s.customer_uuid, companies: new Set(), sale_count: 0, first: s.created_at, last: s.created_at, name: s.customer_name, phone: s.normalized_phone }; byUuid.set(s.customer_uuid, g); }
+      g.companies.add(s.company_id);
+      g.sale_count += 1;
+      if (s.created_at < g.first) g.first = s.created_at;
+      if (s.created_at > g.last) { g.last = s.created_at; g.name = s.customer_name; g.phone = s.normalized_phone; }
+    }
+    rows = [...byUuid.values()].filter(g => g.companies.size >= 2).map(g => ({
+      customer_uuid: g.customer_uuid, closer_company_count: g.companies.size,
+      closer_company_ids: [...g.companies], sale_count: g.sale_count,
+      first_sale_at: g.first, last_sale_at: g.last, customer_name: g.name, normalized_phone: g.phone,
+    })).sort((a, b) => b.closer_company_count - a.closer_company_count || (b.last_sale_at > a.last_sale_at ? 1 : -1));
+  }
+
+  // Resolve closer company ids → names (one batched read).
+  const coIds = [...new Set(rows.flatMap(r => r.closer_company_ids || []))];
+  let coName = {};
+  if (coIds.length) {
+    const { data: cos } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds);
+    coName = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+  }
+
+  let out = rows.map(r => ({
+    customer_uuid: r.customer_uuid,
+    customer_name: r.customer_name || null,
+    phone: r.normalized_phone || null,
+    closer_company_count: r.closer_company_count,
+    closer_companies: (r.closer_company_ids || []).map(id => coName[id] || id),
+    sale_count: r.sale_count,
+    first_sale_at: r.first_sale_at,
+    last_sale_at: r.last_sale_at,
+  }));
+
+  if (q) {
+    out = out.filter(r =>
+      (r.customer_name || '').toLowerCase().includes(q) ||
+      (r.phone || '').includes(q) ||
+      r.closer_companies.some(n => String(n).toLowerCase().includes(q)));
+  }
+
+  res.json({ customers: out, total: out.length });
+}));
+
 // ── GET /compliance/users ─────────────────────────────────────────────────────
 // Returns all users (or filtered by company) for export user-selector.
 router.get('/users', asyncHandler(async (req, res) => {

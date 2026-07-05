@@ -274,6 +274,48 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /transfers/double-sold — fronter fraud badge (issue #6)
+// Returns the caller's OWN leads whose customer was closed_won by >= 2 distinct
+// closer companies (cross-closer double-sell). Fronter sees only the COUNT of
+// closers, never which competitor companies (that detail is compliance-only).
+// Response: { uuids: { <customer_uuid>: { closer_company_count } } } so the
+// transfer list can badge matching rows. Inert (empty) until mig 184 is applied.
+// ============================================================================
+router.get('/double-sold', asyncHandler(async (req, res) => {
+  const { data: ds, error } = await supabaseAdmin
+    .from('v_double_sold_customers')
+    .select('customer_uuid, closer_company_count');
+  if (error || !Array.isArray(ds) || ds.length === 0) return res.json({ uuids: {} });
+
+  const dsUuids = ds.map(r => r.customer_uuid);
+  const countByUuid = Object.fromEntries(ds.map(r => [r.customer_uuid, r.closer_company_count]));
+
+  // Scope to the caller's OWN transfers so a fronter can't enumerate the whole
+  // company's double-sold set. fronter → own leads; managers → company leads.
+  const userRole = req.user.role;
+  const companyId = req.user.company_id;
+  let q = supabaseAdmin.from('transfers').select('customer_uuid').in('customer_uuid', dsUuids).not('customer_uuid', 'is', null);
+  if (userRole === 'fronter') {
+    q = q.eq('created_by', req.user.id);
+  } else if (['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole)) {
+    // full visibility — no extra scope (they have the compliance report anyway)
+  } else if (companyId) {
+    q = q.eq('company_id', companyId);
+  }
+
+  const { data: mine, error: mErr } = await q;
+  if (mErr) return res.json({ uuids: {} });
+
+  const out = {};
+  for (const row of (mine || [])) {
+    if (row.customer_uuid && countByUuid[row.customer_uuid] != null) {
+      out[row.customer_uuid] = { closer_company_count: countByUuid[row.customer_uuid] };
+    }
+  }
+  res.json({ uuids: out });
+}));
+
+// ============================================================================
 // GET /transfers/closers — list available closers for a fronter company
 // Returns closers from ALL active closer companies (no company_links required).
 // ============================================================================

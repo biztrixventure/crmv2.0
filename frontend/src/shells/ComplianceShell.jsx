@@ -36,6 +36,7 @@ import FAQManager         from '../components/Admin/FAQManager/FAQManager';
 import CallQuestionsManager from '../components/Compliance/CallQuestionsManager';
 import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
 import QaAdminTab          from '../components/Compliance/QaAdminTab';
+import DoubleSoldTab       from '../components/Compliance/DoubleSoldTab';
 import BatchInbox          from '../components/Distribution/BatchInbox';
 import BatchRoster         from '../components/Distribution/BatchRoster';
 
@@ -50,6 +51,7 @@ const CODE_TABS = [
   { key: 'roster',      label: 'Assigned Numbers',   icon: ListChecks },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
+  { key: 'double_sold', label: 'Double-Sold',        icon: AlertTriangle },
   { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
   { key: 'reviews',     label: 'Call Reviews',       icon: Star },
   { key: 'numbers',     label: 'Call Numbers',       icon: Hash },
@@ -69,7 +71,7 @@ const CODE_TABS = [
 // "More" so nothing can ever disappear.
 const TAB_GROUPS = [
   { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar'] },
-  { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'bulk_status'] },
+  { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'roster', 'numbers'] },
   { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs'] },
@@ -326,6 +328,7 @@ const ComplianceShell = () => {
         {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'card_validator' && <CardValidator />}
         {activeTab === 'qa_admin' && <QaAdminTab />}
+        {activeTab === 'double_sold' && <DoubleSoldTab />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

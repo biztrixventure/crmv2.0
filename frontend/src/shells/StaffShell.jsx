@@ -174,6 +174,16 @@ const StaffShell = () => {
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   const notifHook = useNotifications();
 
+  // Cross-closer double-sell badge (issue #6): map of the fronter's own leads
+  // whose customer was closed_won by >= 2 closer companies → { closer_company_count }.
+  const [doubleSold, setDoubleSold] = useState({});
+  useEffect(() => {
+    if (!isFronter) return;
+    client.get('transfers/double-sold')
+      .then(r => setDoubleSold(r.data?.uuids || {}))
+      .catch(() => setDoubleSold({}));
+  }, [isFronter, transferTotal]);
+
   const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
@@ -1825,6 +1835,17 @@ const StaffShell = () => {
                             </div>
                             <Badge variant={ds.variant} size="sm">{ds.label}</Badge>
                           </div>
+
+                          {doubleSold[t.customer_uuid] && (
+                            <div className="mt-2 flex items-center gap-1.5 px-2 py-1 rounded-lg"
+                              title="This lead was closed by multiple closer companies — possible resold/double-dipped lead"
+                              style={{ backgroundColor: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.35)' }}>
+                              <AlertTriangle size={12} style={{ color: '#EF4444', flexShrink: 0 }} />
+                              <span className="text-xs font-semibold" style={{ color: '#EF4444' }}>
+                                Double-sold — {doubleSold[t.customer_uuid].closer_company_count} closer companies
+                              </span>
+                            </div>
+                          )}
 
                           {dispoName && (
                             <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
