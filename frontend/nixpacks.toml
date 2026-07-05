@@ -7,5 +7,7 @@ cmds = ["npm install --legacy-peer-deps --no-audit --no-fund"]
 [phases.build]
 cmds = ["npm run build"]
 
+# Custom Node server: serves the static build AND injects branding/SEO/Open-Graph
+# meta per request (social link previews). Replaces `vite preview`.
 [start]
-cmd = "npm run preview -- --host 0.0.0.0 --port ${PORT:-4173}"
+cmd = "node server.cjs"

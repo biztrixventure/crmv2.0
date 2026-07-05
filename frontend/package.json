@@ -8,11 +8,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "start": "node server.cjs",
     "test": "vitest",
     "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.6",
+    "@fullcalendar/core": "^6.1.20",
     "@fullcalendar/daygrid": "^6.1.20",
     "@fullcalendar/interaction": "^6.1.20",
     "@fullcalendar/list": "^6.1.20",
@@ -22,6 +24,7 @@
     "axios": "^1.6.0",
     "cytoscape": "^3.33.3",
     "dompurify": "^3.4.5",
+    "express": "^4.22.2",
     "lucide-react": "^1.8.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

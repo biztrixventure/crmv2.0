@@ -291,6 +291,11 @@ app.use('/api/number-lists',      authMiddleware, readonlyGuard, egressAudit, nu
 app.use('/api/callback-numbers',  authMiddleware, readonlyGuard, callbackNumbersRoutes);
 app.use('/api/feature-flags',     authMiddleware, readonlyGuard, featureFlagsRoutes);
 app.use('/api/business-config',   authMiddleware, readonlyGuard, businessConfigRoutes);
+// Branding/SEO/social-preview: GET is PUBLIC (the frontend meta-injection server
+// + crawlers read it tokenless); PUT/upload are superadmin behind auth.
+const branding = require('./routes/branding');
+app.get('/api/branding', branding.publicGet);
+app.use('/api/branding', authMiddleware, readonlyGuard, branding.adminRouter);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, complianceRoutes);
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
 // QA Department — recording review + scoring. egressAudit so QA recording plays

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useContext } from "react";
+import { lazy, Suspense, useContext, useEffect } from "react";
+import { fetchBranding, applyBranding } from "./utils/branding";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
@@ -66,6 +67,11 @@ const AppContent = () => {
   const { isAuthenticated } = useAuth();
   const { isEnabled } = useFeatureFlags();
   const assistantOn = isEnabled('crm_assistant');   // superadmin system-wide toggle (Features tab)
+
+  // Apply configurable branding (tab title / favicon / meta) to the live SPA.
+  // Public endpoint — runs on login page too. Server-side injection handles the
+  // very first paint + crawlers; this keeps it correct across client nav.
+  useEffect(() => { fetchBranding().then(applyBranding).catch(() => {}); }, []);
 
   return (
     <Router>
