@@ -3,7 +3,7 @@ import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
-  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft,
+  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -552,6 +552,57 @@ function FieldRows({ title, tint, fields, onChange, extra }) {
   );
 }
 
+// The client's WaveTech sheet Call_Out_Come list (Rough Work / Fronter tabs).
+const WAVETECH_OUTCOMES = [
+  'Passed', 'Qualifying Questions Missing', 'Consent not taken properly', 'Inaccurate rebuttal',
+  'Sarcastic CX', 'NEFW', 'Defective listening', 'DAIR', 'Misguide', 'No Consent', 'Windowshop',
+  'Overeducating', 'Already Have Warranty', "Lack of cx's understanding", 'Wrong verbiage',
+  'Communication', 'Free Sense', 'Paid Off Dealership Warranty', 'Probe Missing', 'Script Bound',
+  'Incomplete Product Context', 'Multiple Parameter Issue', 'Lack of rebuttal',
+];
+
+// Editor for the sheet's "Call Outcome" dropdown — the list the reviewer picks
+// after scoring. One-click fill from the WaveTech list, add/edit/remove options.
+function CallOutcomeEditor({ value, onChange }) {
+  const co = value && typeof value === 'object' ? value : null;
+  if (!co) {
+    return (
+      <div className="rounded-xl p-3 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full" style={{ background: '#7c3aed' }} />
+          <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Call outcome</span>
+          <button onClick={() => onChange({ key: 'call_out_come', label: 'Call Outcome', options: [...WAVETECH_OUTCOMES] })}
+            className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: '#7c3aed' }}>+ add (WaveTech list)</button>
+        </div>
+        <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Optional dropdown the reviewer picks after scoring (why the call ended).</div>
+      </div>
+    );
+  }
+  const opts = Array.isArray(co.options) ? co.options : [];
+  const set = (i, v) => onChange({ ...co, options: opts.map((o, j) => j === i ? v : o) });
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-2 h-2 rounded-full" style={{ background: '#7c3aed' }} />
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Call outcome options</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{opts.length}</span>
+        <button onClick={() => onChange({ ...co, options: [...WAVETECH_OUTCOMES] })} className="text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: '#7c3aed' }} title="Load the WaveTech sheet's list">WaveTech list</button>
+        <button onClick={() => onChange({ ...co, options: [...opts, 'New outcome'] })} className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: '#7c3aed' }}>+ add</button>
+        <button onClick={() => onChange(null)} className="text-[11px] font-bold" style={{ color: 'var(--color-error-600)' }} title="Remove the call-outcome field">remove</button>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-auto">
+        {opts.map((o, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <input value={o} onChange={e => set(i, e.target.value)} style={{ ...inp, flex: 1, fontSize: 12, padding: '4px 8px' }} />
+            <button onClick={() => onChange({ ...co, options: opts.filter((_, j) => j !== i) })}><XCircle size={14} style={{ color: 'var(--color-error-600)' }} /></button>
+          </div>
+        ))}
+        {!opts.length && <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No options — add some or load the WaveTech list.</div>}
+      </div>
+    </div>
+  );
+}
+
 function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   const [cfg, setCfg] = useState(() => {
     const c = JSON.parse(JSON.stringify(scorecard.criteria || {}));
@@ -606,6 +657,7 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
         <FieldRows title="Penalty flags (Yes = deduct)" tint="#d97706" fields={cfg.penalty_flags} extra={{ kind: 'Y / N', penalty: true, defaults: { penalty: -5 } }} onChange={v => patch(n => { n.penalty_flags = v; })} />
         {hasQuality && <FieldRows title="Sale-compliance checklist (Yes / No)" tint="#059669" fields={cfg.quality_score.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.quality_score.fields = v; })} />}
         <FieldRows title="Tracking only (Yes / No, no score effect)" tint="#6b7280" fields={cfg.tracking_flags} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.tracking_flags = v; })} />
+        <CallOutcomeEditor value={cfg.call_outcome} onChange={co => patch(n => { if (co) n.call_outcome = co; else delete n.call_outcome; })} />
 
         <div className="flex items-center justify-end gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Cancel</button>
@@ -622,16 +674,24 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
 function ConfigTab({ companyId }) {
   const [cards, setCards] = useState([]);
   const [cfg, setCfg] = useState(null);
-  const [draft, setDraft] = useState({ method: 'tra', name: '', pass_threshold: 80, criteria: '[{"key":"overall","label":"Overall Call Quality","max_points":100,"auto_fail":false}]' });
+  const [draft, setDraft] = useState({ method: 'tra', name: '', pass_threshold: 80 });
   const [editing, setEditing] = useState(null);
   const loadCards = useCallback(() => client.get('qa/scorecards', { params: { company_id: companyId } }).then(r => setCards(r.data.scorecards || [])).catch(() => setCards([])), [companyId]);
   const loadCfg = useCallback(() => client.get('qa/config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({})), [companyId]);
   useEffect(() => { loadCards(); loadCfg(); }, [loadCards, loadCfg]);
 
-  const saveCard = async () => {
-    let criteria; try { criteria = JSON.parse(draft.criteria); } catch { return toast.error('Criteria must be valid JSON array'); }
-    try { await client.post('qa/scorecards', { company_id: companyId, method: draft.method, name: draft.name, pass_threshold: +draft.pass_threshold, criteria }); toast.success('Scorecard saved'); setDraft(d => ({ ...d, name: '' })); loadCards(); }
-    catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+  // Create an empty sheet-model scorecard and jump straight into the visual field
+  // builder — no raw JSON.
+  const createSheet = async () => {
+    if (!draft.name) return;
+    const starter = { model: 'sheet_v2', rating_criteria: [], autofail: { formula_type: 'all_yes', fields: [] }, penalty_flags: [], tracking_flags: [] };
+    try {
+      const r = await client.post('qa/scorecards', { company_id: companyId, method: draft.method, name: draft.name, pass_threshold: draft.pass_threshold === '' ? null : +draft.pass_threshold, criteria: starter });
+      toast.success('Scorecard created — add its fields');
+      setDraft(d => ({ ...d, name: '' }));
+      await loadCards();
+      if (r.data?.scorecard) setEditing(r.data.scorecard);
+    } catch (e) { toast.error(e.response?.data?.error || 'Create failed'); }
   };
   const setCfgKey = async (key, value) => {
     try {
@@ -694,12 +754,13 @@ function ConfigTab({ companyId }) {
           <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New scorecard</div>
           <div className="flex gap-2">
             <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp}><option value="tra">TRA</option><option value="rcm">RCM</option></select>
-            <input placeholder="Name" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ ...inp, flex: 1 }} />
-            <input type="number" title="pass %" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 64 }} />
+            <input placeholder="Name (e.g. WaveTech Fronter)" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ ...inp, flex: 1 }} />
+            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" title="pass %" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 56 }} /></label>
           </div>
-          <textarea value={draft.criteria} onChange={e => setDraft(d => ({ ...d, criteria: e.target.value }))} rows={4} style={{ ...inp, width: '100%', fontFamily: 'monospace', fontSize: 11 }} />
-          <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>criteria JSON: [{'{'}"key","label","max_points","auto_fail"{'}'}]</div>
-          <button onClick={saveCard} disabled={!draft.name} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: draft.name ? 1 : 0.5 }}>Create</button>
+          <button onClick={createSheet} disabled={!draft.name} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: draft.name ? 1 : 0.5 }}>
+            <Plus size={14} /> Create &amp; build fields
+          </button>
+          <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Creates a sheet scorecard and opens the visual builder — ratings, auto-fail, penalties, sale-compliance, tracking, and the call-outcome list. No JSON needed.</div>
         </div>
       </div>
     </div>
