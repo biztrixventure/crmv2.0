@@ -154,7 +154,10 @@ router.put('/columns', superOnly, asyncHandler(async (req, res) => {
 }));
 
 // ── list.layout config ────────────────────────────────────────────────────────
-router.get('/list-layout', superOnly, asyncHandler(async (req, res) => {
+// READ is open to any authenticated user — every shell's useListLayout hook loads
+// its list display config on mount (page size / default view). Only the PUT is
+// superadmin-gated. (Was superOnly → 403 console error for every non-super role.)
+router.get('/list-layout', asyncHandler(async (req, res) => {
   const { shell, role } = req.query;
   if (!shell || !role) return res.status(400).json({ error: 'shell and role are required' });
   const v = await getConfig(null, `list.layout.${shell}.${role}`, null);
