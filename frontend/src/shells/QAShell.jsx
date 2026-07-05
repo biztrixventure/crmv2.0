@@ -1094,6 +1094,194 @@ function CompletedTab({ managerView, companyId }) {
   );
 }
 
+// ── Agents & Fields tab (qa_manager) — bind each agent to RCM/TRA + choose which
+// customer fields show on the agent's task card. ─────────────────────────────
+const CARD_FIELDS = [
+  ['customer_name', 'Customer name'], ['customer_phone', 'Phone'], ['zip', 'ZIP'],
+  ['state', 'State'], ['address', 'Address'], ['agent', 'Agent'],
+  ['call_date', 'Call date'], ['plan', 'Plan / vehicle'],
+];
+const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true]));
+
+function AgentsTab({ companyId }) {
+  const [agents, setAgents] = useState(null);
+  const [fields, setFields] = useState(null);
+
+  const load = useCallback(() => {
+    client.get('qa/agent-methods', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => setAgents([]));
+    client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => setFields(DEFAULT_CARD_FIELDS));
+  }, [companyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const toggleMethod = async (agent, m) => {
+    const methods = agent.methods.includes(m) ? agent.methods.filter(x => x !== m) : [...agent.methods, m];
+    setAgents(list => list.map(a => a.id === agent.id ? { ...a, methods } : a));   // optimistic
+    try { await client.put('qa/agent-methods', { company_id: companyId, user_id: agent.id, methods }); }
+    catch { toast.error('Could not update methods'); load(); }
+  };
+  const toggleField = async (key) => {
+    const next = { ...fields, [key]: !fields[key] };
+    setFields(next);
+    try { await client.put('qa/config', { company_id: companyId, key: 'qa.card_fields', value: next }); }
+    catch { toast.error('Could not save fields'); load(); }
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-5">
+      {/* agent → method binding */}
+      <div>
+        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>QA agents & methods</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>An agent only sees and scores the method(s) you bind here. Bind one or both.</div>
+        {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+          : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
+          : <div className="space-y-2">
+              {agents.map(a => (
+                <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <User size={15} style={{ color: 'var(--color-text-tertiary)' }} />
+                  <div className="min-w-0 flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
+                  {['tra', 'rcm'].map(m => {
+                    const on = a.methods.includes(m);
+                    return (
+                      <button key={m} onClick={() => toggleMethod(a, m)}
+                        className="text-[11px] font-bold px-2.5 py-1 rounded uppercase"
+                        style={on
+                          ? { background: m === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: m === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' }
+                          : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>
+                        {on ? '✓ ' : ''}{m}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>}
+      </div>
+      {/* card field visibility */}
+      <div>
+        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Task card fields</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Choose which customer details show on the agent's task card / scorecard header.</div>
+        {fields === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+          : <div className="p-3 rounded-xl grid grid-cols-2 gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              {CARD_FIELDS.map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  <input type="checkbox" checked={!!fields[key]} onChange={() => toggleField(key)} /> {label}
+                </label>
+              ))}
+            </div>}
+      </div>
+    </div>
+  );
+}
+
+// ── AGENT view: a focused "My Tasks" console — only tasks a manager assigned to
+// this agent (server forces self + bound method). No pool, no dialer, no config.
+function AgentTaskCard({ a, fields, onOpen }) {
+  const show = (k) => fields[k] !== false;
+  return (
+    <button onClick={() => onOpen(a)} className="text-left w-full p-3 rounded-xl transition-shadow hover:shadow-md"
+      style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <MethodPill m={a.method} /><StatusPill s={a.status} />
+        <div className="ml-auto"><ScoreCell a={a} /></div>
+      </div>
+      {show('customer_name') && <div className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.customer_name || '—'}</div>}
+      <div className="mt-1 space-y-0.5 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>
+        {show('customer_phone') && a.customer_phone && <div className="flex items-center gap-1.5"><Phone size={12} />{a.customer_phone}</div>}
+        {(show('zip') || show('state') || show('address')) && (a.customer_zip || a.customer_state || a.customer_address) &&
+          <div className="truncate">{[show('address') && a.customer_address, show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(', ')}</div>}
+        {show('agent') && a.agent_display && <div className="flex items-center gap-1.5"><User size={12} />{a.agent_display}</div>}
+        {show('call_date') && <div className="flex items-center gap-1.5"><Calendar size={12} />{fmtDate(a.subject_date)}</div>}
+        {show('plan') && a.sale_meta && (a.sale_meta.plan || a.sale_meta.vehicle) && <div className="flex items-center gap-1.5"><Layers size={12} />{[a.sale_meta.plan, a.sale_meta.vehicle].filter(Boolean).join(' · ')}</div>}
+      </div>
+    </button>
+  );
+}
+
+function AgentTasks({ selfId, canOverride, companyId }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState('pending');
+  const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
+  const [open, setOpen] = useState(null);
+
+  useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await client.get('qa/queue', { params: { limit: 100, ...(status ? { status } : {}) } }); setItems(r.data.items || []); }
+    catch { setItems([]); }
+    finally { setLoading(false); }
+  }, [status]);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>My tasks</span>
+        <select value={status} onChange={e => setStatus(e.target.value)} style={inp}>
+          <option value="pending">To do</option><option value="in_review">In review</option><option value="scored">Scored</option><option value="">All</option>
+        </select>
+        <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{items.length} task{items.length === 1 ? '' : 's'}</span>
+      </div>
+      {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        : !items.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned to you here yet. Your QA manager assigns calls for you to review — they'll show up here.</div>
+        : <div className="flex-1 overflow-auto grid gap-2.5 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', alignContent: 'start' }}>
+            {items.map(a => <AgentTaskCard key={a.id} a={a} fields={fields} onOpen={setOpen} />)}
+          </div>}
+
+      {open && (
+        <div className="p-4 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '68vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.customer_name || 'Review'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span>
+              {open.customer_phone && <span className="text-xs font-normal ml-2" style={{ color: 'var(--color-text-tertiary)' }}>{open.customer_phone}</span>}</div>
+            <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+          </div>
+          <div className="mb-4"><div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Recordings</div><Candidates assignmentId={open.id} /></div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{open.status === 'scored' ? 'Review (submitted)' : 'Scorecard'}</div>
+            {open.status === 'scored'
+              ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
+              : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QAAgentView({ user, logout }) {
+  const [tab, setTab] = useState('tasks');
+  const [methods, setMethods] = useState(null);
+  useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
+  const tabs = [{ key: 'tasks', label: 'My Tasks', icon: ListChecks }, { key: 'reviews', label: 'My Reviews', icon: ClipboardCheck }];
+
+  return (
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-bg)' }}>
+      <header className="flex items-center gap-4 px-5 py-3 border-b" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA</div>
+        <nav className="flex items-center gap-1">
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold"
+              style={tab === t.key ? { background: 'var(--color-surface-hover)', color: 'var(--color-text)' } : { color: 'var(--color-text-secondary)' }}>
+              <t.icon size={15} />{t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-3">
+          {Array.isArray(methods) && methods.length > 0 && <span className="flex items-center gap-1">{methods.map(m => <MethodPill key={m} m={m} />)}</span>}
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
+          <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
+        </div>
+      </header>
+      <main className="flex-1 p-5 overflow-hidden">
+        {Array.isArray(methods) && methods.length === 0
+          ? <div className="text-center py-20 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Your QA manager hasn't set you up yet.<br />Once they assign you a method (RCM or TRA) and tasks, your work appears here.</div>
+          : tab === 'tasks' ? <AgentTasks selfId={user?.id} canOverride={false} companyId={user?.company_id} />
+          : <CompletedTab managerView={false} companyId={user?.company_id} />}
+      </main>
+    </div>
+  );
+}
+
 // ── Shell ─────────────────────────────────────────────────────────────────────
 export default function QAShell() {
   const { user, hasPermission, logout } = useAuth();
@@ -1104,10 +1292,15 @@ export default function QAShell() {
   const canOverride = isSuper || hasPermission('override_qa_review');
   const [tab, setTab] = useState('queue');
 
+  // A QA AGENT (no assign_qa_tasks) gets the focused, separate agent console.
+  const isManager = isSuper || canAssign;
+  if (!isManager) return <QAAgentView user={user} logout={logout} />;
+
   const canAll = isSuper || hasPermission('view_all_qa_reviews');
   const tabs = [
     { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: true },
+    { key: 'agents', label: 'Agents', icon: UserPlus, show: true },
     { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: true },
     { key: 'config', label: 'Scorecards & Config', icon: Settings2, show: canManage },
     { key: 'reports', label: 'Reports', icon: BarChart3, show: canReports },
@@ -1133,6 +1326,7 @@ export default function QAShell() {
       <main className="flex-1 p-5 overflow-hidden">
         {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
         {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={user?.company_id} />}
+        {tab === 'agents' && <AgentsTab companyId={user?.company_id} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={user?.company_id} />}
         {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab />}

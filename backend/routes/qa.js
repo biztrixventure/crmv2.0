@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -47,6 +47,94 @@ async function allowedCompanyIds(req) {
 }
 const leadDigits = (code) => { const m = String(code || '').match(/(\d+)\s*$/); return m ? m[1] : null; };
 
+// A QA MANAGER can pull the dialer, see the pool, and assign. A qa_agent cannot —
+// they only ever see tasks assigned to them, in their bound method(s).
+async function isManager(req) {
+  if (await isSuperAdmin(req.user.id)) return true;
+  return hasPermission(req.user.id, req.user.company_id, 'assign_qa_tasks');
+}
+// The method(s) a QA agent is bound to (mig 180). Empty = not set up yet → the
+// agent sees nothing until a manager binds them + assigns work.
+async function agentMethods(userId) {
+  const { data } = await supabaseAdmin.from('qa_agent_methods').select('method').eq('user_id', userId);
+  return [...new Set((data || []).map(r => r.method))];
+}
+
+// Pull a zip/state/address value out of a dynamic form_data blob by fuzzy key.
+function scanFormData(fd, kind) {
+  if (!fd || typeof fd !== 'object') return null;
+  const pats = {
+    zip:     /(^|_)(zip|postal)(_?code)?$/i,
+    state:   /(^|_)state$/i,
+    address: /(^|_)(address|street|addr)/i,
+  }[kind];
+  for (const [k, v] of Object.entries(fd)) {
+    if (v == null || v === '') continue;
+    if (pats.test(k)) return String(v).trim();
+  }
+  return null;
+}
+
+// Resolve customer identity for an assignment: CRM (transfer/sale) FIRST, then a
+// best-effort VICIdial lead_field_info fallback. Returns the denormalized columns.
+async function resolveCustomer({ companyId, transferId, saleId, phone, boxId, leadId, dialerBudget }) {
+  const out = { customer_name: null, customer_phone: phone || null, customer_zip: null, customer_state: null, customer_address: null, sale_meta: null };
+
+  // 1. CRM transfer — by id, else by normalized phone within the company.
+  let t = null;
+  if (transferId) {
+    const { data } = await supabaseAdmin.from('transfers').select('customer_name, normalized_phone, form_data').eq('id', transferId).maybeSingle();
+    t = data || null;
+  } else if (phone) {
+    const digits = String(phone).replace(/\D/g, '').slice(-10);
+    if (digits) {
+      const { data } = await supabaseAdmin.from('transfers')
+        .select('customer_name, normalized_phone, form_data')
+        .eq('company_id', companyId).ilike('normalized_phone', `%${digits}`)
+        .order('created_at', { ascending: false }).limit(1);
+      t = (data && data[0]) || null;
+    }
+  }
+  if (t) {
+    out.customer_name = t.customer_name || out.customer_name;
+    out.customer_phone = out.customer_phone || t.normalized_phone || null;
+    out.customer_zip = scanFormData(t.form_data, 'zip');
+    out.customer_state = scanFormData(t.form_data, 'state');
+    out.customer_address = scanFormData(t.form_data, 'address');
+  }
+
+  // 2. Linked sale → name/phone + plan/vehicle meta.
+  if (saleId) {
+    const { data: s } = await supabaseAdmin.from('sales').select('customer_name, customer_phone, form_data').eq('id', saleId).maybeSingle();
+    if (s) {
+      out.customer_name = out.customer_name || s.customer_name || null;
+      out.customer_phone = out.customer_phone || s.customer_phone || null;
+      const fd = s.form_data || {};
+      out.customer_zip = out.customer_zip || scanFormData(fd, 'zip');
+      out.customer_state = out.customer_state || scanFormData(fd, 'state');
+      out.customer_address = out.customer_address || scanFormData(fd, 'address');
+      out.sale_meta = { plan: fd.plan || fd.sale_plan || null, vehicle: fd.vehicle || fd.vin || null };
+    }
+  }
+
+  // 3. Dialer fallback (only if CRM gave no name AND we still have budget).
+  if (!out.customer_name && leadId && boxId && dialerBudget && dialerBudget.n > 0) {
+    dialerBudget.n -= 1;
+    const box = getBoxes().find(b => b.id === boxId);
+    if (box) {
+      const c = await leadFieldCustomer(box, leadId);
+      if (c) {
+        out.customer_name = out.customer_name || c.customer_name;
+        out.customer_phone = out.customer_phone || c.customer_phone;
+        out.customer_zip = out.customer_zip || c.customer_zip;
+        out.customer_state = out.customer_state || c.customer_state;
+        out.customer_address = out.customer_address || c.customer_address;
+      }
+    }
+  }
+  return out;
+}
+
 // ── queue ───────────────────────────────────────────────────────────────────
 router.get('/queue', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
@@ -63,13 +151,25 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const allowed = await allowedCompanyIds(req);
   if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
   if (req.query.company_id)   q = q.eq('company_id', req.query.company_id);
-  if (req.query.method)       q = q.eq('method', req.query.method);
   if (req.query.subject_role) q = q.eq('subject_role', req.query.subject_role);
   if (req.query.status)       q = q.eq('status', req.query.status);
-  if (req.query.mine === 'true')     q = q.eq('assigned_to', req.user.id);
-  if (req.query.unassigned === 'true') q = q.is('assigned_to', null);
   if (req.query.date_from)    q = q.gte('created_at', req.query.date_from);
   if (req.query.date_to)      q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
+
+  // AGENT scoping: a qa_agent only ever sees tasks assigned to THEM, and only in
+  // the method(s) a manager bound them to (mig 180). No pool, no cross-agent view.
+  const mgr = await isManager(req);
+  if (!mgr) {
+    const methods = await agentMethods(req.user.id);
+    if (!methods.length) return res.json({ items: [], total: 0, page, limit });
+    q = q.eq('assigned_to', req.user.id).in('method', methods);
+    if (req.query.method && methods.includes(req.query.method)) q = q.eq('method', req.query.method);
+  } else {
+    // MANAGER filters (pool visibility)
+    if (req.query.method)              q = q.eq('method', req.query.method);
+    if (req.query.mine === 'true')     q = q.eq('assigned_to', req.user.id);
+    if (req.query.unassigned === 'true') q = q.is('assigned_to', null);
+  }
 
   const { data, error, count } = await q;
   if (error) { logger.warn('QA', `queue: ${error.message}`); return res.status(500).json({ error: error.message }); }
@@ -107,8 +207,14 @@ router.get('/queue', asyncHandler(async (req, res) => {
     const rv = reviewByAssign[r.id] || null;
     return {
       ...r,
-      customer_name: t?.customer_name || s?.customer_name || null,
-      customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
+      // prefer the STORED enrichment (frozen at assign time, incl. day-recording
+      // rows with no CRM link); fall back to live transfer/sale hydration.
+      customer_name: r.customer_name || t?.customer_name || s?.customer_name || null,
+      customer_phone: r.customer_phone || rec?.phone || t?.normalized_phone || s?.customer_phone || null,
+      customer_zip: r.customer_zip || null,
+      customer_state: r.customer_state || null,
+      customer_address: r.customer_address || null,
+      sale_meta: r.sale_meta || null,
       subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
       agent_display: r.subject_agent || null,
@@ -124,10 +230,17 @@ router.get('/queue', asyncHandler(async (req, res) => {
 router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
   const assignedTo = req.body?.assigned_to || null;   // null clears back to the pool
-  const { data: a } = await supabaseAdmin.from('qa_assignments').select('id, company_id').eq('id', req.params.id).maybeSingle();
+  const { data: a } = await supabaseAdmin.from('qa_assignments').select('id, company_id, method').eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  // an agent can only be handed a method they're bound to (mig 180)
+  if (assignedTo) {
+    const methods = await agentMethods(assignedTo);
+    if (!methods.includes(a.method)) {
+      return res.status(400).json({ error: `This agent isn't set up for ${a.method.toUpperCase()} — bind that method to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
+    }
+  }
   const { data, error } = await supabaseAdmin.from('qa_assignments')
     .update({ assigned_to: assignedTo }).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -264,7 +377,7 @@ async function buildDispoMap(rows) {
 // loads recordings first (instant), then polls this until done, merging each
 // batch — so a full company's day fills in progressively, never timing out.
 router.get('/day-dispositions', asyncHandler(async (req, res) => {
-  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
   const date = String(req.query.date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
   const agentRes = await resolveDayAgents(req);
@@ -288,7 +401,7 @@ router.get('/day-dispositions', asyncHandler(async (req, res) => {
 // GET /qa/day-recordings?date=YYYY-MM-DD&scope=company|all&company_id=&search=
 // &dispo=0 skips the (slow) disposition enrichment for a fast first paint.
 router.get('/day-recordings', asyncHandler(async (req, res) => {
-  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
   const date = String(req.query.date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
 
@@ -416,6 +529,11 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   if (!['tra', 'rcm'].includes(method) || !recordings.length) return res.status(400).json({ error: 'method (tra|rcm) and recordings[] are required' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  // if assigning straight to an agent, they must be bound to this method (mig 180)
+  if (assigned_to) {
+    const am = await agentMethods(assigned_to);
+    if (!am.includes(method)) return res.status(400).json({ error: `This agent isn't set up for ${method.toUpperCase()} — bind that method to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
+  }
 
   const now = new Date().toISOString();
   const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
@@ -437,6 +555,19 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
     sampled: method === 'rcm', status: 'pending',
   }));
   if (!rows.length) return res.status(400).json({ error: 'No valid recordings' });
+
+  // ENRICH each row with customer identity — CRM (transfer/sale) first, VICIdial
+  // lead_field_info fallback. Bounded dialer budget so a big batch stays fast; any
+  // rows left null are re-fillable later via POST /qa/enrich-existing.
+  const dialerBudget = { n: 60 };
+  for (const row of rows) {
+    const rec = row.recording_ref || {};
+    const c = await resolveCustomer({
+      companyId, transferId: row.transfer_id, saleId: row.sale_id || null,
+      phone: rec.phone, boxId: rec.box_id, leadId: rec.lead_id, dialerBudget,
+    });
+    Object.assign(row, c);
+  }
 
   // insert; unique (method, box, recording_id) drops any already-assigned ones
   const { data, error } = await supabaseAdmin.from('qa_assignments').insert(rows, { count: 'exact' }).select('id');
@@ -901,7 +1032,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
-const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm'];
+const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;
@@ -939,6 +1070,81 @@ router.post('/materialize', asyncHandler(async (req, res) => {
   }
   const result = await materializeCompany(companyId, methods);
   res.json({ ok: true, ...result });
+}));
+
+// ── per-agent method binding (mig 180) ───────────────────────────────────────
+// GET /qa/agent-methods?company_id= — the company's QA agents + their bound
+// methods, for the manager's Agents panel.
+router.get('/agent-methods', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+
+  const { data: roles } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+  const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+  const agentIds = [...new Set((roles || []).filter(r => levelOf(r.custom_roles) === 'qa_agent').map(r => r.user_id))];
+  if (!agentIds.length) return res.json({ agents: [] });
+
+  const [{ data: profs }, { data: binds }] = await Promise.all([
+    supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', agentIds),
+    supabaseAdmin.from('qa_agent_methods').select('user_id, method').eq('company_id', companyId).in('user_id', agentIds),
+  ]);
+  const nameById = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
+  const methodsById = {};
+  for (const b of (binds || [])) (methodsById[b.user_id] ||= []).push(b.method);
+  res.json({ agents: agentIds.map(id => ({ id, name: nameById[id] || id, methods: methodsById[id] || [] })) });
+}));
+
+// PUT /qa/agent-methods { user_id, company_id, methods:['tra'|'rcm'] } — replace
+// an agent's bound methods (flexible: 0, 1, or 2).
+router.put('/agent-methods', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { user_id, company_id } = req.body || {};
+  const companyId = company_id || req.user.company_id;
+  const methods = Array.isArray(req.body?.methods) ? [...new Set(req.body.methods.filter(m => ['tra', 'rcm'].includes(m)))] : [];
+  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+
+  await supabaseAdmin.from('qa_agent_methods').delete().eq('company_id', companyId).eq('user_id', user_id);
+  if (methods.length) {
+    const rows = methods.map(m => ({ company_id: companyId, user_id, method: m, created_by: req.user.id }));
+    const { error } = await supabaseAdmin.from('qa_agent_methods').insert(rows);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  res.json({ ok: true, user_id, company_id: companyId, methods });
+}));
+
+// GET /qa/my-methods — the calling agent's own bound methods (drives their UI).
+router.get('/my-methods', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  res.json({ methods: await agentMethods(req.user.id), is_manager: await isManager(req) });
+}));
+
+// POST /qa/enrich-existing { company_id } — backfill customer fields on pending
+// assignments that still have none (CRM-first, dialer fallback). Manager-only.
+router.post('/enrich-existing', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.body?.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+
+  const { data: rows } = await supabaseAdmin.from('qa_assignments')
+    .select('id, transfer_id, sale_id, recording_ref')
+    .eq('company_id', companyId).is('customer_name', null).limit(300);
+  const dialerBudget = { n: 80 };
+  let filled = 0;
+  for (const r of (rows || [])) {
+    const rec = r.recording_ref || {};
+    const c = await resolveCustomer({ companyId, transferId: r.transfer_id, saleId: r.sale_id, phone: rec.phone, boxId: rec.box_id, leadId: rec.lead_id, dialerBudget });
+    if (c.customer_name || c.customer_phone || c.customer_zip) {
+      await supabaseAdmin.from('qa_assignments').update(c).eq('id', r.id);
+      filled++;
+    }
+  }
+  res.json({ ok: true, scanned: (rows || []).length, filled });
 }));
 
 module.exports = router;

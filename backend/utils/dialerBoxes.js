@@ -522,6 +522,41 @@ async function leadFieldStatus(box, leadId) {
   return null;
 }
 
+// Customer identity fields for a lead via lead_field_info (VICIdial has no
+// all-fields-by-lead_id call, so one request per field, run in parallel; cached
+// like the status lookup). Best-effort FALLBACK — used by QA enrichment only when
+// a recording has no CRM transfer/sale match.
+const _CUST_FIELDS = ['first_name', 'last_name', 'phone_number', 'postal_code', 'state', 'address1'];
+async function _leadFieldValue(box, leadId, field) {
+  const key = `lfv|${box.id}|${leadId}|${field}`;
+  const hit = _lssCache.get(key);
+  if (hit && Date.now() - hit.at < LSS_TTL) return hit.val;
+  let val = null;
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: field, lead_id: leadId },
+      timeout: 12000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (text && !/^ERROR|^NOTICE/i.test(text)) val = (text.split(/\r?\n/)[0].trim() || null);
+  } catch { /* box unreachable → null */ }
+  _lssCache.set(key, { at: Date.now(), val });
+  return val;
+}
+async function _customerOnBox(box, leadId) {
+  const [first, last, phone, zip, state, address] = await Promise.all(_CUST_FIELDS.map(f => _leadFieldValue(box, leadId, f)));
+  const name = [first, last].filter(Boolean).join(' ').trim() || null;
+  if (!name && !phone && !zip) return null;   // nothing useful on this box
+  return { customer_name: name, customer_phone: phone || null, customer_zip: zip || null, customer_state: state || null, customer_address: address || null };
+}
+async function leadFieldCustomer(box, leadId) {
+  if (!box || !leadId) return null;
+  let c = await _customerOnBox(box, leadId);
+  if (c) return c;
+  for (const b of BOXES) { if (b.id === box.id) continue; c = await _customerOnBox(b, leadId); if (c) return c; }
+  return null;
+}
+
 // Resolve dispositions for (boxId, leadId) pairs INCREMENTALLY. Cached-final
 // leads (incl. resolved-null) are returned instantly; up to `budget` NEW leads
 // are fetched this call. Returns { map, remaining, total } so the caller can
@@ -600,5 +635,5 @@ module.exports = {
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
-  leadFieldStatus, fillLeadStatuses, resolveDispos,
+  leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
 };
