@@ -1331,4 +1331,25 @@ router.post('/admin/users', asyncHandler(async (req, res) => {
   res.json({ ok: true, user_id: uid, generated_password: password ? undefined : pass, companies: companyIds.length });
 }));
 
+// full per-company QA config (compliance controls each company's QA setup —
+// methods, RCM sampling, covers, TRA population, retention, card fields).
+const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields'];
+router.get('/admin/company-config', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  const out = {};
+  for (const k of QA_ADMIN_KEYS) out[k] = await getConfig(companyId, k, null);
+  res.json({ company_id: companyId, config: out });
+}));
+router.put('/admin/company-config', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id, key, value } = req.body || {};
+  if (!company_id || !QA_ADMIN_KEYS.includes(key)) return res.status(400).json({ error: 'company_id + a valid qa.* key required' });
+  await setConfig(`company:${company_id}`, key, value, req.user.id);
+  let materialized = null;
+  if (key === 'qa.methods' && Array.isArray(value) && value.length) { try { materialized = await materializeCompany(company_id, value); } catch (e) { logger.warn('QA', `admin cfg materialize: ${e.message}`); } }
+  res.json({ ok: true, key, value, materialized });
+}));
+
 module.exports = router;

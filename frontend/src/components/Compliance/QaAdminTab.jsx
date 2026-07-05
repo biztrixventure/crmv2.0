@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, RefreshCw, Loader2, X, UserPlus, Search, Building2, Check } from 'lucide-react';
+import { Shield, RefreshCw, Loader2, X, UserPlus, Search, Building2, Check, Settings2, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 
@@ -16,6 +16,7 @@ const lvlLabel = (l) => (l === 'qa_manager' ? 'Manager' : 'Agent');
 export default function QaAdminTab() {
   const [companies, setCompanies] = useState(null);
   const [users, setUsers] = useState(null);
+  const [expanded, setExpanded] = useState(null);   // company id whose config is open
 
   const loadUsers = useCallback(() => client.get('qa/admin/users').then(r => setUsers(r.data.users || [])).catch(() => setUsers([])), []);
   const load = useCallback(() => {
@@ -48,20 +49,27 @@ export default function QaAdminTab() {
         <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }}><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
       </div>
 
-      {/* QA per company */}
+      {/* QA per company — enable + full config */}
       <section>
-        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Enable QA per company</div>
+        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Enable &amp; configure QA per company</div>
         {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-          : <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+          : <div className="space-y-2">
               {companies.map(co => (
-                <div key={co.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                  <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                  <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
-                  {METHODS.map(([k, l]) => {
-                    const on = co.methods.includes(k);
-                    return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
-                      style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
-                  })}
+                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-center gap-2 p-2.5">
+                    <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
+                    {METHODS.map(([k, l]) => {
+                      const on = co.methods.includes(k);
+                      return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
+                        style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
+                    })}
+                    <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Configure QA for this company" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                      <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
+                      <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
+                    </button>
+                  </div>
+                  {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} />}
                 </div>
               ))}
             </div>}
@@ -201,6 +209,42 @@ function CreateQaUser({ companies, onDone }) {
         </div>
       </div>
       <button onClick={create} disabled={busy || !f.email || !f.full_name} className="w-full px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: (busy || !f.email || !f.full_name) ? 0.5 : 1 }}>{busy ? 'Creating…' : 'Create QA person'}</button>
+    </div>
+  );
+}
+
+// ── per-company QA config (RCM sampling, covers, retention) ──────────────────
+function CompanyConfig({ companyId, methods }) {
+  const [cfg, setCfg] = useState(null);
+  useEffect(() => { client.get('qa/admin/company-config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({})); }, [companyId]);
+  const setKey = async (key, value) => {
+    setCfg(c => ({ ...c, [key]: value }));
+    try { await client.put('qa/admin/company-config', { company_id: companyId, key, value }); }
+    catch { toast.error('Save failed'); }
+  };
+  if (!cfg) return <div className="p-3" style={{ borderTop: '1px solid var(--color-border)' }}><Loader2 className="animate-spin" size={14} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  const rcm = (cfg['qa.rcm.sample'] && typeof cfg['qa.rcm.sample'] === 'object') ? cfg['qa.rcm.sample'] : { mode: 'percentage', value: 10, period: 'week' };
+  const covers = Array.isArray(cfg['qa.rcm.covers']) ? cfg['qa.rcm.covers'] : ['fronter'];
+  const retention = cfg['qa.retention_days'] ?? 2;
+  return (
+    <div className="p-3 space-y-3" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+      {methods.includes('rcm') ? (
+        <div>
+          <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RCM sampling</div>
+          <div className="flex gap-2 items-center flex-wrap">
+            <select value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}><option value="percentage">Percentage</option><option value="fixed">Fixed N</option></select>
+            <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
+            <select value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="week">per week</option><option value="day">per day</option></select>
+            <span className="text-[11px] font-bold uppercase ml-2" style={{ color: 'var(--color-text-tertiary)' }}>Covers</span>
+            {['fronter', 'closer'].map(r => <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{r}</label>)}
+          </div>
+        </div>
+      ) : <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Enable RCM above to configure sampling. TRA reviews every transfer.</div>}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Keep untouched tasks</span>
+        <input type="number" min={1} max={30} value={retention} onChange={e => setKey('qa.retention_days', Math.max(1, Math.min(30, +e.target.value || 2)))} style={{ ...inp, width: 60 }} />
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>days, then auto-purge</span>
+      </div>
     </div>
   );
 }
