@@ -33,6 +33,12 @@ const SENSITIVE_KEY = (key) =>
 const canWriteConfig = async (req, key, sa) => {
   if (sa) return true;
   if (SENSITIVE_KEY(key)) return false;
+  // Copy presets (drawer copy buttons) are a compliance/manager tool, not an
+  // access-control setting — let those roles curate their own copy formats.
+  if (/^copy_presets\./.test(key)
+      && ['compliance_manager', 'company_admin', 'operations_manager'].includes(req.user?.role)) {
+    return true;
+  }
   const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_business_rules').maybeSingle();
   if (!flagRow) return false;
   return isFeatureEnabled('tool_business_rules', req.user?.company_id || null, req.user?.id);
