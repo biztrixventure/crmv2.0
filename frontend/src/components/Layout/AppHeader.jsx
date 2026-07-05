@@ -158,19 +158,19 @@ const AppHeader = ({
                 title="View profile"
               >
                 <div className="relative flex-shrink-0">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white"
-                    style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 1px 4px rgba(168,136,92,0.4)', fontSize: '11px' }}>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+                    style={{ background: 'var(--gradient-sidebar)' }}>
                     {initials}
                   </div>
                   <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full"
                     style={{ backgroundColor: '#22c55e', border: '2px solid var(--color-surface)' }} />
                 </div>
-                <div className="min-w-0 text-left">
-                  <p className="text-xs font-semibold leading-tight truncate max-w-[130px]" style={{ color: 'var(--color-text)' }}>
+                <div className="text-right">
+                  <p className="text-xs font-semibold leading-tight truncate max-w-[240px]" style={{ color: 'var(--color-text)' }}>
                     {displayName}
                   </p>
                   {userRole && (
-                    <p className="leading-tight truncate capitalize" style={{ color: 'var(--color-text-tertiary)', fontSize: '10px' }}>
+                    <p className="text-xs leading-tight capitalize" style={{ color: 'var(--color-text-tertiary)' }}>
                       {userRole.replace(/_/g, ' ')}
                     </p>
                   )}
