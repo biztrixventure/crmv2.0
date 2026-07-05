@@ -54,7 +54,7 @@ function Rating({ value, scale = 4, onChange, disabled }) {
   const hue = Math.round(frac * 120);                    // 0=red → 120=green
   const color = v == null ? 'transparent' : `hsl(${hue},70%,45%)`;
   return (
-    <div className="relative rounded" style={{ background: v == null ? 'transparent' : `hsl(${hue},70%,45%,0.14)` }}>
+    <div className="relative rounded" style={{ background: v == null ? 'transparent' : `hsla(${hue},70%,45%,0.14)` }}>
       <select value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700 }}>
         <option value="">—</option>
         {Array.from({ length: scale + 1 }, (_, i) => <option key={i} value={i}>{i}</option>)}
