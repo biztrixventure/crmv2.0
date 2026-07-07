@@ -18,10 +18,14 @@ const SUPERADMIN_LEVELS = ['superadmin', 'readonly_admin'];
 
 const isManager    = (role) => MANAGER_LEVELS.includes(role);
 const isSuperAdmin = (role) => SUPERADMIN_LEVELS.includes(role);
-// Toggleable number-list management: super/readonly always, else the
+// Cross-company roles manage number lists for ANY company (they pick the company
+// in the UI): superadmin/readonly + compliance (compliance oversees every co).
+const CROSS_COMPANY_LEVELS = ['superadmin', 'readonly_admin', 'compliance_manager'];
+const isCrossCompany = (role) => CROSS_COMPANY_LEVELS.includes(role);
+// Toggleable number-list management: cross-company roles always, else the
 // manage_callback_numbers permission (granted to manager roles by migration 134).
 const canManage = async (req) =>
-  isSuperAdmin(req.user.role) || await hasPermission(req.user.id, req.user.company_id, 'manage_callback_numbers');
+  isCrossCompany(req.user.role) || await hasPermission(req.user.id, req.user.company_id, 'manage_callback_numbers');
 
 // Enrich rows with fronter + assigned_by names and company names
 const enrichWithNames = async (rows, includeCompany = false) => {
@@ -109,7 +113,7 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /number-lists/summary — superadmin cross-company summary with filters
 // ============================================================================
 router.get('/summary', asyncHandler(async (req, res) => {
-  if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
+  if (!isCrossCompany(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
 
   const { company_id, fronter_id, status, date_from, date_to, list_name, search } = req.query;
 
@@ -159,7 +163,7 @@ router.get('/lists', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
   const { fronter_id, assignment_day, status } = req.query;
 
-  if (!isSuperAdmin(req.user.role) && !companyId) {
+  if (!isCrossCompany(req.user.role) && !companyId) {
     return res.status(400).json({ error: 'company_id required' });
   }
 
@@ -265,7 +269,7 @@ router.get('/fronters', asyncHandler(async (req, res) => {
 // GET /number-lists/companies — all companies (superadmin only)
 // ============================================================================
 router.get('/companies', asyncHandler(async (req, res) => {
-  if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
+  if (!isCrossCompany(req.user.role)) return res.status(403).json({ error: 'Superadmin access required' });
 
   const { data, error } = await supabaseAdmin
     .from('companies')
@@ -339,7 +343,7 @@ router.put('/reassign', asyncHandler(async (req, res) => {
   if (new_assignment_day) patch.assignment_day = new_assignment_day;
 
   let q = supabaseAdmin.from('number_lists').update(patch).eq('list_name', list_name);
-  if (!isSuperAdmin(req.user.role) && companyId) q = q.eq('company_id', companyId);
+  if (!isCrossCompany(req.user.role) && companyId) q = q.eq('company_id', companyId);
   if (fronter_id)     q = q.eq('fronter_id', fronter_id);
   if (assignment_day) q = q.eq('assignment_day', assignment_day);
 
@@ -354,19 +358,25 @@ router.put('/reassign', asyncHandler(async (req, res) => {
 router.put('/:id', [
   body('status').optional().isIn(['new', 'called', 'callback', 'completed', 'skip']),
   body('notes').optional().isString(),
+  body('fronter_id').optional().isUUID(),
 ], asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { status, notes } = req.body;
+  const { status, notes, fronter_id } = req.body;
 
   const updates = { updated_at: new Date().toISOString() };
   if (status !== undefined) updates.status = status;
   if (notes  !== undefined) updates.notes  = notes;
+  // Reassign ONE number to a different fronter — a manager-only action.
+  if (fronter_id !== undefined) {
+    if (!(await canManage(req))) return res.status(403).json({ error: 'Only managers can reassign a number' });
+    updates.fronter_id = fronter_id;
+  }
 
   let query = supabaseAdmin.from('number_lists').update(updates).eq('id', id);
 
   if (!(await canManage(req))) {
     query = query.eq('fronter_id', req.user.id);
-  } else if (!isSuperAdmin(req.user.role)) {
+  } else if (!isCrossCompany(req.user.role)) {
     const companyId = req.user.company_id;
     if (companyId) query = query.eq('company_id', companyId);
   }
@@ -398,7 +408,7 @@ router.put('/:id/transfer', asyncHandler(async (req, res) => {
 
   if (!(await canManage(req))) {
     query = query.eq('fronter_id', req.user.id);
-  } else if (!isSuperAdmin(req.user.role)) {
+  } else if (!isCrossCompany(req.user.role)) {
     if (req.user.company_id) query = query.eq('company_id', req.user.company_id);
   }
 
@@ -424,7 +434,7 @@ router.delete('/batch', asyncHandler(async (req, res) => {
 
   let query = supabaseAdmin.from('number_lists').delete();
 
-  if (!isSuperAdmin(req.user.role) && companyId) query = query.eq('company_id', companyId);
+  if (!isCrossCompany(req.user.role) && companyId) query = query.eq('company_id', companyId);
 
   if (list_name) {
     query = query.eq('list_name', list_name);
@@ -440,6 +450,19 @@ router.delete('/batch', asyncHandler(async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({ message: 'Deleted' });
+}));
+
+// ============================================================================
+// DELETE /number-lists/:id — revoke ONE assigned number (managers only).
+// Defined AFTER /batch so '/batch' isn't captured as an :id.
+// ============================================================================
+router.delete('/:id', asyncHandler(async (req, res) => {
+  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage number lists' });
+  let query = supabaseAdmin.from('number_lists').delete().eq('id', req.params.id);
+  if (!isCrossCompany(req.user.role) && req.user.company_id) query = query.eq('company_id', req.user.company_id);
+  const { error } = await query;
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ message: 'Removed' });
 }));
 
 module.exports = router;

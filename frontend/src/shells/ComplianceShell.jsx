@@ -37,6 +37,7 @@ import CallQuestionsManager from '../components/Compliance/CallQuestionsManager'
 import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
 import QaAdminTab          from '../components/Compliance/QaAdminTab';
 import DoubleSoldTab       from '../components/Compliance/DoubleSoldTab';
+import NumberAssignmentPanel from '../components/Numbers/NumberAssignmentPanel';
 import BatchInbox          from '../components/Distribution/BatchInbox';
 import BatchRoster         from '../components/Distribution/BatchRoster';
 
@@ -49,6 +50,7 @@ const CODE_TABS = [
   { key: 'rec_review',  label: 'Recording Review',   icon: Headphones },
   { key: 'batches',     label: 'Batches',            icon: Building2 },
   { key: 'roster',      label: 'Assigned Numbers',   icon: ListChecks },
+  { key: 'number_lists', label: 'Number Assignment', icon: ListChecks, flag: 'number_assignment' },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
   { key: 'double_sold', label: 'Double-Sold',        icon: AlertTriangle },
@@ -73,7 +75,7 @@ const TAB_GROUPS = [
   { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar'] },
   { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
-  { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'roster', 'numbers'] },
+  { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'roster', 'number_lists', 'numbers'] },
   { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs'] },
   { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
 ];
@@ -329,6 +331,7 @@ const ComplianceShell = () => {
         {activeTab === 'card_validator' && <CardValidator />}
         {activeTab === 'qa_admin' && <QaAdminTab />}
         {activeTab === 'double_sold' && <DoubleSoldTab />}
+        {activeTab === 'number_lists' && <NumberAssignmentPanel user={user} />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

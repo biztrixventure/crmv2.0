@@ -34,6 +34,7 @@ const NAV_SECTIONS = [
       { id: 'faqs',         label: 'FAQs',         icon: HelpCircle },
       { id: 'scripts',      label: 'Scripts',      icon: MessageSquareText },
       { id: 'bulk-upload',  label: 'Bulk Upload',  icon: UploadCloud },
+      { id: 'number-lists', label: 'Number Assignment', icon: PhoneCall },
     ],
   },
   {

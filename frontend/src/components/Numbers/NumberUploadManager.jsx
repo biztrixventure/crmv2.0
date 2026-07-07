@@ -229,15 +229,22 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
       .map(row => {
         const phone = row[phoneCol]?.toString().trim();
         if (!phone) return null;
-        // Compute mapped_data for this row: all extra field mappings resolved to actual values
         const mapped_data = {};
+        // Preserve EVERY column from the file (any data) so the whole row is
+        // stored and viewable later — keyed by the file's own header names.
+        headers.forEach((h, idx) => {
+          const key = String(h || `Column ${idx + 1}`).trim();
+          const val = row[idx]?.toString().trim();
+          if (key && val) mapped_data[key] = val;
+        });
+        // Explicit transfer-field mappings (used to pre-fill a transfer) — keep
+        // these too so a mapped field is stored under its form-field name.
         Object.entries(fieldMapping).forEach(([fieldName, colIdx]) => {
           if (colIdx >= 0 && colIdx < row.length) {
             const val = row[colIdx]?.toString().trim();
             if (val) mapped_data[fieldName] = val;
           }
         });
-        // Also include customer_name from nameCol if mapped separately
         const customer_name = nameCol >= 0 ? row[nameCol]?.toString().trim() || null : null;
         if (customer_name) mapped_data['customer_name'] = customer_name;
         mapped_data['phone_number'] = phone;
@@ -297,6 +304,26 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
       setLists(prev => prev.filter(l => l.key !== list.key));
       setListNumbers(prev => { const n = { ...prev }; delete n[list.key]; return n; });
     } catch { /* non-critical */ } finally { setDeleting(null); }
+  };
+
+  // Revoke ONE number from an assignment (removes it entirely).
+  const revokeNumber = async (list, numId) => {
+    if (!window.confirm('Revoke this number from the assignment? It will be removed.')) return;
+    try {
+      await client.delete(`number-lists/${numId}`);
+      setListNumbers(prev => ({ ...prev, [list.key]: (prev[list.key] || []).filter(n => n.id !== numId) }));
+      loadLists();
+    } catch { /* non-critical */ }
+  };
+
+  // Reassign ONE number to another fronter (it leaves this list, joins theirs).
+  const reassignNumber = async (list, numId, newFronterId) => {
+    if (!newFronterId) return;
+    try {
+      await client.put(`number-lists/${numId}`, { fronter_id: newFronterId });
+      setListNumbers(prev => ({ ...prev, [list.key]: (prev[list.key] || []).filter(n => n.id !== numId) }));
+      loadLists();
+    } catch { /* non-critical */ }
   };
 
   return (
@@ -471,34 +498,28 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
             <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
               <div className="px-4 py-2 text-xs font-bold uppercase tracking-wide"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                Preview — first {Math.min(6, selectedRows.length)} of {selectedRows.length} selected rows
+                Preview — first {Math.min(6, selectedRows.length)} of {selectedRows.length} selected rows · all {headers.length} columns
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                      <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
-                      {nameCol >= 0 && <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>}
-                      {Object.entries(fieldMapping).filter(([, v]) => v >= 0).map(([fname]) => {
-                        const f = formFields.find(ff => ff.name === fname);
-                        return <th key={fname} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{f?.label || fname}</th>;
-                      })}
+                      {/* Every column of the file is shown (any data). Phone/Name columns are flagged. */}
+                      {headers.map((h, i) => (
+                        <th key={i} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                          {h || `Column ${i + 1}`}
+                          {i === phoneCol && <span className="ml-1 text-[9px] px-1 rounded" style={{ backgroundColor: '#dbeafe', color: '#2563eb' }}>phone</span>}
+                          {i === nameCol && <span className="ml-1 text-[9px] px-1 rounded" style={{ backgroundColor: '#ede9fe', color: '#7c3aed' }}>name</span>}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {previewRows.map((row, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--color-text)' }}>
-                          {row[phoneCol] || <span className="text-red-400">—</span>}
-                        </td>
-                        {nameCol >= 0 && (
-                          <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text)' }}>
-                            {row[nameCol] || '—'}
-                          </td>
-                        )}
-                        {Object.entries(fieldMapping).filter(([, v]) => v >= 0).map(([fname, colIdx]) => (
-                          <td key={fname} className="px-3 py-2 text-xs" style={{ color: 'var(--color-text)' }}>
-                            {row[colIdx] || '—'}
+                        {headers.map((h, ci) => (
+                          <td key={ci} className={`px-3 py-2 text-xs ${ci === phoneCol ? 'font-mono' : ''}`} style={{ color: 'var(--color-text)' }}>
+                            {row[ci] || <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                           </td>
                         ))}
                       </tr>
@@ -715,41 +736,61 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                             n.customer_name?.toLowerCase().includes(q))
                         : listNumbers[list.key];
                       const visible = filtered.slice(0, 25);
+                      // Every extra column from the uploaded file (any data) becomes a
+                      // column here — phone_number/customer_name are shown as Phone/Name.
+                      const DYN_SKIP = new Set(['phone_number', 'customer_name']);
+                      const dynCols = [...new Set((listNumbers[list.key] || []).flatMap(n => Object.keys(n.mapped_data || {})))].filter(k => !DYN_SKIP.has(k));
+                      const colCount = 4 + dynCols.length + 1;
                       return (
                         <div className="space-y-2">
                           <input type="text" value={listSearch} onChange={e => setListSearch(e.target.value)}
                             placeholder="Search phone or name…" className="input text-xs w-full"
                             style={{ maxWidth: 280 }} />
-                          <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+                          <div className="rounded-xl overflow-x-auto border" style={{ borderColor: 'var(--color-border)' }}>
                             <table className="w-full text-xs">
                               <thead>
                                 <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
-                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Name</th>
-                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Status</th>
-                                  <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Transfer</th>
+                                  <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Phone</th>
+                                  <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Name</th>
+                                  {dynCols.map(c => <th key={c} className="px-3 py-2 text-left font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{c}</th>)}
+                                  <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Status</th>
+                                  <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Transfer</th>
+                                  <th className="px-3 py-2 text-right font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Actions</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {visible.map(n => (
                                   <tr key={n.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                                    <td className="px-3 py-2 font-mono" style={{ color: 'var(--color-text)' }}>{n.phone_number}</td>
-                                    <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{n.customer_name || '—'}</td>
+                                    <td className="px-3 py-2 font-mono whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{n.phone_number}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{n.customer_name || '—'}</td>
+                                    {dynCols.map(c => <td key={c} className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{n.mapped_data?.[c] || '—'}</td>)}
                                     <td className="px-3 py-2">
                                       <span className="px-2 py-0.5 rounded-full text-xs font-bold"
                                         style={{ backgroundColor: STATUS_COLORS[n.status]?.bg || '#f3f4f6', color: STATUS_COLORS[n.status]?.color || '#6b7280' }}>
                                         {STATUS_COLORS[n.status]?.label || n.status}
                                       </span>
                                     </td>
-                                    <td className="px-3 py-2">
+                                    <td className="px-3 py-2 whitespace-nowrap">
                                       {n.transfer_id
                                         ? <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#059669' }}><Link2 size={10} /> Transferred</span>
                                         : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                                     </td>
+                                    <td className="px-3 py-2">
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <select defaultValue="" onChange={e => { const v = e.target.value; e.target.value = ''; reassignNumber(list, n.id, v); }}
+                                          className="input text-[11px] py-0.5" style={{ minWidth: 92 }} title="Reassign to another fronter">
+                                          <option value="">Move to…</option>
+                                          {fronters.filter(f => f.id !== list.fronter_id).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                                        </select>
+                                        <button onClick={() => revokeNumber(list, n.id)} title="Revoke number" className="p-1 rounded hover:bg-red-100">
+                                          <Trash2 size={12} style={{ color: '#ef4444' }} />
+                                        </button>
+                                      </div>
+                                    </td>
                                   </tr>
                                 ))}
                                 {visible.length === 0 && (
-                                  <tr><td colSpan={4} className="px-3 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>No numbers match.</td></tr>
+                                  <tr><td colSpan={colCount} className="px-3 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>No numbers match.</td></tr>
                                 )}
                               </tbody>
                             </table>

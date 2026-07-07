@@ -33,6 +33,8 @@ import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
+import NumberAssignmentPanel from "../components/Numbers/NumberAssignmentPanel";
+import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PaymentRemindersPanel from "../components/Payments/PaymentRemindersPanel";
@@ -47,6 +49,7 @@ import client from "../api/client";
 // ============================================================================
 const AdminPanel = () => {
   const { user, logout, hasPermission } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
@@ -129,6 +132,7 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
+    ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
   ].filter(item => {
@@ -206,6 +210,7 @@ const AdminPanel = () => {
                   {activeTab === "blacklist" && <BlacklistSettings />}
                   {activeTab === "egress"       && <EgressGovernance />}
                   {activeTab === "branding"     && <BrandingManager />}
+                  {activeTab === "number-lists" && <NumberAssignmentPanel user={user} />}
                   {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
                   <DevCredit />
                 </div>

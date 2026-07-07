@@ -282,6 +282,27 @@ const onParentOrChildChange = (state, field, nextVal, allFields, vehicleTree) =>
   return next;
 };
 
+// Full option list for a filter's multi-select control — powers the "Select all"
+// bar. Mirrors each FieldControl branch's option derivation. Returns null for
+// non-multi kinds (agent/bool/range/text), which get no bar.
+const allOptionsFor = (field, { fields, filters, vehicleTree, vehicleMakes }) => {
+  const kind = kindFor(field);
+  if (kind === 'state') return US_STATES.map(i => STATE_INITIAL_TO_FULL[i] || i);
+  if (kind === 'make') return vehicleMakes || [];
+  if (kind === 'car_model' || kind === 'sale_plan') return scopedChildOptions({ field, fields, filters, vehicleTree }) || [];
+  if (kind === 'sale_client') {
+    const planField = fields.find(f => f.field_type === 'sale_plan');
+    const mapping = Array.isArray(planField?.options) ? planField.options : [];
+    const clients = [...new Set(mapping.filter(o => o && typeof o === 'object' && o.client).map(o => String(o.client)))];
+    return clients.length ? clients : (Array.isArray(field.options) ? field.options.filter(o => typeof o === 'string') : []);
+  }
+  if (kind === 'multi' || kind === 'multi_enum') {
+    const scoped = scopedChildOptions({ field, fields, filters, vehicleTree });
+    return scoped != null ? scoped : (field._enum ? field.options : (Array.isArray(field.options) ? field.options : []));
+  }
+  return null;
+};
+
 const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree = [], fields = [], filters = {} }) => {
   const kind = kindFor(field);
   const set = (v) => onChange(v);
@@ -954,6 +975,23 @@ const DataAnalyzer = () => {
                   </div>
                   {fopen && (
                     <div className="mt-1.5">
+                      {(() => {
+                        const allOpts = allOptionsFor(f, { fields: allFilterFields, filters, vehicleTree, vehicleMakes });
+                        if (!allOpts || allOpts.length === 0) return null;
+                        const cur = Array.isArray(v) ? v : [];
+                        const allOn = allOpts.every(o => cur.includes(o)) && cur.length >= allOpts.length;
+                        return (
+                          <div className="flex items-center gap-2 mb-2">
+                            <button type="button"
+                              onClick={() => setFilters(s => onParentOrChildChange(s, f, allOn ? [] : [...allOpts], allFilterFields, vehicleTree))}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded transition-colors"
+                              style={{ backgroundColor: allOn ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', color: 'var(--color-primary-700)', border: '1px solid var(--color-border)' }}>
+                              {allOn ? 'Clear all' : `Select all (${allOpts.length})`}
+                            </button>
+                            <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{cur.length} of {allOpts.length}</span>
+                          </div>
+                        );
+                      })()}
                       <FieldControl
                         field={f}
                         value={v}
