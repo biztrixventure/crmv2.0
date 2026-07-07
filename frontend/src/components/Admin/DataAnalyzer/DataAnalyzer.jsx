@@ -570,15 +570,18 @@ const DataAnalyzer = () => {
   const cfg = DATASETS[dataset];
 
   // Status filter options come from the CONFIGURABLE status catalogs (SuperAdmin
-  // → Business Rules), NOT a hardcoded list — so enabling/disabling/adding a
-  // status there flows straight into the analyzer's Status filter.
-  const { allStatuses: saleStatuses } = useComplianceStatuses();
-  const { allStatuses: transferStatuses } = useTransferStatuses();
+  // → Business Rules), NOT a hardcoded list — so adding a status there flows
+  // straight into the analyzer. We use the FULL catalog (every key, enabled or
+  // not) rather than the enabled-only set: this is a retrospective analysis tool,
+  // so a status the admin later disabled must still be filterable for the
+  // historical rows that carry it (no capability lost vs the old hardcoded list).
+  const { catalog: saleCatalog } = useComplianceStatuses();
+  const { catalog: transferCatalog } = useTransferStatuses();
   const statusField = useMemo(() => ({
     name: 'status', label: 'Status', field_type: 'sale_status',
-    options: dataset === 'sales' ? saleStatuses : transferStatuses,
+    options: [...new Set((dataset === 'sales' ? saleCatalog : transferCatalog).map(s => s.key))],
     _enum: true,
-  }), [dataset, saleStatuses, transferStatuses]);
+  }), [dataset, saleCatalog, transferCatalog]);
 
   // Group-by + breakdown
   const [groupBy, setGroupBy] = useState(cfg.groupOptions[0].value);
