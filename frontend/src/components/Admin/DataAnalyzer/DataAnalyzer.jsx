@@ -4,6 +4,8 @@ import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download,
 import client from '../../../api/client';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 import SendBatchModal from '../../Distribution/SendBatchModal';
+import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
+import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic
@@ -109,15 +111,14 @@ const kindFor = (f) => {
   }
 };
 
-const SALE_STATUSES     = ['open', 'pending_review', 'closed_won', 'closed_lost', 'sold', 'cancelled', 'follow_up', 'needs_revision'];
-const TRANSFER_STATUSES = ['pending', 'assigned', 'completed', 'rejected', 'cancelled'];
-
 // Datasets share the same filter UI (form_fields) but get dataset-specific
-// extras like the always-on Status filter and the group-by candidates.
+// extras like the group-by candidates. The Status filter's options are NOT
+// hardcoded here — they come from the configurable status catalogs
+// (compliance.status_catalog / transfer.status_catalog) via the status hooks,
+// resolved into a dynamic statusField inside the component.
 const DATASETS = {
   sales: {
     label: 'Sales', icon: DollarSign,
-    statusField: { name: 'status', label: 'Status', field_type: 'sale_status', options: SALE_STATUSES, _enum: true },
     columns: [
       { key: 'customer_name', label: 'Customer' },
       { key: 'customer_phone', label: 'Phone' },
@@ -144,7 +145,6 @@ const DATASETS = {
   },
   transfers: {
     label: 'Transfers', icon: Send,
-    statusField: { name: 'status', label: 'Status', field_type: 'sale_status', options: TRANSFER_STATUSES, _enum: true },
     columns: [
       { key: '_customer', label: 'Customer', render: r => r.form_data?.customer_name || r.form_data?.FirstName || '—' },
       { key: 'normalized_phone', label: 'Phone' },
@@ -569,6 +569,17 @@ const DataAnalyzer = () => {
 
   const cfg = DATASETS[dataset];
 
+  // Status filter options come from the CONFIGURABLE status catalogs (SuperAdmin
+  // → Business Rules), NOT a hardcoded list — so enabling/disabling/adding a
+  // status there flows straight into the analyzer's Status filter.
+  const { allStatuses: saleStatuses } = useComplianceStatuses();
+  const { allStatuses: transferStatuses } = useTransferStatuses();
+  const statusField = useMemo(() => ({
+    name: 'status', label: 'Status', field_type: 'sale_status',
+    options: dataset === 'sales' ? saleStatuses : transferStatuses,
+    _enum: true,
+  }), [dataset, saleStatuses, transferStatuses]);
+
   // Group-by + breakdown
   const [groupBy, setGroupBy] = useState(cfg.groupOptions[0].value);
   const [breakdown, setBreakdown] = useState(null);
@@ -662,8 +673,8 @@ const DataAnalyzer = () => {
 
   // Status + Disposition + Agents are always present (dataset-specific); before form_fields.
   const allFilterFields = useMemo(
-    () => [cfg.statusField, dispositionField, ...agentFields, ...fields],
-    [cfg, dispositionField, agentFields, fields],
+    () => [statusField, dispositionField, ...agentFields, ...fields],
+    [statusField, dispositionField, agentFields, fields],
   );
 
   // Apply the saved drag-and-drop order; new/unordered fields fall to the end.
