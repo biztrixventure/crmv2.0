@@ -49,9 +49,15 @@ router.get('/upcoming', asyncHandler(async (req, res) => {
   const { data, error } = await q.limit(500);
   if (error) return res.status(500).json({ error: error.message });
 
+  // Client scope (superadmin setting): when set, ONLY these clients' reminders
+  // are shown — to closers and everyone else. Case-insensitive to absorb the
+  // client_name casing drift ("Steve Mtm" vs "Steve MTM"). Empty = all clients.
+  let rows = data || [];
+  const scope = new Set((cfg.clientFilter || []).map(c => String(c).toLowerCase()));
+  if (scope.size) rows = rows.filter(r => scope.has(String(r.sales?.client_name || '').toLowerCase()));
+
   // Attach the responsible closer's name + the company name (no FK from
   // payment_followups, so resolve in two batched lookups).
-  const rows = data || [];
   const closerIds  = [...new Set(rows.map(r => r.closer_id).filter(Boolean))];
   const companyIds = [...new Set(rows.map(r => r.company_id).filter(Boolean))];
   const [closers, companies] = await Promise.all([
@@ -133,6 +139,8 @@ router.put('/settings', asyncHandler(async (req, res) => {
   // recency window: how many months back to chase closed sales (1..12)
   if (b.window_months !== undefined)      await setConfig('global', `${CFG}.window_months`, Math.max(1, Math.min(parseInt(b.window_months, 10) || 2, 12)), req.user.id);
   if (Array.isArray(b.notify_roles))      await setConfig('global', `${CFG}.notify_roles`, [...new Set(b.notify_roles.filter(r => ROLES.includes(r)))], req.user.id);
+  // client scope: only these clients' policies generate/show reminders. Empty = all.
+  if (Array.isArray(b.client_filter))     await setConfig('global', `${CFG}.client_filter`, [...new Set(b.client_filter.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()))], req.user.id);
   res.json(await settings());
 }));
 

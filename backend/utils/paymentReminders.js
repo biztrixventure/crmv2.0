@@ -95,14 +95,21 @@ function monthsAgo(n, from = new Date()) {
 // ── config ──────────────────────────────────────────────────────────────────
 async function settings() {
   const wm = parseInt(await getConfig(null, `${CFG}.window_months`, 2), 10);
+  const cf = await getConfig(null, `${CFG}.client_filter`, []);
   return {
     enabled:      await getConfig(null, `${CFG}.enabled`, true),
     // recency window: only sales CLOSED within the last N months are chased for a
     // monthly payment (default 2). Clamped 1..12.
     windowMonths: Math.max(1, Math.min(Number.isFinite(wm) ? wm : 2, 12)),
     notifyRoles:  await getConfig(null, `${CFG}.notify_roles`, ['closer']),
+    // Client scope: when non-empty, ONLY these clients' policies generate/show
+    // reminders (matched case-insensitively). Empty = every client (default).
+    clientFilter: Array.isArray(cf) ? cf.filter(x => typeof x === 'string' && x.trim()) : [],
   };
 }
+
+// Lowercased Set of the configured client scope (empty Set = no scoping).
+const clientScopeSet = (cfg) => new Set((cfg.clientFilter || []).map(c => String(c).toLowerCase()));
 
 // Active policy = closed_won, not superseded. (pending_review intentionally out.)
 const ACTIVE = (q) => q.eq('status', 'closed_won').is('superseded_by', null);
@@ -121,15 +128,18 @@ async function runPaymentReminderScan() {
   // Active policies closed within the recency window, with a monthly payment.
   const { data: sales, error } = await ACTIVE(
     supabaseAdmin.from('sales')
-      .select('id, company_id, closer_id, customer_uuid, customer_name, sale_date, monthly_payment, payment_due_note')
+      .select('id, company_id, closer_id, customer_uuid, customer_name, client_name, sale_date, monthly_payment, payment_due_note')
   ).gte('sale_date', cutoff).limit(50000);
   if (error) { logger.warn('PAY_REMINDER', `scan query failed: ${error.message}`); return { error: error.message }; }
 
+  const scope = clientScopeSet(cfg);   // client-scope filter (case-insensitive)
   const now = new Date().toISOString();
   const rows = [];
   const byCloser = new Map();   // closer_id → { companyId, count }
   for (const s of (sales || [])) {
     if (s.monthly_payment == null || +s.monthly_payment <= 0) continue;
+    // Client scope: skip policies whose client isn't in the configured set.
+    if (scope.size && !scope.has(String(s.client_name || '').toLowerCase())) continue;
     const due = nextPaymentDue(s.sale_date, today, billingDayFromNote(s.payment_due_note));   // next monthly due on/after today
     if (!due) continue;
     rows.push({ sale_id: s.id, company_id: s.company_id, closer_id: s.closer_id, customer_uuid: s.customer_uuid, due_date: isoDate(due), status: 'pending', updated_at: now });

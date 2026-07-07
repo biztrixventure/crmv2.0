@@ -302,11 +302,19 @@ function SuperSettings({ onSaved }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg]   = useState(null);
   const [saved, setSaved] = useState(false);
+  const [clients, setClients] = useState([]);   // configured client catalog
 
   useEffect(() => {
-    if (!open || cfg) return;
-    client.get('payment-reminders/settings').then(r => setCfg(r.data)).catch(() => setCfg({ enabled: true, windowMonths: 2, notifyRoles: ['closer'] }));
-  }, [open, cfg]);
+    if (!open) return;
+    if (!cfg) client.get('payment-reminders/settings').then(r => setCfg(r.data)).catch(() => setCfg({ enabled: true, windowMonths: 2, notifyRoles: ['closer'], clientFilter: [] }));
+    if (!clients.length) client.get('sale-configs?type=client').then(r => setClients((r.data.configs || []).map(c => c.value))).catch(() => {});
+  }, [open, cfg, clients.length]);
+
+  const toggleClient = (name) => setCfg(prev => {
+    const cur = prev.clientFilter || [];
+    const has = cur.some(x => x.toLowerCase() === name.toLowerCase());
+    return { ...prev, clientFilter: has ? cur.filter(x => x.toLowerCase() !== name.toLowerCase()) : [...cur, name] };
+  });
 
   const save = async () => {
     try {
@@ -314,6 +322,7 @@ function SuperSettings({ onSaved }) {
         enabled: cfg.enabled,
         window_months: cfg.windowMonths || 2,
         notify_roles: cfg.notifyRoles,
+        client_filter: cfg.clientFilter || [],
       });
       setSaved(true); setTimeout(() => setSaved(false), 1500); onSaved?.();
     } catch { /* ignore */ }
@@ -341,6 +350,38 @@ function SuperSettings({ onSaved }) {
               <span style={{ color: 'var(--color-text-tertiary)' }}>month(s)</span>
             </div>
           </div>
+          {/* Client scope — pick clients to send reminders for ONLY those, to the closers. */}
+          <div className="rounded-lg p-2.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+              Client scope {(cfg.clientFilter || []).length > 0 && <span className="font-normal" style={{ color: 'var(--color-primary-700)' }}>· {(cfg.clientFilter || []).length} selected</span>}
+            </div>
+            <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+              Select one or more clients to chase reminders for <strong>only those clients</strong> (shown to their closers). None selected = all clients.
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {clients.length === 0
+                ? <span className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No clients configured (Admin → Clients).</span>
+                : clients.map(c => {
+                  const on = (cfg.clientFilter || []).some(x => x.toLowerCase() === c.toLowerCase());
+                  return (
+                    <button key={c} type="button" onClick={() => toggleClient(c)}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-md transition-colors"
+                      style={{
+                        backgroundColor: on ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+                        color: on ? '#fff' : 'var(--color-text-secondary)',
+                        border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+                      }}>
+                      {c}
+                    </button>
+                  );
+                })}
+            </div>
+            {(cfg.clientFilter || []).length > 0 && (
+              <button type="button" onClick={() => setCfg(prev => ({ ...prev, clientFilter: [] }))}
+                className="mt-2 text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Clear — show all clients</button>
+            )}
+          </div>
+
           <div className="text-sm">
             <span style={{ color: 'var(--color-text-secondary)' }}>Also notify (the closer is always notified):</span>
             <div className="flex flex-wrap gap-3 mt-1">
