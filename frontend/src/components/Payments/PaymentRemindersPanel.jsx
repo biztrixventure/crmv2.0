@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { CalendarClock, Phone, CheckCircle, AlertTriangle, XCircle, Settings2, DollarSign, RefreshCw } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -33,6 +33,27 @@ export default function PaymentRemindersPanel() {
   const [busy, setBusy]       = useState(null);
   const [selected, setSelected] = useState(null);   // row open in the detail drawer
   const [noteText, setNoteText] = useState('');
+  const [clientFilter, setClientFilter] = useState(null);   // pick a client → only its reminders
+
+  // Distinct clients present in the loaded reminders, grouped case-insensitively
+  // (client_name drifts in casing — "Steve Mtm" vs "Steve MTM" — so fold them
+  // into one chip). Each chip carries its count.
+  const clients = useMemo(() => {
+    const seen = new Map();   // lowerName → { label, count }
+    rows.forEach(r => {
+      const c = r.sales?.client_name;
+      if (!c || !String(c).trim() || c === '-') return;
+      const k = String(c).toLowerCase();
+      const hit = seen.get(k);
+      if (hit) hit.count += 1; else seen.set(k, { label: c, count: 1 });
+    });
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  const visibleRows = useMemo(
+    () => clientFilter ? rows.filter(r => (r.sales?.client_name || '').toLowerCase() === clientFilter.toLowerCase()) : rows,
+    [rows, clientFilter],
+  );
 
   const load = useCallback(() => {
     setLoading(true); setMsg(null);
@@ -80,12 +101,44 @@ export default function PaymentRemindersPanel() {
 
       {msg && <p className="text-sm font-semibold" style={{ color: msg.type === 'err' ? '#dc2626' : '#16a34a' }}>{msg.text}</p>}
 
+      {/* Client filter — click a client to show only that client's reminders. */}
+      {clients.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-bold uppercase tracking-wide mr-1" style={{ color: 'var(--color-text-tertiary)' }}>Client</span>
+          <button onClick={() => setClientFilter(null)}
+            className="text-xs font-semibold px-2.5 py-1 rounded-full transition-colors"
+            style={{
+              backgroundColor: !clientFilter ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+              color: !clientFilter ? '#fff' : 'var(--color-text-secondary)',
+              border: `1px solid ${!clientFilter ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+            }}>
+            All <span style={{ opacity: 0.7 }}>({rows.length})</span>
+          </button>
+          {clients.map(c => {
+            const on = clientFilter && clientFilter.toLowerCase() === c.label.toLowerCase();
+            return (
+              <button key={c.label} onClick={() => setClientFilter(on ? null : c.label)}
+                className="text-xs font-semibold px-2.5 py-1 rounded-full transition-colors"
+                style={{
+                  backgroundColor: on ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
+                  color: on ? '#fff' : 'var(--color-text-secondary)',
+                  border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+                }}>
+                {c.label} <span style={{ opacity: 0.7 }}>({c.count})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
-      ) : rows.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <div className="rounded-xl border p-12 text-center" style={{ borderColor: 'var(--color-border)' }}>
           <CheckCircle size={40} className="mx-auto mb-3" style={{ color: '#16a34a' }} />
-          <p style={{ color: 'var(--color-text-secondary)' }}>{isCompliance ? 'No payments flagged at risk.' : 'Nothing due in this window — all caught up.'}</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>
+            {clientFilter ? `No reminders for ${clientFilter} in this window.` : isCompliance ? 'No payments flagged at risk.' : 'Nothing due in this window — all caught up.'}
+          </p>
         </div>
       ) : (
         <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
@@ -100,7 +153,7 @@ export default function PaymentRemindersPanel() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => {
+              {visibleRows.map(r => {
                 const s = r.sales || {};
                 const st = STATUS[r.status] || STATUS.pending;
                 const d = daysUntil(r.due_date);

@@ -111,10 +111,12 @@ function applyFilter(query, f, cfg) {
       // selection grabs both. Detection by name pattern keeps the matching
       // logic out of the per-field config — any field whose key contains
       // "make" or "model" gets the looser comparison.
-      // Case-insensitive match for make/model AND plan — stored values drift in
-      // casing/spelling ("Premium" vs "premium"), so exact in() drops rows that
-      // really exist. ilike-OR matches them all.
-      const isMakeOrModel = /\b(make|model)\b/i.test(f.field) || /plan/i.test(f.field);
+      // Case-insensitive match for make/model, plan AND client — stored values
+      // drift in casing/spelling ("Premium" vs "premium"; config "Steve MTM" vs
+      // stored "Steve Mtm"), so exact in() drops rows that really exist (e.g. the
+      // client filter returned 0 for every client whose casing differed from the
+      // plan-config spelling). ilike-OR matches them all.
+      const isMakeOrModel = /\b(make|model)\b/i.test(f.field) || /plan/i.test(f.field) || /client/i.test(f.field);
       if (isMakeOrModel && isTyped) {
         // Typed column → OR-of-ilike works without JSONB quirks. Quote the
         // value so spaces / commas in entries like "Land Rover" don't split
