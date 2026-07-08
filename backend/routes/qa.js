@@ -342,6 +342,81 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
   return pipe(url, false);
 }));
 
+// ── on-demand transcription (self-hosted faster-whisper worker) ───────────────
+// A reviewer clicks "Transcribe" on a specific recording leg → we resolve the
+// audio (same as the stream proxy), fetch the bytes, hand them to the whisper
+// worker, and CACHE the text keyed by the recording identity so repeat opens are
+// instant. Audio is never stored — only the transcript text. Gated by the
+// qa.transcription flag (default OFF) + a configured worker URL.
+const recKey = (q) => `${q.box_id || ''}:${q.recording_id || ''}`;
+
+// GET cached transcript for a recording (drives "show if already transcribed").
+router.get('/recordings/transcript', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const { data } = await supabaseAdmin.from('qa_transcripts')
+    .select('*').eq('recording_key', recKey(req.query)).maybeSingle();
+  res.json({ transcript: data || null });
+}));
+
+// POST transcribe ONE recording leg (cache-first).
+router.post('/recordings/transcribe', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+
+  // company override → global → off. Superadmin sets it globally, or a manager
+  // per-company via PUT /qa/config.
+  const enabled = await getConfig(req.user.company_id, 'qa.transcription', false);
+  if (!enabled) return res.status(403).json({ error: 'Transcription is turned off.' });
+  const workerUrl = (process.env.WHISPER_WORKER_URL || '').replace(/\/$/, '');
+  if (!workerUrl) return res.status(503).json({ error: 'Transcription worker is not configured.' });
+
+  const { box_id, lead_id, recording_id, location } = req.body || {};
+  if (!recording_id && !location) return res.status(400).json({ error: 'recording_id or location required' });
+  const key = recKey({ box_id, recording_id });
+
+  // Cache-first: never re-transcribe a clip we already have.
+  const { data: cached } = await supabaseAdmin.from('qa_transcripts').select('*').eq('recording_key', key).maybeSingle();
+  if (cached) return res.json({ cached: true, transcript: cached });
+
+  // Resolve the audio URL (same path as the stream proxy).
+  let url = (location && /^https?:\/\//.test(location)) ? location : await locationForRecording({ box_id, lead_id, recording_id });
+  if (!url) return res.status(404).json({ error: 'Recording not found' });
+
+  // Fetch the audio bytes (proxied from the dialer; not stored).
+  let audio;
+  try {
+    const up = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000, validateStatus: s => s >= 200 && s < 400 });
+    audio = Buffer.from(up.data);
+  } catch (e) { logger.warn('QA', `transcribe fetch audio: ${e.message}`); return res.status(502).json({ error: 'Could not load the recording audio.' }); }
+  if (!audio?.length) return res.status(502).json({ error: 'Recording audio was empty.' });
+
+  // Hand the bytes to the whisper worker.
+  let result;
+  try {
+    const fd = new FormData();
+    fd.append('audio', new Blob([audio], { type: 'audio/mpeg' }), 'recording.mp3');
+    const r = await axios.post(`${workerUrl}/transcribe`, fd, {
+      headers: { Authorization: `Bearer ${process.env.WHISPER_TOKEN || ''}` },
+      timeout: 300000, maxBodyLength: Infinity, maxContentLength: Infinity,
+    });
+    result = r.data || {};
+  } catch (e) {
+    logger.error('QA', `transcribe worker: ${e.response?.data?.detail || e.message}`);
+    return res.status(502).json({ error: 'Transcription failed — the worker did not respond.' });
+  }
+
+  // Cache the TEXT (audio discarded). Upsert so a race just no-ops the 2nd write.
+  const row = {
+    recording_key: key, box_id: box_id || null, recording_id: recording_id || null, lead_id: lead_id || null,
+    language: result.language || null, duration: result.duration ?? null,
+    text: result.text || '', segments: Array.isArray(result.segments) ? result.segments : null,
+    created_by: req.user.id,
+  };
+  const { data: saved, error: sErr } = await supabaseAdmin.from('qa_transcripts')
+    .upsert(row, { onConflict: 'recording_key' }).select().single();
+  if (sErr) { logger.warn('QA', `transcribe save: ${sErr.message}`); return res.json({ cached: false, transcript: row }); }
+  res.json({ cached: false, transcript: saved });
+}));
+
 // ── agent-id resolution for the day-recording browser ────────────────────────
 // company scope = agent ids of the company's users; all scope = every mapped id.
 async function agentIdsForCompany(companyId) {
@@ -1088,7 +1163,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
-const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days'];
+const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;

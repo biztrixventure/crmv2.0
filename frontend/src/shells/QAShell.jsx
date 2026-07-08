@@ -40,15 +40,34 @@ function Candidates({ assignmentId }) {
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [loadingId, setLoadingId] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
+  const [canTranscribe, setCanTranscribe] = useState(false);   // qa.transcription flag
+  const [txById, setTxById]   = useState({});   // recording_id → transcript
+  const [txBusy, setTxBusy]   = useState(null); // recording_id being transcribed
+  const [txOpen, setTxOpen]   = useState({});   // recording_id → panel open
 
   useEffect(() => {
     let dead = false;
-    setRows(null);
+    setRows(null); setTxById({}); setTxOpen({});
     client.get(`qa/assignments/${assignmentId}/candidates`)
       .then(r => { if (!dead) setRows(r.data.candidates || []); })
       .catch(() => { if (!dead) setRows([]); });
+    // Is on-demand transcription turned on? (default OFF)
+    client.get('qa/config').then(r => { if (!dead) setCanTranscribe(!!r.data?.config?.['qa.transcription']); }).catch(() => {});
     return () => { dead = true; if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
   }, [assignmentId]);
+
+  // On-demand: transcribe THIS clip (cache-first on the server). Toggle the panel
+  // if we already have it.
+  const transcribe = async (c) => {
+    if (txById[c.recording_id]) { setTxOpen(o => ({ ...o, [c.recording_id]: !o[c.recording_id] })); return; }
+    setTxBusy(c.recording_id);
+    try {
+      const r = await client.post('qa/recordings/transcribe', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location });
+      setTxById(m => ({ ...m, [c.recording_id]: r.data?.transcript || { text: '' } }));
+      setTxOpen(o => ({ ...o, [c.recording_id]: true }));
+    } catch (e) { toast.error(e.response?.data?.error || 'Transcription failed'); }
+    finally { setTxBusy(null); }
+  };
 
   const play = async (c) => {
     const a = audioRef.current; if (!a) return;
@@ -67,17 +86,41 @@ function Candidates({ assignmentId }) {
   if (!rows.length) return <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No recordings found on the dialer for this call.</div>;
   return (
     <div className="space-y-2">
-      {rows.map(c => (
-        <div key={c.box_id + c.recording_id} className="flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <button onClick={() => play(c)} className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
-            {loadingId === c.recording_id ? <Loader2 size={15} className="animate-spin" color="#fff" /> : playingRid === c.recording_id ? <Pause size={15} color="#fff" /> : <Play size={15} color="#fff" />}
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{fmtDur(c.duration)} <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>· {c.agent_user || 'agent ?'}</span></div>
-            <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
+      {rows.map(c => {
+        const tx = txById[c.recording_id];
+        const open = !!txOpen[c.recording_id];
+        return (
+        <div key={c.box_id + c.recording_id} className="rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="flex items-center gap-3 p-2.5">
+            <button onClick={() => play(c)} className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
+              {loadingId === c.recording_id ? <Loader2 size={15} className="animate-spin" color="#fff" /> : playingRid === c.recording_id ? <Pause size={15} color="#fff" /> : <Play size={15} color="#fff" />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{fmtDur(c.duration)} <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>· {c.agent_user || 'agent ?'}</span></div>
+              <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
+            </div>
+            {canTranscribe && (
+              <button onClick={() => transcribe(c)} disabled={txBusy === c.recording_id}
+                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 inline-flex items-center gap-1 disabled:opacity-60"
+                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}
+                title="Transcribe this recording">
+                {txBusy === c.recording_id
+                  ? <><Loader2 size={12} className="animate-spin" /> Transcribing…</>
+                  : tx ? (open ? 'Hide transcript' : 'View transcript') : 'Transcribe'}
+              </button>
+            )}
           </div>
+          {tx && open && (
+            <div className="px-3 pb-3">
+              <div className="text-xs whitespace-pre-wrap rounded-lg p-2.5 max-h-60 overflow-y-auto leading-relaxed"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
+                {tx.text ? tx.text : <span className="italic" style={{ color: 'var(--color-text-tertiary)' }}>No speech detected in this clip.</span>}
+              </div>
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
       <audio ref={audioRef} controls className="w-full mt-1" onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)} />
     </div>
   );
