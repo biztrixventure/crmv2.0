@@ -1,4 +1,9 @@
+# faster-whisper 1.0.3 does `import requests` and expects the huggingface-hub 0.x
+# API. huggingface-hub 1.x dropped `requests` (moved to httpx) and changed APIs,
+# which breaks the model download — so pin hub < 1.0 and add requests explicitly.
 faster-whisper==1.0.3
+huggingface-hub>=0.20,<1.0
+requests>=2.31.0
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
