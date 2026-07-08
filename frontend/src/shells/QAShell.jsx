@@ -34,6 +34,42 @@ const StatusPill = ({ s }) => {
   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color }}>{label}</span>;
 };
 
+// Transcript with karaoke-style word highlighting. Words carry start/end (from
+// the whisper worker); as the recording plays we highlight the current word and
+// auto-scroll it into view. Click any word to jump the audio there. Falls back
+// to plain text for older transcripts saved without word timestamps.
+function TranscriptView({ tx, active, curTime, onSeek }) {
+  const activeRef = useRef(null);
+  const words = [];
+  (Array.isArray(tx?.segments) ? tx.segments : []).forEach((s, si) =>
+    (s.words || []).forEach((w, wi) => words.push({ ...w, key: si + '-' + wi })));
+  const activeIdx = active ? words.findIndex(w => curTime >= w.start && curTime < w.end) : -1;
+  useEffect(() => { if (activeRef.current) activeRef.current.scrollIntoView({ block: 'nearest' }); }, [activeIdx]);
+
+  const box = { background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' };
+  if (!words.length) {
+    return (
+      <div className="text-xs whitespace-pre-wrap rounded-lg p-2.5 max-h-60 overflow-y-auto leading-relaxed" style={box}>
+        {tx?.text ? tx.text : <span className="italic" style={{ color: 'var(--color-text-tertiary)' }}>No speech detected in this clip.</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="text-xs rounded-lg p-2.5 max-h-60 overflow-y-auto leading-relaxed" style={box}>
+      {words.map((w, i) => {
+        const on = i === activeIdx;
+        return (
+          <span key={w.key} ref={on ? activeRef : null} onClick={() => onSeek(w.start)} title="Jump to this word"
+            className="cursor-pointer rounded transition-colors"
+            style={{ backgroundColor: on ? 'var(--color-primary-500, #6366f1)' : 'transparent', color: on ? '#fff' : 'inherit', padding: on ? '0 2px' : 0 }}>
+            {w.text}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── candidate audio player (blob-streamed with auth, like RecordingReviewTab) ──
 function Candidates({ assignmentId }) {
   const [rows, setRows] = useState(null);
@@ -44,10 +80,12 @@ function Candidates({ assignmentId }) {
   const [txById, setTxById]   = useState({});   // recording_id → transcript
   const [txBusy, setTxBusy]   = useState(null); // recording_id being transcribed
   const [txOpen, setTxOpen]   = useState({});   // recording_id → panel open
+  const [curTime, setCurTime] = useState(0);    // player position → drives word highlight
+  const [audioRid, setAudioRid] = useState(null); // rid currently loaded in the <audio>
 
   useEffect(() => {
     let dead = false;
-    setRows(null); setTxById({}); setTxOpen({});
+    setRows(null); setTxById({}); setTxOpen({}); setAudioRid(null); setCurTime(0);
     client.get(`qa/assignments/${assignmentId}/candidates`)
       .then(r => { if (!dead) setRows(r.data.candidates || []); })
       .catch(() => { if (!dead) setRows([]); });
@@ -69,15 +107,22 @@ function Candidates({ assignmentId }) {
     finally { setTxBusy(null); }
   };
 
-  const play = async (c) => {
+  // seekTo (seconds) lets a transcript word click jump the audio to that word.
+  const play = async (c, seekTo = null) => {
     const a = audioRef.current; if (!a) return;
-    if (a.dataset.rid === c.recording_id) { a.paused ? a.play() : a.pause(); return; }
+    if (a.dataset.rid === c.recording_id) {
+      if (seekTo != null) { a.currentTime = seekTo; a.play().catch(() => {}); }
+      else { a.paused ? a.play() : a.pause(); }
+      return;
+    }
     setLoadingId(c.recording_id);
     try {
       const res = await client.get('qa/recordings/stream', { params: { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       const url = URL.createObjectURL(res.data); urlRef.current = url;
-      a.src = url; a.dataset.rid = c.recording_id; a.load(); a.play().catch(() => {});
+      a.src = url; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0); a.load();
+      if (seekTo != null) { const onMeta = () => { a.currentTime = seekTo; a.removeEventListener('loadedmetadata', onMeta); }; a.addEventListener('loadedmetadata', onMeta); }
+      a.play().catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
@@ -112,16 +157,16 @@ function Candidates({ assignmentId }) {
           </div>
           {tx && open && (
             <div className="px-3 pb-3">
-              <div className="text-xs whitespace-pre-wrap rounded-lg p-2.5 max-h-60 overflow-y-auto leading-relaxed"
-                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
-                {tx.text ? tx.text : <span className="italic" style={{ color: 'var(--color-text-tertiary)' }}>No speech detected in this clip.</span>}
-              </div>
+              <TranscriptView tx={tx} active={audioRid === c.recording_id} curTime={curTime} onSeek={(t) => play(c, t)} />
             </div>
           )}
         </div>
         );
       })}
-      <audio ref={audioRef} controls className="w-full mt-1" onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)} />
+      <audio ref={audioRef} controls className="w-full mt-1"
+        onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)}
+        onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)}
+        onTimeUpdate={() => setCurTime(audioRef.current?.currentTime || 0)} />
     </div>
   );
 }

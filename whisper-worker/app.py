@@ -87,16 +87,25 @@ async def transcribe(
         tmp.close()
 
         with _lock:  # serialize decodes
-            segments, info = _model.transcribe(tmp.name, vad_filter=True)
+            # word_timestamps=True → per-word start/end so the UI can highlight
+            # each word as the recording plays (karaoke). Small one-time cost at
+            # transcribe; result is cached.
+            segments, info = _model.transcribe(tmp.name, vad_filter=True, word_timestamps=True)
             # Iterating the generator is where decode actually happens. A clip
             # with no detectable speech (pure silence / hold music the VAD strips)
             # makes faster-whisper raise internally ("max() arg is an empty
             # sequence") — that's "no speech", not an error, so return empty text.
             try:
-                seg_list = [
-                    {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
-                    for s in segments
-                ]
+                seg_list = []
+                for s in segments:
+                    words = [
+                        {"start": round(w.start, 2), "end": round(w.end, 2), "text": w.word}
+                        for w in (getattr(s, "words", None) or [])
+                    ]
+                    seg_list.append({
+                        "start": round(s.start, 2), "end": round(s.end, 2),
+                        "text": s.text.strip(), "words": words,
+                    })
             except (ValueError, IndexError) as ie:
                 log.warning(f"no speech detected: {ie}")
                 seg_list = []
