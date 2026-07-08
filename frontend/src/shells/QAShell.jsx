@@ -900,7 +900,11 @@ function groupRecordings(recs) {
     if (!g) { g = { key, phone: r.phone, agent_user: r.agent_user, agent_name: r.agent_name, box_id: r.box_id, parts: [], transferred: false, dispo: null }; m.set(key, g); }
     g.parts.push(r);
     if (r.transferred) g.transferred = true;
-    if (r.dispo && drank(r.dispo) < drank(g.dispo)) g.dispo = r.dispo;
+    // Any dispo beats no dispo; the DRANK order only decides which to show when a
+    // number has several dials with different codes. Without the `!g.dispo` guard,
+    // a code missing from DRANK (rank 999) never beat the null default (also 999)
+    // and showed blank — so every disposition outside the hardcoded list hid.
+    if (r.dispo && (!g.dispo || drank(r.dispo) < drank(g.dispo))) g.dispo = r.dispo;
     if (r.transfer_id && !g.transfer_id) g.transfer_id = r.transfer_id;
   }
   const out = [];

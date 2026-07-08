@@ -1089,18 +1089,31 @@ router.delete('/scorecards/:id', asyncHandler(async (req, res) => {
 router.get('/reports', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_reports'))) return res.status(403).json({ error: 'Forbidden' });
   const EMPTY = { summary: { reviews: 0 }, by_agent: [], by_reviewer: [], time_series: [], buckets: [], method_split: { tra: 0, rcm: 0 }, agents: [], reviewers: [] };
-  let q = supabaseAdmin.from('qa_reviews')
-    .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, assignment_id, total_score, max_score, final_score, quality_score, passed, created_at')
-    .order('created_at', { ascending: false }).limit(5000);
   const allowed = await allowedCompanyIds(req);
-  if (allowed) { if (!allowed.length) return res.json(EMPTY); q = q.in('company_id', allowed); }
-  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
-  if (req.query.method)     q = q.eq('method', req.query.method);
-  if (req.query.date_from)  q = q.gte('created_at', req.query.date_from);
-  if (req.query.date_to)    q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
-  const { data, error } = await q;
-  if (error) return res.status(500).json({ error: error.message });
-  let rows = data || [];
+  if (allowed && !allowed.length) return res.json(EMPTY);
+  // Apply filters, then page through EVERY matching review (1000-row chunks) so
+  // the KPIs/rollups reflect the whole dataset — not just the most recent 5000
+  // (the old .limit(5000) silently capped every number once volume grew).
+  const applyFilters = (q) => {
+    if (allowed)              q = q.in('company_id', allowed);
+    if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+    if (req.query.method)     q = q.eq('method', req.query.method);
+    if (req.query.date_from)  q = q.gte('created_at', req.query.date_from);
+    if (req.query.date_to)    q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
+    return q;
+  };
+  let rows = [];
+  for (let from = 0; from < 1_000_000; from += 1000) {
+    const { data, error } = await applyFilters(
+      supabaseAdmin.from('qa_reviews')
+        .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, assignment_id, total_score, max_score, final_score, quality_score, passed, created_at')
+        .order('created_at', { ascending: false })
+    ).range(from, from + 999);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data || !data.length) break;
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
   if (!rows.length) return res.json(EMPTY);
 
   // reviewed-agent identity from the linked assignment (dialer login + real name)
