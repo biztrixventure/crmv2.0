@@ -88,15 +88,23 @@ async def transcribe(
 
         with _lock:  # serialize decodes
             segments, info = _model.transcribe(tmp.name, vad_filter=True)
-            seg_list = [
-                {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
-                for s in segments
-            ]
+            # Iterating the generator is where decode actually happens. A clip
+            # with no detectable speech (pure silence / hold music the VAD strips)
+            # makes faster-whisper raise internally ("max() arg is an empty
+            # sequence") — that's "no speech", not an error, so return empty text.
+            try:
+                seg_list = [
+                    {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+                    for s in segments
+                ]
+            except (ValueError, IndexError) as ie:
+                log.warning(f"no speech detected: {ie}")
+                seg_list = []
         text = " ".join(s["text"] for s in seg_list).strip()
         return JSONResponse({
             "text": text,
-            "language": info.language,
-            "duration": round(info.duration, 2),
+            "language": getattr(info, "language", None),
+            "duration": round(getattr(info, "duration", 0) or 0, 2),
             "segments": seg_list,
         })
     except Exception as e:  # noqa
