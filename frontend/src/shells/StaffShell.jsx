@@ -687,6 +687,10 @@ const StaffShell = () => {
     setZipFronterInfo(null);
     lastPrefilledId.current = null;
     setPendingDialer(item);
+    // The create-transfer modal is mounted inside the My Transfers tab, so a
+    // Confirm clicked while on another tab (Sales/Callbacks) would set the flag
+    // but never render the form. Switch to the transfers tab so it mounts.
+    setActiveTab('transfers');
     setShowCreateForm(true);
   };
 
