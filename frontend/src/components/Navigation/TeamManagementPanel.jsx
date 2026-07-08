@@ -42,8 +42,23 @@ const TeamManagementPanel = ({ companyId: companyIdProp }) => {
   };
 
   const handleSaveUser = async (formData) => {
-    await client.put(`users/${editUser.id}`, formData);
-    load();
+    // Password lives on a SEPARATE endpoint — PUT /users/:id updates the
+    // profile/role only and silently ignores a `password` field. Split it out
+    // (same as the admin flow) or a manager's typed reset does nothing.
+    setActionErr('');
+    try {
+      const { password, ...profile } = formData;
+      if (Object.keys(profile).length > 0) {
+        await client.put(`users/${editUser.id}`, profile);
+      }
+      if (password && String(password).trim()) {
+        await client.put(`users/${editUser.id}/password`, { password: String(password).trim() });
+      }
+      load();
+    } catch (err) {
+      setActionErr(err.response?.data?.error || 'Failed to save user');
+      throw err;   // keep the modal open so the manager can retry
+    }
   };
 
   const deleteUser = async (id) => {
