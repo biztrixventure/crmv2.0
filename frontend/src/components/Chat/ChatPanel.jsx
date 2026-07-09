@@ -13,7 +13,7 @@ import GroupSettingsModal from './GroupSettingsModal';
 // Full chat window: dim backdrop + opaque docked panel. On large screens it's a
 // two-pane layout (conversation list always visible alongside the open thread,
 // so going back is one click); on mobile it's single-pane with a back button.
-const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) => {
+const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null, onFocusConsumed }) => {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('list');   // 'list' | 'new'
@@ -92,11 +92,17 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null }) 
     setActive(c);
   };
 
-  // Deep-link from a chat notification → open that conversation once it's loaded.
+  // Deep-link from a chat notification → open that conversation ONCE, then clear
+  // the focus. Critical: without consuming it, every later `conversations` update
+  // (the 45s poll, or the unread-reset that openConversation itself triggers)
+  // re-ran this and yanked the user back to the focused chat — so opening ANY
+  // other conversation snapped straight back and looked like "the other chat
+  // won't open". Clearing focus after the first open fixes that; a fresh
+  // notification click sets a new focus and re-opens as expected.
   useEffect(() => {
     if (!open || !focusConversationId) return;
     const c = conversations.find(x => String(x.id) === String(focusConversationId));
-    if (c && active?.id !== c.id) openConversation(c);
+    if (c) { openConversation(c); onFocusConsumed?.(); }
   }, [open, focusConversationId, conversations]); // eslint-disable-line react-hooks/exhaustive-deps
   const onNewGroup = () => { setActive(null); setView('new'); };
 

@@ -52,7 +52,8 @@ const ChatLauncher = () => {
         )}
       </button>
 
-      <ChatPanel open={open} onClose={() => { setOpen(false); refresh(); }} meId={user.id} banned={banned} focusConversationId={focusConv} />
+      <ChatPanel open={open} onClose={() => { setOpen(false); refresh(); }} meId={user.id} banned={banned}
+        focusConversationId={focusConv} onFocusConsumed={() => setFocusConv(null)} />
     </>
   );
 };
