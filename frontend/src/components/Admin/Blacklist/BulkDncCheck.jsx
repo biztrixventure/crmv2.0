@@ -25,6 +25,9 @@ function extractPhones(str) {
 }
 
 const fmtPhone = (p) => (p && p.length === 10) ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p;
+// The DNC API returns `carrier` as an OBJECT ({name,type,state,ocn,…}), not a
+// string — never render it directly (React error #31). Pull out the name.
+const carrierText = (c) => !c ? '' : (typeof c === 'string' ? c : (c.name || ''));
 
 export default function BulkDncCheck() {
   const [pasted, setPasted] = useState('');
@@ -103,7 +106,7 @@ export default function BulkDncCheck() {
       r.ok ? r.message : r.error,
       (r.codes || []).join(' | '),
       r.wireless ? 'Yes' : 'No',
-      r.carrier || '',
+      carrierText(r.carrier),
       r.cached ? 'cache' : 'live',
       r.checked_at ? new Date(r.checked_at).toLocaleString() : '',
     ].map(esc).join(',')));
@@ -236,7 +239,7 @@ export default function BulkDncCheck() {
                           : <span className="inline-flex items-center gap-1" style={{ color: '#16a34a' }}><ShieldCheck size={12} /> Good</span>}
                     </td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{(r.codes || []).join(', ') || '—'}</td>
-                    <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{r.carrier || '—'}{r.wireless ? ' 📱' : ''}</td>
+                    <td className="px-3 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{carrierText(r.carrier) || '—'}{r.wireless ? ' 📱' : ''}</td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{r.ok ? (r.cached ? 'cache' : 'live') : '—'}</td>
                   </tr>
                 ))}
