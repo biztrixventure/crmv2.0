@@ -111,6 +111,44 @@ router.post('/scan/run', asyncHandler(async (req, res) => {
   res.json({ batch_checked: checked, blacklisted, good, failed, remaining });
 }));
 
+// ── POST /bulk-check — check an ARBITRARY list of numbers (paste / file) ──────
+// The frontend chunks a big list and calls this repeatedly for a live progress
+// bar. `force:false` = cache-first (only fresh-checks numbers not seen recently);
+// `force:true` = realtime (bypass cache, re-check every number). Either way each
+// result is upserted into the shared cache, so it stays warm for everyone.
+router.post('/bulk-check', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance / superadmin only' });
+  const cfg = await bl.settings();
+  if (!cfg.enabled) return res.status(400).json({ error: 'Enable the DNC lookup + set an API key first' });
+
+  const force = req.body?.force === true;
+  const raw = Array.isArray(req.body?.phones) ? req.body.phones : [];
+  // normalize + dedupe within this chunk (keep only valid 10-digit US numbers)
+  const seen = new Set(); const phones = [];
+  for (const x of raw) { const p = bl.norm(x); if (p.length === 10 && !seen.has(p)) { seen.add(p); phones.push(p); } }
+  if (phones.length > 250) return res.status(400).json({ error: 'Max 250 numbers per request — send smaller chunks' });
+  if (!phones.length) return res.json({ results: [], checked: 0, blacklisted: 0, good: 0, failed: 0, cached: 0, invalid: raw.length });
+
+  const results = new Array(phones.length);
+  let i = 0, blacklisted = 0, good = 0, failed = 0, cachedCount = 0;
+  // Gentle concurrency so we don't hammer the DNC API.
+  await Promise.all(Array.from({ length: Math.min(6, phones.length) }, async () => {
+    while (i < phones.length) {
+      const idx = i++; const p = phones[idx];
+      const r = await bl.lookup(p, { force });
+      if (!r.ok) { failed++; results[idx] = { phone: p, ok: false, error: r.error }; continue; }
+      if (r.cached) cachedCount++;
+      r.blacklisted ? blacklisted++ : good++;
+      results[idx] = {
+        phone: p, ok: true, blacklisted: r.blacklisted, message: r.message,
+        codes: r.codes || [], wireless: !!r.wireless, carrier: r.carrier || null,
+        cached: !!r.cached, checked_at: r.checked_at,
+      };
+    }
+  }));
+  res.json({ results, checked: blacklisted + good, blacklisted, good, failed, cached: cachedCount, invalid: raw.length - phones.length });
+}));
+
 // ── GET /report/summary — counts by verdict ──────────────────────────────────
 router.get('/report/summary', asyncHandler(async (req, res) => {
   if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });

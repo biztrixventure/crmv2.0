@@ -3,6 +3,7 @@ import { Shield, Check, KeyRound, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import DncLookupPanel from '../../Shared/DncLookupPanel';
+import BulkDncCheck from './BulkDncCheck';
 
 const VERSIONS = [
   ['v1', 'v1 — status only'],
@@ -35,7 +36,7 @@ export default function BlacklistSettings() {
   if (!cfg) return <div className="p-8 text-center text-text-secondary">Loading…</div>;
 
   return (
-    <div className="max-w-xl mx-auto p-1 space-y-4">
+    <div className="max-w-4xl mx-auto p-1 space-y-4">
       <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Shield size={18} /> Blacklist / DNC Lookup</h3>
         <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -108,6 +109,9 @@ export default function BlacklistSettings() {
         <DncLookupPanel compact />
         <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Good: 2223334444 · Blacklisted: 9999999999. Save the key first; a test counts as one API call.</p>
       </div>
+
+      {/* Bulk check — paste / upload a list, check all, export. */}
+      <BulkDncCheck />
     </div>
   );
 }
