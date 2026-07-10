@@ -380,121 +380,161 @@ function ScoreCell({ a }) {
 }
 
 // ── Queue tab ─────────────────────────────────────────────────────────────────
+// Manager view: browse the ACTUAL CRM transfers / sales (not the sampled queue),
+// split into two sections. Open a record → its QA assignment is found-or-created
+// so recordings resolve and the scorecard saves exactly like the queue.
 function QueueTab({ canAssign, canOverride, canManage, selfId }) {
-  const [items, setItems] = useState([]);
+  const [kind, setKind]       = useState('transfer');   // 'transfer' | 'sale'
+  const [items, setItems]     = useState([]);
+  const [totals, setTotals]   = useState({ transfer: null, sale: null });
+  const [total, setTotal]     = useState(0);
+  const [page, setPage]       = useState(1);
+  const [search, setSearch]   = useState('');
+  const [q, setQ]             = useState('');            // committed phone search
   const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(null);          // record_id being opened
+  const [open, setOpen]       = useState(null);          // review panel (assignment-shaped)
   const [pulling, setPulling] = useState(false);
-  const [filters, setFilters] = useState({ method: '', status: 'pending', subject_role: '', mine: '' });
-  const [open, setOpen] = useState(null);   // selected assignment
-  const [kind, setKind] = useState('transfer');   // 'transfer' | 'sale' — the two sections
+  const LIMIT = 50;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { limit: 100 };
-      for (const [k, v] of Object.entries(filters)) if (v) params[k] = v;
-      const r = await client.get('qa/queue', { params });
+      const params = { kind, limit: LIMIT, page };
+      if (q) params.search = q;
+      const r = await client.get('qa/crm-records', { params });
       setItems(r.data.items || []);
+      if (r.data.total != null) { setTotal(r.data.total); setTotals(t => ({ ...t, [kind]: r.data.total })); }
     } catch { setItems([]); }
     finally { setLoading(false); }
-  }, [filters]);
+  }, [kind, page, q]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [kind, q]);   // reset paging on section / search change
+
+  // Light count for the OTHER section so both tabs show a badge.
+  useEffect(() => {
+    const other = kind === 'transfer' ? 'sale' : 'transfer';
+    if (totals[other] != null) return;
+    client.get('qa/crm-records', { params: { kind: other, limit: 1, page: 1 } })
+      .then(r => { if (r.data.total != null) setTotals(t => ({ ...t, [other]: r.data.total })); })
+      .catch(() => {});
+  }, [kind, totals]);
+
+  // Build the assignment-shaped object the review panel + scorecard expect.
+  const toOpen = (it, assignmentId, qaStatus, review, meta) => ({
+    ...it, id: assignmentId,
+    method: meta?.method || (it.record_kind === 'sale' ? 'rcm' : 'tra'),
+    subject_role: meta?.subject_role || (it.record_kind === 'sale' ? 'closer' : 'fronter'),
+    company_id: meta?.company_id || it.company_id,
+    status: qaStatus || 'pending', review: review || null,
+  });
+
+  const openRecord = async (it) => {
+    if (it.assignment_id) { setOpen(toOpen(it, it.assignment_id, it.qa_status, it.review)); return; }
+    setOpening(it.record_id);
+    try {
+      const r = await client.post(`qa/crm-records/${it.record_kind}/${it.record_id}/open`);
+      setOpen(toOpen(it, r.data.assignment_id, 'pending', null, r.data));
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not open record'); }
+    finally { setOpening(null); }
+  };
 
   const pullNow = async () => {
     setPulling(true);
     try {
       const r = await client.post('qa/materialize', {});
-      toast.success(`Pulled ${r.data.tra || 0} TRA + ${r.data.rcm || 0} RCM call(s) into the queue`);
-      load();
-    } catch (e) {
-      toast.error(e.response?.data?.error || 'Could not pull calls');
-    } finally { setPulling(false); }
+      toast.success(`Pulled ${r.data.tra || 0} TRA + ${r.data.rcm || 0} RCM call(s) into agents' queues`);
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not pull calls'); }
+    finally { setPulling(false); }
   };
 
-  // Two sections by record type: a record with a sale_id is a Sale, otherwise a
-  // Transfer. Split the loaded queue so each section shows only its own records.
-  const transfers = items.filter(a => !a.sale_id);
-  const sales     = items.filter(a => !!a.sale_id);
-  const shown     = kind === 'sale' ? sales : transfers;
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const label = kind === 'sale' ? 'sales' : 'transfers';
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      {/* Transfers vs Sales — the two sections */}
+      {/* Transfers vs Sales — CRM record sections */}
       <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-        {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
+        {[['transfer', 'Transfers', totals.transfer, ArrowRightLeft], ['sale', 'Sales', totals.sale, DollarSign]].map(([k, lbl, n, Icon]) => (
           <button key={k} onClick={() => { setKind(k); setOpen(null); }}
             className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
             style={{ background: kind === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kind === k ? '#fff' : 'var(--color-text-secondary)' }}>
-            <Icon size={13} /> {label}
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: kind === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kind === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+            <Icon size={13} /> {lbl}
+            {n != null && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: kind === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kind === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>}
           </button>
         ))}
       </div>
-      {/* list */}
+
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 flex-wrap mb-3">
-          <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))} style={inp}><option value="">Any status</option><option value="pending">Pending</option><option value="in_review">In review</option><option value="scored">Scored</option></select>
-          <select value={filters.subject_role} onChange={e => setFilters(f => ({ ...f, subject_role: e.target.value }))} style={inp}><option value="">Fronter + closer</option><option value="fronter">Fronter</option><option value="closer">Closer</option></select>
-          <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={filters.mine === 'true'} onChange={e => setFilters(f => ({ ...f, mine: e.target.checked ? 'true' : '' }))} /> Mine only</label>
+          <div className="relative">
+            <Search size={13} style={{ position: 'absolute', left: 8, top: 9, color: 'var(--color-text-tertiary)' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && setQ(search.trim())}
+              placeholder="Search phone…" style={{ ...inp, paddingLeft: 26, width: 180 }} />
+          </div>
+          <button onClick={() => setQ(search.trim())} className="px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>Search</button>
+          {q && <button onClick={() => { setSearch(''); setQ(''); }} className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>}
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} {label}</span>
           <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
           {canManage && (
             <button onClick={pullNow} disabled={pulling} className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white"
-              style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: pulling ? 0.6 : 1 }} title="Load this company's calls into the queue right now">
-              {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull calls now
+              style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)', opacity: pulling ? 0.6 : 1 }} title="Also materialize the sampled worklist for agents (TRA + RCM)">
+              {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull agent queue
             </button>
           )}
         </div>
+
         {loading ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
-          : shown.length === 0 ? (
-            <div className="text-center py-10">
-              <div className="text-sm mb-3" style={{ color: 'var(--color-text-tertiary)' }}>{items.length ? `No ${kind === 'sale' ? 'sales' : 'transfers'} in the queue for this filter.` : 'No calls in the queue yet.'}</div>
-              {canManage
-                ? <button onClick={pullNow} disabled={pulling} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: pulling ? 0.6 : 1 }}>
-                    {pulling ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Pull calls now
-                  </button>
-                : <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Ask your QA manager to enable QA / pull calls for this company.</div>}
-              <div className="text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>Calls come from this company's transfers/sales — enable TRA/RCM in Scorecards &amp; Config first.</div>
+          : items.length === 0 ? (
+            <div className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+              {q ? `No ${label} match that phone.` : `No ${label} in the CRM for your companies yet.`}
             </div>
           )
-          : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+          : <>
+            <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
               <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
                 <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
-                  <tr>{['Method', 'Customer / Phone', 'Date', 'Agent', 'Assignee', 'Status', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+                  <tr>{['Customer / Phone', 'Date', 'Disposition', kind === 'sale' ? 'Plan' : '', 'QA', 'Score', ''].filter((h, i) => i !== 3 || kind === 'sale').map(h => <th key={h || 'x'} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {shown.map(a => (
-                    <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
-                      style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
-                      <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{a.subject_role}</span></td>
+                  {items.map(it => (
+                    <tr key={it.record_id} onClick={() => openRecord(it)} className="cursor-pointer"
+                      style={{ borderTop: '1px solid var(--color-border)', background: open?.record_id === it.record_id ? 'var(--color-surface-hover)' : 'transparent' }}>
                       <td className="px-3 py-2">
-                        <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{a.customer_name || a.agent_display || '—'}</div>
-                        {a.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{a.customer_phone}</div>}
+                        <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{it.customer_name || '—'}</div>
+                        {it.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{it.customer_phone}</div>}
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDate(a.subject_date)}</td>
-                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.agent_name ? <>{a.agent_name}{a.agent_display && <span style={{ color: 'var(--color-text-tertiary)' }}> ({a.agent_display})</span>}</> : (a.agent_display || '—')}</td>
-                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{a.assignee_name || <span style={{ color: 'var(--color-text-tertiary)' }}>pool</span>}</td>
-                      <td className="px-3 py-2"><StatusPill s={a.status} /></td>
-                      <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={a} /></td>
-                      <td className="px-2 py-2"><ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} /></td>
+                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDate(it.subject_date)}</td>
+                      <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{it.disposition || '—'}</td>
+                      {kind === 'sale' && <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{[it.client_name, it.plan].filter(Boolean).join(' · ') || '—'}</td>}
+                      <td className="px-3 py-2">{it.qa_status ? <StatusPill s={it.qa_status} /> : <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>not reviewed</span>}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={{ status: it.qa_status, review: it.review }} /></td>
+                      <td className="px-2 py-2">{opening === it.record_id ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>}
+            </div>
+            {total > LIMIT && (
+              <div className="flex items-center justify-between mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>Page {page} of {totalPages}</span>
+                <div className="flex gap-1.5">
+                  <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1 rounded-lg font-bold disabled:opacity-40" style={{ background: 'var(--color-surface-hover)' }}>Prev</button>
+                  <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1 rounded-lg font-bold disabled:opacity-40" style={{ background: 'var(--color-surface-hover)' }}>Next</button>
+                </div>
+              </div>
+            )}
+          </>}
       </div>
 
-      {/* review panel — STICKY bottom sheet (fixed to viewport bottom), full width */}
+      {/* review panel — sticky bottom sheet */}
       {open && (
         <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.record_kind === 'sale' ? 'Sale' : 'Transfer'}</span></div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
           <ContextLine a={open} fields={DEFAULT_CARD_FIELDS} />
-          {canAssign && !open.assigned_to && open.status !== 'scored' && (
-            <button onClick={async () => { try { await client.post(`qa/assignments/${open.id}/assign`, { assigned_to: selfId }); toast.success('Assigned to you'); setOpen({ ...open, assigned_to: selfId }); load(); } catch { toast.error('Assign failed'); } }}
-              className="mb-2 px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}>Assign to me</button>
-          )}
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
             ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />

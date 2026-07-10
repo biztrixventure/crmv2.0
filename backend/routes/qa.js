@@ -241,6 +241,126 @@ router.get('/queue', asyncHandler(async (req, res) => {
   res.json({ items, total: offset === 0 ? (count || 0) : null, page, limit });
 }));
 
+// ── CRM records browser (manager) ─────────────────────────────────────────────
+// Lists the ACTUAL CRM transfers / sales (not the sampled queue) so a QA manager
+// can browse + score any real record. Recordings + scoring reuse the existing
+// assignment path: opening a record find-or-creates its qa_assignment (POST
+// /crm-records/:kind/:id/open). The day-recordings VICIdial browser is separate.
+router.get('/crm-records', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const kind   = req.query.kind === 'sale' ? 'sale' : 'transfer';
+  const limit  = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const page   = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const offset = (page - 1) * limit;
+  const wantCount = offset === 0 ? 'exact' : undefined;
+  const allowed = await allowedCompanyIds(req);
+  const phoneQ = String(req.query.search || '').replace(/\D/g, '').slice(-10);
+
+  let items = [], total = 0;
+  if (kind === 'transfer') {
+    let q = supabaseAdmin.from('transfers')
+      .select('id, company_id, normalized_phone, form_data, vicidial_vendor_code, created_at, status, latest_disposition', { count: wantCount })
+      .neq('vicidial_pending', true)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+    else if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
+    if (req.query.status) q = q.eq('status', req.query.status);
+    if (phoneQ) q = q.ilike('normalized_phone', `%${phoneQ}`);
+    const { data, count, error } = await q;
+    if (error) return res.status(500).json({ error: error.message });
+    total = count || 0;
+    items = (data || []).map(t => ({
+      record_kind: 'transfer', record_id: t.id, company_id: t.company_id,
+      customer_name: scanName(t.form_data), customer_phone: t.normalized_phone,
+      customer_zip: scanFormData(t.form_data, 'zip'), customer_state: scanFormData(t.form_data, 'state'),
+      subject_date: t.created_at, record_status: t.status, disposition: t.latest_disposition,
+      vendor_code: t.vicidial_vendor_code,
+    }));
+  } else {
+    let q = supabaseAdmin.from('sales')
+      .select('id, company_id, customer_name, customer_phone, sale_date, transfer_id, status, closer_disposition, client_name, plan', { count: wantCount })
+      .order('sale_date', { ascending: false, nullsFirst: false })
+      .range(offset, offset + limit - 1);
+    if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+    else if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
+    if (req.query.status) q = q.eq('status', req.query.status);
+    if (phoneQ) q = q.ilike('customer_phone', `%${phoneQ}`);
+    const { data, count, error } = await q;
+    if (error) return res.status(500).json({ error: error.message });
+    total = count || 0;
+    items = (data || []).map(s => ({
+      record_kind: 'sale', record_id: s.id, company_id: s.company_id,
+      customer_name: s.customer_name, customer_phone: s.customer_phone,
+      subject_date: s.sale_date, record_status: s.status, disposition: s.closer_disposition,
+      client_name: s.client_name, plan: s.plan, transfer_id: s.transfer_id,
+    }));
+  }
+
+  // Attach any existing QA assignment + its review, so the list shows the QA
+  // status / score for records already reviewed.
+  const method = kind === 'transfer' ? 'tra' : 'rcm';
+  const col = kind === 'transfer' ? 'transfer_id' : 'sale_id';
+  const ids = items.map(i => i.record_id);
+  if (ids.length) {
+    const { data: asg } = await supabaseAdmin.from('qa_assignments')
+      .select(`id, ${col}, status, assigned_to`).eq('method', method).in(col, ids);
+    const asgByRec = Object.fromEntries((asg || []).map(a => [a[col], a]));
+    const aIds = (asg || []).map(a => a.id);
+    let revByA = {};
+    if (aIds.length) {
+      const { data: revs } = await supabaseAdmin.from('qa_reviews')
+        .select('assignment_id, final_score, quality_score, passed, status, total_score, max_score, autofail_result').in('assignment_id', aIds);
+      revByA = Object.fromEntries((revs || []).map(r => [r.assignment_id, r]));
+    }
+    items = items.map(i => {
+      const a = asgByRec[i.record_id] || null;
+      return { ...i, assignment_id: a?.id || null, qa_status: a?.status || null, review: a ? (revByA[a.id] || null) : null };
+    });
+  }
+  res.json({ items, total: offset === 0 ? total : null, page, limit });
+}));
+
+// Find-or-create the QA assignment for a specific CRM record → returns its id so
+// the frontend can score it + resolve recordings via the normal assignment path.
+router.post('/crm-records/:kind/:id/open', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const kind   = req.params.kind === 'sale' ? 'sale' : 'transfer';
+  const id     = req.params.id;
+  const method = kind === 'transfer' ? 'tra' : 'rcm';
+  const col    = kind === 'transfer' ? 'transfer_id' : 'sale_id';
+
+  const reselect = () => supabaseAdmin.from('qa_assignments')
+    .select('id, company_id, method, subject_role').eq(col, id).eq('method', method).maybeSingle();
+
+  const { data: ex } = await reselect();
+  if (ex) return res.json({ assignment_id: ex.id, method: ex.method, subject_role: ex.subject_role, company_id: ex.company_id });
+
+  // company scope from the record itself
+  const { data: rec } = await supabaseAdmin.from(kind === 'transfer' ? 'transfers' : 'sales').select('company_id').eq('id', id).maybeSingle();
+  if (!rec?.company_id) return res.status(404).json({ error: 'Record not found' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(rec.company_id)) return res.status(403).json({ error: 'Forbidden' });
+
+  const cust = await resolveCustomer({ companyId: rec.company_id, transferId: kind === 'transfer' ? id : null, saleId: kind === 'sale' ? id : null });
+  const row = {
+    company_id: rec.company_id, method, subject_role: kind === 'transfer' ? 'fronter' : 'closer',
+    [col]: id, sampled: false, status: 'pending',
+    customer_name: cust.customer_name, customer_phone: cust.customer_phone,
+    customer_zip: cust.customer_zip, customer_state: cust.customer_state, customer_address: cust.customer_address,
+    sale_meta: cust.sale_meta,
+  };
+  const { data: created, error } = await supabaseAdmin.from('qa_assignments').insert(row).select('id, company_id, method, subject_role').single();
+  if (error) {
+    // race on the unique (record, method) index → re-select the winner
+    const { data: ex2 } = await reselect();
+    if (ex2) return res.json({ assignment_id: ex2.id, method: ex2.method, subject_role: ex2.subject_role, company_id: ex2.company_id });
+    logger.warn('QA', `crm-open ${kind} ${id}: ${error.message}`);
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ assignment_id: created.id, method: created.method, subject_role: created.subject_role, company_id: created.company_id });
+}));
+
 // ── assign an item to a qa_agent ──────────────────────────────────────────────
 router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
