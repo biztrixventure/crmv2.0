@@ -23,6 +23,34 @@ const RECORDING_DEAD_STATUSES = [
   'closed_lost', 'expired', 'needs_revision',
 ];
 
+// The full status vocabularies (sale_status / transfer_status enums; callbacks
+// is free text). Used to compute EXACT per-status totals for the stats strip.
+const SALE_STATUSES     = ['open', 'closed_won', 'closed_lost', 'sold', 'cancelled', 'follow_up', 'compliance_cancelled', 'dispute', 'chargeback', 'pending_review', 'needs_revision'];
+const TRANSFER_STATUSES = ['pending', 'assigned', 'completed', 'cancelled', 'rejected'];
+const CALLBACK_STATUSES = ['pending', 'assigned', 'completed', 'cancelled', 'rejected', 'missed', 'no_answer', 'answering_machine', 'follow_up'];
+
+// Exact per-status totals via one HEAD count query per status.
+//
+// The old approach fetched the whole filtered set with `.limit(20000)` and
+// tallied in JS — but PostgREST silently caps every response at its `max-rows`
+// server setting (5000 here), so any status with >5000 rows (e.g. 6191 approved
+// sales, 61k pending transfers) was undercounted. `head:true, count:'exact'`
+// returns the true count without returning rows, so it is immune to the cap.
+//
+// makeBase MUST return a FRESH query builder (with all non-status filters + a
+// `head:true` count select) on every call — Supabase builders are single-use.
+// Returns { status: count } including only non-zero statuses; {} on total
+// failure so the UI falls back to page-derived counts.
+async function statusCountsExact(makeBase, statuses) {
+  const entries = await Promise.all(statuses.map(async (st) => {
+    try { const { count, error } = await makeBase().eq('status', st); return error ? [st, 0] : [st, count || 0]; }
+    catch { return [st, 0]; }
+  }));
+  const out = {};
+  for (const [st, c] of entries) if (c > 0) out[st] = c;
+  return out;
+}
+
 // Resolve a search term to matching row ids via the app_record_search RPC
 // (matches the full record id, every form_data cell, and the key typed
 // columns). Returns an array of ids, or null when the RPC is unavailable
@@ -870,22 +898,23 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // pages, so paging never re-runs this. null on later pages → UI keeps it.
   let status_counts = null;
   if (!status && parseInt(page) === 1) {
-    try {
-      let scq = (companyType === 'fronter')
-        ? supabaseAdmin.from('sales').select('status, transfers!inner(company_id)').eq('transfers.company_id', company_id)
-        : supabaseAdmin.from('sales').select('status');
-      if (company_id && companyType !== 'fronter') scq = scq.eq('company_id', company_id);
-      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) scq = scq.in('closer_id', ids); }
-      if (disposition) scq = scq.eq('closer_disposition', disposition);
-      else if (exclude_post_date) scq = scq.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
-      if (charge_from) scq = scq.gte('charge_at', charge_from);
-      if (charge_to)   scq = scq.lte('charge_at', charge_to);
-      if (date_from)   scq = scq.gte('sale_date', date_from);
-      if (date_to)     scq = scq.lte('sale_date', date_to);
-      scq = applySaleSearch(scq);
-      const { data: scRows } = await scq.limit(20000);
-      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
-    } catch { status_counts = null; }
+    // Fresh HEAD-count query per status (immune to PostgREST's 5000-row cap that
+    // truncated the old fetch-and-tally). Same filters as the list, minus status.
+    const makeSaleBase = () => {
+      let q = (companyType === 'fronter')
+        ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact', head: true }).eq('transfers.company_id', company_id)
+        : supabaseAdmin.from('sales').select('*', { count: 'exact', head: true });
+      if (company_id && companyType !== 'fronter') q = q.eq('company_id', company_id);
+      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('closer_id', ids); }
+      if (disposition) q = q.eq('closer_disposition', disposition);
+      else if (exclude_post_date) q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
+      if (charge_from) q = q.gte('charge_at', charge_from);
+      if (charge_to)   q = q.lte('charge_at', charge_to);
+      if (date_from)   q = q.gte('sale_date', date_from);
+      if (date_to)     q = q.lte('sale_date', date_to);
+      return applySaleSearch(q);
+    };
+    status_counts = await statusCountsExact(makeSaleBase, SALE_STATUSES);
   }
 
   res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
@@ -947,18 +976,18 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     return q.range(offset, offset + parseInt(limit) - 1);
   };
 
-  // Light status-only query (same filters minus status + paging) for the true
-  // per-status totals on the stats strip — consistent across pages.
-  const buildStatusQuery = (from) => {
-    let q = supabaseAdmin.from(from).select('status');
+  // Fresh HEAD-count query per status (same filters minus status + paging) for
+  // the true per-status totals on the stats strip — consistent across pages and
+  // immune to PostgREST's 5000-row cap (pending transfers alone exceed 60k).
+  const makeTransferBase = (from) => {
+    let q = supabaseAdmin.from(from).select('*', { count: 'exact', head: true });
     if (company_id) q = q.eq('company_id', company_id);
     if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('created_by', ids); }
     if (closer_id) q = q.eq('assigned_closer_id', closer_id);
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
-    q = q.neq('vicidial_pending', true);   // exclude unconfirmed pending-from-dialer
-    return q.limit(20000);
+    return q.neq('vicidial_pending', true);   // exclude unconfirmed pending-from-dialer
   };
 
   let data, error, count;
@@ -974,12 +1003,11 @@ router.get('/transfers', asyncHandler(async (req, res) => {
 
   let status_counts = null;
   if (!status && parseInt(page) === 1) {
-    try {
-      const src = includeDuplicates ? 'v_compliance_transfer_records' : 'transfers';
-      let { data: scRows, error: scErr } = await buildStatusQuery(src);
-      if (scErr) ({ data: scRows } = await buildStatusQuery('transfers'));
-      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
-    } catch { status_counts = null; }
+    const src = includeDuplicates ? 'v_compliance_transfer_records' : 'transfers';
+    status_counts = await statusCountsExact(() => makeTransferBase(src), TRANSFER_STATUSES);
+    // View missing (089 not applied) or empty → fall back to the bare table.
+    if (!Object.keys(status_counts).length && src !== 'transfers')
+      status_counts = await statusCountsExact(() => makeTransferBase('transfers'), TRANSFER_STATUSES);
   }
 
   // Fetch profiles for both creator and assigned closer in one query
@@ -1209,20 +1237,20 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   // Page 1 only — totals are page-independent, so paging never re-runs this.
   let status_counts = null;
   if (!status && parseInt(page) === 1) {
-    try {
-      let scq = supabaseAdmin.from('callbacks').select('status');
-      if (company_id) scq = scq.eq('company_id', company_id);
-      else if (scopeCompanyIds) scq = scq.in('company_id', scopeCompanyIds);
-      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) scq = scq.in('user_id', ids); }
-      if (priority)     scq = scq.eq('priority', priority);
-      if (date_from)    scq = scq.gte('callback_at', etDateToUtcStart(date_from));
-      if (date_to)      scq = scq.lte('callback_at', etDateToUtcEnd(date_to));
-      if (created_from) scq = scq.gte('created_at',  etDateToUtcStart(created_from));
-      if (created_to)   scq = scq.lte('created_at',  etDateToUtcEnd(created_to));
-      if (search) { const s = escapeOrValue(search); scq = scq.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
-      const { data: scRows } = await scq.limit(20000);
-      if (scRows) { status_counts = {}; scRows.forEach(r => { status_counts[r.status] = (status_counts[r.status] || 0) + 1; }); }
-    } catch { status_counts = null; }
+    const makeCallbackBase = () => {
+      let q = supabaseAdmin.from('callbacks').select('*', { count: 'exact', head: true });
+      if (company_id) q = q.eq('company_id', company_id);
+      else if (scopeCompanyIds) q = q.in('company_id', scopeCompanyIds);
+      if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('user_id', ids); }
+      if (priority)     q = q.eq('priority', priority);
+      if (date_from)    q = q.gte('callback_at', etDateToUtcStart(date_from));
+      if (date_to)      q = q.lte('callback_at', etDateToUtcEnd(date_to));
+      if (created_from) q = q.gte('created_at',  etDateToUtcStart(created_from));
+      if (created_to)   q = q.lte('created_at',  etDateToUtcEnd(created_to));
+      if (search) { const s = escapeOrValue(search); q = q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
+      return q;
+    };
+    status_counts = await statusCountsExact(makeCallbackBase, CALLBACK_STATUSES);
   }
 
   const [profileMap, companyMap] = await Promise.all([
