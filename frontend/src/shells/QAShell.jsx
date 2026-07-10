@@ -18,6 +18,10 @@ import { isSheetConfig } from '../utils/qaSheetFormula';
 // Recording playback reuses the shared dialer library via /qa/recordings/stream.
 // ============================================================================
 
+const isoDay   = (d) => { const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return t.toISOString().slice(0, 10); };
+const todayISO = () => isoDay(new Date());
+const addDays  = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoDay(d); };
+const dayOfDate = (v) => (v ? String(v).slice(0, 10) : '');   // any date/ts → 'YYYY-MM-DD'
 const fmtDur = (s) => { if (s == null) return '—'; const m = Math.floor(s / 60), r = Math.floor(s % 60); return m ? `${m}m ${String(r).padStart(2, '0')}s` : `${r}s`; };
 const fmtDate = (d) => { try { return d ? new Date(String(d).length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''; } catch { return d || ''; } };
 const fmtTime = (s) => { try { return s ? new Date(String(s).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return s || ''; } };
@@ -1345,7 +1349,7 @@ function ReviewsSheet({ scorecard, reviews, managerView }) {
 }
 
 function CompletedTab({ managerView, companyId }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
   const [method, setMethod] = useState('');
@@ -1369,15 +1373,34 @@ function CompletedTab({ managerView, companyId }) {
   for (const r of (data?.reviews || [])) { (groups[r.scorecard_id] = groups[r.scorecard_id] || []).push(r); }
   const scorecards = data?.scorecards || {};
 
+  // Quick date presets — one click to view a specific day's scored records.
+  const presets = [
+    ['Today', today, today],
+    ['Yesterday', addDays(today, -1), addDays(today, -1)],
+    ['7 days', addDays(today, -6), today],
+    ['30 days', addDays(today, -29), today],
+  ];
+  const activePreset = presets.find(([, f, t]) => f === from && t === to)?.[0] || null;
+  const singleDay = from === to;
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'All completed reviews' : 'My completed reviews'}</span>
-        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
+        <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {presets.map(([label, f, t]) => (
+            <button key={label} onClick={() => { setFrom(f); setTo(t); }}
+              className="text-[11px] font-bold px-2 py-1 rounded"
+              style={activePreset === label ? { background: 'var(--color-primary-600)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}>{label}</button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />{singleDay ? 'on' : 'from'}</label>
         <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} style={inp} />
-        <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
-        <input type="date" value={to} max={today} onChange={e => setTo(e.target.value)} style={inp} />
-        <button onClick={() => { setFrom(today); setTo(today); }} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Today</button>
+        {!singleDay && <><label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
+        <input type="date" value={to} max={today} onChange={e => setTo(e.target.value)} style={inp} /></>}
+        <button onClick={() => { if (singleDay) { const t = addDays(from, 6); setTo(t > today ? today : t); } else { setTo(from); } }}
+          className="text-[11px] font-bold px-2 py-1 rounded" title={singleDay ? 'Switch to a date range' : 'Collapse to a single day'}
+          style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{singleDay ? 'Range' : 'Single day'}</button>
         <select value={method} onChange={e => setMethod(e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
         {managerView && (
           <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={inp}>
@@ -1515,33 +1538,40 @@ function RecordingsCollapse({ assignmentId }) {
   );
 }
 
+// AGENT queue — only the tasks still TO DO (a scored/skipped task has already
+// moved to Completed). Transfers/Sales split + a date filter that narrows to the
+// records whose call happened on a chosen day.
 function AgentTasks({ selfId, canOverride, companyId }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState('pending');
   const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
   const [open, setOpen] = useState(null);
   const [kind, setKind] = useState('transfer');   // 'transfer' | 'sale'
+  const [day, setDay] = useState('');              // '' = all dates
 
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('qa/queue', { params: { limit: 200, ...(status ? { status } : {}) } }); setItems(r.data.items || []); }
+    try { const r = await client.get('qa/queue', { params: { limit: 200 } }); setItems(r.data.items || []); }
     catch { setItems([]); }
     finally { setLoading(false); }
-  }, [status]);
+  }, []);
   useEffect(() => { load(); }, [load]);
   const show = (k) => fields[k] !== false;
 
-  // Split my tasks into Transfers vs Sales (sale_id present = a sale).
-  const transfers = items.filter(a => !a.sale_id);
-  const sales     = items.filter(a => !!a.sale_id);
+  // To-do only — scoring a call flips its status to 'scored', which drops it from
+  // here and surfaces it under Completed. That IS the auto-sort the manager wants.
+  const todo = items.filter(a => a.status !== 'scored' && a.status !== 'skipped');
+  const availableDays = [...new Set(todo.map(a => dayOfDate(a.subject_date)).filter(Boolean))].sort().reverse();
+  const byDay = day ? todo.filter(a => dayOfDate(a.subject_date) === day) : todo;
+  const transfers = byDay.filter(a => !a.sale_id);
+  const sales     = byDay.filter(a => !!a.sale_id);
   const shown     = kind === 'sale' ? sales : transfers;
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>My tasks</span>
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Queue</span>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
             <button key={k} onClick={() => { setKind(k); setOpen(null); }}
@@ -1552,13 +1582,19 @@ function AgentTasks({ selfId, canOverride, companyId }) {
             </button>
           ))}
         </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} style={inp}>
-          <option value="pending">To do</option><option value="in_review">In review</option><option value="scored">Scored</option><option value="">All</option>
-        </select>
+        {/* date filter — view only the records whose call is on the chosen day */}
+        <label className="flex items-center gap-1 text-xs ml-1" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} /> Date</label>
+        <input type="date" value={day} list="qa-queue-days" onChange={e => { setDay(e.target.value); setOpen(null); }} style={inp} />
+        <datalist id="qa-queue-days">{availableDays.map(d => <option key={d} value={d} />)}</datalist>
+        {day && <button onClick={() => setDay('')} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>All dates</button>}
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{byDay.length}</b> to&nbsp;do{day ? ` on ${fmtDate(day)}` : ''}</span>
       </div>
       {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
-        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{items.length ? `No ${kind === 'sale' ? 'sales' : 'transfers'} assigned to you here.` : "Nothing assigned to you here yet. Your QA manager assigns calls for you to review — they'll show up here."}</div>
+        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{
+            todo.length
+              ? (day ? `No ${kind === 'sale' ? 'sales' : 'transfers'} to score on ${fmtDate(day)}.` : `No ${kind === 'sale' ? 'sales' : 'transfers'} left to score.`)
+              : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here."}</div>
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
@@ -1594,7 +1630,7 @@ function AgentTasks({ selfId, canOverride, companyId }) {
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
             ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
-            : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
+            : <ScoreForm assignment={open} onScored={() => { setOpen(null); toast.success('Scored — moved to Completed'); load(); }} />}
         </div>
       )}
     </div>
@@ -1605,7 +1641,7 @@ function QAAgentView({ user, logout }) {
   const [tab, setTab] = useState('tasks');
   const [methods, setMethods] = useState(null);
   useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
-  const tabs = [{ key: 'tasks', label: 'My Tasks', icon: ListChecks }, { key: 'reviews', label: 'My Reviews', icon: ClipboardCheck }];
+  const tabs = [{ key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-bg)' }}>
