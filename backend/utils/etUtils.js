@@ -110,6 +110,27 @@ function etWallClockToUtc(input) {
   return isNaN(out.getTime()) ? null : out.toISOString();
 }
 
+// A UTC timestamp / ISO string → the ET calendar date ('YYYY-MM-DD') it falls
+// on. Inverse of etDateToUtcStart. Use this to window a DATE column (stored as
+// the ET business day, e.g. sales.sale_date) by absolute timestamptz bounds.
+// Replaces the naive `String(ts).slice(0,10)`, which read the UTC date and so
+// leaked the next calendar day for evening-UTC instants (2026-06-17T00:00Z is
+// 8pm ET on the 16th, not the 17th).
+function utcToEtDate(ts, zone = ET_ZONE) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone || ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: ET_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(d);
+  }
+}
+
 // Current ET calendar day as 'YYYY-MM-DD'. Default zone is America/New_York
 // (the app's display zone). Pass an explicit zone to honor business_config's
 // kpi.today_timezone setting per company.
@@ -125,4 +146,4 @@ function todayEt(zone = ET_ZONE) {
   }
 }
 
-module.exports = { etDateToUtcStart, etDateToUtcEnd, etWallClockToUtc, todayEt };
+module.exports = { etDateToUtcStart, etDateToUtcEnd, etWallClockToUtc, todayEt, utcToEtDate };

@@ -13,6 +13,7 @@
 // ============================================================================
 
 const { supabaseAdmin } = require('../config/database');
+const { utcToEtDate } = require('./etUtils');
 
 const TTL = 60_000;
 const cache = new Map();   // campaign_id -> { at, data }
@@ -100,11 +101,15 @@ async function computeValues(campaign, userIds) {
   //   3. We window by `sale_date` (the business day the deal happened), NOT
   //      created_at (the row-insert / bulk-upload day), so a deal counts on its
   //      real date and a compliance approval moves the right day's counter.
+  //   4. sale_date is the ET business day, so the campaign's UTC bounds must be
+  //      converted to ET dates. A naive UTC .slice(0,10) leaked the next calendar
+  //      day for evening-UTC end instants — a one-day sprint ending 00:00Z (8pm
+  //      ET) counted the following day's sales too (3 instead of 1).
   if (metric_source === 'sales' || metric_source === 'revenue') {
     const pool      = new Set(userIds);
     const statuses  = metric_source === 'revenue' ? REVENUE_LIKE : CLOSED_LIKE;
-    const startDate = String(starts_at).slice(0, 10);
-    const endDate   = String(ends_at).slice(0, 10);
+    const startDate = utcToEtDate(starts_at);
+    const endDate   = utcToEtDate(ends_at);
     const rows = await fetchAllRows(supabaseAdmin
       .from('sales').select('closer_id, fronter_id, monthly_payment, transfers(created_by)')
       .in('status', statuses)
