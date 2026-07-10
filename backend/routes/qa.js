@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -412,25 +412,34 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     }
     candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   } else {
-    // materialized / CRM assignment — resolve the record's dialer lead code
-    // (most precise) AND its phone (fallback). Most transfers (~77%) carry NO
-    // vicidial_vendor_code, so without the phone fallback their sales/transfers
-    // would show no recordings at all.
-    let leadCode = null, phone = null, transferId = a.transfer_id || null;
+    // CRM / materialized assignment. Resolve robustly the same way the client
+    // portal does: by the dialer LEAD code AND by the record's AGENT(s) + DATE +
+    // PHONE. Most transfers (~77%) carry NO vicidial_vendor_code, so the agent+
+    // date+phone path is what actually finds the clips. We gather BOTH the
+    // fronter and the closer for the lead, so a sale shows the closer's call and
+    // a transfer the fronter's — whoever is dialer-mapped.
+    let leadCode = null, phone = null, saleDate = null, createdAt = null, transferId = a.transfer_id || null;
+    const userIds = new Set();
     if (a.sale_id) {
-      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone').eq('id', a.sale_id).maybeSingle();
-      transferId = transferId || s?.transfer_id || null;
-      phone = s?.customer_phone || null;
+      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone, sale_date, closer_id').eq('id', a.sale_id).maybeSingle();
+      if (s) { transferId = transferId || s.transfer_id || null; phone = s.customer_phone || null; saleDate = s.sale_date || null; if (s.closer_id) userIds.add(s.closer_id); }
     }
     if (transferId) {
-      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone').eq('id', transferId).maybeSingle();
-      leadCode = t?.vicidial_vendor_code || null;
-      phone = phone || t?.normalized_phone || null;
+      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone, created_at, created_by, assigned_closer_id').eq('id', transferId).maybeSingle();
+      if (t) { leadCode = t.vicidial_vendor_code || null; phone = phone || t.normalized_phone || null; createdAt = t.created_at || null; if (t.created_by) userIds.add(t.created_by); if (t.assigned_closer_id) userIds.add(t.assigned_closer_id); }
     }
-    const lead = leadDigits(leadCode);
-    if (lead) { try { candidates = await listCandidatesByLeadId(lead); } catch (e) { logger.warn('QA', `candidates lead ${lead}: ${e.message}`); } }
-    // FALLBACK: no lead code (or the lead returned nothing) → resolve by PHONE
-    // across all boxes (every recording leg to this number), like the portal.
+    // dialer agent ids for the fronter + closer on this lead
+    let agentIds = [];
+    if (userIds.size) {
+      const { data: profs } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', [...userIds]);
+      agentIds = [...new Set((profs || []).flatMap(p => p.vicidial_agent_ids || []).filter(Boolean))];
+    }
+    const date = createdAt ? String(createdAt).slice(0, 10) : (saleDate ? String(saleDate).slice(0, 10) : null);
+    try {
+      candidates = await listCandidatesForSale({ code: leadCode, phone, agentIds, date, dialerAt: createdAt });
+    } catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
+    // Last resort — pure phone search across boxes (covers legs by an unmapped
+    // agent) via the dialer's phone_number_log.
     if (!candidates.length && phone) {
       try { candidates = await listCandidatesByPhone({ phone }); } catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
     }
