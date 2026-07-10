@@ -3,7 +3,7 @@ import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
-  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus,
+  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -386,6 +386,7 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
   const [pulling, setPulling] = useState(false);
   const [filters, setFilters] = useState({ method: '', status: 'pending', subject_role: '', mine: '' });
   const [open, setOpen] = useState(null);   // selected assignment
+  const [kind, setKind] = useState('transfer');   // 'transfer' | 'sale' — the two sections
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -410,12 +411,28 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
     } finally { setPulling(false); }
   };
 
+  // Two sections by record type: a record with a sale_id is a Sale, otherwise a
+  // Transfer. Split the loaded queue so each section shows only its own records.
+  const transfers = items.filter(a => !a.sale_id);
+  const sales     = items.filter(a => !!a.sale_id);
+  const shown     = kind === 'sale' ? sales : transfers;
+
   return (
     <div className="flex flex-col gap-3 h-full">
+      {/* Transfers vs Sales — the two sections */}
+      <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+        {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
+          <button key={k} onClick={() => { setKind(k); setOpen(null); }}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
+            style={{ background: kind === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kind === k ? '#fff' : 'var(--color-text-secondary)' }}>
+            <Icon size={13} /> {label}
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: kind === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kind === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+          </button>
+        ))}
+      </div>
       {/* list */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 flex-wrap mb-3">
-          <select value={filters.method} onChange={e => setFilters(f => ({ ...f, method: e.target.value }))} style={inp}><option value="">All methods</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
           <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))} style={inp}><option value="">Any status</option><option value="pending">Pending</option><option value="in_review">In review</option><option value="scored">Scored</option></select>
           <select value={filters.subject_role} onChange={e => setFilters(f => ({ ...f, subject_role: e.target.value }))} style={inp}><option value="">Fronter + closer</option><option value="fronter">Fronter</option><option value="closer">Closer</option></select>
           <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={filters.mine === 'true'} onChange={e => setFilters(f => ({ ...f, mine: e.target.checked ? 'true' : '' }))} /> Mine only</label>
@@ -428,9 +445,9 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
           )}
         </div>
         {loading ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
-          : items.length === 0 ? (
+          : shown.length === 0 ? (
             <div className="text-center py-10">
-              <div className="text-sm mb-3" style={{ color: 'var(--color-text-tertiary)' }}>No calls in the queue yet.</div>
+              <div className="text-sm mb-3" style={{ color: 'var(--color-text-tertiary)' }}>{items.length ? `No ${kind === 'sale' ? 'sales' : 'transfers'} in the queue for this filter.` : 'No calls in the queue yet.'}</div>
               {canManage
                 ? <button onClick={pullNow} disabled={pulling} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: pulling ? 0.6 : 1 }}>
                     {pulling ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Pull calls now
@@ -445,7 +462,7 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
                   <tr>{['Method', 'Customer / Phone', 'Date', 'Agent', 'Assignee', 'Status', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {items.map(a => (
+                  {shown.map(a => (
                     <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
                       style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
                       <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{a.subject_role}</span></td>
@@ -1464,6 +1481,7 @@ function AgentTasks({ selfId, canOverride, companyId }) {
   const [status, setStatus] = useState('pending');
   const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
   const [open, setOpen] = useState(null);
+  const [kind, setKind] = useState('transfer');   // 'transfer' | 'sale'
 
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
   const load = useCallback(async () => {
@@ -1475,25 +1493,39 @@ function AgentTasks({ selfId, canOverride, companyId }) {
   useEffect(() => { load(); }, [load]);
   const show = (k) => fields[k] !== false;
 
+  // Split my tasks into Transfers vs Sales (sale_id present = a sale).
+  const transfers = items.filter(a => !a.sale_id);
+  const sales     = items.filter(a => !!a.sale_id);
+  const shown     = kind === 'sale' ? sales : transfers;
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>My tasks</span>
+        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
+            <button key={k} onClick={() => { setKind(k); setOpen(null); }}
+              className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
+              style={{ background: kind === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kind === k ? '#fff' : 'var(--color-text-secondary)' }}>
+              <Icon size={12} /> {label}
+              <span className="text-[10px] px-1.5 rounded-full" style={{ background: kind === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kind === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+            </button>
+          ))}
+        </div>
         <select value={status} onChange={e => setStatus(e.target.value)} style={inp}>
           <option value="pending">To do</option><option value="in_review">In review</option><option value="scored">Scored</option><option value="">All</option>
         </select>
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
-        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{items.length} task{items.length === 1 ? '' : 's'}</span>
       </div>
       {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
-        : !items.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned to you here yet. Your QA manager assigns calls for you to review — they'll show up here.</div>
+        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{items.length ? `No ${kind === 'sale' ? 'sales' : 'transfers'} assigned to you here.` : "Nothing assigned to you here yet. Your QA manager assigns calls for you to review — they'll show up here."}</div>
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
                 <tr>{['Method', 'Customer / Phone', 'Agent reviewed', 'Location', 'Date', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
               </thead>
               <tbody>
-                {items.map(a => (
+                {shown.map(a => (
                   <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
                     style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
                     <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <StatusPill s={a.status} /></td>
