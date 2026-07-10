@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -412,16 +412,27 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     }
     candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   } else {
-    // materialized assignment — resolve via the transfer's dialer lead code
-    let transferId = a.transfer_id;
-    if (!transferId && a.sale_id) {
-      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
-      transferId = s?.transfer_id || null;
+    // materialized / CRM assignment — resolve the record's dialer lead code
+    // (most precise) AND its phone (fallback). Most transfers (~77%) carry NO
+    // vicidial_vendor_code, so without the phone fallback their sales/transfers
+    // would show no recordings at all.
+    let leadCode = null, phone = null, transferId = a.transfer_id || null;
+    if (a.sale_id) {
+      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone').eq('id', a.sale_id).maybeSingle();
+      transferId = transferId || s?.transfer_id || null;
+      phone = s?.customer_phone || null;
     }
     if (transferId) {
-      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', transferId).maybeSingle();
-      const lead = leadDigits(t?.vicidial_vendor_code);
-      if (lead) { try { candidates = await listCandidatesByLeadId(lead); } catch (e) { logger.warn('QA', `candidates ${lead}: ${e.message}`); } }
+      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone').eq('id', transferId).maybeSingle();
+      leadCode = t?.vicidial_vendor_code || null;
+      phone = phone || t?.normalized_phone || null;
+    }
+    const lead = leadDigits(leadCode);
+    if (lead) { try { candidates = await listCandidatesByLeadId(lead); } catch (e) { logger.warn('QA', `candidates lead ${lead}: ${e.message}`); } }
+    // FALLBACK: no lead code (or the lead returned nothing) → resolve by PHONE
+    // across all boxes (every recording leg to this number), like the portal.
+    if (!candidates.length && phone) {
+      try { candidates = await listCandidatesByPhone({ phone }); } catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
     }
   }
   // first open by the assignee moves it into 'in_review' (progress signal)
