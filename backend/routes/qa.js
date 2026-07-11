@@ -27,6 +27,7 @@ const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetForm
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
+const { WORK_TYPES, getActiveRules, materializeCloserWork, applyCompanyRules } = require('../utils/qaRules');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const axios = require('axios');
@@ -170,14 +171,14 @@ router.get('/queue', asyncHandler(async (req, res) => {
   if (req.query.date_from)    q = q.gte('created_at', req.query.date_from);
   if (req.query.date_to)      q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
 
-  // AGENT scoping: a qa_agent only ever sees tasks assigned to THEM, and only in
-  // the method(s) a manager bound them to (mig 180). No pool, no cross-agent view.
+  // AGENT scoping: a qa_agent only ever sees tasks assigned to THEM. No pool, no
+  // cross-agent view. Explicitly-assigned work is ALWAYS visible regardless of
+  // method bindings — compliance work rules (mig 186) route tasks straight to a
+  // reviewer, and a routed task must never be invisible to its owner.
   const mgr = await isManager(req);
   if (!mgr) {
-    const methods = await agentMethods(req.user.id);
-    if (!methods.length) return res.json({ items: [], total: 0, page, limit });
-    q = q.eq('assigned_to', req.user.id).in('method', methods);
-    if (req.query.method && methods.includes(req.query.method)) q = q.eq('method', req.query.method);
+    q = q.eq('assigned_to', req.user.id);
+    if (req.query.method) q = q.eq('method', req.query.method);
   } else {
     // MANAGER filters (pool visibility)
     if (req.query.method)              q = q.eq('method', req.query.method);
@@ -1649,27 +1650,140 @@ router.put('/admin/company-methods', asyncHandler(async (req, res) => {
   res.json({ ok: true, methods, materialized });
 }));
 
-// create a NEW QA manager/agent user + assign to companies. SUPERADMIN ONLY —
-// compliance manages/assigns existing QA users but does not mint accounts; every
-// user the superadmin creates shows up automatically in /admin/users below.
-router.post('/admin/users', asyncHandler(async (req, res) => {
-  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Only the Super Admin can create QA users. Ask them to create the account — it will appear here automatically for you to assign and manage.' });
-  const { email, full_name, password, level } = req.body || {};
-  const companyIds = Array.isArray(req.body?.company_ids) ? req.body.company_ids : [];
-  if (!email || !full_name || !['qa_manager', 'qa_agent'].includes(level)) return res.status(400).json({ error: 'email, full_name, level (qa_manager|qa_agent) required' });
-  const roleId = await globalQaRoleId(level);
-  if (!roleId) return res.status(500).json({ error: 'Global QA role missing — apply migration 181' });
-  const parts = String(full_name).trim().split(/\s+/);
-  const first_name = parts[0]; const last_name = parts.slice(1).join(' ');
-  const pass = (password && String(password).length >= 8) ? password : ('Qa!' + Math.random().toString(36).slice(2, 10) + 'A9');
+// NOTE: QA user CREATION was removed from the compliance surface — the Super
+// Admin creates QA users through the normal admin user management. Anyone who
+// holds a QA role automatically appears in GET /admin/users above for
+// compliance to assign, bind and route.
 
-  const { data: created, error: authErr } = await supabaseAdmin.auth.admin.createUser({ email, password: pass, email_confirm: true });
-  if (authErr || !created?.user) return res.status(400).json({ error: authErr?.message || 'Could not create user' });
-  const uid = created.user.id;
-  await supabaseAdmin.from('user_profiles').insert({ user_id: uid, first_name, last_name, theme_preference: 'light' });
-  const rows = companyIds.map(cid => ({ user_id: uid, company_id: cid, role_id: roleId, assigned_by: req.user.id, is_active: true }));
-  if (rows.length) { const { error: e } = await supabaseAdmin.from('user_company_roles').insert(rows); if (e) logger.warn('QA', `admin create-user assign: ${e.message}`); }
-  res.json({ ok: true, user_id: uid, generated_password: password ? undefined : pass, companies: companyIds.length });
+// ── WORK RULES — who listens to what (mig 186) ────────────────────────────────
+// A rule = one reviewer × any mix of work types × everyone-or-specific subject
+// users × (for closer_dispo) a disposition set. The engine materializes the
+// matching calls and routes them to the reviewer automatically.
+
+// list rules (enriched with reviewer + subject names)
+router.get('/admin/rules', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  let q = supabaseAdmin.from('qa_routing_rules').select('*').order('created_at', { ascending: false });
+  if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+  const { data: rules, error } = await q;
+  if (error) return res.status(500).json({ error: /does not exist|relation/i.test(error.message) ? 'Work rules need migration 186 — apply it in the Supabase SQL editor first.' : error.message });
+  const uids = [...new Set((rules || []).flatMap(r => [r.reviewer_id, ...(r.subject_user_ids || [])]))].filter(Boolean);
+  let names = {};
+  if (uids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p) || p.user_id.slice(0, 6)]));
+  }
+  const { data: cos } = await supabaseAdmin.from('companies').select('id, name');
+  const coName = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+  res.json({
+    rules: (rules || []).map(r => ({
+      ...r,
+      reviewer_name: names[r.reviewer_id] || null,
+      subject_names: (r.subject_user_ids || []).map(id => names[id] || id.slice(0, 6)),
+      company_name: coName[r.company_id] || null,
+    })),
+  });
+}));
+
+// create a rule
+router.post('/admin/rules', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id, reviewer_id } = req.body || {};
+  const work_types = Array.isArray(req.body?.work_types) ? req.body.work_types.filter(t => WORK_TYPES.includes(t)) : [];
+  const subject_user_ids = Array.isArray(req.body?.subject_user_ids) ? req.body.subject_user_ids.filter(Boolean) : [];
+  const dispositions = Array.isArray(req.body?.dispositions) ? req.body.dispositions.map(d => String(d).trim().toUpperCase()).filter(Boolean) : [];
+  if (!company_id || !reviewer_id || !work_types.length) return res.status(400).json({ error: 'company_id, reviewer_id and at least one work type are required' });
+  const { data, error } = await supabaseAdmin.from('qa_routing_rules')
+    .insert({ company_id, reviewer_id, work_types, subject_user_ids, dispositions, created_by: req.user.id })
+    .select().single();
+  if (error) return res.status(500).json({ error: /does not exist|relation/i.test(error.message) ? 'Work rules need migration 186 — apply it in the Supabase SQL editor first.' : error.message });
+  res.json({ ok: true, rule: data });
+}));
+
+// update / toggle a rule
+router.put('/admin/rules/:id', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const patch = {};
+  if (typeof req.body?.is_active === 'boolean') patch.is_active = req.body.is_active;
+  if (Array.isArray(req.body?.work_types)) patch.work_types = req.body.work_types.filter(t => WORK_TYPES.includes(t));
+  if (Array.isArray(req.body?.subject_user_ids)) patch.subject_user_ids = req.body.subject_user_ids.filter(Boolean);
+  if (Array.isArray(req.body?.dispositions)) patch.dispositions = req.body.dispositions.map(d => String(d).trim().toUpperCase()).filter(Boolean);
+  if (req.body?.reviewer_id) patch.reviewer_id = req.body.reviewer_id;
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await supabaseAdmin.from('qa_routing_rules').update(patch).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, rule: data });
+}));
+
+router.delete('/admin/rules/:id', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { error } = await supabaseAdmin.from('qa_routing_rules').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+}));
+
+// run a company's rules NOW: materialize the base pools the rules need (tra/rcm
+// via the RPCs, closer work here) and route everything to the rule reviewers.
+router.post('/admin/rules/apply', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id } = req.body || {};
+  if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  const rules = await getActiveRules(company_id);
+  if (!rules.length) return res.status(400).json({ error: 'No active work rules for this company yet — add one first.' });
+  const types = new Set(rules.flatMap(r => r.work_types || []));
+  const base = ['tra', 'rcm'].filter(t => types.has(t));
+  let materialized = { tra: 0, rcm: 0 };
+  if (base.length) { try { materialized = await materializeCompany(company_id, base); } catch (e) { logger.warn('QA', `rules apply materialize: ${e.message}`); } }
+  const closer = await materializeCloserWork(company_id, rules);
+  const routed = await applyCompanyRules(company_id);
+  // tell each reviewer what just landed on their plate
+  for (const [uid, n] of Object.entries(routed.byReviewer || {})) {
+    notifyUsers([uid], {
+      companyId: company_id, type: 'qa_assignment',
+      title: `${n} QA call(s) routed to you`, message: 'Compliance work rules assigned calls for you to review.',
+      data: { count: n },
+    }).catch(() => {});
+  }
+  res.json({ ok: true, materialized, closer, routed: routed.assigned });
+}));
+
+// the company's reviewable people (fronters + closers) for the subject picker
+router.get('/admin/company-users', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  const { data: rows } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+  const withLevel = (rows || []).map(r => ({ user_id: r.user_id, level: lvlOf(r.custom_roles) }))
+    .filter(r => ['fronter', 'closer', 'fronter_manager', 'closer_manager'].includes(r.level));
+  const uids = [...new Set(withLevel.map(r => r.user_id))];
+  let names = {};
+  if (uids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p) || p.user_id.slice(0, 6)]));
+  }
+  const seen = new Set();
+  const users = withLevel.filter(r => !seen.has(r.user_id) && seen.add(r.user_id))
+    .map(r => ({ user_id: r.user_id, name: names[r.user_id] || r.user_id.slice(0, 6), level: r.level }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ users });
+}));
+
+// the disposition codes seen on this company's closer-landed transfers (for the
+// closer_dispo picker) — recent slice is plenty for a picker; free-typing is
+// still allowed in the UI.
+router.get('/admin/dispositions', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  const { data } = await supabaseAdmin.from('transfers')
+    .select('latest_disposition').eq('company_id', companyId)
+    .not('latest_disposition', 'is', null).not('assigned_closer_id', 'is', null)
+    .order('created_at', { ascending: false }).limit(2000);
+  const counts = {};
+  for (const r of (data || [])) { const d = String(r.latest_disposition || '').trim().toUpperCase(); if (d) counts[d] = (counts[d] || 0) + 1; }
+  res.json({ dispositions: Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([code, n]) => ({ code, count: n })) });
 }));
 
 // full per-company QA config (compliance controls each company's QA setup —

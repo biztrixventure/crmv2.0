@@ -16,6 +16,7 @@
 const { supabaseAdmin } = require('../config/database');
 const { getConfig } = require('./businessConfig');
 const { autoAssignCompany } = require('./qaAutoAssign');
+const { getActiveRules, materializeCloserWork, applyCompanyRules } = require('./qaRules');
 const logger = require('./logger');
 
 // ── period math (previous complete period) ──────────────────────────────────
@@ -108,11 +109,14 @@ async function materializeCompany(companyId, methods) {
       else rcm = data || 0;
     } catch (e) { logger.warn('QA_JOBS', `RCM ${companyId} error: ${e.message}`); }
   }
-  // Route the freshly-materialized (and any older unassigned) tasks to the
-  // agents who cover this company — so work reaches people automatically
-  // instead of waiting for a manual hand-assign. No coverage → stays in pool.
+  // Route the freshly-materialized (and any older unassigned) tasks. Compliance
+  // WORK RULES first (who listens to what — specific reviewer/work-type/subject
+  // combos), then the generic per-company coverage round-robin picks up the
+  // leftovers. No rule + no coverage → stays in the pool for a manual assign.
   let assigned = 0;
-  try { assigned = (await autoAssignCompany(companyId)).assigned; }
+  try { assigned += (await applyCompanyRules(companyId)).assigned; }
+  catch (e) { logger.warn('QA_JOBS', `rules ${companyId}: ${e.message}`); }
+  try { assigned += (await autoAssignCompany(companyId)).assigned; }
   catch (e) { logger.warn('QA_JOBS', `auto-assign ${companyId}: ${e.message}`); }
   return { tra, rcm, assigned };
 }
@@ -143,8 +147,7 @@ async function purgeStaleQaAssignments() {
 async function runQaMaterialization() {
   let companies;
   try { companies = await enabledCompanies(); }
-  catch (e) { logger.warn('QA_JOBS', `enabledCompanies error: ${e.message}`); return; }
-  if (!companies.length) return;   // nobody has QA on — nothing to do
+  catch (e) { logger.warn('QA_JOBS', `enabledCompanies error: ${e.message}`); companies = []; }
 
   let traTotal = 0, rcmTotal = 0;
   for (const { companyId, methods } of companies) {
@@ -154,6 +157,27 @@ async function runQaMaterialization() {
   if (traTotal || rcmTotal) {
     logger.info('QA_JOBS', `QA materialize: +${traTotal} TRA, +${rcmTotal} RCM across ${companies.length} co(s)`);
   }
+
+  // Compliance WORK RULES run even for companies whose qa.methods is off — a
+  // rule is explicit intent. Materialize the base pools a rule needs (tra/rcm
+  // via the RPCs, closer work here) and route.
+  try {
+    const rules = await getActiveRules(null);
+    const byCo = {};
+    for (const r of rules) (byCo[r.company_id] ||= []).push(r);
+    const enabledSet = new Set(companies.map(c => c.companyId));
+    for (const [coId, coRules] of Object.entries(byCo)) {
+      const types = new Set(coRules.flatMap(r => r.work_types || []));
+      const base = ['tra', 'rcm'].filter(t => types.has(t));
+      if (base.length && !enabledSet.has(coId)) await materializeCompany(coId, base);
+      const c = await materializeCloserWork(coId, coRules);
+      const routed = await applyCompanyRules(coId);
+      if (c.closer_sales || c.closer_dispo || routed.assigned) {
+        logger.info('QA_JOBS', `rules ${coId}: +${c.closer_sales} sales, +${c.closer_dispo} dispo, routed ${routed.assigned}`);
+      }
+    }
+  } catch (e) { logger.warn('QA_JOBS', `rules pass: ${e.message}`); }
+
   // retention runs even if nothing was materialized this tick (backlog drains).
   await purgeStaleQaAssignments();
 }

@@ -1814,9 +1814,11 @@ function QAAgentView({ user, logout }) {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {Array.isArray(methods) && methods.length === 0
-          ? <div className="text-center py-20 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Your QA manager hasn't set you up yet.<br />Once they assign you a method (RCM or TRA) and tasks, your work appears here.</div>
-          : tab === 'tasks' ? <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />
+        {/* No method-binding gate here: compliance work rules route tasks straight
+            to a reviewer, so an agent must always see what's assigned to them —
+            AgentTasks shows its own empty state when there's nothing. */}
+        {tab === 'tasks'
+          ? <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />
           : <CompletedTab managerView={false} companyId={scoped} />}
       </main>
     </div>

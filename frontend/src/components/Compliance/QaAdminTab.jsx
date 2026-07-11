@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Shield, RefreshCw, Loader2, X, UserPlus, Search, Building2, Check, Settings2, ChevronDown, Info, Lock } from 'lucide-react';
+import { Shield, RefreshCw, Loader2, X, Search, Building2, Check, Settings2, ChevronDown, Info, Lock, Headphones, ArrowRightLeft, Shuffle, DollarSign, PhoneOff, Play, Users, User } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
-import { useAuth } from '../../contexts/AuthContext';
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department. Enable/disable QA per company,
@@ -41,8 +40,6 @@ const StepBadge = ({ n }) => (
 );
 
 export default function QaAdminTab() {
-  const { user } = useAuth();
-  const isSuperadmin = user?.role === 'superadmin';
   const [companies, setCompanies] = useState(null);
   const [users, setUsers] = useState(null);
   const [expanded, setExpanded] = useState(null);   // company id whose config is open
@@ -97,9 +94,7 @@ export default function QaAdminTab() {
         <Shield size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>QA Department</h2>
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-          {isSuperadmin
-            ? 'Create QA users, enable QA per company, and route who reviews what.'
-            : 'Assign and manage the QA team across companies. New QA users are created by the Super Admin and appear here automatically.'}
+          Enable QA per company, set <b>work rules</b> — who listens to what — and manage the team. QA accounts are created by the Super Admin and appear here automatically.
         </span>
         <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
       </div>
@@ -158,32 +153,35 @@ export default function QaAdminTab() {
             </div>}
       </section>
 
-      {/* STEP 2 — build the team: assign existing (compliance) + create (superadmin only) */}
+      {/* STEP 2 — WORK RULES: who listens to what */}
+      <section>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+          <StepBadge n={2} /> Work rules — who listens to what
+          <InfoTip w={300} text="The heart of QA routing. A rule sends a kind of work — transfer calls (TRA), random calls (RCM), closer sales calls, or closer-landed calls with chosen dispositions — to one QA reviewer. Limit it to specific agents or cover everyone, and combine any mix. Matching calls are pulled in and routed to the reviewer automatically; Run now applies a company's rules immediately." />
+        </div>
+        <RulesSection companies={companies || []} qaUsers={users || []} />
+      </section>
+
+      {/* STEP 3 — team: assign existing users to companies */}
       <section>
         <div className="text-sm font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={2} /> Build the team
-          <InfoTip text={isSuperadmin
-            ? 'Assign an existing user to a company as QA, or create a brand-new QA account. Creation is a Super Admin power — compliance managers only assign and manage.'
-            : 'Assign an existing user to a company as a QA manager or agent. Creating brand-new QA accounts is reserved for the Super Admin — once they create one, it appears in the roster below automatically.'} />
+          <StepBadge n={3} /> Team access
+          <InfoTip text="Give an existing user QA access to a company (manager or agent). Creating brand-new QA accounts is done by the Super Admin — once created, the user appears in the roster below automatically." />
         </div>
         <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <AssignExisting companies={companies || []} onDone={loadUsers} />
-          {isSuperadmin ? (
-            <CreateQaUser companies={companies || []} onDone={loadUsers} />
-          ) : (
-            <div className="p-3 rounded-xl flex flex-col items-center justify-center text-center gap-1.5" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
-              <Lock size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-              <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New QA accounts — Super Admin only</div>
-              <div className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>Ask the Super Admin to create the QA manager/agent account. As soon as it exists it appears in the roster below, ready for you to assign to companies and bind methods.</div>
-            </div>
-          )}
+          <div className="p-3 rounded-xl flex flex-col items-center justify-center text-center gap-1.5" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
+            <Lock size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+            <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New QA accounts — created by the Super Admin</div>
+            <div className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>The Super Admin creates QA manager/agent accounts in the companies. As soon as an account exists it shows up here automatically — ready to assign, bind and route.</div>
+          </div>
         </div>
       </section>
 
-      {/* STEP 3 — roster: every QA user, searchable */}
+      {/* STEP 4 — roster: every QA user, searchable */}
       <section>
         <div className="text-sm font-bold mb-2 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={3} /> QA managers &amp; agents
+          <StepBadge n={4} /> QA managers &amp; agents
           <InfoTip text="Everyone holding a QA role, whoever created them. Per company: bind an agent's TRA/RCM (what they cover there) or remove them from a company with the ×. 'no method' = agent sees no tasks until you bind one." />
           {users && <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>{users.length} people</span>}
           <span className="ml-auto flex items-center gap-1.5">
@@ -197,7 +195,7 @@ export default function QaAdminTab() {
           </span>
         </div>
         {shownUsers === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-          : !shownUsers.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>{users?.length ? 'No QA people match that filter.' : (isSuperadmin ? 'No QA people yet — create or assign one above.' : 'No QA people yet — the Super Admin creates the accounts; you can also assign an existing user above.')}</div>
+          : !shownUsers.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>{users?.length ? 'No QA people match that filter.' : 'No QA people yet — the Super Admin creates the accounts; you can also assign an existing user above.'}</div>
           : <div className="space-y-2">
               {shownUsers.map(u => (
                 <div key={u.user_id} className="p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -286,41 +284,249 @@ function AssignExisting({ companies, onDone }) {
   );
 }
 
-// ── create a brand-new QA manager/agent + assign to companies ────────────────
-function CreateQaUser({ companies, onDone }) {
-  const [f, setF] = useState({ email: '', full_name: '', password: '', level: 'qa_agent' });
-  const [cids, setCids] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const set = (k, v) => setF(o => ({ ...o, [k]: v }));
-  const toggleCo = (id) => setCids(cs => cs.includes(id) ? cs.filter(x => x !== id) : [...cs, id]);
+// ── WORK RULES — who listens to what (mig 186) ────────────────────────────────
+const WORK_TYPE_DEFS = [
+  { key: 'tra', label: 'Transfer calls (TRA)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'Every transfer the fronters make — full coverage review.' },
+  { key: 'rcm', label: 'Random calls (RCM)', icon: Shuffle, tint: '#d97706', desc: 'A random sample of calls (rate set per company in the gear above).' },
+  { key: 'closer_sales', label: 'Closer sales calls', icon: DollarSign, tint: '#059669', desc: 'The sales calls of the closers — every sale gets a review task.' },
+  { key: 'closer_dispo', label: 'Closer-landed, other dispositions', icon: PhoneOff, tint: '#dc2626', desc: 'Transfers that reached a closer but ended with a different disposition — pick which codes count (none picked = any non-SALE).' },
+];
+const wtDef = (k) => WORK_TYPE_DEFS.find(w => w.key === k) || { label: k, tint: 'var(--color-text-tertiary)', icon: Headphones };
 
-  const create = async () => {
-    if (!f.email || !f.full_name) return toast.error('Email and name required');
+function RulesSection({ companies, qaUsers }) {
+  const [rules, setRules] = useState(null);
+  const [building, setBuilding] = useState(false);
+  const [applying, setApplying] = useState(null);   // company id being run
+
+  const load = useCallback(() => client.get('qa/admin/rules').then(r => setRules(r.data.rules || [])).catch(e => { setRules([]); const m = e.response?.data?.error; if (m && /migration 186/.test(m)) toast.error(m); }), []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (rule) => {
+    setRules(rs => rs.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
+    try { await client.put(`qa/admin/rules/${rule.id}`, { is_active: !rule.is_active }); }
+    catch { toast.error('Could not update rule'); load(); }
+  };
+  const remove = async (rule) => {
+    try { await client.delete(`qa/admin/rules/${rule.id}`); toast.success('Rule removed'); load(); }
+    catch { toast.error('Could not remove rule'); }
+  };
+  const runNow = async (companyId) => {
+    setApplying(companyId);
+    try {
+      const r = await client.post('qa/admin/rules/apply', { company_id: companyId });
+      const bits = [];
+      const m = r.data.materialized || {}; const c = r.data.closer || {};
+      if (m.tra) bits.push(`${m.tra} TRA`); if (m.rcm) bits.push(`${m.rcm} RCM`);
+      if (c.closer_sales) bits.push(`${c.closer_sales} sales`); if (c.closer_dispo) bits.push(`${c.closer_dispo} dispo`);
+      toast.success(`Rules ran — pulled ${bits.length ? bits.join(' + ') : 'no new calls'}, routed ${r.data.routed} task(s)`);
+    } catch (e) { toast.error(e.response?.data?.error || 'Run failed'); }
+    finally { setApplying(null); }
+  };
+
+  // group rules by company for display + per-company Run now
+  const byCompany = useMemo(() => {
+    const m = {};
+    for (const r of (rules || [])) (m[r.company_id] ||= { name: r.company_name, rules: [] }).rules.push(r);
+    return m;
+  }, [rules]);
+
+  return (
+    <div className="space-y-3">
+      {/* existing rules, grouped by company */}
+      {rules === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+        : !rules.length ? (
+          <div className="text-[12px] p-3 rounded-xl leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            No work rules yet. A rule tells the system, for one company: <b>this reviewer</b> listens to <b>these kinds of calls</b> from <b>these agents</b> (or everyone). Any combination works — one reviewer on a single fronter's transfers, another on all closer sales, a third on every CALLBK/NI call that landed on a closer. Build the first one below.
+          </div>
+        ) : Object.entries(byCompany).map(([coId, g]) => (
+          <div key={coId} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+              <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{g.name || coId.slice(0, 8)}</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.rules.length} rule{g.rules.length === 1 ? '' : 's'}</span>
+              <button onClick={() => runNow(coId)} disabled={applying === coId}
+                className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1"
+                style={{ background: 'var(--color-primary-600)', color: '#fff', opacity: applying === coId ? 0.6 : 1 }}
+                title="Pull the matching calls and route them to the rule reviewers right now">
+                {applying === coId ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Run now
+              </button>
+            </div>
+            <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+              {g.rules.map(r => (
+                <div key={r.id} className="flex items-start gap-2 px-3 py-2" style={{ opacity: r.is_active ? 1 : 0.45 }}>
+                  <Headphones size={14} className="mt-0.5" style={{ color: 'var(--color-primary-600)' }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.reviewer_name || r.reviewer_id.slice(0, 6)} <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>listens to</span></div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(r.work_types || []).map(k => { const d = wtDef(k); const I = d.icon; return (
+                        <span key={k} className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${d.tint}18`, color: d.tint }}><I size={10} />{d.label}</span>
+                      ); })}
+                      {(r.work_types || []).includes('closer_dispo') && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                          {(r.dispositions || []).length ? `dispo: ${r.dispositions.join(', ')}` : 'dispo: any non-SALE'}
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                        {(r.subject_names || []).length ? <><User size={10} />{r.subject_names.join(', ')}</> : <><Users size={10} />all agents</>}
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={() => toggle(r)} className="text-[10px] font-bold px-2 py-1 rounded uppercase" style={r.is_active ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.is_active ? 'Active' : 'Paused'}</button>
+                  <button onClick={() => remove(r)} title="Delete rule"><X size={14} style={{ color: 'var(--color-error-600)' }} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+      {/* builder */}
+      {building
+        ? <RuleBuilder companies={companies} qaUsers={qaUsers} onDone={() => { setBuilding(false); load(); }} onCancel={() => setBuilding(false)} />
+        : <button onClick={() => setBuilding(true)} className="w-full py-2.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5"
+            style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', color: '#fff' }}>
+            <Headphones size={14} /> New work rule — assign a reviewer to calls
+          </button>}
+    </div>
+  );
+}
+
+function RuleBuilder({ companies, qaUsers, onDone, onCancel }) {
+  const [companyId, setCompanyId] = useState('');
+  const [reviewerId, setReviewerId] = useState('');
+  const [types, setTypes] = useState([]);
+  const [subjectMode, setSubjectMode] = useState('all');   // all | specific
+  const [subjects, setSubjects] = useState([]);
+  const [dispos, setDispos] = useState([]);
+  const [dispoAdd, setDispoAdd] = useState('');
+  const [companyUsers, setCompanyUsers] = useState(null);
+  const [dispoOptions, setDispoOptions] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) { setCompanyUsers(null); setDispoOptions([]); return; }
+    setCompanyUsers(null); setSubjects([]);
+    client.get('qa/admin/company-users', { params: { company_id: companyId } }).then(r => setCompanyUsers(r.data.users || [])).catch(() => setCompanyUsers([]));
+    client.get('qa/admin/dispositions', { params: { company_id: companyId } }).then(r => setDispoOptions(r.data.dispositions || [])).catch(() => setDispoOptions([]));
+  }, [companyId]);
+
+  const toggleType = (k) => setTypes(ts => ts.includes(k) ? ts.filter(x => x !== k) : [...ts, k]);
+  const toggleSubject = (id) => setSubjects(ss => ss.includes(id) ? ss.filter(x => x !== id) : [...ss, id]);
+  const toggleDispo = (c) => setDispos(ds => ds.includes(c) ? ds.filter(x => x !== c) : [...ds, c]);
+  const addDispo = () => { const c = dispoAdd.trim().toUpperCase(); if (c && !dispos.includes(c)) setDispos(ds => [...ds, c]); setDispoAdd(''); };
+
+  const save = async () => {
+    if (!companyId || !reviewerId || !types.length) return toast.error('Pick a company, a reviewer and at least one kind of call');
+    if (subjectMode === 'specific' && !subjects.length) return toast.error('Pick at least one agent to listen to, or switch back to All agents');
     setBusy(true);
     try {
-      const r = await client.post('qa/admin/users', { ...f, company_ids: cids });
-      toast.success(`Created QA ${f.level === 'qa_manager' ? 'manager' : 'agent'}${r.data.generated_password ? ` — temp password: ${r.data.generated_password}` : ''}`, { duration: r.data.generated_password ? 12000 : 4000 });
-      setF({ email: '', full_name: '', password: '', level: f.level }); setCids([]); onDone();
-    } catch (e) { toast.error(e.response?.data?.error || 'Create failed'); }
+      await client.post('qa/admin/rules', {
+        company_id: companyId, reviewer_id: reviewerId, work_types: types,
+        subject_user_ids: subjectMode === 'specific' ? subjects : [],
+        dispositions: types.includes('closer_dispo') ? dispos : [],
+      });
+      toast.success('Work rule created — it routes matching calls from now on. Use Run now to apply it to what\'s already waiting.');
+      onDone();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not create rule'); }
     finally { setBusy(false); }
   };
 
   return (
-    <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      <div className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}><UserPlus size={13} /> Create a QA person</div>
-      <div className="flex gap-2">
-        <input value={f.full_name} onChange={e => set('full_name', e.target.value)} placeholder="Full name" style={{ ...inp, flex: 1 }} />
-        <select value={f.level} onChange={e => set('level', e.target.value)} style={inp}><option value="qa_agent">Agent</option><option value="qa_manager">Manager</option></select>
+    <div className="p-3.5 rounded-xl space-y-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-primary-600)' }}>
+      <div className="flex items-center gap-2">
+        <Headphones size={15} style={{ color: 'var(--color-primary-600)' }} />
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>New work rule</span>
+        <button onClick={onCancel} className="ml-auto"><X size={16} style={{ color: 'var(--color-text-tertiary)' }} /></button>
       </div>
-      <input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Email" style={{ ...inp, width: '100%' }} />
-      <input value={f.password} onChange={e => set('password', e.target.value)} placeholder="Password (optional — auto-generated if blank)" style={{ ...inp, width: '100%' }} />
+
+      {/* who + where */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <label className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>COMPANY
+          <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
+            <option value="">Choose company…</option>
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>QA REVIEWER (who listens)
+          <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
+            <option value="">Choose QA person…</option>
+            {qaUsers.map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.levels?.includes('qa_manager') ? ' (manager)' : ''}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {/* what kinds of calls */}
       <div>
-        <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Companies</div>
-        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-auto">
-          {companies.map(c => <button key={c.id} onClick={() => toggleCo(c.id)} className="text-[11px] px-2 py-1 rounded-lg" style={cids.includes(c.id) ? { background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)', border: '1px solid var(--color-primary-300, #c7d2fe)' } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{c.name}</button>)}
+        <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>KINDS OF CALLS <span className="font-normal">— pick any combination</span></div>
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {WORK_TYPE_DEFS.map(w => {
+            const on = types.includes(w.key); const I = w.icon;
+            return (
+              <button key={w.key} onClick={() => toggleType(w.key)} className="text-left p-2 rounded-lg flex items-start gap-2"
+                style={{ background: on ? `${w.tint}12` : 'var(--color-bg)', border: `1px solid ${on ? w.tint : 'var(--color-border)'}` }}>
+                <I size={14} className="mt-0.5 flex-shrink-0" style={{ color: w.tint }} />
+                <span>
+                  <span className="block text-xs font-bold" style={{ color: on ? w.tint : 'var(--color-text)' }}>{on ? '✓ ' : ''}{w.label}</span>
+                  <span className="block text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w.desc}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
-      <button onClick={create} disabled={busy || !f.email || !f.full_name} className="w-full px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: (busy || !f.email || !f.full_name) ? 0.5 : 1 }}>{busy ? 'Creating…' : 'Create QA person'}</button>
+
+      {/* dispositions — only for closer_dispo */}
+      {types.includes('closer_dispo') && (
+        <div>
+          <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>WHICH DISPOSITIONS <span className="font-normal">— none picked = any non-SALE</span></div>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {dispoOptions.map(d => (
+              <button key={d.code} onClick={() => toggleDispo(d.code)} className="text-[11px] font-bold px-2 py-1 rounded-lg"
+                style={dispos.includes(d.code) ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626', border: '1px solid #dc262666' } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                {d.code} <span className="font-normal opacity-70">({d.count})</span>
+              </button>
+            ))}
+            {dispos.filter(c => !dispoOptions.some(o => o.code === c)).map(c => (
+              <button key={c} onClick={() => toggleDispo(c)} className="text-[11px] font-bold px-2 py-1 rounded-lg" style={{ background: 'rgba(220,38,38,0.12)', color: '#dc2626', border: '1px solid #dc262666' }}>{c}</button>
+            ))}
+            <input value={dispoAdd} onChange={e => setDispoAdd(e.target.value)} onKeyDown={e => e.key === 'Enter' && addDispo()} placeholder="Add code…" style={{ ...inp, width: 90, fontSize: 11, padding: '4px 8px' }} />
+          </div>
+        </div>
+      )}
+
+      {/* whose calls */}
+      <div>
+        <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>LISTEN TO</div>
+        <div className="flex items-center gap-2 mb-1.5">
+          {[['all', 'All agents', Users], ['specific', 'Specific agents', User]].map(([k, l, I]) => (
+            <button key={k} onClick={() => setSubjectMode(k)} className="text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1"
+              style={subjectMode === k ? { background: 'var(--color-primary-600)', color: '#fff' } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+              <I size={11} />{l}
+            </button>
+          ))}
+          {subjectMode === 'specific' && <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{subjects.length} selected — single or multiple, your choice</span>}
+        </div>
+        {subjectMode === 'specific' && (
+          !companyId ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a company first to see its agents.</div>
+          : companyUsers === null ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+          : !companyUsers.length ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No fronters/closers found in this company.</div>
+          : <div className="flex flex-wrap gap-1.5 max-h-32 overflow-auto">
+              {companyUsers.map(u => (
+                <button key={u.user_id} onClick={() => toggleSubject(u.user_id)} className="text-[11px] px-2 py-1 rounded-lg"
+                  style={subjects.includes(u.user_id) ? { background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)', border: '1px solid var(--color-primary-300, #c7d2fe)', fontWeight: 700 } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                  {subjects.includes(u.user_id) ? '✓ ' : ''}{u.name} <span className="opacity-60">· {u.level.replace('_', ' ')}</span>
+                </button>
+              ))}
+            </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button onClick={onCancel} className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+        <button onClick={save} disabled={busy} className="px-4 py-2 rounded-lg text-xs font-bold text-white inline-flex items-center gap-1.5"
+          style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Create rule
+        </button>
+      </div>
     </div>
   );
 }
