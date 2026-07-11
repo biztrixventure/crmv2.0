@@ -1097,6 +1097,8 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   if (req.query.company_id)  q = q.eq('company_id', req.query.company_id);
   if (req.query.method)      q = q.eq('method', req.query.method);
   if (req.query.reviewer_id && managerView) q = q.eq('reviewer_id', req.query.reviewer_id);
+  // per-AGENT quality file: every review of one reviewed user (CRM subject)
+  if (req.query.subject_user_id) q = q.eq('subject_user_id', req.query.subject_user_id);
   if (req.query.date_from)   q = q.gte('created_at', req.query.date_from);
   if (req.query.date_to)     q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
   const { data: reviews, error } = await q;
@@ -1151,7 +1153,14 @@ router.get('/reviews', asyncHandler(async (req, res) => {
       overall_notes: r.overall_notes,
     };
   });
-  res.json({ reviews: out, scorecards, manager_view: managerView });
+  // dialer-label subject filter (day-recording reviews with no CRM subject link) —
+  // the label lives on the assignment, so it can only be matched post-hydration.
+  let rows = out;
+  if (req.query.agent) {
+    const a = String(req.query.agent).trim().toLowerCase();
+    rows = out.filter(r => String(r.agent || '').trim().toLowerCase() === a);
+  }
+  res.json({ reviews: rows, scorecards, manager_view: managerView });
 }));
 
 // ── edit / override a review (audited) ────────────────────────────────────────

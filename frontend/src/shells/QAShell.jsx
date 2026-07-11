@@ -1542,6 +1542,200 @@ function StatTile({ icon: Icon, label, value, sub, tint = 'var(--color-primary-6
 
 const csvEsc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
+// ── Agent Quality File — one reviewed user's complete QA history ──────────────
+// Opened by clicking an agent on the Agents board. Fetches every review of that
+// user in the window (subject_user_id when the CRM link exists, dialer label
+// otherwise) and shows: KPI tiles, score trend, the criteria they miss most,
+// call-outcome mix, and every reviewed call — plus a CSV of the file.
+function AgentQualityFile({ subject, managerView, companyId, onClose }) {
+  const [daysBack, setDaysBack] = useState(90);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const today = todayISO();
+  const from = addDays(today, -(daysBack - 1));
+
+  useEffect(() => {
+    setLoading(true);
+    const params = { date_from: from, date_to: today };
+    if (subject.subjectId) params.subject_user_id = subject.subjectId;
+    else if (subject.agentLabel) params.agent = subject.agentLabel;
+    if (companyId) params.company_id = companyId;
+    if (!managerView) params.mine = 'true';
+    client.get('qa/reviews', { params }).then(r => setData(r.data)).catch(() => setData({ reviews: [], scorecards: {} })).finally(() => setLoading(false));
+  }, [subject, from, today, managerView, companyId]);
+
+  const reviews = data?.reviews || [];
+  const scorecards = data?.scorecards || {};
+
+  // KPIs
+  const scores = reviews.map(scoreOfReview).filter(v => v != null);
+  const avg = scores.length ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length) : null;
+  const passed = reviews.filter(r => r.passed === true).length;
+  const decided = passed + reviews.filter(r => r.passed === false).length;
+  const autofails = reviews.filter(r => r.autofail_result === 'Fail').length;
+
+  // per-day score trend
+  const byDay = {};
+  for (const r of reviews) { const d = dayOfDate(r.reviewed_at); if (d) (byDay[d] ||= []).push(r); }
+  const trend = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).map(([d, rows]) => {
+    const ss = rows.map(scoreOfReview).filter(v => v != null);
+    return { x: d, y: ss.length ? Math.round(ss.reduce((s, v) => s + v, 0) / ss.length) : 0 };
+  });
+
+  // the criteria this agent misses most — bad answer per section type:
+  // rating ≤2, auto-fail 'N', penalty 'Y', sale-compliance 'N'.
+  const missAgg = {};
+  for (const r of reviews) {
+    const c = scorecards[r.scorecard_id]?.criteria;
+    if (!c || Array.isArray(c)) continue;
+    const vals = r.values || {};
+    const bump = (f, bad) => {
+      const v = vals[f.key];
+      if (v == null || v === '') return;
+      (missAgg[f.key] ||= { label: f.label, misses: 0, seen: 0 });
+      missAgg[f.key].seen++;
+      if (bad(v)) missAgg[f.key].misses++;
+    };
+    for (const f of (c.rating_criteria || [])) bump(f, v => Number(v) <= 2);
+    for (const f of ((c.autofail || {}).fields || [])) bump(f, v => v === 'N');
+    for (const f of (c.penalty_flags || [])) bump(f, v => v === 'Y');
+    for (const f of ((c.quality_score || {}).fields || [])) bump(f, v => v === 'N');
+  }
+  const issues = Object.values(missAgg).filter(x => x.misses > 0).sort((a, b) => b.misses - a.misses).slice(0, 8);
+
+  // call-outcome mix
+  const outcomeTally = {};
+  for (const r of reviews) { const o = (r.call_outcome || '').trim(); if (o) outcomeTally[o] = (outcomeTally[o] || 0) + 1; }
+  const outcomes = Object.entries(outcomeTally).sort((a, b) => b[1] - a[1]);
+
+  const exportFile = () => {
+    const lines = [['Reviewed at', 'Method', 'Customer', 'Phone', 'Score', 'Quality %', 'Result', 'Auto-fail', 'Call outcome', 'Reviewer', 'Notes'].join(',')];
+    for (const r of reviews) {
+      lines.push([
+        r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '', (r.method || '').toUpperCase(),
+        r.customer_name || '', r.customer_phone || '', r.final_score ?? '', r.quality_score ?? '',
+        r.passed === true ? 'PASS' : r.passed === false ? 'FAIL' : '', r.autofail_result || '',
+        r.call_outcome || '', r.reviewer_name || '', r.overall_notes || '',
+      ].map(csvEsc).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `qa-file_${(subject.name || 'agent').replace(/[^a-z0-9]+/gi, '_')}_${from}_${today}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="rounded-2xl p-5 overflow-auto" style={{ width: 'min(920px, 96vw)', maxHeight: '92vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        {/* header */}
+        <div className="flex items-center gap-2.5 mb-3 flex-wrap">
+          <span className="inline-flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 34, height: 34, background: 'var(--color-primary-100, #e0e7ff)' }}>
+            <User size={17} style={{ color: 'var(--color-primary-700, #4338ca)' }} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-base font-extrabold truncate" style={{ color: 'var(--color-text)' }}>{subject.name}</div>
+            <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Quality file · last {daysBack} days{subject.agentLabel && subject.subjectId == null ? ` · dialer ${subject.agentLabel}` : ''}</div>
+          </div>
+          <div className="flex items-center gap-1 p-0.5 rounded-lg ml-2" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+            {[30, 90, 180].map(d => (
+              <button key={d} onClick={() => setDaysBack(d)} className="text-[11px] font-bold px-2 py-1 rounded"
+                style={daysBack === d ? { background: 'var(--color-primary-600)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}>{d}d</button>
+            ))}
+          </div>
+          <button onClick={exportFile} disabled={!reviews.length} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg ml-auto"
+            style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', opacity: reviews.length ? 1 : 0.5 }}>
+            <Download size={13} /> Export file
+          </button>
+          <button onClick={onClose}><XCircle size={20} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+        </div>
+
+        {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+          : !reviews.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No reviews of this agent in the last {daysBack} days.</div>
+          : (
+            <>
+              {/* KPIs */}
+              <div className="flex items-stretch gap-2 flex-wrap mb-3">
+                <StatTile icon={ClipboardCheck} label="Calls reviewed" value={reviews.length} />
+                <StatTile icon={TrendingUp} label="Avg score" value={avg ?? '—'} tint={avg == null ? 'var(--color-primary-600)' : avg >= 80 ? '#059669' : avg >= 60 ? '#d97706' : '#dc2626'} />
+                <StatTile icon={CheckCircle2} label="Pass rate" value={decided ? `${Math.round(passed / decided * 100)}%` : '—'} sub={decided ? `${passed}/${decided}` : null} tint="#059669" />
+                <StatTile icon={XCircle} label="Auto-fails" value={autofails} tint="#dc2626" />
+                <StatTile icon={ArrowRightLeft} label="TRA" value={reviews.filter(r => r.method === 'tra').length} tint="#2563eb" />
+                <StatTile icon={Shield} label="RCM" value={reviews.filter(r => r.method === 'rcm').length} tint="#d97706" />
+              </div>
+
+              {/* trend */}
+              {trend.length >= 2 && (
+                <div className="p-3 rounded-xl mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Score trend</div>
+                  <Lines series={[{ name: 'Avg score', color: PALETTE[0], points: trend }]} yMax={100} yUnit="%" />
+                </div>
+              )}
+
+              <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: outcomes.length ? '3fr 2fr' : '1fr' }}>
+                {/* most-missed criteria */}
+                <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    What they miss most <InfoTip side="right" text="The scorecard questions this agent fails most often — low ratings (≤2), auto-fail violations, penalty flags and missed sale-compliance items — with how many of their reviewed calls had the problem. This is the coaching list." />
+                  </div>
+                  {!issues.length ? <div className="text-xs py-3" style={{ color: 'var(--color-text-tertiary)' }}>No recurring issues — clean reviews in this range. 🎉</div>
+                    : <div className="space-y-1.5">
+                        {issues.map(it => (
+                          <div key={it.label} className="flex items-center gap-2">
+                            <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)', width: 190 }}>{it.label}</span>
+                            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-hover)' }}>
+                              <div className="h-full rounded-full" style={{ width: `${Math.round(it.misses / it.seen * 100)}%`, background: '#dc2626' }} />
+                            </div>
+                            <span className="text-[11px] font-bold tabular-nums whitespace-nowrap" style={{ color: '#dc2626' }}>{it.misses}<span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}> / {it.seen}</span></span>
+                          </div>
+                        ))}
+                      </div>}
+                </div>
+                {/* outcome mix */}
+                {outcomes.length > 0 && (
+                  <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                    <div className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Call outcomes</div>
+                    <div className="space-y-1">
+                      {outcomes.slice(0, 8).map(([o, n]) => (
+                        <div key={o} className="flex items-center gap-2 text-xs">
+                          <span className="truncate" style={{ color: 'var(--color-text-secondary)' }}>{o}</span>
+                          <span className="font-bold tabular-nums ml-auto" style={{ color: 'var(--color-text)' }}>{n}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* every reviewed call */}
+              <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+                <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+                  <thead style={{ background: 'var(--color-surface-hover)' }}>
+                    <tr>{['When', 'Method', 'Customer / Phone', 'Score', 'Outcome', 'Reviewer'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {reviews.map(r => (
+                      <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-1.5 whitespace-nowrap text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewed_at ? new Date(r.reviewed_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
+                        <td className="px-2 py-1.5"><MethodPill m={r.method} /></td>
+                        <td className="px-2 py-1.5">
+                          <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</span>
+                          {r.customer_phone && <span className="text-[10px] tabular-nums ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{r.customer_phone}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap"><ReviewScore r={r} /></td>
+                        <td className="px-2 py-1.5 text-[11px] truncate" style={{ color: 'var(--color-text-tertiary)', maxWidth: 150 }}>{r.call_outcome || ''}</td>
+                        <td className="px-2 py-1.5 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewer_name || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+      </div>
+    </div>
+  );
+}
+
 function CompletedTab({ managerView, companyId }) {
   const today = todayISO();
   const [from, setFrom] = useState(today);
@@ -1552,10 +1746,11 @@ function CompletedTab({ managerView, companyId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   // scoreboard controls
-  const [view, setView] = useState('sheet');       // sheet | daily | reviewers
+  const [view, setView] = useState('sheet');       // sheet | daily | agents | reviewers
   const [search, setSearch] = useState('');
   const [result, setResult] = useState('');        // '' | pass | fail | autofail
   const [sort, setSort] = useState('newest');      // newest | high | low
+  const [file, setFile] = useState(null);          // agent quality-file modal
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1615,7 +1810,7 @@ function CompletedTab({ managerView, companyId }) {
     const m = {};
     for (const r of sorted) {
       const k = keyFn(r) || '?';
-      (m[k] ||= { name: nameFn(r) || 'Unknown', n: 0, sum: 0, scored: 0, passed: 0, decided: 0, autofails: 0, tra: 0, rcm: 0 });
+      (m[k] ||= { name: nameFn(r) || 'Unknown', subjectId: r.subject_user_id || null, agentLabel: r.agent || null, n: 0, sum: 0, scored: 0, passed: 0, decided: 0, autofails: 0, tra: 0, rcm: 0 });
       const g = m[k]; g.n++;
       const s = scoreOfReview(r); if (s != null) { g.sum += s; g.scored++; }
       if (r.passed === true) { g.passed++; g.decided++; } else if (r.passed === false) g.decided++;
@@ -1691,6 +1886,7 @@ function CompletedTab({ managerView, companyId }) {
 
   return (
     <div className="flex flex-col h-full">
+      {file && <AgentQualityFile subject={file} managerView={managerView} companyId={companyId} onClose={() => setFile(null)} />}
       {/* row 1 — range + server filters */}
       <div className="flex items-center gap-2 flex-wrap mb-2.5">
         <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'Completed — scoreboard' : 'My scoreboard'}
@@ -1832,7 +2028,10 @@ function CompletedTab({ managerView, companyId }) {
               {agentBoard.map((g, i) => {
                 const risky = g.avg != null && g.avg < 60;
                 return (
-                  <div key={g.name + i} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: risky ? '1px solid #dc262666' : '1px solid var(--color-border)' }}>
+                  <div key={g.name + i} onClick={() => setFile({ name: g.name, subjectId: g.subjectId, agentLabel: g.agentLabel })}
+                    className="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-transform hover:scale-[1.005]"
+                    title="Open this agent's full quality file"
+                    style={{ background: 'var(--color-surface)', border: risky ? '1px solid #dc262666' : '1px solid var(--color-border)' }}>
                     <span className="inline-flex items-center justify-center rounded-full font-extrabold text-sm flex-shrink-0"
                       style={{ width: 30, height: 30, background: risky ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: risky ? '#dc2626' : 'var(--color-text-secondary)' }}>
                       {risky ? <XCircle size={15} /> : i + 1}
@@ -1848,6 +2047,7 @@ function CompletedTab({ managerView, companyId }) {
                     <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 70, textAlign: 'right' }}>avg <b style={{ color: g.avg == null ? 'var(--color-text)' : g.avg >= 80 ? '#059669' : g.avg >= 60 ? '#d97706' : '#dc2626' }}>{g.avg ?? '—'}</b></div>
                     <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 74, textAlign: 'right' }}>pass <b style={{ color: g.passRate == null ? 'var(--color-text)' : g.passRate >= 50 ? '#059669' : '#dc2626' }}>{g.passRate != null ? `${g.passRate}%` : '—'}</b></div>
                     <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 90, textAlign: 'right' }}>auto-fails <b style={{ color: g.autofails ? '#dc2626' : 'var(--color-text)' }}>{g.autofails}</b></div>
+                    <ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
                   </div>
                 );
               })}
