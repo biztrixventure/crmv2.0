@@ -691,6 +691,22 @@ function ReportsTab({ companyId }) {
         <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
         <input type="date" value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <button onClick={() => {
+            // THE deliverable: one row per reviewed fronter/closer — the users
+            // whose quality this department exists to assure.
+            const rows = data?.by_agent || [];
+            if (!rows.length) return toast.error('No agent data to export yet');
+            const lines = [['Agent (reviewed user)', 'Reviews', 'Passed', 'Pass rate %', 'Avg score'].join(',')];
+            for (const a of rows) lines.push([a.name, a.reviews, a.passed, a.pass_rate ?? '', a.avg_score].map(v => { const s2 = String(v ?? ''); return /[",\n]/.test(s2) ? '"' + s2.replace(/"/g, '""') + '"' : s2; }).join(','));
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob);
+            a2.download = `qa-agent-report_${f.date_from}_${f.date_to}.csv`; a2.click(); URL.revokeObjectURL(a2.href);
+          }}
+          className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+          style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
+          title="Download the per-agent quality report (one row per reviewed fronter/closer)">
+          <Download size={13} /> Agent report
+        </button>
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
       </div>
 
@@ -1591,39 +1607,65 @@ function CompletedTab({ managerView, companyId }) {
     return { date: d, avg: ss.length ? Math.round(ss.reduce((s, v) => s + v, 0) / ss.length) : 0, n: rows.length };
   });
 
-  // reviewers leaderboard (manager view)
-  const leaders = (() => {
+  // shared rollup: group the filtered reviews by a key and compute the quality
+  // stats. Used for BOTH boards — the REVIEWED AGENTS (the department's whole
+  // point: each score is linked to the fronter/closer who took the call) and
+  // the reviewers (who did the scoring).
+  const rollup = (keyFn, nameFn) => {
     const m = {};
     for (const r of sorted) {
-      const k = r.reviewer_id || '?';
-      (m[k] ||= { name: r.reviewer_name || 'Unknown', n: 0, sum: 0, scored: 0, passed: 0, decided: 0, autofails: 0 });
+      const k = keyFn(r) || '?';
+      (m[k] ||= { name: nameFn(r) || 'Unknown', n: 0, sum: 0, scored: 0, passed: 0, decided: 0, autofails: 0, tra: 0, rcm: 0 });
       const g = m[k]; g.n++;
       const s = scoreOfReview(r); if (s != null) { g.sum += s; g.scored++; }
       if (r.passed === true) { g.passed++; g.decided++; } else if (r.passed === false) g.decided++;
       if (r.autofail_result === 'Fail') g.autofails++;
+      if (r.method === 'tra') g.tra++; else if (r.method === 'rcm') g.rcm++;
     }
-    return Object.values(m)
-      .map(g => ({ ...g, avg: g.scored ? Math.round(g.sum / g.scored) : null, passRate: g.decided ? Math.round(g.passed / g.decided * 100) : null }))
-      .sort((a, b) => b.n - a.n);
-  })();
+    return Object.values(m).map(g => ({ ...g, avg: g.scored ? Math.round(g.sum / g.scored) : null, passRate: g.decided ? Math.round(g.passed / g.decided * 100) : null }));
+  };
+  // the REVIEWED agents' quality board — subject user first, dialer label fallback
+  const [agentSort, setAgentSort] = useState('reviews');   // reviews | low | high
+  const agentBoard = rollup(r => r.subject_user_id || r.agent, r => r.subject_name || r.agent)
+    .sort((a, b) => agentSort === 'low' ? ((a.avg ?? 999) - (b.avg ?? 999)) : agentSort === 'high' ? ((b.avg ?? -1) - (a.avg ?? -1)) : (b.n - a.n));
+  // reviewers leaderboard (manager view)
+  const leaders = rollup(r => r.reviewer_id, r => r.reviewer_name).sort((a, b) => b.n - a.n);
 
-  const exportCsv = () => {
-    const head = ['Reviewed at', 'Reviewer', 'Method', 'Customer', 'Phone', 'Agent reviewed', 'Score', 'Quality %', 'Result', 'Auto-fail', 'Call outcome', 'Notes'];
-    const lines = [head.join(',')];
-    for (const r of sorted) {
-      lines.push([
-        r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '', r.reviewer_name || '', (r.method || '').toUpperCase(),
-        r.customer_name || '', r.customer_phone || '', r.agent || '',
-        r.final_score ?? '', r.quality_score ?? '',
-        r.passed === true ? 'PASS' : r.passed === false ? 'FAIL' : '', r.autofail_result || '',
-        r.call_outcome || '', r.overall_notes || '',
-      ].map(csvEsc).join(','));
-    }
+  const downloadCsvLines = (lines, name) => {
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `qa-completed_${from}_${to}.csv`;
+    a.download = name;
     a.click(); URL.revokeObjectURL(a.href);
+  };
+  // The export follows the view: Agents → the per-USER quality report (the
+  // department's deliverable — one row per reviewed fronter/closer); Reviewers →
+  // the reviewer summary; Sheet/Daily → the raw scored calls, each row tied to
+  // the user it grades.
+  const exportCsv = () => {
+    if (view === 'agents') {
+      const lines = [['Agent (reviewed user)', 'Reviews', 'Avg score', 'Passed', 'Failed', 'Pass rate %', 'Auto-fails', 'TRA', 'RCM'].join(',')];
+      for (const g of agentBoard) lines.push([g.name, g.n, g.avg ?? '', g.passed, g.decided - g.passed, g.passRate ?? '', g.autofails, g.tra, g.rcm].map(csvEsc).join(','));
+      return downloadCsvLines(lines, `qa-agent-report_${from}_${to}.csv`);
+    }
+    if (view === 'reviewers') {
+      const lines = [['Reviewer', 'Reviews', 'Avg score given', 'Pass rate %', 'Auto-fails', 'TRA', 'RCM'].join(',')];
+      for (const g of leaders) lines.push([g.name, g.n, g.avg ?? '', g.passRate ?? '', g.autofails, g.tra, g.rcm].map(csvEsc).join(','));
+      return downloadCsvLines(lines, `qa-reviewer-report_${from}_${to}.csv`);
+    }
+    const head = ['Reviewed at', 'Agent (reviewed user)', 'Dialer agent', 'Method', 'Customer', 'Phone', 'Score', 'Quality %', 'Result', 'Auto-fail', 'Call outcome', 'Reviewer', 'Notes'];
+    const lines = [head.join(',')];
+    for (const r of sorted) {
+      lines.push([
+        r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '',
+        r.subject_name || r.agent || '', r.agent || '', (r.method || '').toUpperCase(),
+        r.customer_name || '', r.customer_phone || '',
+        r.final_score ?? '', r.quality_score ?? '',
+        r.passed === true ? 'PASS' : r.passed === false ? 'FAIL' : '', r.autofail_result || '',
+        r.call_outcome || '', r.reviewer_name || '', r.overall_notes || '',
+      ].map(csvEsc).join(','));
+    }
+    downloadCsvLines(lines, `qa-completed_${from}_${to}.csv`);
   };
 
   const groups = {};
@@ -1643,6 +1685,7 @@ function CompletedTab({ managerView, companyId }) {
   const views = [
     ['sheet', 'Sheet', Table2],
     ['daily', 'Daily', CalendarDays],
+    ['agents', 'Agents', User],
     ...(managerView ? [['reviewers', 'Reviewers', Award]] : []),
   ];
 
@@ -1770,6 +1813,41 @@ function CompletedTab({ managerView, companyId }) {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                );
+              })}
+            </div>
+          )
+          : view === 'agents' ? (
+            /* the REVIEWED agents' quality board — the department's product:
+               every score is linked to the fronter/closer who took the call */
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Agent quality — the users these reviews grade</span>
+                <InfoTip text="One row per reviewed fronter/closer: how many of their calls were scored, their average score, pass rate and auto-fails in this range. Sort by lowest score to find who needs coaching. The CSV button exports exactly this report." />
+                <select value={agentSort} onChange={e => setAgentSort(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 8px', marginLeft: 'auto' }}>
+                  <option value="reviews">Most reviewed</option><option value="low">Lowest score first</option><option value="high">Highest score first</option>
+                </select>
+              </div>
+              {agentBoard.map((g, i) => {
+                const risky = g.avg != null && g.avg < 60;
+                return (
+                  <div key={g.name + i} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: risky ? '1px solid #dc262666' : '1px solid var(--color-border)' }}>
+                    <span className="inline-flex items-center justify-center rounded-full font-extrabold text-sm flex-shrink-0"
+                      style={{ width: 30, height: 30, background: risky ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: risky ? '#dc2626' : 'var(--color-text-secondary)' }}>
+                      {risky ? <XCircle size={15} /> : i + 1}
+                    </span>
+                    <div className="min-w-0" style={{ width: 190 }}>
+                      <div className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>{g.name}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.n} call{g.n === 1 ? '' : 's'} reviewed · {g.tra} TRA · {g.rcm} RCM</div>
+                    </div>
+                    {/* avg-score bar (0–100) — green ≥80, amber ≥60, red below */}
+                    <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-hover)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(2, g.avg ?? 0)}%`, background: g.avg == null ? 'var(--color-border)' : g.avg >= 80 ? '#059669' : g.avg >= 60 ? '#d97706' : '#dc2626' }} />
+                    </div>
+                    <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 70, textAlign: 'right' }}>avg <b style={{ color: g.avg == null ? 'var(--color-text)' : g.avg >= 80 ? '#059669' : g.avg >= 60 ? '#d97706' : '#dc2626' }}>{g.avg ?? '—'}</b></div>
+                    <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 74, textAlign: 'right' }}>pass <b style={{ color: g.passRate == null ? 'var(--color-text)' : g.passRate >= 50 ? '#059669' : '#dc2626' }}>{g.passRate != null ? `${g.passRate}%` : '—'}</b></div>
+                    <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 90, textAlign: 'right' }}>auto-fails <b style={{ color: g.autofails ? '#dc2626' : 'var(--color-text)' }}>{g.autofails}</b></div>
                   </div>
                 );
               })}
