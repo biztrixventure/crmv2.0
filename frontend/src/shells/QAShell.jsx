@@ -4,6 +4,7 @@ import {
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
   UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
+  Download, Award, TrendingUp, Table2, CalendarDays,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -1491,6 +1492,40 @@ function ReviewsSheet({ scorecard, reviews, managerView }) {
   );
 }
 
+// ── Completed — the reviewer SCOREBOARD ───────────────────────────────────────
+// Every scored call with live KPI tiles, a score trend, search / result / sort
+// controls and three views: the scorecard Sheet, a Daily breakdown, and (for
+// managers) a Reviewers leaderboard.
+const scoreOfReview = (r) => (r.final_score != null ? Number(r.final_score) : (r.quality_score != null ? Number(r.quality_score) : null));
+
+// compact score badge straight from a review row (same semantics as ScoreCell)
+function ReviewScore({ r }) {
+  if (r.final_score != null) return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-sm font-extrabold tabular-nums" style={{ color: r.passed ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{r.final_score}</span>
+      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={r.passed ? { background: 'rgba(16,185,129,0.12)', color: '#059669' } : { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }}>{r.passed ? 'PASS' : 'FAIL'}</span>
+    </span>
+  );
+  if (r.quality_score != null) return <span className="text-sm font-extrabold tabular-nums" style={{ color: 'var(--color-text)' }}>{r.quality_score}%<span className="text-[10px] font-normal ml-1" style={{ color: 'var(--color-text-tertiary)' }}>quality</span></span>;
+  return <span className="text-[11px] font-bold" style={{ color: r.autofail_result === 'Fail' ? 'var(--color-error-600)' : 'var(--color-text-secondary)' }}>{r.autofail_result || 'scored'}</span>;
+}
+
+function StatTile({ icon: Icon, label, value, sub, tint = 'var(--color-primary-600)' }) {
+  return (
+    <div className="flex items-center gap-2 px-2.5 rounded-lg" style={{ minWidth: 118, height: 48, background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="rounded-md flex-shrink-0 flex items-center justify-center" style={{ width: 26, height: 26, background: `${tint}18` }}>
+        <Icon size={13} style={{ color: tint }} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-bold uppercase tracking-wider truncate" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
+        <p className="text-base font-bold leading-none mt-0.5 tabular-nums" style={{ color: 'var(--color-text)' }}>{value}{sub && <span className="text-[10px] font-semibold ml-1" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</span>}</p>
+      </div>
+    </div>
+  );
+}
+
+const csvEsc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+
 function CompletedTab({ managerView, companyId }) {
   const today = todayISO();
   const [from, setFrom] = useState(today);
@@ -1500,6 +1535,11 @@ function CompletedTab({ managerView, companyId }) {
   const [agents, setAgents] = useState([]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  // scoreboard controls
+  const [view, setView] = useState('sheet');       // sheet | daily | reviewers
+  const [search, setSearch] = useState('');
+  const [result, setResult] = useState('');        // '' | pass | fail | autofail
+  const [sort, setSort] = useState('newest');      // newest | high | low
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1513,8 +1553,81 @@ function CompletedTab({ managerView, companyId }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (managerView) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [managerView, companyId]);
 
+  // ── filter + sort (client-side, on the loaded range) ──
+  const sorted = (() => {
+    const all = data?.reviews || [];
+    const q = search.trim().toLowerCase(); const qd = q.replace(/\D/g, '');
+    const filtered = all.filter(r => {
+      if (result === 'pass' && r.passed !== true) return false;
+      if (result === 'fail' && r.passed !== false) return false;
+      if (result === 'autofail' && r.autofail_result !== 'Fail') return false;
+      if (!q) return true;
+      const hay = [r.customer_name, r.agent, r.reviewer_name, r.subject_name, r.call_outcome].filter(Boolean).join(' ').toLowerCase();
+      if (hay.includes(q)) return true;
+      return !!qd && String(r.customer_phone || '').replace(/\D/g, '').includes(qd);
+    });
+    if (sort === 'newest') return filtered;   // API order is newest-first already
+    const val = (r) => { const s = scoreOfReview(r); return s == null ? (sort === 'high' ? -1 : 101) : s; };
+    return [...filtered].sort((a, b) => sort === 'high' ? val(b) - val(a) : val(a) - val(b));
+  })();
+
+  // ── scoreboard stats over the filtered set ──
+  const scores = sorted.map(scoreOfReview).filter(v => v != null);
+  const passed = sorted.filter(r => r.passed === true).length;
+  const failed = sorted.filter(r => r.passed === false).length;
+  const decided = passed + failed;
+  const autofails = sorted.filter(r => r.autofail_result === 'Fail').length;
+  const avg = scores.length ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length) : null;
+  const best = scores.length ? Math.max(...scores) : null;
+  const nTra = sorted.filter(r => r.method === 'tra').length;
+  const nRcm = sorted.filter(r => r.method === 'rcm').length;
+
+  // per-day rollup (Daily view + trend line)
+  const byDay = {};
+  for (const r of sorted) { const d = dayOfDate(r.reviewed_at); if (d) (byDay[d] ||= []).push(r); }
+  const days = Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0]));
+  const trend = days.slice().reverse().map(([d, rows]) => {
+    const ss = rows.map(scoreOfReview).filter(v => v != null);
+    return { date: d, avg: ss.length ? Math.round(ss.reduce((s, v) => s + v, 0) / ss.length) : 0, n: rows.length };
+  });
+
+  // reviewers leaderboard (manager view)
+  const leaders = (() => {
+    const m = {};
+    for (const r of sorted) {
+      const k = r.reviewer_id || '?';
+      (m[k] ||= { name: r.reviewer_name || 'Unknown', n: 0, sum: 0, scored: 0, passed: 0, decided: 0, autofails: 0 });
+      const g = m[k]; g.n++;
+      const s = scoreOfReview(r); if (s != null) { g.sum += s; g.scored++; }
+      if (r.passed === true) { g.passed++; g.decided++; } else if (r.passed === false) g.decided++;
+      if (r.autofail_result === 'Fail') g.autofails++;
+    }
+    return Object.values(m)
+      .map(g => ({ ...g, avg: g.scored ? Math.round(g.sum / g.scored) : null, passRate: g.decided ? Math.round(g.passed / g.decided * 100) : null }))
+      .sort((a, b) => b.n - a.n);
+  })();
+
+  const exportCsv = () => {
+    const head = ['Reviewed at', 'Reviewer', 'Method', 'Customer', 'Phone', 'Agent reviewed', 'Score', 'Quality %', 'Result', 'Auto-fail', 'Call outcome', 'Notes'];
+    const lines = [head.join(',')];
+    for (const r of sorted) {
+      lines.push([
+        r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '', r.reviewer_name || '', (r.method || '').toUpperCase(),
+        r.customer_name || '', r.customer_phone || '', r.agent || '',
+        r.final_score ?? '', r.quality_score ?? '',
+        r.passed === true ? 'PASS' : r.passed === false ? 'FAIL' : '', r.autofail_result || '',
+        r.call_outcome || '', r.overall_notes || '',
+      ].map(csvEsc).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `qa-completed_${from}_${to}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
   const groups = {};
-  for (const r of (data?.reviews || [])) { (groups[r.scorecard_id] = groups[r.scorecard_id] || []).push(r); }
+  for (const r of sorted) { (groups[r.scorecard_id] = groups[r.scorecard_id] || []).push(r); }
   const scorecards = data?.scorecards || {};
 
   // Quick date presets — one click to view a specific day's scored records.
@@ -1527,11 +1640,18 @@ function CompletedTab({ managerView, companyId }) {
   const activePreset = presets.find(([, f, t]) => f === from && t === to)?.[0] || null;
   const singleDay = from === to;
 
+  const views = [
+    ['sheet', 'Sheet', Table2],
+    ['daily', 'Daily', CalendarDays],
+    ...(managerView ? [['reviewers', 'Reviewers', Award]] : []),
+  ];
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 flex-wrap mb-3">
-        <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'All completed reviews' : 'My completed reviews'}
-          <InfoTip text={managerView ? "Every scored call, grouped by scorecard as a sheet. Filter by the day it was scored, the method, or a specific reviewer." : "Every call you've scored, grouped as a sheet. Pick a day (or range) to see exactly what you completed then."} />
+      {/* row 1 — range + server filters */}
+      <div className="flex items-center gap-2 flex-wrap mb-2.5">
+        <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'Completed — scoreboard' : 'My scoreboard'}
+          <InfoTip text={managerView ? "Every scored call in the range, with live KPIs. Views: Sheet (scorecard layout), Daily (day-by-day breakdown), Reviewers (who scored how much, how strictly). Search, filter by result, sort by score, export CSV." : "Everything you've scored in the range, with your live stats. Sheet shows the full scorecard layout; Daily breaks your work down day by day. Search, filter by result, sort and export."} />
         </span>
         <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {presets.map(([label, f, t]) => (
@@ -1555,13 +1675,129 @@ function CompletedTab({ managerView, companyId }) {
           </select>
         )}
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
-        {data && <span className="text-xs ml-1" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{data.reviews.length}</b> reviews</span>}
+        <button onClick={exportCsv} disabled={!sorted.length} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+          style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', opacity: sorted.length ? 1 : 0.5 }} title="Download the filtered reviews as CSV">
+          <Download size={13} /> CSV
+        </button>
       </div>
+
+      {/* row 2 — the scoreboard tiles */}
+      {!loading && data && data.reviews.length > 0 && (
+        <div className="flex items-stretch gap-2 flex-wrap mb-2.5">
+          <StatTile icon={ClipboardCheck} label="Reviews" value={sorted.length} sub={sorted.length !== data.reviews.length ? `of ${data.reviews.length}` : null} />
+          <StatTile icon={CheckCircle2} label="Pass rate" value={decided ? `${Math.round(passed / decided * 100)}%` : '—'} sub={decided ? `${passed}/${decided}` : null} tint="#059669" />
+          <StatTile icon={TrendingUp} label="Avg score" value={avg != null ? avg : '—'} tint="#2563eb" />
+          <StatTile icon={Star} label="Best" value={best != null ? best : '—'} tint="#d97706" />
+          <StatTile icon={XCircle} label="Auto-fails" value={autofails} tint="#dc2626" />
+          <StatTile icon={ArrowRightLeft} label="TRA" value={nTra} tint="#2563eb" />
+          <StatTile icon={Shield} label="RCM" value={nRcm} tint="#d97706" />
+        </div>
+      )}
+
+      {/* row 3 — view switch + scoreboard controls */}
+      {!loading && data && data.reviews.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-2.5">
+          <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+            {views.map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setView(k)} className="text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
+                style={view === k ? { background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', color: '#fff' } : { color: 'var(--color-text-secondary)' }}>
+                <Icon size={11} /> {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+            <Search size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer / phone / agent / outcome…"
+              style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--color-text)', fontSize: 12, padding: '6px 2px', width: 210 }} />
+            {search && <button onClick={() => setSearch('')}><XCircle size={13} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
+          </div>
+          <select value={result} onChange={e => setResult(e.target.value)} style={inp} title="Filter by result">
+            <option value="">Any result</option><option value="pass">Passed</option><option value="fail">Failed</option><option value="autofail">Auto-fail</option>
+          </select>
+          <select value={sort} onChange={e => setSort(e.target.value)} style={inp} title="Sort order">
+            <option value="newest">Newest first</option><option value="high">Score: high → low</option><option value="low">Score: low → high</option>
+          </select>
+          <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{sorted.length}</b> shown</span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto">
         {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
-          : !data || !data.reviews.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No completed reviews in this range. Score calls in the Queue and they appear here as a sheet.</div>
-          : Object.entries(groups).map(([scId, revs]) => <ReviewsSheet key={scId} scorecard={scorecards[scId]} reviews={revs} managerView={managerView} />)}
+          : !data || !data.reviews.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No completed reviews in this range. Score calls in the Queue and they appear here as your scoreboard.</div>
+          : !sorted.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Nothing matches those filters — clear the search or result filter.</div>
+          : view === 'sheet' ? (
+            <>
+              {trend.length >= 2 && (
+                <div className="p-3 rounded-xl mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Score trend</div>
+                  <Lines series={[{ name: 'Avg score', color: PALETTE[0], points: trend.map(d => ({ x: d.date, y: d.avg })) }]} yMax={100} yUnit="%" />
+                </div>
+              )}
+              {Object.entries(groups).map(([scId, revs]) => <ReviewsSheet key={scId} scorecard={scorecards[scId]} reviews={revs} managerView={managerView} />)}
+            </>
+          )
+          : view === 'daily' ? (
+            <div className="space-y-3">
+              {days.map(([day, rows]) => {
+                const ss = rows.map(scoreOfReview).filter(v => v != null);
+                const dAvg = ss.length ? Math.round(ss.reduce((s, v) => s + v, 0) / ss.length) : null;
+                const dPassed = rows.filter(r => r.passed === true).length;
+                const dDecided = dPassed + rows.filter(r => r.passed === false).length;
+                return (
+                  <div key={day} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                    <div className="flex items-center gap-2.5 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                      <CalendarDays size={14} style={{ color: 'var(--color-primary-600)' }} />
+                      <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{fmtDate(day)}</span>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{rows.length} review{rows.length === 1 ? '' : 's'}</span>
+                      {dAvg != null && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>avg <b style={{ color: 'var(--color-text)' }}>{dAvg}</b></span>}
+                      {dDecided > 0 && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>pass <b style={{ color: dPassed / dDecided >= 0.5 ? '#059669' : '#dc2626' }}>{Math.round(dPassed / dDecided * 100)}%</b></span>}
+                    </div>
+                    <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {rows.map(r => (
+                          <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                            <td className="px-3 py-1.5 whitespace-nowrap text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)', width: 70 }}>{r.reviewed_at ? new Date(r.reviewed_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''}</td>
+                            <td className="px-2 py-1.5"><MethodPill m={r.method} /></td>
+                            <td className="px-2 py-1.5">
+                              <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 180 }}>{r.customer_name || '—'}</div>
+                              {r.customer_phone && <div className="text-[10px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.customer_phone}</div>}
+                            </td>
+                            <td className="px-2 py-1.5 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{r.agent || '—'}</td>
+                            {managerView && <td className="px-2 py-1.5 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewer_name || '—'}</td>}
+                            <td className="px-2 py-1.5 whitespace-nowrap"><ReviewScore r={r} /></td>
+                            <td className="px-2 py-1.5 text-[11px] truncate" style={{ color: 'var(--color-text-tertiary)', maxWidth: 160 }}>{r.call_outcome || ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          )
+          : ( /* reviewers leaderboard */
+            <div className="space-y-2">
+              {leaders.map((g, i) => (
+                <div key={g.name + i} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: i === 0 ? '1px solid #d9770666' : '1px solid var(--color-border)' }}>
+                  <span className="inline-flex items-center justify-center rounded-full font-extrabold text-sm flex-shrink-0"
+                    style={{ width: 30, height: 30, background: i === 0 ? 'rgba(217,119,6,0.15)' : 'var(--color-surface-hover)', color: i === 0 ? '#d97706' : 'var(--color-text-secondary)' }}>
+                    {i === 0 ? <Award size={15} /> : i + 1}
+                  </span>
+                  <div className="min-w-0" style={{ width: 170 }}>
+                    <div className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>{g.name}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.n} review{g.n === 1 ? '' : 's'}</div>
+                  </div>
+                  {/* volume bar relative to the top reviewer */}
+                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-hover)' }}>
+                    <div className="h-full rounded-full" style={{ width: `${Math.round(g.n / (leaders[0]?.n || 1) * 100)}%`, background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }} />
+                  </div>
+                  <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 70, textAlign: 'right' }}>avg <b style={{ color: 'var(--color-text)' }}>{g.avg ?? '—'}</b></div>
+                  <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 74, textAlign: 'right' }}>pass <b style={{ color: g.passRate == null ? 'var(--color-text)' : g.passRate >= 50 ? '#059669' : '#dc2626' }}>{g.passRate != null ? `${g.passRate}%` : '—'}</b></div>
+                  <div className="text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)', width: 90, textAlign: 'right' }}>auto-fails <b style={{ color: g.autofails ? '#dc2626' : 'var(--color-text)' }}>{g.autofails}</b></div>
+                </div>
+              ))}
+            </div>
+          )}
       </div>
     </div>
   );
