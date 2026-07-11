@@ -3,7 +3,7 @@ import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
-  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign,
+  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,6 +37,31 @@ const StatusPill = ({ s }) => {
   const [label, color] = map[s] || [s, 'var(--color-text-tertiary)'];
   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color }}>{label}</span>;
 };
+
+// Small "i" helper — hover or tap to reveal a plain-language explanation of the
+// option it sits next to. Used across the QA config so nothing is a mystery.
+function InfoTip({ text, side = 'left', w = 250 }) {
+  const [open, setOpen] = useState(false);
+  const pos = side === 'right' ? { right: 0 } : { left: 0 };
+  return (
+    <span className="relative inline-flex" style={{ verticalAlign: 'middle' }}
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }}
+        className="inline-flex items-center justify-center rounded-full cursor-help"
+        style={{ width: 15, height: 15, background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', flexShrink: 0 }}
+        aria-label="What does this do?">
+        <Info size={10} />
+      </button>
+      {open && (
+        <span className="absolute z-[60] text-[11px] font-normal normal-case tracking-normal leading-snug p-2.5 rounded-lg"
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: w, top: 'calc(100% + 5px)', ...pos, background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', boxShadow: '0 8px 24px rgba(0,0,0,0.20)', whiteSpace: 'normal' }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 // Transcript with karaoke-style word highlighting. Words carry start/end (from
 // the whisper worker); as the recording plays we highlight the current word and
@@ -457,6 +482,10 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
 
   return (
     <div className="flex flex-col gap-3 h-full">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Queue</span>
+        <InfoTip text="Browse every real CRM transfer and sale for your companies. Click any row to open it, listen to the recording, and score it. Opening a record automatically creates its QA task — no need to pull first." />
+      </div>
       {/* Transfers vs Sales — CRM record sections */}
       <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
         {[['transfer', 'Transfers', totals.transfer, ArrowRightLeft], ['sale', 'Sales', totals.sale, DollarSign]].map(([k, lbl, n, Icon]) => (
@@ -481,10 +510,13 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} {label}</span>
           <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
           {canManage && (
-            <button onClick={pullNow} disabled={pulling} className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white"
-              style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)', opacity: pulling ? 0.6 : 1 }} title="Also materialize the sampled worklist for agents (TRA + RCM)">
-              {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull agent queue
-            </button>
+            <span className="ml-auto inline-flex items-center gap-1">
+              <button onClick={pullNow} disabled={pulling} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold"
+                style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)', opacity: pulling ? 0.6 : 1 }}>
+                {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull agent queue
+              </button>
+              <InfoTip side="right" text="Runs the sampler now: builds the TRA (full-coverage) + RCM (random-sample) worklist and drops those tasks into your agents' queues. Normally this runs automatically on a schedule — use this to pull immediately." />
+            </span>
           )}
         </div>
 
@@ -668,7 +700,7 @@ function ReportsTab() {
 // a company-scoped COPY (overrides the template for this company only). ────────
 const slug = s => String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || ('f' + Date.now());
 
-function FieldRows({ title, tint, fields, onChange, extra }) {
+function FieldRows({ title, tint, fields, onChange, extra, info }) {
   const set = (i, patch) => onChange(fields.map((f, j) => j === i ? { ...f, ...patch } : f));
   const remove = i => onChange(fields.filter((_, j) => j !== i));
   const add = () => onChange([...fields, { key: slug('field ' + (fields.length + 1)), label: 'New field', ...(extra?.defaults || {}) }]);
@@ -677,6 +709,7 @@ function FieldRows({ title, tint, fields, onChange, extra }) {
       <div className="flex items-center gap-2 mb-2">
         <span className="w-2 h-2 rounded-full" style={{ background: tint }} />
         <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{title}</span>
+        {info && <InfoTip text={info} />}
         <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{extra?.kind}</span>
         <button onClick={add} className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: tint }}>+ add</button>
       </div>
@@ -685,12 +718,16 @@ function FieldRows({ title, tint, fields, onChange, extra }) {
           <div key={i} className="flex items-center gap-2">
             <input value={f.label} onChange={e => set(i, { label: e.target.value, key: f._locked ? f.key : slug(e.target.value) })} style={{ ...inp, flex: 1 }} />
             {extra?.rating && (
-              <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }} title="Counts toward Base Score">
+              <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                 <input type="checkbox" checked={f.included_in_base !== false} onChange={e => set(i, { included_in_base: e.target.checked })} /> in base
+                <InfoTip side="right" w={210} text="When on, this rating (0–4) counts toward the Base Score. Turn off to show the question but keep it out of the score math." />
               </label>
             )}
             {extra?.penalty && (
-              <input type="number" value={f.penalty ?? -5} onChange={e => set(i, { penalty: +e.target.value })} style={{ ...inp, width: 60 }} title="Penalty points" />
+              <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                <input type="number" value={f.penalty ?? -5} onChange={e => set(i, { penalty: +e.target.value })} style={{ ...inp, width: 60 }} />
+                <InfoTip side="right" w={210} text="Points deducted from the final score when the reviewer marks this flag Yes. Use a negative number (e.g. -5)." />
+              </label>
             )}
             <button onClick={() => remove(i)} className="p-1 rounded" title="Remove"><XCircle size={15} style={{ color: 'var(--color-error-600)' }} /></button>
           </div>
@@ -720,6 +757,7 @@ function CallOutcomeEditor({ value, onChange }) {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full" style={{ background: '#7c3aed' }} />
           <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Call outcome</span>
+          <InfoTip text="An optional single-choice dropdown the reviewer picks after scoring to label WHY the call ended (e.g. No Consent, Windowshop). It doesn’t change the score — it’s used for reporting and coaching." />
           <button onClick={() => onChange({ key: 'call_out_come', label: 'Call Outcome', options: [...WAVETECH_OUTCOMES] })}
             className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: '#7c3aed' }}>+ add (WaveTech list)</button>
         </div>
@@ -796,16 +834,27 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
         </div>
         {isGlobal && <div className="text-[11px] mb-3 p-2 rounded-lg" style={{ background: 'rgba(217,119,6,0.1)', color: 'var(--color-warning-600)' }}>This is the shared template. Saving creates an editable copy for <b>your company only</b> — the template stays intact.</div>}
 
-        <div className="flex gap-2 mb-3">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Scorecard name" style={{ ...inp, flex: 1 }} />
-          <label className="flex items-center gap-1 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={passT} onChange={e => setPassT(e.target.value)} style={{ ...inp, width: 64 }} placeholder="none" />%</label>
+        <div className="text-[11px] mb-3 p-2.5 rounded-lg leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+          A scorecard is the list of questions a reviewer answers for each call. Each colored section below is one <b>type</b> of question — the color dot matches the type. Hover any <Info size={10} className="inline" /> to see exactly how that type affects the score.
         </div>
 
-        <FieldRows title="Ratings (score 0–4)" tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: '0–4 rating', rating: true }} onChange={v => patch(n => { n.rating_criteria = v; })} />
-        <FieldRows title="Compliance — Auto-Fail (Yes / No)" tint="#dc2626" fields={cfg.autofail.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.autofail.fields = v; })} />
-        <FieldRows title="Penalty flags (Yes = deduct)" tint="#d97706" fields={cfg.penalty_flags} extra={{ kind: 'Y / N', penalty: true, defaults: { penalty: -5 } }} onChange={v => patch(n => { n.penalty_flags = v; })} />
-        {hasQuality && <FieldRows title="Sale-compliance checklist (Yes / No)" tint="#059669" fields={cfg.quality_score.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.quality_score.fields = v; })} />}
-        <FieldRows title="Tracking only (Yes / No, no score effect)" tint="#6b7280" fields={cfg.tracking_flags} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.tracking_flags = v; })} />
+        <div className="flex gap-2 mb-3">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Scorecard name" style={{ ...inp, flex: 1 }} />
+          <label className="flex items-center gap-1 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={passT} onChange={e => setPassT(e.target.value)} style={{ ...inp, width: 64 }} placeholder="none" />%
+            <InfoTip side="right" text="The minimum final score a call must reach to count as a Pass. Leave blank for no pass/fail line — the score still shows, just without a pass badge." />
+          </label>
+        </div>
+
+        <FieldRows title="Ratings (score 0–4)" tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: '0–4 rating', rating: true }} onChange={v => patch(n => { n.rating_criteria = v; })}
+          info="The main graded questions. The reviewer rates each 0–4; the ones marked “in base” are summed into the Base Score (then turned into a %). Use these for things like tone, script adherence, rebuttals." />
+        <FieldRows title="Compliance — Auto-Fail (Yes / No)" tint="#dc2626" fields={cfg.autofail.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.autofail.fields = v; })}
+          info="Hard compliance rules. If the reviewer answers Yes to ANY auto-fail question, the whole call scores 0 and is marked failed — no matter how good the ratings were. Use for deal-breakers (no consent, DNC, misrepresentation)." />
+        <FieldRows title="Penalty flags (Yes = deduct)" tint="#d97706" fields={cfg.penalty_flags} extra={{ kind: 'Y / N', penalty: true, defaults: { penalty: -5 } }} onChange={v => patch(n => { n.penalty_flags = v; })}
+          info="Softer mistakes that don’t fail the call but cost points. Each flag set to Yes subtracts its points from the final score. Set the point value per flag on the right of each row." />
+        {hasQuality && <FieldRows title="Sale-compliance checklist (Yes / No)" tint="#059669" fields={cfg.quality_score.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.quality_score.fields = v; })}
+          info="A Yes/No checklist scored as a percentage — the Quality score is the share of items answered Yes. Used on closer/RCM sale reviews to measure sale-compliance separately from the 0–4 ratings." />}
+        <FieldRows title="Tracking only (Yes / No, no score effect)" tint="#6b7280" fields={cfg.tracking_flags} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.tracking_flags = v; })}
+          info="Questions you want the reviewer to answer for reporting, but that must NOT change the score. Pure data collection — shows up in reports, never adds or removes points." />
         <CallOutcomeEditor value={cfg.call_outcome} onChange={co => patch(n => { if (co) n.call_outcome = co; else delete n.call_outcome; })} />
 
         <div className="flex items-center justify-end gap-2 mt-2">
@@ -853,36 +902,66 @@ function ConfigTab({ companyId }) {
   };
 
   const methods = Array.isArray(cfg?.['qa.methods']) ? cfg['qa.methods'] : [];
+  const setMethod = (m, on) => { const next = on ? [...new Set([...methods, m])] : methods.filter(x => x !== m); setCfgKey('qa.methods', next); };
   return (
-    <div className="grid grid-cols-2 gap-5">
+    <div className="h-full overflow-auto">
       {editing && <ScorecardEditor scorecard={editing} companyId={companyId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); loadCards(); }} />}
-      {/* config */}
+
+      {/* page intro */}
+      <div className="mb-4">
+        <div className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+          <Settings2 size={17} style={{ color: 'var(--color-primary-600)' }} /> Scorecards &amp; Config
+        </div>
+        <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          Set up QA in two steps: <b>1)</b> turn on a review method on the left, <b>2)</b> build the scorecard reviewers fill in, on the right. Hover any <Info size={11} className="inline" /> for a plain-language explanation.
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-5">
+      {/* ── STEP 1 — methods ─────────────────────────────────────────── */}
       <div>
-        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Company QA config</div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to your primary company ({companyId?.slice(0, 8)}…). Empty methods = QA off.</div>
-        {cfg === null ? <Loader2 className="animate-spin" /> : (
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+          <span className="inline-flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>1</span>
+          Review methods
+          <InfoTip text="Which QA reviews run for your company. Nothing is reviewed until you switch at least one method on — an empty list means QA is OFF." />
+        </div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to your primary company ({companyId?.slice(0, 8)}…).</div>
+        {cfg === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : (
           <div className="space-y-3">
-            <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <div className="text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>Methods</div>
-              {['tra', 'rcm'].map(m => (
-                <label key={m} className="flex items-center gap-2 text-sm mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  <input type="checkbox" checked={methods.includes(m)} onChange={e => { const next = e.target.checked ? [...new Set([...methods, m])] : methods.filter(x => x !== m); setCfgKey('qa.methods', next); }} />
-                  {m.toUpperCase()} — {m === 'tra' ? 'review every fronter transfer' : 'random sample'}
-                </label>
-              ))}
-            </div>
-            {methods.includes('rcm') && (
-              <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                <div className="text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>RCM sampling</div>
-                <RcmConfig value={cfg['qa.rcm.sample']} covers={cfg['qa.rcm.covers']} onSample={v => setCfgKey('qa.rcm.sample', v)} onCovers={v => setCfgKey('qa.rcm.covers', v)} />
-              </div>
-            )}
+            {[
+              ['tra', 'TRA — Full coverage', 'Every fronter transfer gets reviewed. Use when you want 100% of transferred calls checked.', '#2563eb'],
+              ['rcm', 'RCM — Random sample', 'Only a random slice of calls is pulled for review (set the rate below). Use for spot-checking at scale.', '#d97706'],
+            ].map(([m, label, desc, tint]) => {
+              const on = methods.includes(m);
+              return (
+                <div key={m} className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: `1px solid ${on ? tint + '66' : 'var(--color-border)'}` }}>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={on} onChange={e => setMethod(m, e.target.checked)} />
+                    <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{label}</span>
+                    <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={on ? { background: tint + '22', color: tint } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{on ? 'On' : 'Off'}</span>
+                  </label>
+                  <div className="text-[11px] mt-1 ml-6" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</div>
+                  {m === 'rcm' && on && (
+                    <div className="mt-2 ml-6 pt-2" style={{ borderTop: '1px dashed var(--color-border)' }}>
+                      <div className="text-[11px] font-bold mb-1.5 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>Sampling rate <InfoTip side="right" text="How much to sample and who it covers. Percentage pulls that share of calls; Fixed N pulls a set number each period. “Covers” chooses whether the sample is drawn from fronter calls, closer calls, or both." /></div>
+                      <RcmConfig value={cfg['qa.rcm.sample']} covers={cfg['qa.rcm.covers']} onSample={v => setCfgKey('qa.rcm.sample', v)} onCovers={v => setCfgKey('qa.rcm.covers', v)} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
-      {/* scorecards */}
+
+      {/* ── STEP 2 — scorecards ──────────────────────────────────────── */}
       <div>
-        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Scorecards</div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+          <span className="inline-flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>2</span>
+          Scorecards
+          <InfoTip text="The question sheets reviewers fill in per call. Each method (TRA / RCM) uses its matching scorecard. Templates are shared starting points — editing one saves a private copy for your company." />
+        </div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Click <b>Edit fields</b> to change the questions and how they score.</div>
         <div className="space-y-2 mb-4">
           {cards.map(c => {
             const isSheet = c.criteria && !Array.isArray(c.criteria) && c.criteria.model === 'sheet_v2';
@@ -892,25 +971,30 @@ function ConfigTab({ companyId }) {
             return (
               <div key={c.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: c.is_active ? 1 : 0.5 }}>
                 <MethodPill m={c.method} />
-                <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{c.name}{!c.company_id && <span className="text-[10px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>(template)</span>}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fieldCount} fields{c.pass_threshold != null ? ` · pass ≥ ${c.pass_threshold}%` : ''}</div></div>
+                <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate flex items-center gap-1" style={{ color: 'var(--color-text)' }}>{c.name}{!c.company_id && <><span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>(template)</span><InfoTip side="right" w={220} text="A shared, read-only starting point. Click Edit fields and Save to make an editable copy for your company — the template itself never changes." /></>}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fieldCount} fields{c.pass_threshold != null ? ` · pass ≥ ${c.pass_threshold}%` : ''}</div></div>
                 {isSheet && c.is_active && <button onClick={() => setEditing(c)} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>Edit fields</button>}
                 {c.company_id && c.is_active && <button onClick={() => client.delete(`qa/scorecards/${c.id}`).then(loadCards)} className="text-[11px] font-bold" style={{ color: 'var(--color-error-600)' }}>Disable</button>}
               </div>
             );
           })}
+          {!cards.length && <div className="text-[11px] p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No scorecards yet — create one below.</div>}
         </div>
         <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New scorecard</div>
+          <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>New scorecard <InfoTip side="right" text="Creates a blank scorecard for the chosen method and opens the visual builder so you can add questions. No coding or JSON needed." /></div>
           <div className="flex gap-2">
-            <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp}><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Method
+              <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp}><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+            </label>
             <input placeholder="Name (e.g. WaveTech Fronter)" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ ...inp, flex: 1 }} />
-            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" title="pass %" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 56 }} /></label>
+            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 56 }} />%
+              <InfoTip side="right" text="Minimum final score to count as a Pass. You can change it later in the builder; leave it as-is if unsure." />
+            </label>
           </div>
           <button onClick={createSheet} disabled={!draft.name} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: draft.name ? 1 : 0.5 }}>
             <Plus size={14} /> Create &amp; build fields
           </button>
-          <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Creates a sheet scorecard and opens the visual builder — ratings, auto-fail, penalties, sale-compliance, tracking, and the call-outcome list. No JSON needed.</div>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1130,6 +1214,10 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
 
   return (
     <div className="flex flex-col h-full">
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Day recordings</span>
+        <InfoTip text="Pull EVERY dialer call for a chosen day straight from VICIdial, grouped by number + agent and tagged Transferred (→ TRA) or not (→ RCM). Select the ones you want and Assign them to a QA agent as scoring tasks. This is the manual way to feed the agent queue." />
+      </div>
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <label className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={14} />Date</label>
         <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
@@ -1386,7 +1474,9 @@ function CompletedTab({ managerView, companyId }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 flex-wrap mb-3">
-        <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'All completed reviews' : 'My completed reviews'}</span>
+        <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'All completed reviews' : 'My completed reviews'}
+          <InfoTip text={managerView ? "Every scored call, grouped by scorecard as a sheet. Filter by the day it was scored, the method, or a specific reviewer." : "Every call you've scored, grouped as a sheet. Pick a day (or range) to see exactly what you completed then."} />
+        </span>
         <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {presets.map(([label, f, t]) => (
             <button key={label} onClick={() => { setFrom(f); setTo(t); }}
@@ -1457,7 +1547,7 @@ function AgentsTab({ companyId }) {
     <div className="grid grid-cols-2 gap-5">
       {/* agent → method binding */}
       <div>
-        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>QA agents & methods</div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. An agent can only be assigned, only sees, and only scores the method(s) you switch on here. Bind one or both." /></div>
         <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>An agent only sees and scores the method(s) you bind here. Bind one or both.</div>
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
@@ -1484,7 +1574,7 @@ function AgentsTab({ companyId }) {
       </div>
       {/* card field visibility */}
       <div>
-        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Task card fields</div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>Task card fields <InfoTip text="Pick which customer details (name, phone, ZIP, state, agent, call date, plan) appear on the agent's task row and scorecard header. Turn off anything they shouldn't see or don't need." /></div>
         <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Choose which customer details show on the agent's task card / scorecard header.</div>
         {fields === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : <div className="p-3 rounded-xl grid grid-cols-2 gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -1571,7 +1661,9 @@ function AgentTasks({ selfId, canOverride, companyId }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Queue</span>
+        <span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }}>Queue
+          <InfoTip text="The calls your QA manager assigned to you that still need scoring. Open one, listen, and score it — once scored it moves to Completed automatically. Use the date filter to focus on a single day's calls." />
+        </span>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
             <button key={k} onClick={() => { setKind(k); setOpen(null); }}
