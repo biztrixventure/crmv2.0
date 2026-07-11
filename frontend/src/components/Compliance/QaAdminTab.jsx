@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Shield, RefreshCw, Loader2, X, UserPlus, Search, Building2, Check, Settings2, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Shield, RefreshCw, Loader2, X, UserPlus, Search, Building2, Check, Settings2, ChevronDown, Info, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department. Enable/disable QA per company,
@@ -13,10 +14,40 @@ const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-bord
 const METHODS = [['tra', 'TRA'], ['rcm', 'RCM']];
 const lvlLabel = (l) => (l === 'qa_manager' ? 'Manager' : 'Agent');
 
+// Small "i" helper — hover or tap for a plain-language explanation (mirrors the
+// QA shell's InfoTip so both surfaces explain themselves the same way).
+function InfoTip({ text, w = 250 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex" style={{ verticalAlign: 'middle' }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen(o => !o); }}
+        className="inline-flex items-center justify-center rounded-full cursor-help"
+        style={{ width: 15, height: 15, background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', flexShrink: 0 }} aria-label="What does this do?">
+        <Info size={10} />
+      </button>
+      {open && (
+        <span className="absolute z-[60] text-[11px] font-normal normal-case tracking-normal leading-snug p-2.5 rounded-lg"
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: w, top: 'calc(100% + 5px)', left: 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', boxShadow: '0 8px 24px rgba(0,0,0,0.20)', whiteSpace: 'normal' }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+const StepBadge = ({ n }) => (
+  <span className="inline-flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>{n}</span>
+);
+
 export default function QaAdminTab() {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [companies, setCompanies] = useState(null);
   const [users, setUsers] = useState(null);
   const [expanded, setExpanded] = useState(null);   // company id whose config is open
+  const [rosterQ, setRosterQ] = useState('');       // roster name filter
+  const [rosterLvl, setRosterLvl] = useState('');   // '' | qa_manager | qa_agent
 
   const loadUsers = useCallback(() => client.get('qa/admin/users').then(r => setUsers(r.data.users || [])).catch(() => setUsers([])), []);
   const load = useCallback(() => {
@@ -51,18 +82,34 @@ export default function QaAdminTab() {
     catch { toast.error('Method update failed'); loadUsers(); }
   };
 
+  // roster with filters applied
+  const shownUsers = useMemo(() => {
+    if (!users) return null;
+    const q = rosterQ.trim().toLowerCase();
+    return users.filter(u =>
+      (!q || u.name.toLowerCase().includes(q)) &&
+      (!rosterLvl || u.levels.includes(rosterLvl)));
+  }, [users, rosterQ, rosterLvl]);
+
   return (
     <div className="space-y-6 pb-6">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Shield size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>QA Department</h2>
-        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Compliance controls every QA setting, manager and agent — across all companies.</span>
-        <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }}><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+          {isSuperadmin
+            ? 'Create QA users, enable QA per company, and route who reviews what.'
+            : 'Assign and manage the QA team across companies. New QA users are created by the Super Admin and appear here automatically.'}
+        </span>
+        <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
       </div>
 
-      {/* QA per company — enable + full config */}
+      {/* STEP 1 — QA per company: enable + configure + route */}
       <section>
-        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Enable, configure &amp; route QA per company</div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+          <StepBadge n={1} /> Companies — enable, configure &amp; route
+          <InfoTip text="Turn on TRA (review every transfer) and/or RCM (random sample) per company, open the gear for sampling/retention settings, and see who covers each company's calls. Distribute routes waiting tasks to the covering agents." />
+        </div>
         <div className="text-[11px] mb-2 p-2 rounded-lg leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
           Turn on TRA/RCM for a company, then bind agents to it below — a bound agent <b>covers</b> that company's calls of that method. New calls route to covering agents automatically; use <b>Distribute</b> to route whatever is already waiting. “nobody” means those calls have no owner yet.
         </div>
@@ -111,19 +158,48 @@ export default function QaAdminTab() {
             </div>}
       </section>
 
-      {/* Assign / create QA people */}
-      <section className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        <AssignExisting companies={companies || []} onDone={loadUsers} />
-        <CreateQaUser companies={companies || []} onDone={loadUsers} />
+      {/* STEP 2 — build the team: assign existing (compliance) + create (superadmin only) */}
+      <section>
+        <div className="text-sm font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+          <StepBadge n={2} /> Build the team
+          <InfoTip text={isSuperadmin
+            ? 'Assign an existing user to a company as QA, or create a brand-new QA account. Creation is a Super Admin power — compliance managers only assign and manage.'
+            : 'Assign an existing user to a company as a QA manager or agent. Creating brand-new QA accounts is reserved for the Super Admin — once they create one, it appears in the roster below automatically.'} />
+        </div>
+        <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <AssignExisting companies={companies || []} onDone={loadUsers} />
+          {isSuperadmin ? (
+            <CreateQaUser companies={companies || []} onDone={loadUsers} />
+          ) : (
+            <div className="p-3 rounded-xl flex flex-col items-center justify-center text-center gap-1.5" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
+              <Lock size={16} style={{ color: 'var(--color-text-tertiary)' }} />
+              <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>New QA accounts — Super Admin only</div>
+              <div className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>Ask the Super Admin to create the QA manager/agent account. As soon as it exists it appears in the roster below, ready for you to assign to companies and bind methods.</div>
+            </div>
+          )}
+        </div>
       </section>
 
-      {/* QA people list */}
+      {/* STEP 3 — roster: every QA user, searchable */}
       <section>
-        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>QA managers &amp; agents</div>
-        {users === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-          : !users.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA people yet — assign or create one above.</div>
+        <div className="text-sm font-bold mb-2 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>
+          <StepBadge n={3} /> QA managers &amp; agents
+          <InfoTip text="Everyone holding a QA role, whoever created them. Per company: bind an agent's TRA/RCM (what they cover there) or remove them from a company with the ×. 'no method' = agent sees no tasks until you bind one." />
+          {users && <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>{users.length} people</span>}
+          <span className="ml-auto flex items-center gap-1.5">
+            <span className="flex items-center gap-1 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+              <Search size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+              <input value={rosterQ} onChange={e => setRosterQ(e.target.value)} placeholder="Filter by name…" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--color-text)', fontSize: 12, padding: '5px 2px', width: 130 }} />
+            </span>
+            <select value={rosterLvl} onChange={e => setRosterLvl(e.target.value)} style={{ ...inp, fontSize: 12, padding: '4px 8px' }}>
+              <option value="">All roles</option><option value="qa_manager">Managers</option><option value="qa_agent">Agents</option>
+            </select>
+          </span>
+        </div>
+        {shownUsers === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+          : !shownUsers.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>{users?.length ? 'No QA people match that filter.' : (isSuperadmin ? 'No QA people yet — create or assign one above.' : 'No QA people yet — the Super Admin creates the accounts; you can also assign an existing user above.')}</div>
           : <div className="space-y-2">
-              {users.map(u => (
+              {shownUsers.map(u => (
                 <div key={u.user_id} className="p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{u.name}</span>

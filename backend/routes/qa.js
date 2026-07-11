@@ -1649,9 +1649,11 @@ router.put('/admin/company-methods', asyncHandler(async (req, res) => {
   res.json({ ok: true, methods, materialized });
 }));
 
-// create a NEW QA manager/agent user + assign to companies (QA-scoped)
+// create a NEW QA manager/agent user + assign to companies. SUPERADMIN ONLY —
+// compliance manages/assigns existing QA users but does not mint accounts; every
+// user the superadmin creates shows up automatically in /admin/users below.
 router.post('/admin/users', asyncHandler(async (req, res) => {
-  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Only the Super Admin can create QA users. Ask them to create the account — it will appear here automatically for you to assign and manage.' });
   const { email, full_name, password, level } = req.body || {};
   const companyIds = Array.isArray(req.body?.company_ids) ? req.body.company_ids : [];
   if (!email || !full_name || !['qa_manager', 'qa_agent'].includes(level)) return res.status(400).json({ error: 'email, full_name, level (qa_manager|qa_agent) required' });
