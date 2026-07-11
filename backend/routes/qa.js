@@ -571,6 +571,36 @@ async function allAgentIds() {
   const { data: profs } = await supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').not('vicidial_agent_ids', 'is', null);
   return foldAgents(profs);
 }
+
+// Map dialer agent ids → the CRM company that agent belongs to. Used to route a
+// day-recording (identified only by its dialer agent_user) to the right company
+// when assigning across "All my companies". An agent id resolves to its owner's
+// active company; if the owner is in several companies, the first one WITHIN the
+// caller's allowed set wins (so a manager can never route a call into a company
+// they can't touch). Returns { AGENT_ID_UPPER → company_id }.
+async function companiesForAgentIds(agentUsers, allowed) {
+  const wanted = [...new Set((agentUsers || []).filter(Boolean).map(a => String(a).toUpperCase()))];
+  if (!wanted.length) return {};
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, vicidial_agent_ids').overlaps('vicidial_agent_ids', wanted);
+  const uidByAgent = {};
+  for (const p of (profs || [])) for (const a of (p.vicidial_agent_ids || [])) {
+    const A = String(a).toUpperCase();
+    if (wanted.includes(A) && !uidByAgent[A]) uidByAgent[A] = p.user_id;
+  }
+  const uids = [...new Set(Object.values(uidByAgent))];
+  if (!uids.length) return {};
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, company_id').in('user_id', uids).eq('is_active', true);
+  const companyByUid = {};
+  for (const r of (ucr || [])) {
+    if (allowed && !allowed.includes(r.company_id)) continue;   // never outside the caller's scope
+    if (!companyByUid[r.user_id]) companyByUid[r.user_id] = r.company_id;
+  }
+  const out = {};
+  for (const [A, uid] of Object.entries(uidByAgent)) if (companyByUid[uid]) out[A] = companyByUid[uid];
+  return out;
+}
 function foldAgents(profs) {
   const ids = new Set(); const nameByAgent = {};
   for (const p of profs || []) for (const a of (p.vicidial_agent_ids || [])) {
@@ -731,12 +761,20 @@ const isXferDispo = (d) => { const s = String(d || '').toUpperCase(); return s =
 // which silently returned an empty list before).
 router.get('/agents', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
-  const companyId = req.query.company_id || req.user.company_id;
   const allowed = await allowedCompanyIds(req);
-  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
-
-  const { data: roles, error } = await supabaseAdmin.from('user_company_roles')
-    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+  const scopeAll = req.query.company_id === '__all__';
+  let rolesQ = supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').eq('is_active', true);
+  if (scopeAll) {
+    // every QA agent across the companies this manager may touch (for
+    // "All my companies" cross-company assignment).
+    if (allowed) { if (!allowed.length) return res.json({ agents: [] }); rolesQ = rolesQ.in('company_id', allowed); }
+  } else {
+    const companyId = req.query.company_id || req.user.company_id;
+    if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+    rolesQ = rolesQ.eq('company_id', companyId);
+  }
+  const { data: roles, error } = await rolesQ;
   if (error) { logger.warn('QA', `agents roles: ${error.message}`); return res.status(500).json({ error: error.message }); }
   // custom_roles may embed as object or array depending on cardinality
   const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
@@ -756,20 +794,29 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   const { company_id, assigned_to, method, date } = req.body || {};
   const recordings = Array.isArray(req.body?.recordings) ? req.body.recordings : [];
   const subject_role = ['fronter', 'closer'].includes(req.body?.subject_role) ? req.body.subject_role : 'fronter';
-  const companyId = company_id || req.user.company_id;
+  const wantAll = company_id === '__all__';
+  const companyId = wantAll ? null : (company_id || req.user.company_id);
   if (!['tra', 'rcm'].includes(method) || !recordings.length) return res.status(400).json({ error: 'method (tra|rcm) and recordings[] are required' });
   const allowed = await allowedCompanyIds(req);
-  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  if (!wantAll && allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
   // if assigning straight to an agent, they must be bound to this method (mig 180)
   if (assigned_to) {
     const am = await agentMethods(assigned_to);
     if (!am.includes(method)) return res.status(400).json({ error: `This agent isn't set up for ${method.toUpperCase()} — bind that method to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
   }
 
+  // Cross-company ("All my companies"): route each recording to the company its
+  // dialer agent belongs to. Recordings whose agent maps to no allowed company
+  // are skipped (reported), never mis-filed.
+  let companyByAgent = {};
+  if (wantAll) companyByAgent = await companiesForAgentIds(recordings.map(r => r.agent_user), allowed);
+  const rowCompany = (r) => wantAll ? (companyByAgent[String(r.agent_user || '').toUpperCase()] || null) : companyId;
+
   const now = new Date().toISOString();
   const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
+  let skippedNoCompany = 0;
   const rows = recordings.filter(r => r && r.box_id && r.recording_id).map(r => ({
-    company_id: companyId, method, subject_role, source: 'day_recording',
+    company_id: rowCompany(r), method, subject_role, source: 'day_recording',
     transfer_id: r.transfer_id || null,
     // recording_ref = the primary clip + its sibling legs/redials (grouped by
     // number+agent) as `parts`, so the reviewer can hear every attempt like the
@@ -784,8 +831,11 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
     subject_agent: r.agent_user || null,        // the reviewed agent's dialer id/login (name in recording_ref.agent_name)
     assigned_to: assigned_to || null, assigned_by: req.user.id, assigned_at: now,
     sampled: method === 'rcm', status: 'pending',
-  }));
-  if (!rows.length) return res.status(400).json({ error: 'No valid recordings' });
+  })).filter(row => {
+    if (!row.company_id) { skippedNoCompany++; return false; }   // unresolved company (All mode) → skip, don't misfile
+    return true;
+  });
+  if (!rows.length) return res.status(wantAll ? 200 : 400).json({ ok: true, inserted: 0, skipped: 0, skipped_no_company: skippedNoCompany, error: skippedNoCompany ? 'None of these recordings map to a company you manage (their dialer agents aren\'t mapped). Assign from a specific company instead.' : 'No valid recordings' });
 
   // ENRICH each row with customer identity — CRM (transfer/sale) first, VICIdial
   // lead_field_info fallback. Bounded so a huge batch stays fast: inline-enrich up
@@ -796,7 +846,7 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   const enrichOne = async (row) => {
     const rec = row.recording_ref || {};
     Object.assign(row, await resolveCustomer({
-      companyId, transferId: row.transfer_id, saleId: row.sale_id || null,
+      companyId: row.company_id, transferId: row.transfer_id, saleId: row.sale_id || null,
       phone: rec.phone, boxId: rec.box_id, leadId: rec.lead_id, dialerBudget,
     }));
   };
@@ -820,13 +870,13 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   }
   if (assigned_to && inserted) {
     notifyUsers([assigned_to], {
-      companyId, type: 'qa_assignment',
+      companyId: companyId || rows[0]?.company_id, type: 'qa_assignment',
       title: `${inserted} ${method.toUpperCase()} call(s) assigned for QA`,
       message: 'A QA manager assigned recordings for you to review.',
       data: { method, count: inserted },
     }).catch(() => {});
   }
-  res.json({ ok: true, inserted, skipped });
+  res.json({ ok: true, inserted, skipped, skipped_no_company: skippedNoCompany });
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter
@@ -1420,7 +1470,16 @@ router.get('/my-companies', asyncHandler(async (req, res) => {
   if (allowed) { if (!allowed.length) return res.json({ companies: [], all: false }); q = q.in('id', allowed); }
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ companies: data || [], all: allowed === null });
+  // annotate each with QA-on (has methods) + how many calls still await review, so
+  // the picker can default to a live company and badge where work is waiting.
+  const out = [];
+  for (const c of (data || [])) {
+    const methods = await getConfig(c.id, 'qa.methods', []);
+    const { count } = await supabaseAdmin.from('qa_assignments')
+      .select('*', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'pending');
+    out.push({ id: c.id, name: c.name, company_type: c.company_type, qa_enabled: Array.isArray(methods) && methods.length > 0, pending: count || 0 });
+  }
+  res.json({ companies: out, all: allowed === null });
 }));
 
 // POST /qa/enrich-existing { company_id } — backfill customer fields on pending

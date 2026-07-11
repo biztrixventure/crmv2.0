@@ -52,7 +52,9 @@ function useQaCompanies() {
       setCompanies(list); setAll(!!r.data.all);
       let saved = null; try { saved = localStorage.getItem('qa_company'); } catch { /* ignore */ }
       const valid = saved && (saved === ALL_CO ? r.data.all : list.some(c => c.id === saved));
-      setCompanyId(valid ? saved : (list[0]?.id || (r.data.all ? ALL_CO : '')));
+      // default to a company that actually has QA running (else the first)
+      const preferred = list.find(c => c.qa_enabled) || list[0];
+      setCompanyId(valid ? saved : (preferred?.id || (r.data.all ? ALL_CO : '')));
     }).catch(() => setCompanies([]));
   }, []);
   const choose = (id) => { setCompanyId(id); try { localStorage.setItem('qa_company', id); } catch { /* ignore */ } };
@@ -64,13 +66,14 @@ function useQaCompanies() {
 function CompanyPicker({ companies, all, companyId, onChange }) {
   if (companies === null) return <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />;
   if (!companies.length && !all) return <span className="text-xs font-semibold" style={{ color: 'var(--color-warning-600)' }}><Building2 size={12} className="inline mr-1" />No company assigned</span>;
-  if (companies.length === 1 && !all) return <span className="text-xs font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }}><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{companies[0].name}</span>;
+  const optLabel = (c) => `${c.name}${c.pending ? ` · ${c.pending} pending` : ''}${c.qa_enabled === false ? ' · QA off' : ''}`;
+  if (companies.length === 1 && !all) return <span className="text-xs font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }} title={optLabel(companies[0])}><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{companies[0].name}{companies[0].pending ? <span className="text-[10px] font-bold px-1.5 rounded-full" style={{ background: 'rgba(217,119,6,0.14)', color: 'var(--color-warning-600)' }}>{companies[0].pending}</span> : null}</span>;
   return (
     <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="You only see data for the companies assigned to you">
       <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
       <select value={companyId} onChange={e => onChange(e.target.value)} style={{ ...inp, fontWeight: 700, padding: '5px 8px' }}>
         {all && <option value={ALL_CO}>All my companies</option>}
-        {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        {companies.map(c => <option key={c.id} value={c.id}>{optLabel(c)}</option>)}
       </select>
     </label>
   );
@@ -1113,7 +1116,11 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
   // scope=all (superadmin / view-all only). `scoped` is the concrete company id
   // (or '' when All) used for the assign-to agent list + task creation.
   const scopeParams = companyId === ALL_CO ? { scope: 'all' } : { scope: 'company', ...(companyId ? { company_id: companyId } : {}) };
+  const allMode = companyId === ALL_CO;
   const assignCo = scoped;
+  // agent list + task company: a specific company, or __all__ for cross-company
+  // routing (each recording lands in its own company, resolved server-side).
+  const agentScope = allMode ? '__all__' : assignCo;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [dispoLoading, setDispoLoading] = useState(false);
@@ -1135,7 +1142,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
   const [playingRid, setPlayingRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
-  useEffect(() => { if (canManage && assignCo) client.get('qa/agents', { params: { company_id: assignCo } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else if (!assignCo) setAgents([]); }, [canManage, assignCo]);
+  useEffect(() => { if (canManage && agentScope) client.get('qa/agents', { params: { company_id: agentScope } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else setAgents([]); }, [canManage, agentScope]);
   // Company changed in the header → drop stale results so the view can't show
   // another company's recordings until the user reloads for the new one.
   useEffect(() => { setData(null); setSel({}); setDispoLoading(false); }, [companyId]);
@@ -1253,8 +1260,10 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
           parts: g.parts.map(x => ({ box_id: x.box_id, recording_id: x.recording_id, lead_id: x.lead_id, location: x.location, start_time: x.start_time, duration: x.duration, agent_user: x.agent_user })),
         };
       });
-      const r = await client.post('qa/assignments/from-recordings', { company_id: assignCo, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
-      toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}`);
+      const r = await client.post('qa/assignments/from-recordings', { company_id: agentScope, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
+      const extra = [r.data.skipped ? `${r.data.skipped} already assigned` : '', r.data.skipped_no_company ? `${r.data.skipped_no_company} unmapped company` : ''].filter(Boolean).join(', ');
+      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${extra ? ` (${extra})` : ''}`);
+      else toast.error(r.data.error || `Nothing assigned${extra ? ` — ${extra}` : ''}`);
       clearSel();
     } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
     finally { setAssigning(false); }
@@ -1322,6 +1331,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
             style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: (assigning || !assignTo) ? 0.5 : 1 }}>
             {assigning ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Assign
           </button>
+          {allMode && <span className="text-[11px] inline-flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}><Building2 size={11} /> each call routes to its own company automatically</span>}
         </div>
       )}
 
