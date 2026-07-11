@@ -15,6 +15,7 @@
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const { getConfig } = require('./businessConfig');
+const { autoAssignCompany } = require('./qaAutoAssign');
 const logger = require('./logger');
 
 // ── period math (previous complete period) ──────────────────────────────────
@@ -107,7 +108,13 @@ async function materializeCompany(companyId, methods) {
       else rcm = data || 0;
     } catch (e) { logger.warn('QA_JOBS', `RCM ${companyId} error: ${e.message}`); }
   }
-  return { tra, rcm };
+  // Route the freshly-materialized (and any older unassigned) tasks to the
+  // agents who cover this company — so work reaches people automatically
+  // instead of waiting for a manual hand-assign. No coverage → stays in pool.
+  let assigned = 0;
+  try { assigned = (await autoAssignCompany(companyId)).assigned; }
+  catch (e) { logger.warn('QA_JOBS', `auto-assign ${companyId}: ${e.message}`); }
+  return { tra, rcm, assigned };
 }
 
 // ── retention purge ─────────────────────────────────────────────────────────

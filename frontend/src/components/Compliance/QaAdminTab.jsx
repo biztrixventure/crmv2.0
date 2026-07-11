@@ -32,6 +32,17 @@ export default function QaAdminTab() {
     catch { toast.error('Update failed'); load(); }
   };
   const removeAssign = async (ucrId) => { try { await client.delete(`qa/admin/assign/${ucrId}`); loadUsers(); } catch { toast.error('Remove failed'); } };
+  const [distributing, setDistributing] = useState(null);   // company id being distributed
+  const distribute = async (co) => {
+    setDistributing(co.id);
+    try {
+      const r = await client.post('qa/admin/auto-assign', { company_id: co.id });
+      if (r.data.assigned) toast.success(`Routed ${r.data.assigned} task(s) to ${co.name}'s covering agents`);
+      else toast.info(co.coverage && (co.coverage.tra.length || co.coverage.rcm.length) ? 'Nothing waiting to route — all caught up.' : 'No covering agent yet. Bind an agent to this company below first.');
+      load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Distribute failed'); }
+    finally { setDistributing(null); }
+  };
   // bind an agent's review method(s) for a company (else they see no tasks).
   const setAgentMethod = async (userId, companyId, current, m) => {
     const methods = current.includes(m) ? current.filter(x => x !== m) : [...current, m];
@@ -51,7 +62,10 @@ export default function QaAdminTab() {
 
       {/* QA per company — enable + full config */}
       <section>
-        <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Enable &amp; configure QA per company</div>
+        <div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Enable, configure &amp; route QA per company</div>
+        <div className="text-[11px] mb-2 p-2 rounded-lg leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+          Turn on TRA/RCM for a company, then bind agents to it below — a bound agent <b>covers</b> that company's calls of that method. New calls route to covering agents automatically; use <b>Distribute</b> to route whatever is already waiting. “nobody” means those calls have no owner yet.
+        </div>
         {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : <div className="space-y-2">
               {companies.map(co => (
@@ -69,6 +83,28 @@ export default function QaAdminTab() {
                       <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
                     </button>
                   </div>
+                  {/* coverage + routing — who handles this company's calls, and any backlog */}
+                  {co.methods.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
+                      <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Covered by</span>
+                      {METHODS.filter(([k]) => co.methods.includes(k)).map(([k, l]) => {
+                        const names = (co.coverage?.[k]) || [];
+                        return (
+                          <span key={k} className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+                            <span className="font-bold" style={{ color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{l}</span>
+                            {names.length ? <span style={{ color: 'var(--color-text-secondary)' }}>{names.join(', ')}</span> : <span style={{ color: 'var(--color-error-600)' }}>nobody</span>}
+                          </span>
+                        );
+                      })}
+                      {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} unassigned</span>}
+                      <button onClick={() => distribute(co)} disabled={distributing === co.id}
+                        className="ml-auto text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
+                        style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)', opacity: distributing === co.id ? 0.6 : 1 }}
+                        title="Route this company's unassigned tasks to its covering agents (round-robin)">
+                        {distributing === co.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Distribute
+                      </button>
+                    </div>
+                  )}
                   {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} />}
                 </div>
               ))}

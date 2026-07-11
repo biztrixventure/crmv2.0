@@ -26,6 +26,7 @@ const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
+const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const axios = require('axios');
@@ -1446,16 +1447,52 @@ async function globalQaRoleId(level) {
 const profName = (p) => `${p?.first_name || ''} ${p?.last_name || ''}`.trim();
 const lvlOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
 
-// companies + their QA enablement (methods)
+// companies + their QA enablement (methods), who COVERS each company's calls
+// (qa_agent_methods), and how many tasks are still sitting unassigned — so
+// compliance can see routing gaps at a glance and distribute in one click.
 router.get('/admin/overview', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const { data: companies } = await supabaseAdmin.from('companies').select('id, name, company_type').order('name');
+
+  // coverage map: company_id → { tra:[names], rcm:[names] }, built once
+  const { data: cov } = await supabaseAdmin.from('qa_agent_methods').select('user_id, company_id, method');
+  const covUids = [...new Set((cov || []).map(r => r.user_id))];
+  let nameById = {};
+  if (covUids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', covUids);
+    nameById = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p) || p.user_id.slice(0, 6)]));
+  }
+  const coverageByCo = {};
+  for (const r of (cov || [])) {
+    const co = (coverageByCo[r.company_id] ||= { tra: [], rcm: [] });
+    if (co[r.method] && !co[r.method].includes(nameById[r.user_id])) co[r.method].push(nameById[r.user_id] || '?');
+  }
+
   const out = [];
   for (const c of (companies || [])) {
     const methods = await getConfig(c.id, 'qa.methods', []);
-    out.push({ id: c.id, name: c.name, company_type: c.company_type, methods: Array.isArray(methods) ? methods : [] });
+    const { count } = await supabaseAdmin.from('qa_assignments')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', c.id).eq('status', 'pending').is('assigned_to', null);
+    out.push({
+      id: c.id, name: c.name, company_type: c.company_type,
+      methods: Array.isArray(methods) ? methods : [],
+      coverage: coverageByCo[c.id] || { tra: [], rcm: [] },
+      unassigned: count || 0,
+    });
   }
   res.json({ companies: out });
+}));
+
+// Distribute a company's unassigned pending tasks to its covering agents now
+// (round-robin). Applies coverage to the existing backlog — new tasks already
+// auto-route on materialize. Compliance / superadmin only.
+router.post('/admin/auto-assign', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id } = req.body || {};
+  if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  const r = await autoAssignCompany(company_id, { assignedBy: req.user.id });
+  res.json({ ok: true, ...r });
 }));
 
 // all QA users (managers + agents) across companies, grouped by user
