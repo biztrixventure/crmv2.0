@@ -3,7 +3,7 @@ import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
-  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info,
+  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,6 +37,44 @@ const StatusPill = ({ s }) => {
   const [label, color] = map[s] || [s, 'var(--color-text-tertiary)'];
   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color }}>{label}</span>;
 };
+
+// Company access for a QA user — only the companies assigned to them (superadmin
+// / view-all get all, with an "All my companies" option). Drives the header
+// picker + scopes every data pull. Selection persists across sessions.
+const ALL_CO = '__all__';
+function useQaCompanies() {
+  const [companies, setCompanies] = useState(null);
+  const [all, setAll] = useState(false);
+  const [companyId, setCompanyId] = useState('');
+  useEffect(() => {
+    client.get('qa/my-companies').then(r => {
+      const list = r.data.companies || [];
+      setCompanies(list); setAll(!!r.data.all);
+      let saved = null; try { saved = localStorage.getItem('qa_company'); } catch { /* ignore */ }
+      const valid = saved && (saved === ALL_CO ? r.data.all : list.some(c => c.id === saved));
+      setCompanyId(valid ? saved : (list[0]?.id || (r.data.all ? ALL_CO : '')));
+    }).catch(() => setCompanies([]));
+  }, []);
+  const choose = (id) => { setCompanyId(id); try { localStorage.setItem('qa_company', id); } catch { /* ignore */ } };
+  return { companies, all, companyId, setCompanyId: choose };
+}
+
+// Header dropdown: pick which assigned company's data to view. Only ever lists
+// companies the API would allow, so it can't leak another company's data.
+function CompanyPicker({ companies, all, companyId, onChange }) {
+  if (companies === null) return <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />;
+  if (!companies.length && !all) return <span className="text-xs font-semibold" style={{ color: 'var(--color-warning-600)' }}><Building2 size={12} className="inline mr-1" />No company assigned</span>;
+  if (companies.length === 1 && !all) return <span className="text-xs font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }}><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{companies[0].name}</span>;
+  return (
+    <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="You only see data for the companies assigned to you">
+      <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+      <select value={companyId} onChange={e => onChange(e.target.value)} style={{ ...inp, fontWeight: 700, padding: '5px 8px' }}>
+        {all && <option value={ALL_CO}>All my companies</option>}
+        {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+    </label>
+  );
+}
 
 // Small "i" helper — hover or tap to reveal a plain-language explanation of the
 // option it sits next to. Used across the QA config so nothing is a mystery.
@@ -412,7 +450,7 @@ function ScoreCell({ a }) {
 // Manager view: browse the ACTUAL CRM transfers / sales (not the sampled queue),
 // split into two sections. Open a record → its QA assignment is found-or-created
 // so recordings resolve and the scorecard saves exactly like the queue.
-function QueueTab({ canAssign, canOverride, canManage, selfId }) {
+function QueueTab({ canAssign, canOverride, canManage, selfId, companyId }) {
   const [kind, setKind]       = useState('transfer');   // 'transfer' | 'sale'
   const [items, setItems]     = useState([]);
   const [totals, setTotals]   = useState({ transfer: null, sale: null });
@@ -431,23 +469,24 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
     try {
       const params = { kind, limit: LIMIT, page };
       if (q) params.search = q;
+      if (companyId) params.company_id = companyId;
       const r = await client.get('qa/crm-records', { params });
       setItems(r.data.items || []);
       if (r.data.total != null) { setTotal(r.data.total); setTotals(t => ({ ...t, [kind]: r.data.total })); }
     } catch { setItems([]); }
     finally { setLoading(false); }
-  }, [kind, page, q]);
+  }, [kind, page, q, companyId]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [kind, q]);   // reset paging on section / search change
+  useEffect(() => { setPage(1); setTotals({ transfer: null, sale: null }); }, [kind, q, companyId]);   // reset paging + counts on section / search / company change
 
   // Light count for the OTHER section so both tabs show a badge.
   useEffect(() => {
     const other = kind === 'transfer' ? 'sale' : 'transfer';
     if (totals[other] != null) return;
-    client.get('qa/crm-records', { params: { kind: other, limit: 1, page: 1 } })
+    client.get('qa/crm-records', { params: { kind: other, limit: 1, page: 1, ...(companyId ? { company_id: companyId } : {}) } })
       .then(r => { if (r.data.total != null) setTotals(t => ({ ...t, [other]: r.data.total })); })
       .catch(() => {});
-  }, [kind, totals]);
+  }, [kind, totals, companyId]);
 
   // Build the assignment-shaped object the review panel + scorecard expect.
   const toOpen = (it, assignmentId, qaStatus, review, meta) => ({
@@ -471,7 +510,7 @@ function QueueTab({ canAssign, canOverride, canManage, selfId }) {
   const pullNow = async () => {
     setPulling(true);
     try {
-      const r = await client.post('qa/materialize', {});
+      const r = await client.post('qa/materialize', companyId ? { company_id: companyId } : {});
       toast.success(`Pulled ${r.data.tra || 0} TRA + ${r.data.rcm || 0} RCM call(s) into agents' queues`);
     } catch (e) { toast.error(e.response?.data?.error || 'Could not pull calls'); }
     finally { setPulling(false); }
@@ -589,7 +628,7 @@ const ChartCard = ({ title, children, wide }) => (
   </div>
 );
 
-function ReportsTab() {
+function ReportsTab({ companyId }) {
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
@@ -600,8 +639,9 @@ function ReportsTab() {
     setLoading(true);
     const params = {};
     for (const [k, v] of Object.entries(f)) if (v) params[k] = v;
+    if (companyId) params.company_id = companyId;
     client.get('qa/reports', { params }).then(r => setData(r.data)).catch(() => setData(null)).finally(() => setLoading(false));
-  }, [f]);
+  }, [f, companyId]);
   useEffect(() => { load(); }, [load]);
   const set = (k, v) => setF(o => ({ ...o, [k]: v }));
 
@@ -1065,10 +1105,15 @@ function groupRecordings(recs) {
   return out.sort((a, b) => String(b.latest || '').localeCompare(String(a.latest || '')));
 }
 
-function DayRecordingsTab({ canAll, canManage, companyId }) {
+function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
   const [date, setDate] = useState(yesterday);
-  const [scope, setScope] = useState('company');
+  // Company scope comes from the header picker. A specific company → that
+  // company's dialer agents only; "All my companies" (companyId === ALL_CO) →
+  // scope=all (superadmin / view-all only). `scoped` is the concrete company id
+  // (or '' when All) used for the assign-to agent list + task creation.
+  const scopeParams = companyId === ALL_CO ? { scope: 'all' } : { scope: 'company', ...(companyId ? { company_id: companyId } : {}) };
+  const assignCo = scoped;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [dispoLoading, setDispoLoading] = useState(false);
@@ -1090,7 +1135,10 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
   const [playingRid, setPlayingRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
-  useEffect(() => { if (canManage) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [canManage, companyId]);
+  useEffect(() => { if (canManage && assignCo) client.get('qa/agents', { params: { company_id: assignCo } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else if (!assignCo) setAgents([]); }, [canManage, assignCo]);
+  // Company changed in the header → drop stale results so the view can't show
+  // another company's recordings until the user reloads for the new one.
+  useEffect(() => { setData(null); setSel({}); setDispoLoading(false); }, [companyId]);
 
   // Poll dispositions in budgeted batches until every recording has one. Each
   // response is cumulative (cached + newly resolved), so we just apply the
@@ -1100,7 +1148,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     for (let i = 0; i < 50; i++) {
       if (loadTokenRef.current !== token) return;
       let dr;
-      try { dr = await client.get('qa/day-dispositions', { params: { date, scope }, timeout: 120000 }); }
+      try { dr = await client.get('qa/day-dispositions', { params: { date, ...scopeParams }, timeout: 120000 }); }
       catch { break; }
       if (loadTokenRef.current !== token) return;
       const dispos = dr.data.dispos || {};
@@ -1122,7 +1170,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     setLoading(true); setData(null); setSel({}); setDispoLoading(false); setDispoRemaining(0);
     try {
       // 1) recordings FIRST (skip the slow dispo pass) → instant paint
-      const r = await client.get('qa/day-recordings', { params: { date, scope, dispo: 0 }, timeout: 120000 });
+      const r = await client.get('qa/day-recordings', { params: { date, ...scopeParams, dispo: 0 }, timeout: 120000 });
       if (loadTokenRef.current !== token) return;
       setData(r.data);
       if (!r.data.total) { toast.message('No recordings found for that day.'); return; }
@@ -1205,7 +1253,7 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
           parts: g.parts.map(x => ({ box_id: x.box_id, recording_id: x.recording_id, lead_id: x.lead_id, location: x.location, start_time: x.start_time, duration: x.duration, agent_user: x.agent_user })),
         };
       });
-      const r = await client.post('qa/assignments/from-recordings', { company_id: companyId, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
+      const r = await client.post('qa/assignments/from-recordings', { company_id: assignCo, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
       toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}`);
       clearSel();
     } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
@@ -1216,18 +1264,15 @@ function DayRecordingsTab({ canAll, canManage, companyId }) {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-1.5 mb-2">
         <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Day recordings</span>
-        <InfoTip text="Pull EVERY dialer call for a chosen day straight from VICIdial, grouped by number + agent and tagged Transferred (→ TRA) or not (→ RCM). Select the ones you want and Assign them to a QA agent as scoring tasks. This is the manual way to feed the agent queue." />
+        <InfoTip text="Pull EVERY dialer call for a chosen day straight from VICIdial, grouped by number + agent and tagged Transferred (→ TRA) or not (→ RCM). Select the ones you want and Assign them to a QA agent as scoring tasks. Only the agents of the company picked in the top-right header are pulled." />
+        <span className="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+          <Building2 size={11} />{companyId === ALL_CO ? 'All my companies' : 'Selected company'}
+        </span>
       </div>
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <label className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={14} />Date</label>
         <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
         <button onClick={() => setDate(yesterday)} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Yesterday</button>
-        {canAll && (
-          <select value={scope} onChange={e => setScope(e.target.value)} style={inp}>
-            <option value="company">My company's agents</option>
-            <option value="all">All companies (heavy)</option>
-          </select>
-        )}
         <button onClick={load} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white"
           style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: loading ? 0.6 : 1 }}>
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Headphones size={15} />} Load day
@@ -1451,9 +1496,10 @@ function CompletedTab({ managerView, companyId }) {
     const params = { date_from: from, date_to: to };
     if (method) params.method = method;
     if (reviewerId) params.reviewer_id = reviewerId;
+    if (companyId) params.company_id = companyId;
     if (!managerView) params.mine = 'true';
     client.get('qa/reviews', { params }).then(r => setData(r.data)).catch(() => setData({ reviews: [], scorecards: {} })).finally(() => setLoading(false));
-  }, [from, to, method, reviewerId, managerView]);
+  }, [from, to, method, reviewerId, managerView, companyId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (managerView) client.get('qa/agents', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); }, [managerView, companyId]);
 
@@ -1631,7 +1677,7 @@ function RecordingsCollapse({ assignmentId }) {
 // AGENT queue — only the tasks still TO DO (a scored/skipped task has already
 // moved to Completed). Transfers/Sales split + a date filter that narrows to the
 // records whose call happened on a chosen day.
-function AgentTasks({ selfId, canOverride, companyId }) {
+function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
@@ -1651,7 +1697,8 @@ function AgentTasks({ selfId, canOverride, companyId }) {
 
   // To-do only — scoring a call flips its status to 'scored', which drops it from
   // here and surfaces it under Completed. That IS the auto-sort the manager wants.
-  const todo = items.filter(a => a.status !== 'scored' && a.status !== 'skipped');
+  // Also honor the header company filter (multi-company agents).
+  const todo = items.filter(a => a.status !== 'scored' && a.status !== 'skipped' && (!filterCompany || a.company_id === filterCompany));
   const availableDays = [...new Set(todo.map(a => dayOfDate(a.subject_date)).filter(Boolean))].sort().reverse();
   const byDay = day ? todo.filter(a => dayOfDate(a.subject_date) === day) : todo;
   const transfers = byDay.filter(a => !a.sale_id);
@@ -1732,6 +1779,8 @@ function AgentTasks({ selfId, canOverride, companyId }) {
 function QAAgentView({ user, logout }) {
   const [tab, setTab] = useState('tasks');
   const [methods, setMethods] = useState(null);
+  const { companies, all, companyId, setCompanyId } = useQaCompanies();
+  const scoped = companyId === ALL_CO ? '' : companyId;
   useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
   const tabs = [{ key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
@@ -1749,6 +1798,7 @@ function QAAgentView({ user, logout }) {
         </nav>
         <div className="ml-auto flex items-center gap-3">
           {Array.isArray(methods) && methods.length > 0 && <span className="flex items-center gap-1">{methods.map(m => <MethodPill key={m} m={m} />)}</span>}
+          <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
@@ -1756,8 +1806,8 @@ function QAAgentView({ user, logout }) {
       <main className="flex-1 p-5 overflow-hidden">
         {Array.isArray(methods) && methods.length === 0
           ? <div className="text-center py-20 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Your QA manager hasn't set you up yet.<br />Once they assign you a method (RCM or TRA) and tasks, your work appears here.</div>
-          : tab === 'tasks' ? <AgentTasks selfId={user?.id} canOverride={false} companyId={user?.company_id} />
-          : <CompletedTab managerView={false} companyId={user?.company_id} />}
+          : tab === 'tasks' ? <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />
+          : <CompletedTab managerView={false} companyId={scoped} />}
       </main>
     </div>
   );
@@ -1778,6 +1828,11 @@ export default function QAShell() {
   if (!isManager) return <QAAgentView user={user} logout={logout} />;
 
   const canAll = isSuper || hasPermission('view_all_qa_reviews');
+  const { companies, all, companyId, setCompanyId } = useQaCompanies();
+  // A specific company for scoped tabs; '' when "All my companies" is picked so
+  // the server falls back to the user's full allowed set. Config/Agents need a
+  // concrete company, so they fall back to the primary company.
+  const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
     { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: true },
@@ -1800,17 +1855,18 @@ export default function QAShell() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-3">
+          <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} />}
-        {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={user?.company_id} />}
-        {tab === 'agents' && <AgentsTab companyId={user?.company_id} />}
-        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={user?.company_id} />}
-        {tab === 'config' && canManage && <ConfigTab companyId={user?.company_id} />}
-        {tab === 'reports' && canReports && <ReportsTab />}
+        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} companyId={scoped} />}
+        {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={companyId} scoped={scoped} />}
+        {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} />}
+        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
+        {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
+        {tab === 'reports' && canReports && <ReportsTab companyId={scoped} />}
       </main>
     </div>
   );

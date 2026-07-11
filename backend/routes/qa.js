@@ -1408,6 +1408,21 @@ router.get('/my-methods', asyncHandler(async (req, res) => {
   res.json({ methods: await agentMethods(req.user.id), is_manager: await isManager(req) });
 }));
 
+// GET /qa/my-companies — the companies THIS QA user may see. Drives the header
+// company selector and scopes every data pull. Superadmin / view_all_qa_reviews
+// get every company (all:true); everyone else only the companies they're
+// assigned to (allowedCompanyIds). Same source of truth the data endpoints
+// enforce, so the dropdown can never offer a company the API would reject.
+router.get('/my-companies', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const allowed = await allowedCompanyIds(req);   // null = all companies
+  let q = supabaseAdmin.from('companies').select('id, name, company_type').order('name');
+  if (allowed) { if (!allowed.length) return res.json({ companies: [], all: false }); q = q.in('id', allowed); }
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ companies: data || [], all: allowed === null });
+}));
+
 // POST /qa/enrich-existing { company_id } — backfill customer fields on pending
 // assignments that still have none (CRM-first, dialer fallback). Manager-only.
 router.post('/enrich-existing', asyncHandler(async (req, res) => {
