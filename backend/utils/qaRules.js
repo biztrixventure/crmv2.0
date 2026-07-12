@@ -110,9 +110,19 @@ async function materializeCloserWork(companyId, rules) {
 
   try {
     if (types.has('closer_sales')) {
-      const { data: sales } = await supabaseAdmin.from('sales')
+      // Sales are found from BOTH directions of the fronter↔closer link:
+      //   • rule on the CLOSER company (e.g. 1-Vertex) → its own sales rows
+      //   • rule on a FRONTER company → sales whose TRANSFER came from it (the
+      //     customers this company's fronters sent that got closed)
+      const idSet = new Set();
+      const { data: own } = await supabaseAdmin.from('sales')
         .select('id').eq('company_id', companyId).gte('created_at', since).limit(3000);
-      const ids = (sales || []).map(s => s.id);
+      (own || []).forEach(s => idSet.add(s.id));
+      const { data: viaTransfer } = await supabaseAdmin.from('sales')
+        .select('id, transfers!inner(company_id)').eq('transfers.company_id', companyId)
+        .gte('created_at', since).limit(3000);
+      (viaTransfer || []).forEach(s => idSet.add(s.id));
+      const ids = [...idSet];
       if (ids.length) {
         const { data: existing } = await supabaseAdmin.from('qa_assignments')
           .select('sale_id').in('sale_id', ids);

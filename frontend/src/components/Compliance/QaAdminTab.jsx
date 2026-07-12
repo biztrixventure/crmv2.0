@@ -46,8 +46,8 @@ const StepBadge = ({ n }) => (
 const WORK_TYPE_DEFS = [
   { key: 'tra', label: 'Transfer calls (TRA)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'The calls that are IN the CRM — every transfer the fronters enter. A transfer means TRA.' },
   { key: 'rcm', label: 'Random calls (RCM)', icon: Shuffle, tint: '#d97706', desc: 'Random RAW dialer calls of the users — numbers NOT entered in the CRM. Sampled daily at the configured rate.' },
-  { key: 'closer_sales', label: 'Closer sales calls', icon: DollarSign, tint: '#059669', desc: 'The sales calls of the closers — every sale gets a review task.' },
-  { key: 'closer_dispo', label: 'Closer-landed, other dispositions', icon: PhoneOff, tint: '#dc2626', desc: 'Transfers that reached a closer but ended with a different disposition — pick which codes count (none picked = any non-SALE).' },
+  { key: 'closer_sales', label: 'Closer sales calls', icon: DollarSign, tint: '#059669', desc: 'The CLOSER\'s leg: transferred customers that got closed into a sale. Works from either side — pick the closer company for its own sales, or a fronter company for the sales its transfers produced.' },
+  { key: 'closer_dispo', label: 'Closer-landed, other dispositions', icon: PhoneOff, tint: '#dc2626', desc: 'The CLOSER\'s leg of transfers that did NOT close — pick which dispositions count (none picked = any non-SALE). Combine with "Closer sales" to hear EVERY call that landed on a closer.' },
 ];
 const wtDef = (k) => WORK_TYPE_DEFS.find(w => w.key === k) || { label: k, tint: 'var(--color-text-tertiary)', icon: Headphones };
 
@@ -179,7 +179,7 @@ export default function QaAdminTab() {
                       ⚠ Work is piling up with no reviewer. Fix: <b>QA Team below → pick a person → Assign work → {co.name}</b> — the waiting calls route to them instantly.
                     </div>
                   )}
-                  {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} />}
+                  {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} companyType={co.company_type} />}
                 </div>
                 );
               })}
@@ -577,8 +577,9 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
           : <div className="flex flex-wrap gap-1.5 max-h-32 overflow-auto">
               {companyUsers.map(u => (
                 <button key={u.user_id} onClick={() => toggleSubject(u.user_id)} className="text-[11px] px-2 py-1 rounded-lg"
+                  title={u.linked ? `Closer at the linked company ${u.company_name || ''} — receives this company's transferred calls` : undefined}
                   style={subjects.includes(u.user_id) ? { background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)', border: '1px solid var(--color-primary-300, #c7d2fe)', fontWeight: 700 } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-                  {subjects.includes(u.user_id) ? '✓ ' : ''}{u.name} <span className="opacity-60">· {u.level.replace('_', ' ')}</span>
+                  {subjects.includes(u.user_id) ? '✓ ' : ''}{u.name} <span className="opacity-60">· {u.level.replace('_', ' ')}{u.linked && u.company_name ? ` @ ${u.company_name}` : ''}</span>
                 </button>
               ))}
             </div>
@@ -690,7 +691,7 @@ function RulesSection({ rules, reload }) {
 }
 
 // ── per-company QA config (RCM sampling, covers, retention) ──────────────────
-function CompanyConfig({ companyId, methods }) {
+function CompanyConfig({ companyId, methods, companyType }) {
   const [cfg, setCfg] = useState(null);
   useEffect(() => { client.get('qa/admin/company-config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({})); }, [companyId]);
   const setKey = async (key, value) => {
@@ -725,12 +726,24 @@ function CompanyConfig({ companyId, methods }) {
           <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
           <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '% of calls' : 'calls'}</span>
           <select value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="day">per day</option><option value="week">per week</option></select>
-          <span className="text-[11px] ml-2" style={{ color: 'var(--color-text-tertiary)' }}>listen to:</span>
-          {[['fronter', 'fronters'], ['closer', 'closers']].map(([r, label]) => (
-            <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              <input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}
-            </label>
-          ))}
+          {/* Only the roles this company ACTUALLY has: fronter companies employ
+              fronters, the closer company employs closers — never both boxes. */}
+          {(() => {
+            const opts = companyType === 'fronter' ? [['fronter', 'fronters']]
+              : companyType === 'closer' ? [['closer', 'closers']]
+              : [['fronter', 'fronters'], ['closer', 'closers']];
+            return (
+              <>
+                <span className="text-[11px] ml-2" style={{ color: 'var(--color-text-tertiary)' }}>listen to:</span>
+                {opts.map(([r, label]) => (
+                  <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    <input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}
+                  </label>
+                ))}
+                {companyType === 'fronter' && <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>(this company has fronters only — the closers' calls are reviewed via "Closer" work types on the closer company)</span>}
+              </>
+            );
+          })()}
         </Row>
       ) : (
         <div className="text-[11px] py-2" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px dashed var(--color-border)' }}>

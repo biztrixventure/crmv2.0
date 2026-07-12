@@ -1846,15 +1846,36 @@ router.post('/admin/rules/apply', asyncHandler(async (req, res) => {
   res.json({ ok: true, materialized, closer, routed: routed.assigned, held: routed.held || 0 });
 }));
 
-// the company's reviewable people (fronters + closers) for the subject picker
+// The reviewable people for the subject picker. A transfer's TWO legs involve
+// people from DIFFERENT companies — the fronter belongs to the fronter company,
+// but the closer who received the call belongs to the LINKED closer company
+// (e.g. 1-Vertex). So this returns the company's own fronters/closers PLUS the
+// closers of every company linked to it via company_links, tagged with where
+// they come from — otherwise closer-leg reviews could never target a person.
 router.get('/admin/company-users', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
   const { data: rows } = await supabaseAdmin.from('user_company_roles')
-    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
-  const withLevel = (rows || []).map(r => ({ user_id: r.user_id, level: lvlOf(r.custom_roles) }))
+    .select('user_id, company_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+  let withLevel = (rows || []).map(r => ({ user_id: r.user_id, company_id: r.company_id, level: lvlOf(r.custom_roles), linked: false }))
     .filter(r => ['fronter', 'closer', 'fronter_manager', 'closer_manager'].includes(r.level));
+
+  // + the closers of LINKED companies (both link directions)
+  const { data: links } = await supabaseAdmin.from('company_links')
+    .select('fronter_company_id, closer_company_id')
+    .or(`fronter_company_id.eq.${companyId},closer_company_id.eq.${companyId}`);
+  const linkedIds = [...new Set((links || []).map(l => l.fronter_company_id === companyId ? l.closer_company_id : l.fronter_company_id).filter(id => id && id !== companyId))];
+  let linkedNames = {};
+  if (linkedIds.length) {
+    const { data: cos } = await supabaseAdmin.from('companies').select('id, name').in('id', linkedIds);
+    linkedNames = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+    const { data: lr } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, company_id, custom_roles(level)').in('company_id', linkedIds).eq('is_active', true);
+    const linkedClosers = (lr || []).map(r => ({ user_id: r.user_id, company_id: r.company_id, level: lvlOf(r.custom_roles), linked: true }))
+      .filter(r => ['closer', 'closer_manager'].includes(r.level));
+    withLevel = withLevel.concat(linkedClosers);
+  }
   const uids = [...new Set(withLevel.map(r => r.user_id))];
   let names = {};
   if (uids.length) {
@@ -1863,8 +1884,11 @@ router.get('/admin/company-users', asyncHandler(async (req, res) => {
   }
   const seen = new Set();
   const users = withLevel.filter(r => !seen.has(r.user_id) && seen.add(r.user_id))
-    .map(r => ({ user_id: r.user_id, name: names[r.user_id] || r.user_id.slice(0, 6), level: r.level }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map(r => ({
+      user_id: r.user_id, name: names[r.user_id] || r.user_id.slice(0, 6), level: r.level,
+      linked: !!r.linked, company_name: r.linked ? (linkedNames[r.company_id] || null) : null,
+    }))
+    .sort((a, b) => (a.linked === b.linked ? a.name.localeCompare(b.name) : a.linked ? 1 : -1));
   res.json({ users });
 }));
 
