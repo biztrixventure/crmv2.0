@@ -77,7 +77,9 @@ export default function QaAdminTab() {
     setDistributing(co.id);
     try {
       const r = await client.post('qa/admin/auto-assign', { company_id: co.id });
-      if (r.data.assigned) toast.success(`Routed ${r.data.assigned} task(s) to ${co.name}'s covering agents`);
+      const held = r.data.held || 0;
+      if (r.data.assigned) toast.success(`Routed ${r.data.assigned} task(s) to ${co.name}'s covering agents${held ? ` — ${held} waiting behind the workload cap` : ''}`);
+      else if (held) toast.info(`All covering reviewers are at their workload cap — ${held} task(s) will flow in as reviews get done.`);
       else toast.info(co.coverage && (co.coverage.tra.length || co.coverage.rcm.length) ? 'Nothing waiting to route — all caught up.' : 'No covering agent yet. Assign work to a QA person below first.');
       load();
     } catch (e) { toast.error(e.response?.data?.error || 'Distribute failed'); }
@@ -250,8 +252,14 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</span>
-                    <span className="block text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} co · {nRules} task{nRules === 1 ? '' : 's'}</span>
+                    <span className="block text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} co · {nRules} rule{nRules === 1 ? '' : 's'}</span>
                   </span>
+                  {u.open_tasks > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums" title={`${u.open_tasks} open call(s) on their plate right now`}
+                      style={u.open_tasks >= 25 ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626' } : u.open_tasks >= 15 ? { background: 'rgba(217,119,6,0.12)', color: '#d97706' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                      {u.open_tasks}
+                    </span>
+                  )}
                   <ChevronRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                 </button>
               );
@@ -280,6 +288,11 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
               <div className="text-sm font-extrabold truncate" style={{ color: 'var(--color-text)' }}>{person.name}</div>
               <div className="flex items-center gap-1 mt-0.5">{person.levels.map(l => <span key={l} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}</div>
             </div>
+            <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-lg tabular-nums"
+              title="Open (unscored) calls on their plate right now — routing pauses at the company's workload cap so they never drown"
+              style={(person.open_tasks || 0) >= 25 ? { background: 'rgba(220,38,38,0.10)', color: '#dc2626' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+              <Headphones size={11} /> {person.open_tasks || 0} on their plate
+            </span>
             <button onClick={() => setAssigning(a => !a)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold text-white"
               style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
               <Headphones size={13} /> Assign work
@@ -425,7 +438,8 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
       if (runNow) {
         try {
           const r = await client.post('qa/admin/rules/apply', { company_id: companyId });
-          toast.success(`Assigned — routed ${r.data.routed} matching call(s) now; new ones follow automatically.`);
+          const held = r.data.held || 0;
+          toast.success(`Assigned — routed ${r.data.routed} call(s) now${held ? `; ${held} waiting behind the workload cap (they'll flow in as reviews get done)` : ''}. New calls follow automatically.`);
         } catch { toast.success('Assigned — matching calls route automatically from now on.'); }
       } else {
         toast.success('Assigned — matching calls route automatically from now on.');
@@ -573,7 +587,8 @@ function RulesSection({ companies, qaUsers, rules, reload }) {
       const m = r.data.materialized || {}; const c = r.data.closer || {};
       if (m.tra) bits.push(`${m.tra} TRA`); if (m.rcm) bits.push(`${m.rcm} RCM`);
       if (c.closer_sales) bits.push(`${c.closer_sales} sales`); if (c.closer_dispo) bits.push(`${c.closer_dispo} dispo`);
-      toast.success(`Rules ran — pulled ${bits.length ? bits.join(' + ') : 'no new calls'}, routed ${r.data.routed} task(s)`);
+      const held = r.data.held || 0;
+      toast.success(`Rules ran — pulled ${bits.length ? bits.join(' + ') : 'no new calls'}, routed ${r.data.routed} task(s)${held ? `; ${held} waiting behind the workload cap` : ''}`);
     } catch (e) { toast.error(e.response?.data?.error || 'Run failed'); }
     finally { setApplying(null); }
   };
@@ -673,6 +688,12 @@ function CompanyConfig({ companyId, methods }) {
         <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Keep untouched tasks</span>
         <input type="number" min={1} max={30} value={retention} onChange={e => setKey('qa.retention_days', Math.max(1, Math.min(30, +e.target.value || 2)))} style={{ ...inp, width: 60 }} />
         <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>days, then auto-purge</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Reviewer workload cap</span>
+        <input type="number" min={5} max={200} value={cfg['qa.reviewer_cap'] ?? 25} onChange={e => setKey('qa.reviewer_cap', Math.max(5, Math.min(200, +e.target.value || 25)))} style={{ ...inp, width: 60 }} />
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>open calls max per reviewer</span>
+        <InfoTip text="Routing never puts more than this many OPEN (unscored) calls on one reviewer's plate. Anything beyond waits in the pool and flows in automatically as they finish reviews — a big backlog trickles instead of burying anyone." />
       </div>
     </div>
   );

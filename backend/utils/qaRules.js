@@ -27,6 +27,30 @@ const WORK_TYPES = ['tra', 'rcm', 'closer_sales', 'closer_dispo'];
 
 const up = (s) => String(s || '').trim().toUpperCase();
 
+// ── reviewer workload protection ─────────────────────────────────────────────
+// Routing never buries a reviewer: nobody's OPEN plate (pending + in_review)
+// exceeds qa.reviewer_cap (per company, default 25, clamp 5–200). Tasks that
+// would overflow stay in the pool and trickle in as reviews get scored.
+function clampCap(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 25;
+  return Math.min(200, Math.max(5, Math.round(n)));
+}
+async function reviewerCap(companyId) {
+  return clampCap(await getConfig(companyId, 'qa.reviewer_cap', 25));
+}
+// current open plate per reviewer id
+async function openCounts(reviewerIds) {
+  const out = {};
+  await Promise.all([...new Set(reviewerIds)].filter(Boolean).map(async (rid) => {
+    const { count } = await supabaseAdmin.from('qa_assignments')
+      .select('*', { count: 'exact', head: true })
+      .eq('assigned_to', rid).in('status', ['pending', 'in_review']);
+    out[rid] = count || 0;
+  }));
+  return out;
+}
+
 // Work type of an assignment row — stored tag first, derived for older rows.
 // No CRM link at all (raw dialer recording) = RCM whatever the subject's role.
 function workTypeOf(row) {
@@ -136,14 +160,19 @@ async function materializeCloserWork(companyId, rules) {
 }
 
 // Route the company's unassigned pending tasks by its rules. Specific rules run
-// BEFORE the generic coverage round-robin (caller order guarantees it). Returns
-// { assigned, byReviewer } — byReviewer feeds notifications.
+// BEFORE the generic coverage round-robin (caller order guarantees it). Every
+// pick respects the reviewer cap and goes to the LEAST-LOADED matching
+// reviewer, so nobody gets buried. Returns { assigned, byReviewer, held } —
+// held = tasks that matched a rule but waited because every matching
+// reviewer's plate was full.
 async function applyCompanyRules(companyId) {
-  const result = { assigned: 0, byReviewer: {} };
+  const result = { assigned: 0, byReviewer: {}, held: 0 };
   const rules = await getActiveRules(companyId);
   if (!rules.length) return result;
 
   try {
+    const cap = await reviewerCap(companyId);
+    const open = await openCounts(rules.map(r => r.reviewer_id));
     const { data: tasks } = await supabaseAdmin.from('qa_assignments')
       .select('id, method, transfer_id, sale_id, subject_role, work_type')
       .eq('company_id', companyId).eq('status', 'pending').is('assigned_to', null)
@@ -164,10 +193,10 @@ async function applyCompanyRules(companyId) {
       (data || []).forEach(s => { sById[s.id] = s; });
     }
 
-    // reviewer → task ids, balanced: when several rules match a task, the
-    // reviewer with the fewest picks this run takes it.
+    // reviewer → task ids. Load = what's already on their plate + this run's
+    // picks; a reviewer at the cap is skipped entirely.
     const picks = {};   // reviewer_id -> [task ids]
-    const load = (rid) => (picks[rid] || []).length;
+    const load = (rid) => (open[rid] || 0) + (picks[rid] || []).length;
 
     for (const task of tasks) {
       const wt = workTypeOf(task);
@@ -189,7 +218,8 @@ async function applyCompanyRules(companyId) {
         return true;
       });
       if (!matching.length) continue;
-      const reviewers = [...new Set(matching.map(r => r.reviewer_id))];
+      const reviewers = [...new Set(matching.map(r => r.reviewer_id))].filter(rid => load(rid) < cap);
+      if (!reviewers.length) { result.held++; continue; }   // every matching plate full → wait
       reviewers.sort((a, b) => load(a) - load(b));
       (picks[reviewers[0]] ||= []).push(task.id);
     }
@@ -205,9 +235,9 @@ async function applyCompanyRules(companyId) {
         result.byReviewer[reviewer] = (result.byReviewer[reviewer] || 0) + chunk.length;
       }
     }
-    if (result.assigned) logger.info('QA_RULES', `rules routed ${result.assigned} task(s) in ${companyId}`);
+    if (result.assigned || result.held) logger.info('QA_RULES', `rules routed ${result.assigned} task(s) in ${companyId}${result.held ? `, ${result.held} held (reviewer caps)` : ''}`);
   } catch (e) { logger.warn('QA_RULES', `applyCompanyRules ${companyId}: ${e.message}`); }
   return result;
 }
 
-module.exports = { WORK_TYPES, workTypeOf, getActiveRules, ruleCompanies, materializeCloserWork, applyCompanyRules };
+module.exports = { WORK_TYPES, workTypeOf, getActiveRules, ruleCompanies, materializeCloserWork, applyCompanyRules, reviewerCap, openCounts };

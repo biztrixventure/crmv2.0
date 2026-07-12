@@ -27,7 +27,7 @@ const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetForm
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
-const { WORK_TYPES, getActiveRules, materializeCloserWork, applyCompanyRules } = require('../utils/qaRules');
+const { WORK_TYPES, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const axios = require('axios');
@@ -1377,7 +1377,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
-const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription'];
+const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;
@@ -1605,7 +1605,10 @@ router.get('/admin/users', asyncHandler(async (req, res) => {
     byUser[r.user_id].levels.add(level);
     byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level, methods: level === 'qa_agent' ? (methodsBy[`${r.user_id}|${r.company_id}`] || []) : null });
   }
-  res.json({ users: Object.values(byUser).map(u => ({ ...u, levels: [...u.levels] })) });
+  // each person's current OPEN plate (pending + in_review) — the workload
+  // compliance should look at before piling on more.
+  const open = await openCounts(uids);
+  res.json({ users: Object.values(byUser).map(u => ({ ...u, levels: [...u.levels], open_tasks: open[u.user_id] || 0 })) });
 }));
 
 // search QUALITY people only — users holding an active qa_manager/qa_agent role
@@ -1766,7 +1769,7 @@ router.post('/admin/rules/apply', asyncHandler(async (req, res) => {
       data: { count: n },
     }).catch(() => {});
   }
-  res.json({ ok: true, materialized, closer, routed: routed.assigned });
+  res.json({ ok: true, materialized, closer, routed: routed.assigned, held: routed.held || 0 });
 }));
 
 // the company's reviewable people (fronters + closers) for the subject picker
@@ -1809,7 +1812,7 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
 
 // full per-company QA config (compliance controls each company's QA setup —
 // methods, RCM sampling, covers, TRA population, retention, card fields).
-const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields'];
+const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap'];
 router.get('/admin/company-config', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
