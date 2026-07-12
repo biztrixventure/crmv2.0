@@ -35,15 +35,17 @@ async function companyDialerAgents(companyId, covers) {
   const roleByUid = {};
   for (const r of (ucr || [])) { const l = lvl(r.custom_roles); if (want.has(l)) roleByUid[r.user_id] = /closer/.test(l) ? 'closer' : 'fronter'; }
   const uids = Object.keys(roleByUid);
-  if (!uids.length) return { ids: [], roleByAgent: {} };
+  if (!uids.length) return { ids: [], roleByAgent: {}, nameByAgent: {} };
   const { data: profs } = await supabaseAdmin.from('user_profiles')
-    .select('user_id, vicidial_agent_ids').in('user_id', uids).not('vicidial_agent_ids', 'is', null);
-  const ids = new Set(); const roleByAgent = {};
+    .select('user_id, first_name, last_name, vicidial_agent_ids').in('user_id', uids).not('vicidial_agent_ids', 'is', null);
+  const ids = new Set(); const roleByAgent = {}; const nameByAgent = {};
   for (const p of (profs || [])) for (const a of (p.vicidial_agent_ids || [])) {
     const A = String(a).toUpperCase(); if (!A) continue;
     ids.add(A); roleByAgent[A] = roleByUid[p.user_id];
+    const nm = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (nm) nameByAgent[A] = nm;
   }
-  return { ids: [...ids], roleByAgent };
+  return { ids: [...ids], roleByAgent, nameByAgent };
 }
 
 // Insert rows tolerating both the recording-unique guard (already-assigned
@@ -78,7 +80,7 @@ async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
     .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day);
   if (already > 0) return 0;
 
-  const { ids, roleByAgent } = await companyDialerAgents(companyId, covers);
+  const { ids, roleByAgent, nameByAgent } = await companyDialerAgents(companyId, covers);
   if (!ids.length) { logger.info('QA_RCM', `${companyId}: no dialer-mapped users to sample`); return 0; }
 
   const recs = await listDayRecordings({ date: day, agentIds: ids });
@@ -125,7 +127,7 @@ async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
       company_id: companyId, method: 'rcm',
       subject_role: roleByAgent[String(g.agent_user || '').toUpperCase()] || 'fronter',
       work_type: 'rcm', source: 'dialer_random', status: 'pending', sampled: true, period: day,
-      recording_ref: { ...cleanPart(primary), agent_name: null, phone: g.phone, parts: g.parts.length > 1 ? g.parts.map(cleanPart) : undefined },
+      recording_ref: { ...cleanPart(primary), agent_name: nameByAgent[String(g.agent_user || '').toUpperCase()] || null, phone: g.phone, parts: g.parts.length > 1 ? g.parts.map(cleanPart) : undefined },
       recording_date: day, subject_agent: g.agent_user || null,
       customer_phone: g.phone || null,
     };

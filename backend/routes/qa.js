@@ -49,6 +49,22 @@ async function allowedCompanyIds(req) {
 }
 const leadDigits = (code) => { const m = String(code || '').match(/(\d+)\s*$/); return m ? m[1] : null; };
 
+// dialer agent id(s) → the CRM user's real NAME (vicidial_agent_ids mapping).
+// Reviewed agents must show as people, not dialer codes like TMC100277.
+async function dialerAgentNameMap(agentIds) {
+  const want = [...new Set((agentIds || []).filter(Boolean).flatMap(a => [String(a), String(a).toUpperCase()]))];
+  if (!want.length) return {};
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('first_name, last_name, vicidial_agent_ids').overlaps('vicidial_agent_ids', want);
+  const map = {};
+  for (const p of (profs || [])) for (const a of (p.vicidial_agent_ids || [])) {
+    const A = String(a).toUpperCase();
+    const nm = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (nm && !map[A]) map[A] = nm;
+  }
+  return map;
+}
+
 // A QA MANAGER can pull the dialer, see the pool, and assign. A qa_agent cannot —
 // they only ever see tasks assigned to them, in their bound method(s).
 async function isManager(req) {
@@ -240,6 +256,13 @@ router.get('/queue', asyncHandler(async (req, res) => {
       review: rv,   // { final_score, quality_score, passed, autofail_result, status } or null
     };
   });
+  // the reviewed agent must show as a PERSON — resolve any dialer id whose name
+  // isn't stored on the row (raw RCM samples, older day-recording tasks).
+  const unresolved = items.filter(i => !i.agent_name && i.agent_display).map(i => i.agent_display);
+  if (unresolved.length) {
+    const nm = await dialerAgentNameMap(unresolved);
+    for (const i of items) if (!i.agent_name && i.agent_display) i.agent_name = nm[String(i.agent_display).toUpperCase()] || null;
+  }
   res.json({ items, total: offset === 0 ? (count || 0) : null, page, limit });
 }));
 
@@ -1156,17 +1179,22 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
   const sById = Object.fromEntries((sRes.data || []).map(s => [s.id, s]));
 
+  // reviewed agents must show as PEOPLE — resolve dialer ids → CRM user names
+  const dialerNames = await dialerAgentNameMap(Object.values(assignById)
+    .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
+
   const out = reviews.map(r => {
     const a = assignById[r.assignment_id] || {};
     const rec = a.recording_ref || null;
     const t = a.transfer_id ? tById[a.transfer_id] : null;
     const s = a.sale_id ? sById[a.sale_id] : null;
+    const dialerId = a.subject_agent || rec?.agent_user || null;
     return {
       id: r.id, assignment_id: r.assignment_id, method: r.method, subject_role: r.subject_role,
       scorecard_id: r.scorecard_id, status: r.status, reviewed_at: r.created_at,
       reviewer_id: r.reviewer_id, reviewer_name: nameById[r.reviewer_id] || null,
       subject_user_id: r.subject_user_id, subject_name: nameById[r.subject_user_id] || null,
-      agent: (rec?.agent_name) || a.subject_agent || rec?.agent_user || null,
+      agent: (rec?.agent_name) || dialerNames[String(dialerId || '').toUpperCase()] || dialerId || null,
       customer_name: (t ? scanName(t.form_data) : null) || s?.customer_name || null,
       customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
       call_date: a.recording_date || rec?.start_time || t?.created_at || s?.sale_date || null,
