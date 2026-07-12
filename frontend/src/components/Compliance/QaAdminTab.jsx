@@ -177,13 +177,13 @@ export default function QaAdminTab() {
           removeAssign={removeAssign} setAgentMethod={setAgentMethod} />
       </section>
 
-      {/* STEP 3 — work rules overview across companies */}
+      {/* STEP 3 — read-only overview of the SAME assignments, grouped by company */}
       <section>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={3} /> Work rules — all companies
-          <InfoTip w={300} text="Every active listening rule, grouped by company. A rule sends a kind of work — TRA, RCM, closer sales, or closer-landed calls with chosen dispositions — to one QA reviewer, for everyone or specific agents. Run now pulls matching calls and routes them immediately." />
+          <StepBadge n={3} /> Listening overview — by company
+          <InfoTip w={300} text="The same assignments you created in the QA Team console above, viewed by company: who listens to what in each one. Run now pulls matching calls and routes them immediately; pause/× manage a rule. New assignments are made in the QA Team console — one place only, no duplicates." />
         </div>
-        <RulesSection companies={companies || []} qaUsers={users || []} rules={rules} reload={loadRules} />
+        <RulesSection rules={rules} reload={loadRules} />
       </section>
     </div>
   );
@@ -589,9 +589,11 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
   );
 }
 
-// ── STEP 3 — rules overview grouped by company (controlled) ───────────────────
-function RulesSection({ companies, qaUsers, rules, reload }) {
-  const [building, setBuilding] = useState(false);
+// ── STEP 3 — rules overview grouped by company (read-only + Run now/pause/×).
+// Assignments are CREATED in one place only: the QA Team console above — this
+// section is the by-company view of the same rules, so there's never a second,
+// competing "assign" flow to confuse anyone. ──────────────────────────────────
+function RulesSection({ rules, reload }) {
   const [applying, setApplying] = useState(null);   // company id being run
 
   const toggle = async (rule) => {
@@ -627,7 +629,7 @@ function RulesSection({ companies, qaUsers, rules, reload }) {
       {rules === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
         : !rules.length ? (
           <div className="text-[12px] p-3 rounded-xl leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            No work rules yet — assign work from the QA Team console above (pick a person → Assign work), or build a rule here.
+            No listening assignments yet. Create them in the <b>QA Team</b> console above — pick a person, click <b>Assign work</b>. They'll appear here grouped by company.
           </div>
         ) : Object.entries(byCompany).map(([coId, g]) => (
           <div key={coId} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -670,12 +672,6 @@ function RulesSection({ companies, qaUsers, rules, reload }) {
           </div>
         ))}
 
-      {building
-        ? <RuleBuilder companies={companies} qaUsers={qaUsers} onDone={() => { setBuilding(false); reload(); }} onCancel={() => setBuilding(false)} />
-        : <button onClick={() => setBuilding(true)} className="w-full py-2.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5"
-            style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', color: '#fff' }}>
-            <Headphones size={14} /> New work rule — assign a reviewer to calls
-          </button>}
     </div>
   );
 }

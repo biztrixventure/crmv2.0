@@ -59,11 +59,15 @@ router.get(
         `
         );
 
-      // Scope: company_id provided → only that company's roles
+      // Scope: company_id provided → that company's roles PLUS the GLOBAL QA
+      //        roles (company_id NULL, qa_manager/qa_agent — mig 181): one QA
+      //        role spans many companies, so creating a Quality user inside any
+      //        company must offer them; the person then auto-appears in the
+      //        compliance QA Department for work assignment.
       //        no company_id (superadmin) → only system-level roles (company_id IS NULL)
       if (companyId) {
-        query = query.eq('company_id', companyId);
-        logger.debug('GET_ROLES', 'Added company filter', { companyId });
+        query = query.or(`company_id.eq.${companyId},and(company_id.is.null,level.in.(qa_manager,qa_agent))`);
+        logger.debug('GET_ROLES', 'Added company filter (+global QA roles)', { companyId });
       } else {
         query = query.is('company_id', null);
         logger.debug('GET_ROLES', 'Superadmin: returning system-level roles only');
