@@ -28,10 +28,12 @@ const WORK_TYPES = ['tra', 'rcm', 'closer_sales', 'closer_dispo'];
 const up = (s) => String(s || '').trim().toUpperCase();
 
 // Work type of an assignment row — stored tag first, derived for older rows.
+// No CRM link at all (raw dialer recording) = RCM whatever the subject's role.
 function workTypeOf(row) {
   if (row.work_type) return row.work_type;
   if (row.sale_id) return 'closer_sales';
   if (row.method === 'tra') return 'tra';
+  if (!row.transfer_id) return 'rcm';
   if (row.subject_role === 'closer') return 'closer_dispo';
   return 'rcm';
 }

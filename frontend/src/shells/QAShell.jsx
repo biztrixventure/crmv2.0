@@ -4,7 +4,7 @@ import {
   LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
   UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -989,8 +989,8 @@ function ConfigTab({ companyId }) {
         {cfg === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : (
           <div className="space-y-3">
             {[
-              ['tra', 'TRA — Full coverage', 'Every fronter transfer gets reviewed. Use when you want 100% of transferred calls checked.', '#2563eb'],
-              ['rcm', 'RCM — Random sample', 'Only a random slice of calls is pulled for review (set the rate below). Use for spot-checking at scale.', '#d97706'],
+              ['tra', 'TRA — the CRM calls', 'Every transfer entered in the CRM gets reviewed — a transfer means TRA. Full coverage of the CRM-entered numbers.', '#2563eb'],
+              ['rcm', 'RCM — random RAW dialer calls', 'A random slice of the users’ actual calls straight off the dialer — numbers NOT entered in the CRM (those are TRA’s job). Sampled daily; set the rate below.', '#d97706'],
             ].map(([m, label, desc, tint]) => {
               const on = methods.includes(m);
               return (
@@ -2225,9 +2225,14 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const todo = items.filter(a => a.status !== 'scored' && a.status !== 'skipped' && (!filterCompany || a.company_id === filterCompany));
   const availableDays = [...new Set(todo.map(a => dayOfDate(a.subject_date)).filter(Boolean))].sort().reverse();
   const byDay = day ? todo.filter(a => dayOfDate(a.subject_date) === day) : todo;
-  const transfers = byDay.filter(a => !a.sale_id);
-  const sales     = byDay.filter(a => !!a.sale_id);
-  const shown     = kind === 'sale' ? sales : transfers;
+  // SEPARATED sections by source: Transfers = CRM transfer records (TRA + the
+  // closer-landed dispo reviews), Sales = CRM sales (closers), Random = RCM raw
+  // dialer calls with no CRM record at all.
+  const secOf     = a => a.sale_id ? 'sale' : (a.transfer_id ? 'transfer' : 'random');
+  const transfers = byDay.filter(a => secOf(a) === 'transfer');
+  const sales     = byDay.filter(a => secOf(a) === 'sale');
+  const randoms   = byDay.filter(a => secOf(a) === 'random');
+  const shown     = kind === 'sale' ? sales : kind === 'random' ? randoms : transfers;
 
   return (
     <div className="flex flex-col h-full">
@@ -2236,7 +2241,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
           <InfoTip text="The calls your QA manager assigned to you that still need scoring. Open one, listen, and score it — once scored it moves to Completed automatically. Use the date filter to focus on a single day's calls." />
         </span>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-          {[['transfer', 'Transfers', transfers.length, ArrowRightLeft], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
+          {[['transfer', 'Transfers (TRA)', transfers.length, ArrowRightLeft], ['random', 'Random (RCM)', randoms.length, Shuffle], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
             <button key={k} onClick={() => { setKind(k); setOpen(null); }}
               className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
               style={{ background: kind === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kind === k ? '#fff' : 'var(--color-text-secondary)' }}>
@@ -2254,10 +2259,12 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{byDay.length}</b> to&nbsp;do{day ? ` on ${fmtDate(day)}` : ''}</span>
       </div>
       {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
-        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{
-            todo.length
-              ? (day ? `No ${kind === 'sale' ? 'sales' : 'transfers'} to score on ${fmtDate(day)}.` : `No ${kind === 'sale' ? 'sales' : 'transfers'} left to score.`)
-              : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here."}</div>
+        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{(() => {
+            const noun = kind === 'sale' ? 'sales' : kind === 'random' ? 'random calls' : 'transfers';
+            return todo.length
+              ? (day ? `No ${noun} to score on ${fmtDate(day)}.` : `No ${noun} left to score.`)
+              : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here.";
+          })()}</div>
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>

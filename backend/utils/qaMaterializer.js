@@ -17,6 +17,7 @@ const { supabaseAdmin } = require('../config/database');
 const { getConfig } = require('./businessConfig');
 const { autoAssignCompany } = require('./qaAutoAssign');
 const { getActiveRules, materializeCloserWork, applyCompanyRules } = require('./qaRules');
+const { sampleRcmFromDialer } = require('./qaDialerSampler');
 const logger = require('./logger');
 
 // ── period math (previous complete period) ──────────────────────────────────
@@ -93,20 +94,14 @@ async function materializeCompany(companyId, methods) {
     } catch (e) { logger.warn('QA_JOBS', `TRA ${companyId} error: ${e.message}`); }
   }
   if (methods.includes('rcm')) {
+    // RCM = RANDOM calls of the users straight off the DIALER — actual raw
+    // recordings, NOT CRM records (CRM-entered numbers are TRA's job; the
+    // sampler excludes them so the sections stay separate). The old CRM-row
+    // sampler (app_qa_materialize_rcm RPC) is retired from this path.
     try {
       const covers = await getConfig(companyId, 'qa.rcm.covers', ['fronter']);
       const sample = await getConfig(companyId, 'qa.rcm.sample', { mode: 'percentage', value: 10, period: 'week' });
-      const kind = sample?.period === 'day' ? 'day' : 'week';
-      const { label, start, end } = previousPeriod(kind);
-      const { data, error } = await supabaseAdmin.rpc('app_qa_materialize_rcm', {
-        p_company_id: companyId,
-        p_covers: Array.isArray(covers) && covers.length ? covers : ['fronter'],
-        p_mode: sample?.mode === 'fixed' ? 'fixed' : 'percentage',
-        p_value: Number.isFinite(+sample?.value) ? +sample.value : 10,
-        p_period: label, p_start: start.toISOString(), p_end: end.toISOString(),
-      });
-      if (error) logger.warn('QA_JOBS', `RCM ${companyId}: ${error.message}`);
-      else rcm = data || 0;
+      rcm = await sampleRcmFromDialer(companyId, { covers, sample });
     } catch (e) { logger.warn('QA_JOBS', `RCM ${companyId} error: ${e.message}`); }
   }
   // Route the freshly-materialized (and any older unassigned) tasks. Compliance

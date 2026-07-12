@@ -286,8 +286,8 @@ function AssignExisting({ companies, onDone }) {
 
 // ── WORK RULES — who listens to what (mig 186) ────────────────────────────────
 const WORK_TYPE_DEFS = [
-  { key: 'tra', label: 'Transfer calls (TRA)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'Every transfer the fronters make — full coverage review.' },
-  { key: 'rcm', label: 'Random calls (RCM)', icon: Shuffle, tint: '#d97706', desc: 'A random sample of calls (rate set per company in the gear above).' },
+  { key: 'tra', label: 'Transfer calls (TRA)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'The calls that are IN the CRM — every transfer the fronters enter. A transfer means TRA.' },
+  { key: 'rcm', label: 'Random calls (RCM)', icon: Shuffle, tint: '#d97706', desc: 'Random RAW dialer calls of the users — numbers NOT entered in the CRM. Sampled daily at the rate set in the gear above.' },
   { key: 'closer_sales', label: 'Closer sales calls', icon: DollarSign, tint: '#059669', desc: 'The sales calls of the closers — every sale gets a review task.' },
   { key: 'closer_dispo', label: 'Closer-landed, other dispositions', icon: PhoneOff, tint: '#dc2626', desc: 'Transfers that reached a closer but ended with a different disposition — pick which codes count (none picked = any non-SALE).' },
 ];
