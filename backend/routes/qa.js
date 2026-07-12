@@ -1579,11 +1579,14 @@ router.post('/admin/auto-assign', asyncHandler(async (req, res) => {
   res.json({ ok: true, ...r });
 }));
 
-// all QA users (managers + agents) across companies, grouped by user
+// All QA users (managers + agents) across companies, grouped by user. Includes
+// people whose company access was removed (no active rows) — a QA person never
+// disappears from the team list; they just show with no company access, ready
+// to be re-added.
 router.get('/admin/users', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const { data: rows } = await supabaseAdmin.from('user_company_roles')
-    .select('id, user_id, company_id, is_active, custom_roles(level), companies(name)').eq('is_active', true);
+    .select('id, user_id, company_id, is_active, custom_roles(level), companies(name)');
   const qaRows = (rows || []).filter(r => ['qa_manager', 'qa_agent'].includes(lvlOf(r.custom_roles)));
   const uids = [...new Set(qaRows.map(r => r.user_id))];
   let names = {};
@@ -1603,7 +1606,8 @@ router.get('/admin/users', asyncHandler(async (req, res) => {
     const level = lvlOf(r.custom_roles);
     (byUser[r.user_id] ||= { user_id: r.user_id, name: names[r.user_id] || r.user_id, levels: new Set(), companies: [] });
     byUser[r.user_id].levels.add(level);
-    byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level, methods: level === 'qa_agent' ? (methodsBy[`${r.user_id}|${r.company_id}`] || []) : null });
+    // only ACTIVE rows count as access; inactive rows just keep the person listed
+    if (r.is_active) byUser[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: Array.isArray(r.companies) ? r.companies[0]?.name : r.companies?.name, level, methods: level === 'qa_agent' ? (methodsBy[`${r.user_id}|${r.company_id}`] || []) : null });
   }
   // each person's current OPEN plate (pending + in_review) — the workload
   // compliance should look at before piling on more.
@@ -1651,15 +1655,34 @@ router.post('/admin/assign', asyncHandler(async (req, res) => {
   res.json({ ok: true, ucr_id: data.id });
 }));
 
-// remove a QA assignment (deactivate) — QA roles only
+// Remove a QA person's COMPANY ACCESS — a soft deactivate, never a user delete.
+// The account stays intact and the person stays in the QA team list (re-add
+// anytime reactivates the same row). Business cleanup happens with it:
+//   • their routing rules for that company are PAUSED (no new work routes)
+//   • their untouched pending tasks there return to the pool (calls don't rot
+//     on someone who's off the account; in-progress/scored work is untouched)
 router.delete('/admin/assign/:ucrId', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
-  const { data: row } = await supabaseAdmin.from('user_company_roles').select('id, custom_roles(level)').eq('id', req.params.ucrId).maybeSingle();
+  const { data: row } = await supabaseAdmin.from('user_company_roles').select('id, user_id, company_id, custom_roles(level)').eq('id', req.params.ucrId).maybeSingle();
   if (!row) return res.status(404).json({ error: 'Not found' });
   if (!['qa_manager', 'qa_agent'].includes(lvlOf(row.custom_roles))) return res.status(400).json({ error: 'Not a QA assignment' });
   const { error } = await supabaseAdmin.from('user_company_roles').update({ is_active: false }).eq('id', req.params.ucrId);
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true });
+
+  let paused_rules = 0, released_tasks = 0;
+  try {
+    const { data: pr } = await supabaseAdmin.from('qa_routing_rules')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('reviewer_id', row.user_id).eq('company_id', row.company_id).eq('is_active', true).select('id');
+    paused_rules = (pr || []).length;
+  } catch { /* mig 186 not applied — nothing to pause */ }
+  try {
+    const { data: rt } = await supabaseAdmin.from('qa_assignments')
+      .update({ assigned_to: null })
+      .eq('assigned_to', row.user_id).eq('company_id', row.company_id).eq('status', 'pending').select('id');
+    released_tasks = (rt || []).length;
+  } catch { /* best-effort */ }
+  res.json({ ok: true, paused_rules, released_tasks });
 }));
 
 // enable/disable QA (methods) for ANY company

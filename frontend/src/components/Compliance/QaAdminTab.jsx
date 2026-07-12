@@ -71,7 +71,18 @@ export default function QaAdminTab() {
     try { const r = await client.put('qa/admin/company-methods', { company_id: co.id, methods }); const mm = r.data.materialized; if (mm && (mm.tra || mm.rcm)) toast.success(`QA on — pulled ${mm.tra || 0} TRA + ${mm.rcm || 0} RCM`); }
     catch { toast.error('Update failed'); load(); }
   };
-  const removeAssign = async (ucrId) => { try { await client.delete(`qa/admin/assign/${ucrId}`); loadUsers(); } catch { toast.error('Remove failed'); } };
+  // Remove COMPANY ACCESS only — soft, reversible, never a user delete. The
+  // backend also pauses their rules there + returns unscored calls to the pool.
+  const removeAssign = async (ucrId, label) => {
+    try {
+      const r = await client.delete(`qa/admin/assign/${ucrId}`);
+      const bits = [];
+      if (r.data.released_tasks) bits.push(`${r.data.released_tasks} unscored call(s) returned to the pool`);
+      if (r.data.paused_rules) bits.push(`${r.data.paused_rules} listening rule(s) paused`);
+      toast.success(`Access removed${label ? ` from ${label}` : ''}. The account is NOT deleted — they stay in the QA team and can be re-added anytime.${bits.length ? ` ${bits.join('; ')}.` : ''}`, { duration: 7000 });
+      loadUsers(); loadRules();
+    } catch { toast.error('Remove failed'); }
+  };
   const [distributing, setDistributing] = useState(null);   // company id being distributed
   const distribute = async (co) => {
     setDistributing(co.id);
@@ -186,6 +197,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
   const [assigning, setAssigning] = useState(false);
   const [addCo, setAddCo] = useState('');        // add-to-company picker
   const [addLvl, setAddLvl] = useState('qa_agent');
+  const [confirmRemove, setConfirmRemove] = useState(null);   // ucr_id awaiting confirmation
 
   const shown = useMemo(() => {
     if (!users) return null;
@@ -197,7 +209,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
 
   const person = (users || []).find(u => u.user_id === sel) || null;
   const personRules = (rules || []).filter(r => r.reviewer_id === sel);
-  useEffect(() => { setAssigning(false); setAddCo(''); }, [sel]);
+  useEffect(() => { setAssigning(false); setAddCo(''); setConfirmRemove(null); }, [sel]);
 
   const addToCompany = async () => {
     if (!person || !addCo) return;
@@ -311,22 +323,33 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
               Company access <InfoTip text="The companies this person can work. For agents, TRA/RCM chips show which method they cover there (needed for manual assigns; work rules route regardless). × removes them from that company." />
             </div>
             <div className="flex flex-wrap gap-1.5 items-center">
-              {person.companies.map(c => (
-                <span key={c.ucr_id} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{c.company_name || c.company_id.slice(0, 6)}</span>
-                  {c.level === 'qa_agent' ? (
-                    <span className="inline-flex items-center gap-0.5">
-                      {METHODS.map(([k, l]) => {
-                        const on = (c.methods || []).includes(k);
-                        return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} className="font-bold px-1 rounded uppercase text-[10px]"
-                          style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.18)' : 'rgba(217,119,6,0.18)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' } : { color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>{on ? '✓' : ''}{l}</button>;
-                      })}
-                    </span>
-                  ) : <span className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>MGR</span>}
-                  <button onClick={() => removeAssign(c.ucr_id)} title="Remove from this company"><X size={12} style={{ color: 'var(--color-error-600)' }} /></button>
-                </span>
-              ))}
-              {!person.companies.length && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No company access yet.</span>}
+              {person.companies.map(c => {
+                const coName = c.company_name || c.company_id.slice(0, 6);
+                // × asks first — one accidental click must never remove access.
+                if (confirmRemove === c.ucr_id) return (
+                  <span key={c.ucr_id} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid #dc262666', color: 'var(--color-text-secondary)' }}>
+                    <span>Remove <b style={{ color: 'var(--color-text)' }}>{person.name}</b> from <b style={{ color: 'var(--color-text)' }}>{coName}</b>? Their unscored calls return to the pool; the account is <b>not</b> deleted.</span>
+                    <button onClick={() => { setConfirmRemove(null); removeAssign(c.ucr_id, coName); }} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#dc2626', color: '#fff' }}>Remove access</button>
+                    <button onClick={() => setConfirmRemove(null)} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Keep</button>
+                  </span>
+                );
+                return (
+                  <span key={c.ucr_id} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{coName}</span>
+                    {c.level === 'qa_agent' ? (
+                      <span className="inline-flex items-center gap-0.5">
+                        {METHODS.map(([k, l]) => {
+                          const on = (c.methods || []).includes(k);
+                          return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} className="font-bold px-1 rounded uppercase text-[10px]"
+                            style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.18)' : 'rgba(217,119,6,0.18)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' } : { color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>{on ? '✓' : ''}{l}</button>;
+                        })}
+                      </span>
+                    ) : <span className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>MGR</span>}
+                    <button onClick={() => setConfirmRemove(c.ucr_id)} title="Remove access to this company (asks first — never deletes the account)"><X size={12} style={{ color: 'var(--color-error-600)' }} /></button>
+                  </span>
+                );
+              })}
+              {!person.companies.length && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No company access right now — the account still exists. Use “+ add to company” to restore it.</span>}
               {notIn.length > 0 && (
                 <span className="inline-flex items-center gap-1 ml-1">
                   <select value={addCo} onChange={e => setAddCo(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 6px' }}>
