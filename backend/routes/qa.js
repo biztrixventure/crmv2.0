@@ -1608,14 +1608,26 @@ router.get('/admin/users', asyncHandler(async (req, res) => {
   res.json({ users: Object.values(byUser).map(u => ({ ...u, levels: [...u.levels] })) });
 }));
 
-// search any user to assign as QA (by name)
+// search QUALITY people only — users holding an active qa_manager/qa_agent role
+// (compliance never assigns work to non-QA users; the Super Admin mints QA
+// accounts, and they show up here the moment they exist).
 router.get('/admin/user-search', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const q = String(req.query.q || '').trim().toLowerCase();
   if (q.length < 2) return res.json({ users: [] });
-  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').limit(500);
+  const { data: rows } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').eq('is_active', true);
+  const levelsByUid = {};
+  for (const r of (rows || [])) {
+    const l = lvlOf(r.custom_roles);
+    if (['qa_manager', 'qa_agent'].includes(l)) (levelsByUid[r.user_id] ||= new Set()).add(l);
+  }
+  const qaIds = Object.keys(levelsByUid);
+  if (!qaIds.length) return res.json({ users: [] });
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, first_name, last_name').in('user_id', qaIds);
   const hits = (profs || []).filter(p => profName(p).toLowerCase().includes(q)).slice(0, 25);
-  res.json({ users: hits.map(p => ({ user_id: p.user_id, name: profName(p) })) });
+  res.json({ users: hits.map(p => ({ user_id: p.user_id, name: profName(p), levels: [...(levelsByUid[p.user_id] || [])] })) });
 }));
 
 // assign an existing user to a company as a QA role (multi-company = call per co)
