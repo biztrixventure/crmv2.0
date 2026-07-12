@@ -399,6 +399,10 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  // an AGENT hears only their own tasks' recordings; managers anything in scope
+  if (!(await isManager(req)) && a.assigned_to !== req.user.id) {
+    return res.status(403).json({ error: 'This call is not assigned to you.' });
+  }
 
   let candidates = [];
   if (a.recording_ref && a.recording_ref.recording_id) {
@@ -455,11 +459,25 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
 
 // ── recording stream proxy (mirrors compliance/recordings/stream; kept under
 // /qa so QA plays are egress-audited and independent of compliance perms) ──────
+// Only ever proxy audio from the DIALER infrastructure — never an arbitrary
+// user-supplied URL (SSRF). Allowed hosts: the configured boxes + *.i5.tel
+// (the recording servers), extendable via QA_STREAM_HOST_SUFFIXES.
+function allowedRecordingUrl(u) {
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    for (const b of getBoxes()) { try { if (new URL(b.base).hostname.toLowerCase() === h) return true; } catch { /* bad base */ } }
+    const suf = (process.env.QA_STREAM_HOST_SUFFIXES || '.i5.tel').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    return suf.some(s => h === s.replace(/^\./, '') || h.endsWith(s.startsWith('.') ? s : '.' + s));
+  } catch { return false; }
+}
+
 router.get('/recordings/stream', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const ref = { box_id: req.query.box_id, lead_id: req.query.lead_id, recording_id: req.query.recording_id };
   const reresolve = () => locationForRecording(ref);
-  let url = req.query.location && /^https?:\/\//.test(req.query.location) ? req.query.location : await reresolve();
+  let url = (req.query.location && /^https?:\/\//.test(req.query.location) && allowedRecordingUrl(req.query.location))
+    ? req.query.location : await reresolve();
+  if (url && !allowedRecordingUrl(url)) url = null;
   if (!url) return res.status(404).json({ error: 'Recording not found' });
   const pipe = async (u, retry) => {
     try {
@@ -519,8 +537,9 @@ router.post('/recordings/transcribe', asyncHandler(async (req, res) => {
   const { data: cached } = await supabaseAdmin.from('qa_transcripts').select('*').eq('recording_key', key).maybeSingle();
   if (cached) return res.json({ cached: true, transcript: cached });
 
-  // Resolve the audio URL (same path as the stream proxy).
-  let url = (location && /^https?:\/\//.test(location)) ? location : await locationForRecording({ box_id, lead_id, recording_id });
+  // Resolve the audio URL (same path — and same host allowlist — as the stream proxy).
+  let url = (location && /^https?:\/\//.test(location) && allowedRecordingUrl(location)) ? location : await locationForRecording({ box_id, lead_id, recording_id });
+  if (url && !allowedRecordingUrl(url)) url = null;
   if (!url) return res.status(404).json({ error: 'Recording not found' });
 
   // Fetch the audio bytes (proxied from the dialer; not stored).
@@ -985,10 +1004,14 @@ router.post('/reviews', asyncHandler(async (req, res) => {
   }
 
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id, subject_agent, recording_ref').eq('id', assignment_id).maybeSingle();
+    .select('id, company_id, method, subject_role, transfer_id, sale_id, subject_agent, recording_ref, assigned_to').eq('id', assignment_id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  // an AGENT scores only their own task; managers score anything in scope
+  if (!(await isManager(req)) && a.assigned_to !== req.user.id) {
+    return res.status(403).json({ error: 'This call is not assigned to you.' });
+  }
 
   const scorecard = await resolveScorecard(a.company_id, a.method);
   if (!scorecard) return res.status(400).json({ error: 'No active scorecard for this method' });

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
-  LogOut, RefreshCw, User, Phone, Calendar, Layers, CheckCircle2, XCircle,
-  ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones, Clock,
-  UserPlus, Filter, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
+  LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
+  ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
+  UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
   Download, Award, TrendingUp, Table2, CalendarDays, Shuffle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -454,7 +454,7 @@ function ScoreCell({ a }) {
 // Manager view: browse the ACTUAL CRM transfers / sales (not the sampled queue),
 // split into two sections. Open a record → its QA assignment is found-or-created
 // so recordings resolve and the scorecard saves exactly like the queue.
-function QueueTab({ canAssign, canOverride, canManage, selfId, companyId }) {
+function QueueTab({ canOverride, canManage, selfId, companyId }) {
   const [kind, setKind]       = useState('transfer');   // 'transfer' | 'sale'
   const [items, setItems]     = useState([]);
   const [totals, setTotals]   = useState({ transfer: null, sale: null });
@@ -483,14 +483,15 @@ function QueueTab({ canAssign, canOverride, canManage, selfId, companyId }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); setTotals({ transfer: null, sale: null }); }, [kind, q, companyId]);   // reset paging + counts on section / search / company change
 
-  // Light count for the OTHER section so both tabs show a badge.
+  // Light count for the OTHER section so both tabs show a badge — same search
+  // filter as the active section, so the two badges always mean the same thing.
   useEffect(() => {
     const other = kind === 'transfer' ? 'sale' : 'transfer';
     if (totals[other] != null) return;
-    client.get('qa/crm-records', { params: { kind: other, limit: 1, page: 1, ...(companyId ? { company_id: companyId } : {}) } })
+    client.get('qa/crm-records', { params: { kind: other, limit: 1, page: 1, ...(q ? { search: q } : {}), ...(companyId ? { company_id: companyId } : {}) } })
       .then(r => { if (r.data.total != null) setTotals(t => ({ ...t, [other]: r.data.total })); })
       .catch(() => {});
-  }, [kind, totals, companyId]);
+  }, [kind, totals, companyId, q]);
 
   // Build the assignment-shaped object the review panel + scorecard expect.
   const toOpen = (it, assignmentId, qaStatus, review, meta) => ({
@@ -1125,7 +1126,7 @@ function groupRecordings(recs) {
   return out.sort((a, b) => String(b.latest || '').localeCompare(String(a.latest || '')));
 }
 
-function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
+function DayRecordingsTab({ canAssign, companyId, scoped }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
   const [date, setDate] = useState(yesterday);
   // Company scope comes from the header picker. A specific company → that
@@ -1159,7 +1160,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
   const [playingRid, setPlayingRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
-  useEffect(() => { if (canManage && agentScope) client.get('qa/agents', { params: { company_id: agentScope } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else setAgents([]); }, [canManage, agentScope]);
+  useEffect(() => { if (canAssign && agentScope) client.get('qa/agents', { params: { company_id: agentScope } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else setAgents([]); }, [canAssign, agentScope]);
   // Company changed in the header → drop stale results so the view can't show
   // another company's recordings until the user reloads for the new one.
   useEffect(() => { setData(null); setSel({}); setDispoLoading(false); }, [companyId]);
@@ -1331,7 +1332,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
       </div>
 
       {/* assign bar (manager) */}
-      {canManage && selCount > 0 && (
+      {canAssign && selCount > 0 && (
         <div className="flex items-center gap-2 flex-wrap mb-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-primary-600)' }}>
           <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{selCount} selected</span>
           <button onClick={clearSel} className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>
@@ -1364,7 +1365,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
           <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
             <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
               <tr>
-                {canManage && <th className="px-2 py-2 w-8"><button onClick={allSelected ? clearSel : selectAllFiltered} title={`Select all ${allGroups.length} numbers`}>{allSelected ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
+                {canAssign && <th className="px-2 py-2 w-8"><button onClick={allSelected ? clearSel : selectAllFiltered} title={`Select all ${allGroups.length} numbers`}>{allSelected ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></th>}
                 <th />
                 {[['Time', 'time'], ['Phone', 'phone'], ['Dispo', 'dispo'], ['Type', 'type'], ['Agent', 'agent'], ['Calls', 'calls'], ['Length', 'length']].map(([label, key]) => (
                   <th key={key} className="text-left px-3 py-2 text-[11px] font-bold uppercase select-none cursor-pointer" style={{ color: sortKey === key ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }} onClick={() => sortBy(key)}>
@@ -1381,7 +1382,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
                 return (
                   <Fragment key={g.key}>
                     <tr style={{ borderTop: '1px solid var(--color-border)', background: checked ? 'var(--color-surface-hover)' : 'transparent' }}>
-                      {canManage && <td className="px-2 py-1.5"><button onClick={() => toggle(g)}>{checked ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>}
+                      {canAssign && <td className="px-2 py-1.5"><button onClick={() => toggle(g)}>{checked ? <CheckSquare size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Square size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>}
                       <td className="px-2 py-1.5">
                         <button onClick={() => play(p)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
                           {loadingRid === p.recording_id ? <Loader2 size={13} className="animate-spin" color="#fff" /> : on ? <Pause size={13} color="#fff" /> : <Play size={13} color="#fff" />}
@@ -1404,7 +1405,7 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
                       const pon = playingRid === c.recording_id;
                       return (
                         <tr key={c.box_id + c.recording_id} style={{ background: 'var(--color-bg)' }}>
-                          {canManage && <td />}
+                          {canAssign && <td />}
                           <td className="px-2 py-1" style={{ paddingLeft: 18 }}>
                             <button onClick={() => play(c)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: c.transferred ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'var(--color-surface-hover)' }}>
                               {loadingRid === c.recording_id ? <Loader2 size={12} className="animate-spin" color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} /> : pon ? <Pause size={12} color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} /> : <Play size={12} color={c.transferred ? '#fff' : 'var(--color-text-secondary)'} />}
@@ -1424,8 +1425,8 @@ function DayRecordingsTab({ canAll, canManage, companyId, scoped }) {
                   </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' || dfilter ? 'No calls match.' : 'No recordings for this day.'}</td></tr>}
-              {capped && <tr><td colSpan={canManage ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allGroups.length} numbers (for speed) — but <b>Select all</b> selects all {allGroups.length}.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={canAssign ? 10 : 9} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{search || xfilter !== 'all' || dfilter ? 'No calls match.' : 'No recordings for this day.'}</td></tr>}
+              {capped && <tr><td colSpan={canAssign ? 10 : 9} className="px-3 py-3 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Showing first {CAP} of {allGroups.length} numbers (for speed) — but <b>Select all</b> selects all {allGroups.length}.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2019,7 +2020,7 @@ function CompletedTab({ managerView, companyId }) {
                every score is linked to the fronter/closer who took the call */
             <div className="space-y-2">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Agent quality — the users these reviews grade</span>
+                <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{managerView ? 'Agent quality — the users these reviews grade' : 'Agent quality — from YOUR reviews only'}</span>
                 <InfoTip text="One row per reviewed fronter/closer: how many of their calls were scored, their average score, pass rate and auto-fails in this range. Sort by lowest score to find who needs coaching. The CSV button exports exactly this report." />
                 <select value={agentSort} onChange={e => setAgentSort(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 8px', marginLeft: 'auto' }}>
                   <option value="reviews">Most reviewed</option><option value="low">Lowest score first</option><option value="high">Highest score first</option>
@@ -2090,7 +2091,7 @@ const CARD_FIELDS = [
 ];
 const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true]));
 
-function AgentsTab({ companyId }) {
+function AgentsTab({ companyId, canManage }) {
   const [agents, setAgents] = useState(null);
   const [fields, setFields] = useState(null);
 
@@ -2117,8 +2118,8 @@ function AgentsTab({ companyId }) {
     <div className="grid grid-cols-2 gap-5">
       {/* agent → method binding */}
       <div>
-        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. An agent can only be assigned, only sees, and only scores the method(s) you switch on here. Bind one or both." /></div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>An agent only sees and scores the method(s) you bind here. Bind one or both.</div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. Manual assigns require the binding; compliance work rules route regardless. Bind one or both." /></div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to the company selected in the header picker. Bind one or both methods.</div>
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
           : <div className="space-y-2">
@@ -2147,12 +2148,13 @@ function AgentsTab({ companyId }) {
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>Task card fields <InfoTip text="Pick which customer details (name, phone, ZIP, state, agent, call date, plan) appear on the agent's task row and scorecard header. Turn off anything they shouldn't see or don't need." /></div>
         <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Choose which customer details show on the agent's task card / scorecard header.</div>
         {fields === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-          : <div className="p-3 rounded-xl grid grid-cols-2 gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          : <div className="p-3 rounded-xl grid grid-cols-2 gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: canManage ? 1 : 0.6 }}>
               {CARD_FIELDS.map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                  <input type="checkbox" checked={!!fields[key]} onChange={() => toggleField(key)} /> {label}
+                  <input type="checkbox" disabled={!canManage} checked={!!fields[key]} onChange={() => canManage && toggleField(key)} /> {label}
                 </label>
               ))}
+              {!canManage && <div className="col-span-2 text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Changing these needs the “manage QA config” permission.</div>}
             </div>}
       </div>
     </div>
@@ -2238,7 +2240,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }}>Queue
-          <InfoTip text="The calls your QA manager assigned to you that still need scoring. Open one, listen, and score it — once scored it moves to Completed automatically. Use the date filter to focus on a single day's calls." />
+          <InfoTip w={290} text="The calls assigned to you that still need scoring. Sections: Transfers (TRA) = calls entered in the CRM by fronters; Random (RCM) = raw dialer calls not in the CRM; Sales = the closers' sale calls. Open one, listen, score — once scored it moves to Completed automatically. Use the date filter for a single day." />
         </span>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[['transfer', 'Transfers (TRA)', transfers.length, ArrowRightLeft], ['random', 'Random (RCM)', randoms.length, Shuffle], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
@@ -2356,11 +2358,12 @@ export default function QAShell() {
   const canOverride = isSuper || hasPermission('override_qa_review');
   const [tab, setTab] = useState('queue');
 
-  // A QA AGENT (no assign_qa_tasks) gets the focused, separate agent console.
-  const isManager = isSuper || canAssign;
+  // A QA AGENT (no manager-side permission at all) gets the focused agent
+  // console. ANY manager-side permission — assign, config, or reports — opens
+  // the manager shell; each tab still gates itself by its own permission.
+  const isManager = isSuper || canAssign || canManage || canReports;
   if (!isManager) return <QAAgentView user={user} logout={logout} />;
 
-  const canAll = isSuper || hasPermission('view_all_qa_reviews');
   const { companies, all, companyId, setCompanyId } = useQaCompanies();
   // A specific company for scoped tabs; '' when "All my companies" is picked so
   // the server falls back to the user's full allowed set. Config/Agents need a
@@ -2368,8 +2371,8 @@ export default function QAShell() {
   const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
     { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
-    { key: 'day', label: 'Day Recordings', icon: Headphones, show: true },
-    { key: 'agents', label: 'Agents', icon: UserPlus, show: true },
+    { key: 'day', label: 'Day Recordings', icon: Headphones, show: isSuper || canAssign },
+    { key: 'agents', label: 'Agents', icon: UserPlus, show: isSuper || canAssign },
     { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: true },
     { key: 'config', label: 'Scorecards & Config', icon: Settings2, show: canManage },
     { key: 'reports', label: 'Reports', icon: BarChart3, show: canReports },
@@ -2394,9 +2397,9 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'queue' && <QueueTab canAssign={canAssign} canOverride={canOverride} canManage={canManage} selfId={user?.id} companyId={scoped} />}
-        {tab === 'day' && <DayRecordingsTab canAll={canAll} canManage={canManage} companyId={companyId} scoped={scoped} />}
-        {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} />}
+        {tab === 'queue' && <QueueTab canOverride={canOverride} canManage={canManage} selfId={user?.id} companyId={scoped} />}
+        {tab === 'day' && <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />}
+        {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab companyId={scoped} />}

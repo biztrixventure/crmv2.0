@@ -313,7 +313,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
 
           {/* the assign-work builder (person-fixed) */}
           {assigning && (
-            <RuleBuilder companies={companies} qaUsers={users} fixedReviewer={person}
+            <RuleBuilder companies={companies} fixedReviewer={person}
               onDone={() => { setAssigning(false); reloadAll(); }} onCancel={() => setAssigning(false)} />
           )}
 
@@ -407,9 +407,10 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
 }
 
 // ── work-rule builder — standalone (Step 3) or person-fixed (Team console) ────
-function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = null }) {
+// Person-fixed by design: the QA Team console is the ONLY place assignments are
+// created, so fixedReviewer is always provided.
+function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
   const [companyId, setCompanyId] = useState('');
-  const [reviewerId, setReviewerId] = useState('');
   const [types, setTypes] = useState([]);
   const [subjectMode, setSubjectMode] = useState('all');   // all | specific
   const [subjects, setSubjects] = useState([]);
@@ -418,12 +419,12 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
   const [companyUsers, setCompanyUsers] = useState(null);
   const [dispoOptions, setDispoOptions] = useState([]);
   const [accessLevel, setAccessLevel] = useState('qa_agent');   // when adding access on the fly
-  const [runNow, setRunNow] = useState(!!fixedReviewer);
+  const [runNow, setRunNow] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const rid = fixedReviewer ? fixedReviewer.user_id : reviewerId;
-  const personEntry = fixedReviewer ? (fixedReviewer.companies || []).find(c => c.company_id === companyId) : null;
-  const needsAccess = !!fixedReviewer && !!companyId && !personEntry;
+  const rid = fixedReviewer.user_id;
+  const personEntry = (fixedReviewer.companies || []).find(c => c.company_id === companyId) || null;
+  const needsAccess = !!companyId && !personEntry;
 
   useEffect(() => {
     if (!companyId) { setCompanyUsers(null); setDispoOptions([]); return; }
@@ -438,15 +439,15 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
   const addDispo = () => { const c = dispoAdd.trim().toUpperCase(); if (c && !dispos.includes(c)) setDispos(ds => [...ds, c]); setDispoAdd(''); };
 
   const save = async () => {
-    if (!companyId || !rid || !types.length) return toast.error('Pick a company' + (fixedReviewer ? '' : ', a reviewer') + ' and at least one kind of call');
+    if (!companyId || !types.length) return toast.error('Pick a company and at least one kind of call');
     if (subjectMode === 'specific' && !subjects.length) return toast.error('Pick at least one agent to listen to, or switch back to All agents');
     setBusy(true);
     try {
-      // 1. company access on the fly (person-fixed mode)
+      // 1. company access on the fly
       if (needsAccess) await client.post('qa/admin/assign', { user_id: rid, company_id: companyId, level: accessLevel });
       // 2. bind the implied methods so manual assigns/coverage also work
-      const isAgent = fixedReviewer ? (personEntry ? personEntry.level === 'qa_agent' : accessLevel === 'qa_agent') : false;
-      if (fixedReviewer && isAgent) {
+      const isAgent = personEntry ? personEntry.level === 'qa_agent' : accessLevel === 'qa_agent';
+      if (isAgent) {
         const implied = [...new Set(types.map(t => t === 'tra' ? 'tra' : 'rcm'))];
         const merged = [...new Set([...(personEntry?.methods || []), ...implied])];
         await client.put('qa/agent-methods', { user_id: rid, company_id: companyId, methods: merged }).catch(() => {});
@@ -476,26 +477,18 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
     <div className="p-3.5 rounded-xl space-y-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-primary-600)' }}>
       <div className="flex items-center gap-2">
         <Headphones size={15} style={{ color: 'var(--color-primary-600)' }} />
-        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{fixedReviewer ? `Assign work to ${fixedReviewer.name}` : 'New work rule'}</span>
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Assign work to {fixedReviewer.name}</span>
         <button onClick={onCancel} className="ml-auto"><X size={16} style={{ color: 'var(--color-text-tertiary)' }} /></button>
       </div>
 
-      {/* where (+ who, when not person-fixed) */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: fixedReviewer ? '1fr' : '1fr 1fr' }}>
+      {/* where */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: '1fr' }}>
         <label className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>COMPANY
           <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
             <option value="">Choose company…</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}{fixedReviewer && (fixedReviewer.companies || []).some(pc => pc.company_id === c.id) ? ' ✓' : ''}</option>)}
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}{(fixedReviewer.companies || []).some(pc => pc.company_id === c.id) ? ' ✓' : ''}</option>)}
           </select>
         </label>
-        {!fixedReviewer && (
-          <label className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>QA REVIEWER (who listens)
-            <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
-              <option value="">Choose QA person…</option>
-              {qaUsers.map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.levels?.includes('qa_manager') ? ' (manager)' : ''}</option>)}
-            </select>
-          </label>
-        )}
       </div>
       {needsAccess && (
         <div className="flex items-center gap-2 text-[11px] p-2 rounded-lg" style={{ background: 'rgba(217,119,6,0.08)', color: 'var(--color-warning-600)' }}>
@@ -581,7 +574,7 @@ function RuleBuilder({ companies, qaUsers, onDone, onCancel, fixedReviewer = nul
           <button onClick={onCancel} className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Cancel</button>
           <button onClick={save} disabled={busy} className="px-4 py-2 rounded-lg text-xs font-bold text-white inline-flex items-center gap-1.5"
             style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: busy ? 0.6 : 1 }}>
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {fixedReviewer ? 'Assign' : 'Create rule'}
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Assign
           </button>
         </span>
       </div>

@@ -174,10 +174,26 @@ async function applyCompanyRules(companyId) {
     const cap = await reviewerCap(companyId);
     const open = await openCounts(rules.map(r => r.reviewer_id));
     const { data: tasks } = await supabaseAdmin.from('qa_assignments')
-      .select('id, method, transfer_id, sale_id, subject_role, work_type')
+      .select('id, method, transfer_id, sale_id, subject_role, work_type, subject_agent')
       .eq('company_id', companyId).eq('status', 'pending').is('assigned_to', null)
       .order('created_at', { ascending: true }).limit(5000);
     if (!tasks || !tasks.length) return result;
+
+    // Raw dialer tasks (no CRM record) identify their subject by the DIALER
+    // agent id — map those to CRM users so "listen to specific agents" rules
+    // match RCM raw calls too, not only CRM-linked work.
+    const rawAgents = [...new Set(tasks
+      .filter(t => !t.transfer_id && !t.sale_id && t.subject_agent)
+      .flatMap(t => [String(t.subject_agent), String(t.subject_agent).toUpperCase()]))];
+    const userByAgent = {};
+    if (rawAgents.length) {
+      const { data: profs } = await supabaseAdmin.from('user_profiles')
+        .select('user_id, vicidial_agent_ids').overlaps('vicidial_agent_ids', rawAgents);
+      for (const p of (profs || [])) for (const a of (p.vicidial_agent_ids || [])) {
+        const A = String(a).toUpperCase();
+        if (!userByAgent[A]) userByAgent[A] = p.user_id;
+      }
+    }
 
     // resolve each task's subject user + disposition in two batched reads
     const tIds = [...new Set(tasks.map(t => t.transfer_id).filter(Boolean))];
@@ -202,9 +218,10 @@ async function applyCompanyRules(companyId) {
       const wt = workTypeOf(task);
       const t = task.transfer_id ? tById[task.transfer_id] : null;
       const s = task.sale_id ? sById[task.sale_id] : null;
-      const subject = task.subject_role === 'closer'
+      const subject = (task.subject_role === 'closer'
         ? (s?.closer_id || t?.assigned_closer_id || null)
-        : (t?.created_by || null);
+        : (t?.created_by || null))
+        || userByAgent[String(task.subject_agent || '').toUpperCase()] || null;
       const dispo = up(t?.latest_disposition);
 
       const matching = rules.filter(r => {
