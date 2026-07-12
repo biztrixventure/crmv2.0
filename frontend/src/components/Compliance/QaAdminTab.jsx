@@ -119,50 +119,70 @@ export default function QaAdminTab() {
       <section>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
           <StepBadge n={1} /> Companies — enable, configure &amp; route
-          <InfoTip text="Turn on TRA (CRM transfers) and/or RCM (random raw dialer calls) per company, open the gear for sampling/retention settings, and see who covers each company's calls. Distribute routes waiting tasks to the covering agents." />
+          <InfoTip text="Turn on the review types per company, open the gear for the settings, and see who reviews that company's calls. If a company shows waiting calls with no reviewer, assign someone in the QA Team below." />
+        </div>
+        {/* one-line legend so the toggles are never a mystery */}
+        <div className="text-[11px] mb-2 flex items-center gap-3 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+          <span><b style={{ color: 'var(--color-primary-600)' }}>TRA</b> = calls entered in the CRM — every transfer gets reviewed</span>
+          <span><b style={{ color: 'var(--color-warning-600)' }}>RCM</b> = random raw dialer calls — sampled daily</span>
         </div>
         {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : <div className="space-y-2">
-              {companies.map(co => (
-                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              {companies.map(co => {
+                const noCoverage = co.methods.length > 0 && !((co.coverage?.tra || []).length || (co.coverage?.rcm || []).length);
+                return (
+                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: noCoverage && co.unassigned > 0 ? '1px solid rgba(217,119,6,0.5)' : '1px solid var(--color-border)' }}>
                   <div className="flex items-center gap-2 p-2.5">
                     <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                     <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
                     {METHODS.map(([k, l]) => {
                       const on = co.methods.includes(k);
                       return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
+                        title={k === 'tra'
+                          ? (on ? 'TRA is ON — every CRM transfer of this company gets a review task. Click to turn off.' : 'Turn ON TRA — review every transfer entered in the CRM for this company.')
+                          : (on ? 'RCM is ON — a daily random sample of this company\'s raw dialer calls gets review tasks. Click to turn off.' : 'Turn ON RCM — sample random raw dialer calls of this company daily.')}
                         style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
                     })}
-                    <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Configure QA for this company" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                    <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Settings: sample size, task expiry, workload cap" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
                       <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
                       <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
                     </button>
                   </div>
-                  {/* coverage + routing — who handles this company's calls, and any backlog */}
+                  {/* who reviews this company's calls + waiting work */}
                   {co.methods.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
-                      <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Covered by</span>
+                      <span className="text-[10px] font-bold uppercase inline-flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>Reviewers
+                        <InfoTip text="The QA people currently set up to receive this company's calls, per review type. 'nobody yet' = tasks are being created but have no owner — assign a person in the QA Team below and they start flowing." />
+                      </span>
                       {METHODS.filter(([k]) => co.methods.includes(k)).map(([k, l]) => {
                         const names = (co.coverage?.[k]) || [];
                         return (
                           <span key={k} className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
                             <span className="font-bold" style={{ color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{l}</span>
-                            {names.length ? <span style={{ color: 'var(--color-text-secondary)' }}>{names.join(', ')}</span> : <span style={{ color: 'var(--color-error-600)' }}>nobody</span>}
+                            {names.length ? <span style={{ color: 'var(--color-text-secondary)' }}>{names.join(', ')}</span> : <span style={{ color: 'var(--color-error-600)' }}>nobody yet</span>}
                           </span>
                         );
                       })}
-                      {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} unassigned</span>}
+                      {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" title="Review tasks created for this company that no QA person owns yet. They wait in the pool (and expire after the task-expiry days) until someone is assigned."
+                        style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} call{co.unassigned === 1 ? '' : 's'} waiting for a reviewer</span>}
                       <button onClick={() => distribute(co)} disabled={distributing === co.id}
                         className="ml-auto text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
                         style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)', opacity: distributing === co.id ? 0.6 : 1 }}
-                        title="Route this company's unassigned tasks to its covering agents (round-robin)">
+                        title="Hand the waiting calls to this company's reviewers now (does nothing while there are no reviewers)">
                         {distributing === co.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Distribute
                       </button>
                     </div>
                   )}
+                  {/* the one action that fixes a 'nobody yet' company, spelled out */}
+                  {noCoverage && co.unassigned > 0 && (
+                    <div className="px-2.5 pb-2.5 -mt-1 text-[11px] flex items-center gap-1.5" style={{ color: 'var(--color-warning-600)' }}>
+                      ⚠ Work is piling up with no reviewer. Fix: <b>QA Team below → pick a person → Assign work → {co.name}</b> — the waiting calls route to them instantly.
+                    </div>
+                  )}
                   {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} />}
                 </div>
-              ))}
+                );
+              })}
             </div>}
       </section>
 
@@ -682,31 +702,53 @@ function CompanyConfig({ companyId, methods }) {
   const rcm = (cfg['qa.rcm.sample'] && typeof cfg['qa.rcm.sample'] === 'object') ? cfg['qa.rcm.sample'] : { mode: 'percentage', value: 10, period: 'week' };
   const covers = Array.isArray(cfg['qa.rcm.covers']) ? cfg['qa.rcm.covers'] : ['fronter'];
   const retention = cfg['qa.retention_days'] ?? 2;
+  // one settings row: bold title + plain-language sentence + the controls
+  const Row = ({ title, tip, children, sub }) => (
+    <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px dashed var(--color-border)' }}>
+      <div style={{ width: 210 }} className="flex-shrink-0">
+        <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>{title}{tip && <InfoTip text={tip} />}</div>
+        {sub && <div className="text-[10px] mt-0.5 leading-snug" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">{children}</div>
+    </div>
+  );
+
   return (
-    <div className="p-3 space-y-3" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+    <div className="px-3 pb-2" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
       {methods.includes('rcm') ? (
-        <div>
-          <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RCM sampling</div>
-          <div className="flex gap-2 items-center flex-wrap">
-            <select value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}><option value="percentage">Percentage</option><option value="fixed">Fixed N</option></select>
-            <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
-            <select value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="week">per week</option><option value="day">per day</option></select>
-            <span className="text-[11px] font-bold uppercase ml-2" style={{ color: 'var(--color-text-tertiary)' }}>Covers</span>
-            {['fronter', 'closer'].map(r => <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{r}</label>)}
-          </div>
+        <Row title="Random sample size (RCM)"
+          sub="How many raw dialer calls to pull for review, and whose calls the sample listens to."
+          tip="'A fixed number' pulls exactly that many calls; 'A percentage' takes that share of the day's calls. Weekly amounts are spread evenly across the days. 'Fronters/Closers' picks whose dialer calls go into the random draw.">
+          <select value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}>
+            <option value="fixed">A fixed number</option><option value="percentage">A percentage</option>
+          </select>
+          <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
+          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '% of calls' : 'calls'}</span>
+          <select value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="day">per day</option><option value="week">per week</option></select>
+          <span className="text-[11px] ml-2" style={{ color: 'var(--color-text-tertiary)' }}>listen to:</span>
+          {[['fronter', 'fronters'], ['closer', 'closers']].map(([r, label]) => (
+            <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}
+            </label>
+          ))}
+        </Row>
+      ) : (
+        <div className="text-[11px] py-2" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px dashed var(--color-border)' }}>
+          Turn on <b>RCM</b> above to set the random-sample size. TRA needs no settings — it always reviews every CRM transfer.
         </div>
-      ) : <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Enable RCM above to configure sampling. TRA reviews every CRM transfer.</div>}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Keep untouched tasks</span>
+      )}
+      <Row title="Unclaimed calls expire after"
+        sub="A waiting call nobody picks up is removed automatically — old calls never pile into an endless backlog."
+        tip="Only applies to calls still sitting in the pool with no reviewer. Anything assigned, in progress, or scored is kept forever.">
         <input type="number" min={1} max={30} value={retention} onChange={e => setKey('qa.retention_days', Math.max(1, Math.min(30, +e.target.value || 2)))} style={{ ...inp, width: 60 }} />
-        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>days, then auto-purge</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Reviewer workload cap</span>
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>days</span>
+      </Row>
+      <Row title="Max open calls per reviewer"
+        sub="No QA person ever holds more than this many unscored calls — extra work waits and flows in as they finish."
+        tip="The workload cap. Routing always picks the least-loaded reviewer and stops at this number, so a big backlog trickles onto plates instead of burying anyone.">
         <input type="number" min={5} max={200} value={cfg['qa.reviewer_cap'] ?? 25} onChange={e => setKey('qa.reviewer_cap', Math.max(5, Math.min(200, +e.target.value || 25)))} style={{ ...inp, width: 60 }} />
-        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>open calls max per reviewer</span>
-        <InfoTip text="Routing never puts more than this many OPEN (unscored) calls on one reviewer's plate. Anything beyond waits in the pool and flows in automatically as they finish reviews — a big backlog trickles instead of burying anyone." />
-      </div>
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>open calls</span>
+      </Row>
     </div>
   );
 }
