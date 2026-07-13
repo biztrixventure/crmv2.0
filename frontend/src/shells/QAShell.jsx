@@ -4,7 +4,7 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -2167,10 +2167,16 @@ function AgentsTab({ companyId, canManage }) {
 // Reviewed-agent label: real name + dialer id, e.g. "John Doe (1002)".
 const agentLabel = (a) => a.agent_name ? `${a.agent_name}${a.agent_display ? ` (${a.agent_display})` : ''}` : (a.agent_display || '—');
 
-// Kind of call in plain words, from what the task carries.
-const callKind = (a) => a.sale_id ? { label: 'Closer sale call', tint: '#059669' }
-  : a.transfer_id ? { label: 'Transfer call (TRA)', tint: '#2563eb' }
-  : { label: 'Random call (RCM)', tint: '#d97706' };
+// Kind of call in plain words — the department's 4 work types.
+const callKind = (a) => {
+  const wt = a.work_type || (a.sale_id ? 'closer_sales' : a.transfer_id ? (a.subject_role === 'closer' ? 'closer_dispo' : 'tra') : 'rcm');
+  return {
+    tra: { label: 'TRA · Transfer call', tint: '#2563eb' },
+    rcm: { label: 'RCM · Random call', tint: '#d97706' },
+    closer_sales: { label: 'Closed Sale call', tint: '#059669' },
+    closer_dispo: { label: 'Unclosed Sale call', tint: '#dc2626' },
+  }[wt] || { label: 'Call', tint: '#6b7280' };
+};
 
 // A prominent "who + what" banner so a reviewer instantly knows whose call they
 // are about to grade, of what kind, and for which customer — no guessing.
@@ -2229,7 +2235,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const [loading, setLoading] = useState(true);
   const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
   const [open, setOpen] = useState(null);
-  const [kind, setKind] = useState('transfer');   // 'transfer' | 'sale'
+  const [wtab, setWtab] = useState('tra');          // tra | rcm | closer_sales | closer_dispo
   const [day, setDay] = useState('');              // '' = all dates
 
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
@@ -2248,28 +2254,29 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const todo = items.filter(a => a.status !== 'scored' && a.status !== 'skipped' && (!filterCompany || a.company_id === filterCompany));
   const availableDays = [...new Set(todo.map(a => dayOfDate(a.subject_date)).filter(Boolean))].sort().reverse();
   const byDay = day ? todo.filter(a => dayOfDate(a.subject_date) === day) : todo;
-  // SEPARATED sections by source: Transfers = CRM transfer records (TRA + the
-  // closer-landed dispo reviews), Sales = CRM sales (closers), Random = RCM raw
-  // dialer calls with no CRM record at all.
-  const secOf     = a => a.sale_id ? 'sale' : (a.transfer_id ? 'transfer' : 'random');
-  const transfers = byDay.filter(a => secOf(a) === 'transfer');
-  const sales     = byDay.filter(a => secOf(a) === 'sale');
-  const randoms   = byDay.filter(a => secOf(a) === 'random');
-  const shown     = kind === 'sale' ? sales : kind === 'random' ? randoms : transfers;
+  // FOUR sections by work type — the department's model:
+  //   tra          Fronter transfer calls (in the CRM)
+  //   rcm          Fronter random calls (raw dialer, not in the CRM)
+  //   closer_sales Closer calls that CLOSED a sale
+  //   closer_dispo Closer calls that did NOT close (unclosed sale)
+  const wtOf = a => a.work_type || (a.sale_id ? 'closer_sales' : a.transfer_id ? (a.subject_role === 'closer' ? 'closer_dispo' : 'tra') : 'rcm');
+  const byWt = { tra: [], rcm: [], closer_sales: [], closer_dispo: [] };
+  for (const a of byDay) (byWt[wtOf(a)] || byWt.tra).push(a);
+  const shown = byWt[wtab] || [];
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }}>Queue
-          <InfoTip w={290} text="The calls assigned to you that still need scoring. Sections: Transfers (TRA) = calls entered in the CRM by fronters; Random (RCM) = raw dialer calls not in the CRM; Sales = the closers' sale calls. Open one, listen, score — once scored it moves to Completed automatically. Use the date filter for a single day." />
+          <InfoTip w={310} text="The calls assigned to you that still need scoring, in four sections: TRA = fronter transfer calls (in the CRM); RCM = fronter random calls (raw dialer, not in the CRM); Closed Sale = closer calls that closed a sale; Unclosed Sale = closer calls that didn't close. Open one, listen, score — it moves to Completed automatically." />
         </span>
-        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-          {[['transfer', 'Transfers (TRA)', transfers.length, ArrowRightLeft], ['random', 'Random (RCM)', randoms.length, Shuffle], ['sale', 'Sales', sales.length, DollarSign]].map(([k, label, n, Icon]) => (
-            <button key={k} onClick={() => { setKind(k); setOpen(null); }}
+        <div className="flex items-center gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[['tra', 'TRA · Transfers', ArrowRightLeft], ['rcm', 'RCM · Random', Shuffle], ['closer_sales', 'Closed Sale', DollarSign], ['closer_dispo', 'Unclosed Sale', PhoneOff]].map(([k, label, Icon]) => (
+            <button key={k} onClick={() => { setWtab(k); setOpen(null); }}
               className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
-              style={{ background: kind === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kind === k ? '#fff' : 'var(--color-text-secondary)' }}>
+              style={{ background: wtab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: wtab === k ? '#fff' : 'var(--color-text-secondary)' }}>
               <Icon size={12} /> {label}
-              <span className="text-[10px] px-1.5 rounded-full" style={{ background: kind === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kind === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+              <span className="text-[10px] px-1.5 rounded-full" style={{ background: wtab === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: wtab === k ? '#fff' : 'var(--color-text-tertiary)' }}>{byWt[k].length}</span>
             </button>
           ))}
         </div>
@@ -2283,9 +2290,9 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
       </div>
       {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
         : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{(() => {
-            const noun = kind === 'sale' ? 'sales' : kind === 'random' ? 'random calls' : 'transfers';
+            const noun = { tra: 'TRA transfers', rcm: 'random (RCM) calls', closer_sales: 'closed-sale calls', closer_dispo: 'unclosed-sale calls' }[wtab] || 'calls';
             return todo.length
-              ? (day ? `No ${noun} to score on ${fmtDate(day)}.` : `No ${noun} left to score.`)
+              ? (day ? `No ${noun} to score on ${fmtDate(day)}.` : `No ${noun} in your queue right now.`)
               : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here.";
           })()}</div>
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>

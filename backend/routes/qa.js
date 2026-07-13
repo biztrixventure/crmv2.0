@@ -27,7 +27,7 @@ const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetForm
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
-const { WORK_TYPES, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
+const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
 const { sampleRcmFromDialer } = require('../utils/qaDialerSampler');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
@@ -261,6 +261,8 @@ router.get('/queue', asyncHandler(async (req, res) => {
       // transfer, closer on a sale) → resolved dialer id (below)
       agent_name: rec?.agent_name || (t ? names[t.created_by] : null) || (s ? names[s.closer_id] : null) || null,
       subject_role_user: t?.created_by || s?.closer_id || null,
+      // the ONE canonical work type — drives the agent's 4 queue sections
+      work_type: workTypeOf(r),
       duration: rec?.duration ?? null,
       assignee_name: r.assigned_to ? (names[r.assigned_to] || null) : null,
       review: rv,   // { final_score, quality_score, passed, autofail_result, status } or null

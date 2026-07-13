@@ -44,10 +44,10 @@ const StepBadge = ({ n }) => (
 );
 
 const WORK_TYPE_DEFS = [
-  { key: 'tra', label: 'Transfer calls (TRA)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'The calls that are IN the CRM — every transfer the fronters enter. A transfer means TRA.' },
-  { key: 'rcm', label: 'Random calls (RCM)', icon: Shuffle, tint: '#d97706', desc: 'Random RAW dialer calls of the users — numbers NOT entered in the CRM. Sampled daily at the configured rate.' },
-  { key: 'closer_sales', label: 'Closer sales calls', icon: DollarSign, tint: '#059669', desc: 'The CLOSER\'s leg: transferred customers that got closed into a sale. Works from either side — pick the closer company for its own sales, or a fronter company for the sales its transfers produced.' },
-  { key: 'closer_dispo', label: 'Closer-landed, other dispositions', icon: PhoneOff, tint: '#dc2626', desc: 'The CLOSER\'s leg of transfers that did NOT close — pick which dispositions count (none picked = any non-SALE). Combine with "Closer sales" to hear EVERY call that landed on a closer.' },
+  { key: 'tra', label: 'TRA — Transfer calls (Fronter)', icon: ArrowRightLeft, tint: '#2563eb', desc: 'The fronters\' transfer calls — the ones entered IN the CRM. A transfer means TRA. Comes from CRM records.' },
+  { key: 'rcm', label: 'RCM — Random calls (Fronter)', icon: Shuffle, tint: '#d97706', desc: 'The fronters\' OTHER calls — raw dialer calls NOT in the CRM. This is the only type fetched live from the dialer, sampled daily at the configured rate.' },
+  { key: 'closer_sales', label: 'Closed Sale calls (Closer)', icon: DollarSign, tint: '#059669', desc: 'The closers\' calls that CLOSED a sale. Every TRA that became a sale. Pick the closer company for its own sales, or a fronter company for the sales its transfers produced.' },
+  { key: 'closer_dispo', label: 'Unclosed Sale calls (Closer)', icon: PhoneOff, tint: '#dc2626', desc: 'The closers\' calls that did NOT close — a TRA that landed on the closer but ended with a non-sale disposition. Pick which codes count (none = any non-sale). With "Closed Sale" this covers EVERY closer call.' },
 ];
 const wtDef = (k) => WORK_TYPE_DEFS.find(w => w.key === k) || { label: k, tint: 'var(--color-text-tertiary)', icon: Headphones };
 
