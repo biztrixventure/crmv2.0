@@ -1877,15 +1877,18 @@ router.get('/admin/company-users', asyncHandler(async (req, res) => {
     withLevel = withLevel.concat(linkedClosers);
   }
   const uids = [...new Set(withLevel.map(r => r.user_id))];
-  let names = {};
+  let names = {}; const hasDialer = {};
   if (uids.length) {
-    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids').in('user_id', uids);
     names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p) || p.user_id.slice(0, 6)]));
+    for (const p of (profs || [])) hasDialer[p.user_id] = Array.isArray(p.vicidial_agent_ids) && p.vicidial_agent_ids.length > 0;
   }
   const seen = new Set();
   const users = withLevel.filter(r => !seen.has(r.user_id) && seen.add(r.user_id))
     .map(r => ({
       user_id: r.user_id, name: names[r.user_id] || r.user_id.slice(0, 6), level: r.level,
+      // no dialer mapping → their RAW (RCM) calls can't be sampled/attributed
+      has_dialer: !!hasDialer[r.user_id],
       linked: !!r.linked, company_name: r.linked ? (linkedNames[r.company_id] || null) : null,
     }))
     .sort((a, b) => (a.linked === b.linked ? a.name.localeCompare(b.name) : a.linked ? 1 : -1));

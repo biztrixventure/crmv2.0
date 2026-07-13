@@ -465,9 +465,13 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
     try {
       // 1. company access on the fly
       if (needsAccess) await client.post('qa/admin/assign', { user_id: rid, company_id: companyId, level: accessLevel });
-      // 2. bind the implied methods so manual assigns/coverage also work
+      // 2. Method binding = company-wide "catch-all" coverage (Distribute uses it).
+      //    Bind it ONLY when the rule covers ALL agents — otherwise a
+      //    "listen to 3 specific users" reviewer would ALSO be flooded with the
+      //    whole company via Distribute. Specific-user rules route via the rule
+      //    alone, so they stay focused.
       const isAgent = personEntry ? personEntry.level === 'qa_agent' : accessLevel === 'qa_agent';
-      if (isAgent) {
+      if (isAgent && subjectMode === 'all') {
         const implied = [...new Set(types.map(t => t === 'tra' ? 'tra' : 'rcm'))];
         const merged = [...new Set([...(personEntry?.methods || []), ...implied])];
         await client.put('qa/agent-methods', { user_id: rid, company_id: companyId, methods: merged }).catch(() => {});
@@ -575,13 +579,21 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
           : companyUsers === null ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !companyUsers.length ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No fronters/closers found in this company.</div>
           : <div className="flex flex-wrap gap-1.5 max-h-32 overflow-auto">
-              {companyUsers.map(u => (
+              {companyUsers.map(u => {
+                // RCM needs a dialer mapping to attribute raw calls; warn if missing
+                const rcmNeedsDialer = types.includes('rcm') && !u.has_dialer;
+                return (
                 <button key={u.user_id} onClick={() => toggleSubject(u.user_id)} className="text-[11px] px-2 py-1 rounded-lg"
-                  title={u.linked ? `Closer at the linked company ${u.company_name || ''} — receives this company's transferred calls` : undefined}
-                  style={subjects.includes(u.user_id) ? { background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)', border: '1px solid var(--color-primary-300, #c7d2fe)', fontWeight: 700 } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                  title={rcmNeedsDialer ? 'No dialer id mapped — this person\'s RANDOM (RCM) raw calls can\'t be sampled until their vicidial_agent_ids is set on their profile.' : (u.linked ? `Closer at the linked company ${u.company_name || ''} — receives this company's transferred calls` : undefined)}
+                  style={subjects.includes(u.user_id) ? { background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)', border: '1px solid var(--color-primary-300, #c7d2fe)', fontWeight: 700 } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: `1px solid ${rcmNeedsDialer ? '#dc262655' : 'var(--color-border)'}` }}>
                   {subjects.includes(u.user_id) ? '✓ ' : ''}{u.name} <span className="opacity-60">· {u.level.replace('_', ' ')}{u.linked && u.company_name ? ` @ ${u.company_name}` : ''}</span>
+                  {rcmNeedsDialer && <span title="No dialer mapping" style={{ color: '#dc2626', marginLeft: 3 }}>⚠</span>}
                 </button>
-              ))}
+                );
+              })}
+              {types.includes('rcm') && companyUsers.some(u => subjects.includes(u.user_id) && !u.has_dialer) && (
+                <div className="w-full text-[10px] mt-1" style={{ color: 'var(--color-warning-600)' }}>⚠ Users marked ⚠ have no dialer id — their random (RCM) calls can't be pulled until their dialer mapping is set. TRA/closer reviews still work for them.</div>
+              )}
             </div>
         )}
       </div>

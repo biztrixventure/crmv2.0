@@ -115,9 +115,33 @@ async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
     ? Math.max(1, sample?.period === 'week' ? Math.ceil(value / 7) : Math.round(value))
     : Math.max(1, Math.round(pool.length * value / 100));
 
-  // shuffle + take
-  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  const picked = pool.slice(0, Math.min(quota, pool.length));
+  // RULE-AWARE sampling: if an active RCM rule restricts to specific users, the
+  // sample MUST contain those users' calls (otherwise "listen to these 3 users"
+  // routes nothing when the random draw happens to miss them). Collect the
+  // dialer ids those rules target, take their calls FIRST, then fill the rest of
+  // the quota with a random draw. No specific-user RCM rule → pure random (old
+  // behaviour), since targetAgents stays empty.
+  const targetAgents = new Set();
+  try {
+    const { data: rules } = await supabaseAdmin.from('qa_routing_rules')
+      .select('subject_user_ids, work_types').eq('company_id', companyId).eq('is_active', true);
+    const wantUids = [...new Set((rules || []).filter(r => (r.work_types || []).includes('rcm') && (r.subject_user_ids || []).length).flatMap(r => r.subject_user_ids))];
+    if (wantUids.length) {
+      const { data: tp } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', wantUids);
+      for (const p of (tp || [])) for (const a of (p.vicidial_agent_ids || [])) targetAgents.add(String(a).toUpperCase());
+    }
+  } catch { /* no rules table yet → pure random */ }
+
+  const shuffle = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+  let picked;
+  if (targetAgents.size) {
+    const isTarget = g => targetAgents.has(String(g.agent_user || '').toUpperCase());
+    const targeted = shuffle(pool.filter(isTarget));
+    const rest = shuffle(pool.filter(g => !isTarget(g)));
+    picked = [...targeted, ...rest].slice(0, Math.min(quota, pool.length));
+  } else {
+    picked = shuffle(pool).slice(0, Math.min(quota, pool.length));
+  }
 
   const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
   const rows = picked.map(g => {

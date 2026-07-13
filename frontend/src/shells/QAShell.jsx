@@ -611,10 +611,10 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
       {open && (
         <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.record_kind === 'sale' ? 'Sale' : 'Transfer'}</span></div>
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'}</div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
-          <ContextLine a={open} fields={DEFAULT_CARD_FIELDS} />
+          <ReviewingBanner a={open} />
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
             ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
@@ -2167,6 +2167,27 @@ function AgentsTab({ companyId, canManage }) {
 // Reviewed-agent label: real name + dialer id, e.g. "John Doe (1002)".
 const agentLabel = (a) => a.agent_name ? `${a.agent_name}${a.agent_display ? ` (${a.agent_display})` : ''}` : (a.agent_display || '—');
 
+// Kind of call in plain words, from what the task carries.
+const callKind = (a) => a.sale_id ? { label: 'Closer sale call', tint: '#059669' }
+  : a.transfer_id ? { label: 'Transfer call (TRA)', tint: '#2563eb' }
+  : { label: 'Random call (RCM)', tint: '#d97706' };
+
+// A prominent "who + what" banner so a reviewer instantly knows whose call they
+// are about to grade, of what kind, and for which customer — no guessing.
+function ReviewingBanner({ a }) {
+  const k = callKind(a);
+  const agent = (a.agent_name || a.agent_display) ? agentLabel(a) : 'Unknown agent';
+  return (
+    <div className="rounded-xl p-2.5 mb-3 flex items-center gap-2.5 flex-wrap" style={{ background: `${k.tint}12`, border: `1px solid ${k.tint}44` }}>
+      <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ background: k.tint, color: '#fff' }}>{k.label}</span>
+      <span className="text-sm" style={{ color: 'var(--color-text)' }}>Reviewing <b>{agent}</b></span>
+      {a.customer_name && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>· customer <b style={{ color: 'var(--color-text)' }}>{a.customer_name}</b></span>}
+      {a.customer_phone && <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>· {a.customer_phone}</span>}
+      {a.subject_date && <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {fmtDate(a.subject_date)}</span>}
+    </div>
+  );
+}
+
 // One-line context strip: the reviewed agent (not a sheet column) + who the call
 // is. Customer/zip/etc are auto-filled INTO the sheet's own meta cells, so this
 // stays a single compact line — not a big box.
@@ -2295,10 +2316,10 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
       {open && (
         <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {open.method.toUpperCase()} · {open.subject_role}</span></div>
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'}</div>
             <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
           </div>
-          <ContextLine a={open} fields={fields} />
+          <ReviewingBanner a={open} />
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
             ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
