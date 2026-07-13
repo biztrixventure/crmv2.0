@@ -70,21 +70,31 @@ async function insertRows(rows) {
 }
 
 // Sample the PREVIOUS complete day's raw dialer calls for one company.
-// Returns the number of RCM tasks created (0 when already sampled today).
-async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
-  const day = new Date(Date.now() - 86400000).toISOString().slice(0, 10);   // yesterday UTC
+// Returns the number of RCM tasks created. `date` overrides the day (else
+// yesterday); `force` re-samples even if a sample already exists for that day
+// (clears the day's UNASSIGNED samples first — used by the manual "Pull now").
+// `detail:true` makes it return a diagnostic object instead of a bare count.
+async function sampleRcmFromDialer(companyId, { covers, sample, force = false, date, detail = false } = {}) {
+  const day = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const ret = (created, reason) => detail ? { created, day, reason } : created;
 
-  // one sample per day — if any dialer-random rows exist for this day, done.
+  // one sample per day — if any dialer-random rows exist for this day, done
+  // (unless forced, in which case we drop the day's UNASSIGNED samples & redo).
   const { count: already } = await supabaseAdmin.from('qa_assignments')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day);
-  if (already > 0) return 0;
+  if (already > 0) {
+    if (!force) return ret(0, 'already_sampled');
+    await supabaseAdmin.from('qa_assignments').delete()
+      .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day)
+      .eq('status', 'pending').is('assigned_to', null);
+  }
 
   const { ids, roleByAgent, nameByAgent } = await companyDialerAgents(companyId, covers);
-  if (!ids.length) { logger.info('QA_RCM', `${companyId}: no dialer-mapped users to sample`); return 0; }
+  if (!ids.length) { logger.info('QA_RCM', `${companyId}: no dialer-mapped users to sample`); return ret(0, 'no_mapped_users'); }
 
   const recs = await listDayRecordings({ date: day, agentIds: ids });
-  if (!recs.length) return 0;
+  if (!recs.length) return ret(0, 'no_recordings_that_day');
 
   // numbers that live in the CRM around that day are TRA territory — exclude,
   // so RCM stays purely the raw, non-CRM calls (sections separated).
@@ -106,7 +116,7 @@ async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
     groups.set(key, g);
   }
   const pool = [...groups.values()];
-  if (!pool.length) return 0;
+  if (!pool.length) return ret(0, 'all_calls_are_in_crm');
 
   // quota per the company's sample config; weekly quotas spread across 7 days
   const mode = sample?.mode === 'fixed' ? 'fixed' : 'percentage';
@@ -158,7 +168,7 @@ async function sampleRcmFromDialer(companyId, { covers, sample } = {}) {
   });
   const n = await insertRows(rows);
   if (n) logger.info('QA_RCM', `${companyId}: sampled ${n}/${pool.length} raw dialer call(s) for ${day}`);
-  return n;
+  return detail ? { created: n, day, reason: n ? 'ok' : 'nothing_new', pool: pool.length, targeted: targetAgents.size } : n;
 }
 
 module.exports = { sampleRcmFromDialer };

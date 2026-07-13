@@ -28,6 +28,7 @@ const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, lo
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
+const { sampleRcmFromDialer } = require('../utils/qaDialerSampler');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const axios = require('axios');
@@ -216,11 +217,17 @@ router.get('/queue', asyncHandler(async (req, res) => {
   ]);
   const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
   const sById = Object.fromEntries((sRes.data || []).map(s => [s.id, s]));
-  // assignee names
-  const assignees = [...new Set((data || []).map(r => r.assigned_to).filter(Boolean))];
+  // Names for BOTH the assignee AND the REVIEWED subject user — a CRM transfer
+  // task grades the fronter (transfers.created_by), a sale grades the closer
+  // (sales.closer_id). Resolving these is what stops "Unknown agent".
+  const subjectUids = [...new Set([
+    ...(tRes.data || []).map(t => t.created_by),
+    ...(sRes.data || []).map(s => s.closer_id),
+    ...(data || []).map(r => r.assigned_to),
+  ].filter(Boolean))];
   let names = {};
-  if (assignees.length) {
-    const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', assignees);
+  if (subjectUids.length) {
+    const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', subjectUids);
     names = Object.fromEntries((up || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
   }
   // attach the SCORE for any already-scored rows (so the Queue shows a scoreboard)
@@ -249,8 +256,11 @@ router.get('/queue', asyncHandler(async (req, res) => {
       sale_meta: r.sale_meta || null,
       subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
-      agent_display: r.subject_agent || null,     // reviewed agent's dialer id/login
-      agent_name: rec?.agent_name || null,          // …and their real name
+      agent_display: r.subject_agent || null,     // reviewed agent's dialer id/login (raw RCM)
+      // reviewed agent's real name: recording name → CRM subject (fronter on a
+      // transfer, closer on a sale) → resolved dialer id (below)
+      agent_name: rec?.agent_name || (t ? names[t.created_by] : null) || (s ? names[s.closer_id] : null) || null,
+      subject_role_user: t?.created_by || s?.closer_id || null,
       duration: rec?.duration ?? null,
       assignee_name: r.assigned_to ? (names[r.assigned_to] || null) : null,
       review: rv,   // { final_score, quality_score, passed, autofail_result, status } or null
@@ -1194,7 +1204,7 @@ router.get('/reviews', asyncHandler(async (req, res) => {
       scorecard_id: r.scorecard_id, status: r.status, reviewed_at: r.created_at,
       reviewer_id: r.reviewer_id, reviewer_name: nameById[r.reviewer_id] || null,
       subject_user_id: r.subject_user_id, subject_name: nameById[r.subject_user_id] || null,
-      agent: (rec?.agent_name) || dialerNames[String(dialerId || '').toUpperCase()] || dialerId || null,
+      agent: (rec?.agent_name) || dialerNames[String(dialerId || '').toUpperCase()] || (r.subject_user_id ? nameById[r.subject_user_id] : null) || dialerId || null,
       customer_name: (t ? scanName(t.form_data) : null) || s?.customer_name || null,
       customer_phone: rec?.phone || t?.normalized_phone || s?.customer_phone || null,
       call_date: a.recording_date || rec?.start_time || t?.created_at || s?.sale_date || null,
@@ -1617,6 +1627,24 @@ router.get('/admin/overview', asyncHandler(async (req, res) => {
     });
   }
   res.json({ companies: out });
+}));
+
+// Force-pull a fresh RCM random sample of YESTERDAY's raw dialer calls, live
+// from the dialer (bypasses the once-per-day guard), then route it. This is the
+// "Pull RCM now" button — proves the pipeline live and tells you exactly why if
+// nothing comes (no mapped users / no calls that day / all calls were CRM).
+router.post('/admin/sample-rcm', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { company_id } = req.body || {};
+  if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  const methods = await getConfig(company_id, 'qa.methods', []);
+  if (!Array.isArray(methods) || !methods.includes('rcm')) return res.status(400).json({ error: 'RCM is not enabled for this company — turn it on first.' });
+  const covers = await getConfig(company_id, 'qa.rcm.covers', ['fronter']);
+  const sample = await getConfig(company_id, 'qa.rcm.sample', { mode: 'percentage', value: 10, period: 'week' });
+  const result = await sampleRcmFromDialer(company_id, { covers, sample, force: true, detail: true });
+  const routed = await applyCompanyRules(company_id);
+  const auto = await autoAssignCompany(company_id);
+  res.json({ ok: true, sampled: result.created, day: result.day, reason: result.reason, routed: routed.assigned + auto.assigned });
 }));
 
 // Distribute a company's unassigned pending tasks to its covering agents now

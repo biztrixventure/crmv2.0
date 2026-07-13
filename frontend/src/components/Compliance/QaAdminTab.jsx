@@ -83,6 +83,24 @@ export default function QaAdminTab() {
       loadUsers(); loadRules();
     } catch { toast.error('Remove failed'); }
   };
+  const [pulling, setPulling] = useState(null);   // company id whose RCM is being pulled
+  const pullRcm = async (co) => {
+    setPulling(co.id);
+    try {
+      const r = await client.post('qa/admin/sample-rcm', { company_id: co.id });
+      const reasonMsg = {
+        no_mapped_users: 'no fronter/closer here has a dialer id mapped',
+        no_recordings_that_day: `no dialer calls found for ${r.data.day}`,
+        all_calls_are_in_crm: 'every call that day is already in the CRM (those are TRA, not RCM)',
+        already_sampled: 'already sampled',
+        nothing_new: 'nothing new to add',
+      };
+      if (r.data.sampled) toast.success(`Pulled ${r.data.sampled} random call(s) from ${r.data.day} and routed ${r.data.routed}.`);
+      else toast.info(`No RCM added for ${r.data.day} — ${reasonMsg[r.data.reason] || r.data.reason}.`, { duration: 7000 });
+      load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Pull failed'); }
+    finally { setPulling(null); }
+  };
   const [distributing, setDistributing] = useState(null);   // company id being distributed
   const distribute = async (co) => {
     setDistributing(co.id);
@@ -165,6 +183,14 @@ export default function QaAdminTab() {
                       })}
                       {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" title="Review tasks created for this company that no QA person owns yet. They wait in the pool (and expire after the task-expiry days) until someone is assigned."
                         style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} call{co.unassigned === 1 ? '' : 's'} waiting for a reviewer</span>}
+                      {co.methods.includes('rcm') && (
+                        <button onClick={() => pullRcm(co)} disabled={pulling === co.id}
+                          className="text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
+                          style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)', opacity: pulling === co.id ? 0.6 : 1 }}
+                          title="Fetch yesterday's random raw dialer calls LIVE from the dialer right now, and route them. Tells you exactly why if nothing comes.">
+                          {pulling === co.id ? <Loader2 size={12} className="animate-spin" /> : <Shuffle size={12} />} Pull RCM now
+                        </button>
+                      )}
                       <button onClick={() => distribute(co)} disabled={distributing === co.id}
                         className="ml-auto text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
                         style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)', opacity: distributing === co.id ? 0.6 : 1 }}
