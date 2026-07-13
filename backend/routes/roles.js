@@ -223,6 +223,16 @@ router.post(
     const userId = req.user.id;
     let targetCompanyId = company_id;
 
+    // QA roles are GLOBAL and already exist once system-wide — never create a
+    // per-company copy (that is exactly the duplicate we removed). The existing
+    // global QA Manager / QA Agent already appears in every company's picker.
+    if (['qa_manager', 'qa_agent'].includes(level)) {
+      return res.status(400).json({
+        error: 'QA Manager and QA Agent are global roles that already apply to every company — assign the existing one from the role list instead of creating a copy.',
+        code: 'QA_ROLE_GLOBAL',
+      });
+    }
+
     logger.info('CREATE_ROLE', `Creating role`, { name, level, userId });
 
     // If company_id not provided, fetch from user's company assignment
@@ -651,6 +661,56 @@ const CLOSER_DEFAULTS = [
   COMPANY_ADMIN_ROLE,
 ];
 
+// ─── QA roles are GLOBAL (company_id = NULL), shared by every company ─────────
+// One QA Manager + one QA Agent role exists system-wide (mig 181). They show up
+// in every company's role picker (see GET /roles union), so a person can be made
+// QA in any company WITHOUT a per-company copy. Company-scoped QA roles are
+// duplicates and are blocked on create. This canonical set is the single source
+// of truth for their permissions.
+const QA_GLOBAL_ROLES = [
+  {
+    name: 'QA Manager', level: 'qa_manager',
+    description: 'Quality department lead — assigns reviews, builds scorecards, sees all QA reports',
+    permissions: ['view_qa_queue', 'submit_qa_review', 'assign_qa_tasks', 'manage_qa_config', 'override_qa_review', 'view_all_qa_reviews', 'view_qa_reports'],
+  },
+  {
+    name: 'QA Agent', level: 'qa_agent',
+    description: 'Quality reviewer — listens to and scores the calls assigned to them',
+    permissions: ['view_qa_queue', 'submit_qa_review'],
+  },
+];
+
+// Idempotent: make sure the two GLOBAL QA roles exist with the canonical
+// permissions. Creates them if missing, reconciles perms if drifted. Never makes
+// company-scoped copies. Returns { created:[], reconciled:[] }.
+async function ensureGlobalQaRoles(permMap) {
+  const out = { created: [], reconciled: [] };
+  for (const tpl of QA_GLOBAL_ROLES) {
+    const wantPermIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
+    // find by level among global roles (name may differ from an older seed)
+    let { data: role } = await supabaseAdmin.from('custom_roles')
+      .select('id').is('company_id', null).eq('level', tpl.level).limit(1).maybeSingle();
+    if (!role) {
+      const { data: created, error } = await supabaseAdmin.from('custom_roles')
+        .insert({ name: tpl.name, description: tpl.description, level: tpl.level, company_id: null })
+        .select('id').single();
+      if (error) { logger.warn('SEED_ROLES', `global ${tpl.name}: ${error.message}`); continue; }
+      role = created; out.created.push(tpl.name);
+    }
+    // reconcile permission set to the canonical list
+    const { data: have } = await supabaseAdmin.from('role_permissions').select('permission_id').eq('role_id', role.id);
+    const haveSet = new Set((have || []).map(r => r.permission_id));
+    const wantSet = new Set(wantPermIds);
+    const same = haveSet.size === wantSet.size && [...wantSet].every(id => haveSet.has(id));
+    if (!same) {
+      await supabaseAdmin.from('role_permissions').delete().eq('role_id', role.id);
+      if (wantPermIds.length) await supabaseAdmin.from('role_permissions').insert(wantPermIds.map(pid => ({ role_id: role.id, permission_id: pid })));
+      out.reconciled.push(tpl.name);
+    }
+  }
+  return out;
+}
+
 router.post('/seed-defaults', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.query.company_id || req.body.company_id || req.user.company_id;
@@ -716,9 +776,14 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
     created.push(tpl.name);
   }
 
+  // Every company also gets the GLOBAL QA roles available (shared, not copied) —
+  // so QA Manager / QA Agent can be assigned here just like anywhere else.
+  const qa = await ensureGlobalQaRoles(permMap);
+  if (qa.created.length) created.push(...qa.created.map(n => `${n} (global)`));
+
   clearPermissionCache();   // role permission sets may have changed
-  logger.success('SEED_ROLES', `Done: created=[${created}] updated=[${updated}] skipped=[${skipped}]`);
-  res.json({ message: 'Default roles seeded', created, updated, skipped, company_type: company.company_type, reset });
+  logger.success('SEED_ROLES', `Done: created=[${created}] updated=[${updated}] skipped=[${skipped}] qa=${JSON.stringify(qa)}`);
+  res.json({ message: 'Default roles seeded', created, updated, skipped, qa_global: qa, company_type: company.company_type, reset });
 }));
 
 module.exports = router;
