@@ -84,10 +84,12 @@ export default function QaAdminTab() {
     } catch { toast.error('Remove failed'); }
   };
   const [pulling, setPulling] = useState(null);   // company id whose RCM is being pulled
+  const [rcmDay, setRcmDay] = useState({});        // company id → chosen YYYY-MM-DD
   const pullRcm = async (co) => {
     setPulling(co.id);
     try {
-      const r = await client.post('qa/admin/sample-rcm', { company_id: co.id });
+      const day = rcmDay[co.id] || undefined;      // default = yesterday (backend)
+      const r = await client.post('qa/admin/sample-rcm', { company_id: co.id, ...(day ? { date: day } : {}) });
       const reasonMsg = {
         no_mapped_users: 'no fronter/closer here has a dialer id mapped',
         no_recordings_that_day: `no dialer calls found for ${r.data.day}`,
@@ -101,6 +103,7 @@ export default function QaAdminTab() {
     } catch (e) { toast.error(e.response?.data?.error || 'Pull failed'); }
     finally { setPulling(null); }
   };
+  const yesterdayISO = () => { const d = new Date(Date.now() - 864e5); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
   const [distributing, setDistributing] = useState(null);   // company id being distributed
   const distribute = async (co) => {
     setDistributing(co.id);
@@ -184,12 +187,20 @@ export default function QaAdminTab() {
                       {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" title="Review tasks created for this company that no QA person owns yet. They wait in the pool (and expire after the task-expiry days) until someone is assigned."
                         style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} call{co.unassigned === 1 ? '' : 's'} waiting for a reviewer</span>}
                       {co.methods.includes('rcm') && (
-                        <button onClick={() => pullRcm(co)} disabled={pulling === co.id}
-                          className="text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
-                          style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)', opacity: pulling === co.id ? 0.6 : 1 }}
-                          title="Fetch yesterday's random raw dialer calls LIVE from the dialer right now, and route them. Tells you exactly why if nothing comes.">
-                          {pulling === co.id ? <Loader2 size={12} className="animate-spin" /> : <Shuffle size={12} />} Pull RCM now
-                        </button>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{ background: 'rgba(217,119,6,0.10)', border: '1px solid rgba(217,119,6,0.35)' }}>
+                          <Shuffle size={11} style={{ color: 'var(--color-warning-600)' }} />
+                          <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-warning-600)' }}>Pull RCM</span>
+                          <input type="date" value={rcmDay[co.id] || yesterdayISO()} max={yesterdayISO()}
+                            onChange={e => setRcmDay(m => ({ ...m, [co.id]: e.target.value }))}
+                            title="Which day's random raw dialer calls to fetch. Defaults to yesterday — change it if yesterday was a day off (e.g. Sunday)."
+                            style={{ ...inp, fontSize: 11, padding: '2px 4px' }} onClick={e => e.stopPropagation()} />
+                          <button onClick={() => pullRcm(co)} disabled={pulling === co.id}
+                            className="text-[10px] font-bold px-2 py-0.5 rounded"
+                            style={{ background: 'var(--color-warning-600)', color: '#fff', opacity: pulling === co.id ? 0.6 : 1 }}
+                            title="Fetch that day's random raw dialer calls LIVE from the dialer now, and route them. Tells you exactly why if nothing comes.">
+                            {pulling === co.id ? <Loader2 size={11} className="animate-spin inline" /> : 'Fetch'}
+                          </button>
+                        </span>
                       )}
                       <button onClick={() => distribute(co)} disabled={distributing === co.id}
                         className="ml-auto text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
@@ -549,24 +560,31 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
         </div>
       )}
 
-      {/* what kinds of calls */}
+      {/* what kinds of calls — all 4, grouped Fronter vs Closer so none is missed */}
       <div>
-        <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>KINDS OF CALLS <span className="font-normal">— pick any combination</span></div>
-        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          {WORK_TYPE_DEFS.map(w => {
-            const on = types.includes(w.key); const I = w.icon;
-            return (
-              <button key={w.key} onClick={() => toggleType(w.key)} className="text-left p-2 rounded-lg flex items-start gap-2"
-                style={{ background: on ? `${w.tint}12` : 'var(--color-bg)', border: `1px solid ${on ? w.tint : 'var(--color-border)'}` }}>
-                <I size={14} className="mt-0.5 flex-shrink-0" style={{ color: w.tint }} />
-                <span>
-                  <span className="block text-xs font-bold" style={{ color: on ? w.tint : 'var(--color-text)' }}>{on ? '✓ ' : ''}{w.label}</span>
-                  <span className="block text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w.desc}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>KINDS OF CALLS TO REVIEW <span className="font-normal">— tick any combination (a call has a fronter leg and a closer leg)</span></div>
+        {[['Fronter calls', ['tra', 'rcm']], ['Closer calls', ['closer_sales', 'closer_dispo']]].map(([groupLabel, keys]) => (
+          <div key={groupLabel} className="mb-2">
+            <div className="text-[9px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{groupLabel}</div>
+            <div className="space-y-1.5">
+              {keys.map(k => WORK_TYPE_DEFS.find(w => w.key === k)).map(w => {
+                const on = types.includes(w.key); const I = w.icon;
+                return (
+                  <button key={w.key} onClick={() => toggleType(w.key)} className="w-full text-left p-2 rounded-lg flex items-start gap-2"
+                    style={{ background: on ? `${w.tint}12` : 'var(--color-bg)', border: `1px solid ${on ? w.tint : 'var(--color-border)'}` }}>
+                    <span className="inline-flex items-center justify-center rounded flex-shrink-0" style={{ width: 18, height: 18, background: on ? w.tint : 'var(--color-surface-hover)' }}>
+                      {on ? <Check size={12} color="#fff" /> : <I size={12} style={{ color: w.tint }} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold" style={{ color: on ? w.tint : 'var(--color-text)' }}>{w.label}</span>
+                      <span className="block text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* dispositions — only for closer_dispo */}

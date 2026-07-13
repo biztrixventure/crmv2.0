@@ -1639,11 +1639,16 @@ router.post('/admin/sample-rcm', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id } = req.body || {};
   if (!company_id) return res.status(400).json({ error: 'company_id required' });
+  // optional specific day (YYYY-MM-DD) — else yesterday. Can't be today (the day
+  // isn't complete) or the future.
+  let date = typeof req.body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date) ? req.body.date : null;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (date && date >= todayStr) return res.status(400).json({ error: 'Pick a completed past day (not today or the future).' });
   const methods = await getConfig(company_id, 'qa.methods', []);
   if (!Array.isArray(methods) || !methods.includes('rcm')) return res.status(400).json({ error: 'RCM is not enabled for this company — turn it on first.' });
   const covers = await getConfig(company_id, 'qa.rcm.covers', ['fronter']);
   const sample = await getConfig(company_id, 'qa.rcm.sample', { mode: 'percentage', value: 10, period: 'week' });
-  const result = await sampleRcmFromDialer(company_id, { covers, sample, force: true, detail: true });
+  const result = await sampleRcmFromDialer(company_id, { covers, sample, force: true, detail: true, date });
   const routed = await applyCompanyRules(company_id);
   const auto = await autoAssignCompany(company_id);
   res.json({ ok: true, sampled: result.created, day: result.day, reason: result.reason, routed: routed.assigned + auto.assigned });
