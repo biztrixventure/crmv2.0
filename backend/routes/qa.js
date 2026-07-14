@@ -497,22 +497,32 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
 // Only ever proxy audio from the DIALER infrastructure — never an arbitrary
 // user-supplied URL (SSRF). Allowed hosts: the configured boxes + *.i5.tel
 // (the recording servers), extendable via QA_STREAM_HOST_SUFFIXES.
+// Recording audio is often served from a SEPARATE storage host (a raw IP like
+// 37.27.213.10/RECORDINGS/...), not the box API host (*.i5.tel). We learn those
+// hosts from URLs the DIALER itself hands back (server-side re-resolve) and trust
+// them thereafter, so the client's location= fast-path passes the allowlist too.
+const _dialerRecordingHosts = new Set();
+function hostOf(u) { try { return new URL(u).hostname.toLowerCase(); } catch { return null; } }
+function noteDialerRecordingUrl(u) { const h = hostOf(u); if (h) _dialerRecordingHosts.add(h); }
 function allowedRecordingUrl(u) {
-  try {
-    const h = new URL(u).hostname.toLowerCase();
-    for (const b of getBoxes()) { try { if (new URL(b.base).hostname.toLowerCase() === h) return true; } catch { /* bad base */ } }
-    const suf = (process.env.QA_STREAM_HOST_SUFFIXES || '.i5.tel').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    return suf.some(s => h === s.replace(/^\./, '') || h.endsWith(s.startsWith('.') ? s : '.' + s));
-  } catch { return false; }
+  const h = hostOf(u);
+  if (!h) return false;
+  if (_dialerRecordingHosts.has(h)) return true;
+  for (const b of getBoxes()) { try { if (new URL(b.base).hostname.toLowerCase() === h) return true; } catch { /* bad base */ } }
+  const suf = (process.env.QA_STREAM_HOST_SUFFIXES || '.i5.tel').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return suf.some(s => h === s.replace(/^\./, '') || h.endsWith(s.startsWith('.') ? s : '.' + s));
 }
 
 router.get('/recordings/stream', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const ref = { box_id: req.query.box_id, lead_id: req.query.lead_id, recording_id: req.query.recording_id };
-  const reresolve = () => locationForRecording(ref);
+  // Server re-resolve returns the URL straight from the authenticated dialer API
+  // — trusted, so we register its host and skip the client-facing allowlist.
+  const reresolve = async () => { const u = await locationForRecording(ref); if (u) noteDialerRecordingUrl(u); return u; };
+  // Client-supplied location is only trusted when it passes the allowlist (SSRF
+  // guard); otherwise re-resolve server-side from the dialer.
   let url = (req.query.location && /^https?:\/\//.test(req.query.location) && allowedRecordingUrl(req.query.location))
     ? req.query.location : await reresolve();
-  if (url && !allowedRecordingUrl(url)) url = null;
   if (!url) return res.status(404).json({ error: 'Recording not found' });
   const pipe = async (u, retry) => {
     try {
@@ -572,9 +582,12 @@ router.post('/recordings/transcribe', asyncHandler(async (req, res) => {
   const { data: cached } = await supabaseAdmin.from('qa_transcripts').select('*').eq('recording_key', key).maybeSingle();
   if (cached) return res.json({ cached: true, transcript: cached });
 
-  // Resolve the audio URL (same path — and same host allowlist — as the stream proxy).
-  let url = (location && /^https?:\/\//.test(location) && allowedRecordingUrl(location)) ? location : await locationForRecording({ box_id, lead_id, recording_id });
-  if (url && !allowedRecordingUrl(url)) url = null;
+  // Resolve the audio URL (same path — and same host allowlist — as the stream
+  // proxy). Client location must pass the allowlist; a server re-resolve from the
+  // dialer is trusted (and its host remembered for the stream fast-path).
+  let url;
+  if (location && /^https?:\/\//.test(location) && allowedRecordingUrl(location)) url = location;
+  else { url = await locationForRecording({ box_id, lead_id, recording_id }); if (url) noteDialerRecordingUrl(url); }
   if (!url) return res.status(404).json({ error: 'Recording not found' });
 
   // Fetch the audio bytes (proxied from the dialer; not stored).
@@ -738,6 +751,9 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
 
   const ttlMs = await dayCacheTtl(req.query.company_id || req.user.company_id);
   const rows = await listDayRecordings({ date, agentIds: ids, ttlMs });
+  // These locations come from the dialer — trust their hosts so the agent's play
+  // (client-supplied location=) passes the SSRF allowlist without a re-resolve.
+  for (const r of rows) if (r.location) noteDialerRecordingUrl(r.location);
   const cls = await classifyTransferred(rows, req.query.company_id || req.user.company_id, date);
 
   // Disposition enrichment (bulk + per-lead fill). Skipped with ?dispo=0 so the
