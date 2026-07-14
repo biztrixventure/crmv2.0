@@ -27,7 +27,12 @@ const SALE_LABEL = {
 const SKIP_KEYS = new Set([
   'customer_name', 'customer_phone', 'customer_email', 'customer_address',
   'FirstName', 'LastName', 'Phone', 'Phone2', 'Email', 'Address', 'City', 'State', 'Zip',
+  // Vehicle fields already shown in the "Vehicle info" section (from typed
+  // columns). List BOTH the CarXxx aliases AND the actual stored keys (VIN,
+  // Miles) so they don't ALSO render as free-form "Additional info" rows —
+  // otherwise VIN/Miles appear twice (and, if the column is stale, mismatched).
   'CarYear', 'CarMake', 'CarModel', 'CarMiles', 'CarVin',
+  'VIN', 'Vin', 'vin', 'Miles', 'Mileage',
   'SaleDisposition',
   // Internal/derived keys we never want to render as free-form rows.
   'manual_entry_by', 'cli_number', 'transfer_date', 'last_redial_at', 'state_abbr',

@@ -36,9 +36,17 @@ router.use(asyncHandler(async (req, res, next) => {
   next();
 }));
 
+// Form-field NAME → denormalized sales column the lists/drawers/exports read.
+// Include the ACTUAL keys the sale form stores (VIN, Make, Model — not just the
+// CarXxx aliases) so cleaning e.g. `VIN` also syncs `car_vin`; otherwise the
+// JSONB value updates but the typed column goes stale (drawer/export show the
+// old value). Only TEXT-safe columns are mapped — car_miles / car_year are
+// numeric, so they're intentionally excluded to avoid cast errors on write.
 const SALE_COL_BY_FIELD = {
   Phone: 'customer_phone', Phone2: 'customer_phone_2', Email: 'customer_email',
-  CarMake: 'car_make', CarModel: 'car_model', CarVin: 'car_vin',
+  CarMake: 'car_make', Make: 'car_make',
+  CarModel: 'car_model', Model: 'car_model',
+  CarVin: 'car_vin', VIN: 'car_vin', Vin: 'car_vin', vin: 'car_vin',
 };
 const SALE_COL_BY_TYPE = {
   sale_plan: 'plan', sale_client: 'client_name',
