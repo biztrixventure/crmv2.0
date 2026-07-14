@@ -27,12 +27,18 @@ const fmtDur = (s) => { if (s == null) return '—'; const m = Math.floor(s / 60
 const fmtDate = (d) => { try { return d ? new Date(String(d).length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''; } catch { return d || ''; } };
 const fmtTime = (s) => { try { return s ? new Date(String(s).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return s || ''; } };
 const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
-const MethodPill = ({ m }) => (
-  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase"
-    style={m === 'tra'
-      ? { background: 'var(--color-primary-50, rgba(37,99,235,0.12))', color: 'var(--color-primary-600)' }
-      : { background: 'var(--color-warning-50, rgba(217,119,6,0.12))', color: 'var(--color-warning-600)' }}>{m}</span>
-);
+// Renders a method OR a work-type slot (tra | rcm | closer_sales | closer_dispo).
+const SLOT_PILL = {
+  tra:          { label: 'TRA',  tint: '#2563eb' },
+  rcm:          { label: 'RCM',  tint: '#d97706' },
+  closer_sales: { label: 'SALE', tint: '#059669' },
+  closer_dispo: { label: 'UNCL', tint: '#dc2626' },
+};
+const MethodPill = ({ m }) => {
+  const p = SLOT_PILL[m] || { label: String(m || '—'), tint: '#6b7280' };
+  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `${p.tint}1f`, color: p.tint }}>{p.label}</span>;
+};
+const SLOT_LABEL = { tra: 'TRA · Transfers', rcm: 'RCM · Random', closer_sales: 'Closed Sale', closer_dispo: 'Unclosed Sale' };
 const StatusPill = ({ s }) => {
   const map = { pending: ['Pending', 'var(--color-text-tertiary)'], in_review: ['In review', 'var(--color-warning-600)'], scored: ['Scored', 'var(--color-success-600)'], skipped: ['Skipped', 'var(--color-text-tertiary)'] };
   const [label, color] = map[s] || [s, 'var(--color-text-tertiary)'];
@@ -269,7 +275,9 @@ function ScoreForm({ assignment, onScored }) {
 
   useEffect(() => {
     setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall('');
-    client.get('qa/scorecards', { params: { method: assignment.method, company_id: assignment.company_id } })
+    // fetch by WORK TYPE slot (tra | rcm | closer_sales | closer_dispo) so each
+    // section uses its own scorecard; fall back to method for legacy tasks.
+    client.get('qa/scorecards', { params: { method: assignment.work_type || assignment.method, company_id: assignment.company_id } })
       .then(r => {
         const list = r.data.scorecards || [];
         // company-scoped active first, else global template
@@ -285,7 +293,7 @@ function ScoreForm({ assignment, onScored }) {
 
   if (loadErr) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>{loadErr}</div>;
   if (scorecard === null) return <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
-  if (!scorecard) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>No active scorecard for {assignment.method.toUpperCase()}. Ask a QA manager to configure one.</div>;
+  if (!scorecard) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>No active scorecard for {SLOT_LABEL[assignment.work_type || assignment.method] || (assignment.method || '').toUpperCase()} yet. Ask a QA manager to set one up in Scorecards &amp; Config.</div>;
 
   // sheet_v2 (WaveTech replication) → horizontal spreadsheet-row scoring UI
   if (isSheetConfig(scorecard.criteria)) {
@@ -633,7 +641,7 @@ const ChartCard = ({ title, children, wide }) => (
   </div>
 );
 
-function ReportsTab({ companyId }) {
+function ReportsTab({ companyId, companyName = '' }) {
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
@@ -705,8 +713,20 @@ function ReportsTab({ companyId }) {
           }}
           className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
           style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
-          title="Download the per-agent quality report (one row per reviewed fronter/closer)">
-          <Download size={13} /> Agent report
+          title="Download the per-agent quality report as CSV (one row per reviewed fronter/closer)">
+          <Download size={13} /> CSV
+        </button>
+        <button onClick={async () => {
+            if (!data?.summary?.reviews) return toast.error('No scored reviews to export yet');
+            try {
+              const { exportQaReportPdf } = await import('../utils/qaReportPdf');
+              exportQaReportPdf({ data, filters: f, companyName });
+            } catch (e) { toast.error('Could not build the PDF'); console.error(e); }
+          }}
+          className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white"
+          style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}
+          title="Download a compact PDF: agent performance with charts and a full breakdown table">
+          <Download size={13} /> PDF report
         </button>
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
       </div>
@@ -1020,9 +1040,9 @@ function ConfigTab({ companyId }) {
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
           <span className="inline-flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>2</span>
           Scorecards
-          <InfoTip text="The question sheets reviewers fill in per call. Each method (TRA / RCM) uses its matching scorecard. Templates are shared starting points — editing one saves a private copy for your company." />
+          <InfoTip w={320} text="The question sheets reviewers fill in per call. Each of the 4 sections — TRA, Closed Sale, Unclosed Sale, RCM — can carry its OWN scorecard, so grading a transfer differs from grading a sale. A section with no scorecard yet simply can't be scored until you add one. Templates are shared starting points — editing one saves a private copy for your company." />
         </div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Click <b>Edit fields</b> to change the questions and how they score.</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>One scorecard per section. Right now <b>TRA</b> is set up — add <b>Closed Sale</b>, <b>Unclosed Sale</b> and <b>RCM</b> sheets when you have them. Click <b>Edit fields</b> to change the questions and how they score.</div>
         <div className="space-y-2 mb-4">
           {cards.map(c => {
             const isSheet = c.criteria && !Array.isArray(c.criteria) && c.criteria.model === 'sheet_v2';
@@ -1043,8 +1063,13 @@ function ConfigTab({ companyId }) {
         <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>New scorecard <InfoTip side="right" text="Creates a blank scorecard for the chosen method and opens the visual builder so you can add questions. No coding or JSON needed." /></div>
           <div className="flex gap-2">
-            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Method
-              <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp}><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+            <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Section
+              <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp} title="Which of the 4 QA sections this scorecard grades">
+                <option value="tra">TRA · Transfers</option>
+                <option value="closer_sales">Closed Sale</option>
+                <option value="closer_dispo">Unclosed Sale</option>
+                <option value="rcm">RCM · Random</option>
+              </select>
             </label>
             <input placeholder="Name (e.g. WaveTech Fronter)" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ ...inp, flex: 1 }} />
             <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 56 }} />%
@@ -2207,6 +2232,7 @@ function AgentsTab({ companyId, canManage }) {
   const [undone, setUndone] = useState({});        // agentId → open (pending+in_review) count
   const [canClear, setCanClear] = useState(false); // compliance-granted clear-tasks right
   const [clearing, setClearing] = useState(null);  // agentId | '__all__' while a clear runs
+  const [clearWt, setClearWt] = useState('');       // '' = every section, else one work type
 
   const load = useCallback(() => {
     client.get('qa/agent-methods', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => setAgents([]));
@@ -2223,13 +2249,15 @@ function AgentsTab({ companyId, canManage }) {
   const totalUndone = Object.values(undone).reduce((s, n) => s + n, 0);
   const clearUndone = async (agentId) => {
     const who = agentId ? (agents?.find(a => a.id === agentId)?.name || 'this agent') : 'ALL QA agents';
-    const n = agentId ? (undone[agentId] || 0) : totalUndone;
-    if (!n) { toast('Nothing to clear — no un-scored tasks.'); return; }
-    if (!window.confirm(`Clear ${n} un-scored task(s) for ${who}?\n\nOnly PENDING / in-progress tasks are removed. Completed (scored) work stays.`)) return;
+    const scope = clearWt ? ` ${SLOT_LABEL[clearWt] || clearWt}` : '';
+    const n = agentId ? (undone[agentId] || 0) : totalUndone;   // note: count is across all sections
+    if (!clearWt && !n) { toast('Nothing to clear — no un-scored tasks.'); return; }
+    if (!window.confirm(`Clear${scope} un-scored task(s) for ${who}?\n\nOnly PENDING / in-progress tasks are removed. Completed (scored) work stays.`)) return;
     setClearing(agentId || '__all__');
     try {
       const body = { company_id: companyId };
       if (agentId) body.agent_id = agentId;
+      if (clearWt) body.work_type = clearWt;
       const r = await client.post('qa/clear-undone', body);
       toast.success(`Cleared ${r.data.cleared} un-scored task(s).`);
       load();
@@ -2259,12 +2287,21 @@ function AgentsTab({ companyId, canManage }) {
         <div className="text-[11px] mb-3 flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
           <span>Applies to the company selected in the header picker. Bind one or both methods.</span>
           {canManage && canClear && agents?.length > 0 && (
-            <button onClick={() => clearUndone(null)} disabled={clearing !== null || !totalUndone}
-              className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
-              style={{ background: totalUndone ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: totalUndone ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', border: '1px solid currentColor', opacity: clearing !== null ? 0.6 : 1 }}
-              title="Delete every un-scored (pending / in-progress) task for all agents. Completed work stays.">
-              {clearing === '__all__' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Clear all un-scored ({totalUndone})
-            </button>
+            <span className="ml-auto flex items-center gap-1.5">
+              <select value={clearWt} onChange={e => setClearWt(e.target.value)} style={{ ...inp, padding: '3px 6px', fontSize: 11 }} title="Limit clearing to one section, or clear every section">
+                <option value="">Every section</option>
+                <option value="tra">TRA · Transfers</option>
+                <option value="closer_sales">Closed Sale</option>
+                <option value="closer_dispo">Unclosed Sale</option>
+                <option value="rcm">RCM · Random</option>
+              </select>
+              <button onClick={() => clearUndone(null)} disabled={clearing !== null || (!clearWt && !totalUndone)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
+                style={{ background: totalUndone ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: totalUndone ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', border: '1px solid currentColor', opacity: clearing !== null ? 0.6 : 1 }}
+                title="Delete un-scored (pending / in-progress) tasks for all agents in the chosen section. Completed work stays.">
+                {clearing === '__all__' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Clear un-scored{clearWt ? '' : ` (${totalUndone})`}
+              </button>
+            </span>
           )}
         </div>
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -2590,7 +2627,7 @@ export default function QAShell() {
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
-        {tab === 'reports' && canReports && <ReportsTab companyId={scoped} />}
+        {tab === 'reports' && canReports && <ReportsTab companyId={scoped} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
       </main>
     </div>
   );

@@ -1246,19 +1246,24 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter
-async function resolveScorecard(companyId, method) {
-  const cfgId = await getConfig(companyId, `qa.scorecard.${method}`, null);
+// Resolve the scorecard for a (company, SLOT). `slot` is the WORK TYPE
+// (tra | rcm | closer_sales | closer_dispo) — the qa_scorecards.method column is
+// now used as a per-work-type slot, so each of the four sections can carry its
+// own scorecard. Legacy rows with method 'tra'/'rcm' serve those two slots as
+// before; closer_sales / closer_dispo get their own (created when the manager
+// brings each section's sheet). Config-key override → company row → global row.
+async function resolveScorecard(companyId, slot) {
+  const cfgId = await getConfig(companyId, `qa.scorecard.${slot}`, null);
   if (cfgId) {
     const { data } = await supabaseAdmin.from('qa_scorecards').select('*').eq('id', cfgId).eq('is_active', true).maybeSingle();
     if (data) return data;
   }
-  // company-scoped active scorecard for the method, else the global starter
   const { data: co } = await supabaseAdmin.from('qa_scorecards').select('*')
-    .eq('company_id', companyId).eq('method', method).eq('is_active', true)
+    .eq('company_id', companyId).eq('method', slot).eq('is_active', true)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (co) return co;
   const { data: g } = await supabaseAdmin.from('qa_scorecards').select('*')
-    .is('company_id', null).eq('method', method).eq('is_active', true)
+    .is('company_id', null).eq('method', slot).eq('is_active', true)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   return g || null;
 }
@@ -1350,7 +1355,7 @@ router.post('/reviews', asyncHandler(async (req, res) => {
   }
 
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id, subject_agent, recording_ref, assigned_to').eq('id', assignment_id).maybeSingle();
+    .select('id, company_id, method, work_type, subject_role, transfer_id, sale_id, subject_agent, recording_ref, assigned_to').eq('id', assignment_id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
@@ -1359,8 +1364,9 @@ router.post('/reviews', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'This call is not assigned to you.' });
   }
 
-  const scorecard = await resolveScorecard(a.company_id, a.method);
-  if (!scorecard) return res.status(400).json({ error: 'No active scorecard for this method' });
+  // scorecard is resolved per WORK TYPE (tra / rcm / closer_sales / closer_dispo)
+  const scorecard = await resolveScorecard(a.company_id, workTypeOf(a));
+  if (!scorecard) return res.status(400).json({ error: 'No active scorecard for this section yet. Ask a QA manager to set one up in Scorecards & Config.' });
 
   // ── sheet_v2 path (WaveTech) — formula engine is the single source of truth ─
   if (isSheetConfig(scorecard.criteria)) {
@@ -1627,7 +1633,8 @@ router.get('/scorecards', asyncHandler(async (req, res) => {
 router.post('/scorecards', asyncHandler(async (req, res) => {
   if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, method, name, criteria, pass_threshold } = req.body || {};
-  if (!['tra', 'rcm'].includes(method) || !name) return res.status(400).json({ error: 'method (tra|rcm) and name are required' });
+  // `method` is the work-type slot: tra | rcm | closer_sales | closer_dispo
+  if (!WORK_TYPES.includes(method) || !name) return res.status(400).json({ error: 'method (tra|rcm|closer_sales|closer_dispo) and name are required' });
   // criteria may be an ARRAY (legacy weighted) or an OBJECT (sheet_v2). Keep whichever.
   const criteriaVal = (Array.isArray(criteria) || (criteria && typeof criteria === 'object')) ? criteria : [];
   const row = {
@@ -1751,7 +1758,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
-const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
+const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.scorecard.closer_sales', 'qa.scorecard.closer_dispo', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;
@@ -1810,6 +1817,15 @@ router.post('/clear-undone', asyncHandler(async (req, res) => {
   let q = supabaseAdmin.from('qa_assignments').delete()
     .eq('company_id', companyId).in('status', ['pending', 'in_review']);
   if (req.body?.agent_id) q = q.eq('assigned_to', req.body.agent_id);
+  // optional: clear only ONE section (tra / rcm / closer_sales / closer_dispo).
+  // Match on work_type OR (legacy rows with NULL work_type) the derived method,
+  // so pre-work_type tasks still clear under tra/rcm.
+  if (WORK_TYPES.includes(req.body?.work_type)) {
+    const wt = req.body.work_type;
+    q = (wt === 'tra' || wt === 'rcm')
+      ? q.or(`work_type.eq.${wt},and(work_type.is.null,method.eq.${wt})`)
+      : q.eq('work_type', wt);
+  }
   const { data, error } = await q.select('id');
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true, cleared: (data || []).length });
