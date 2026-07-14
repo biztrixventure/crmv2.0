@@ -139,41 +139,14 @@ async function purgeStaleQaAssignments() {
   } catch (e) { logger.warn('QA_JOBS', `retention purge error: ${e.message}`); return 0; }
 }
 
+// QA is now a MANUAL, dialer-driven department: the QA manager loads a dialer
+// day and distributes the calls to agents (POST /qa/assignments/from-recordings).
+// There is NO automatic CRM materialization, RCM auto-sampling, or rule routing
+// — those pulled CRM "pending transfers/sales" into QA, which is exactly what we
+// no longer want. The scheduler now only runs the retention purge so untouched
+// pooled tasks still age out. (materializeCompany / applyCompanyRules stay
+// exported for the on-demand "Pull RCM now" button and any manual trigger.)
 async function runQaMaterialization() {
-  let companies;
-  try { companies = await enabledCompanies(); }
-  catch (e) { logger.warn('QA_JOBS', `enabledCompanies error: ${e.message}`); companies = []; }
-
-  let traTotal = 0, rcmTotal = 0;
-  for (const { companyId, methods } of companies) {
-    const r = await materializeCompany(companyId, methods);
-    traTotal += r.tra; rcmTotal += r.rcm;
-  }
-  if (traTotal || rcmTotal) {
-    logger.info('QA_JOBS', `QA materialize: +${traTotal} TRA, +${rcmTotal} RCM across ${companies.length} co(s)`);
-  }
-
-  // Compliance WORK RULES run even for companies whose qa.methods is off — a
-  // rule is explicit intent. Materialize the base pools a rule needs (tra/rcm
-  // via the RPCs, closer work here) and route.
-  try {
-    const rules = await getActiveRules(null);
-    const byCo = {};
-    for (const r of rules) (byCo[r.company_id] ||= []).push(r);
-    const enabledSet = new Set(companies.map(c => c.companyId));
-    for (const [coId, coRules] of Object.entries(byCo)) {
-      const types = new Set(coRules.flatMap(r => r.work_types || []));
-      const base = ['tra', 'rcm'].filter(t => types.has(t));
-      if (base.length && !enabledSet.has(coId)) await materializeCompany(coId, base);
-      const c = await materializeCloserWork(coId, coRules);
-      const routed = await applyCompanyRules(coId);
-      if (c.closer_sales || c.closer_dispo || routed.assigned) {
-        logger.info('QA_JOBS', `rules ${coId}: +${c.closer_sales} sales, +${c.closer_dispo} dispo, routed ${routed.assigned}`);
-      }
-    }
-  } catch (e) { logger.warn('QA_JOBS', `rules pass: ${e.message}`); }
-
-  // retention runs even if nothing was materialized this tick (backlog drains).
   await purgeStaleQaAssignments();
 }
 

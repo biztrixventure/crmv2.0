@@ -1149,7 +1149,7 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
   const [expanded, setExpanded] = useState({});      // group key → true (sub-parts open)
   const [agents, setAgents] = useState([]);
   const [assignTo, setAssignTo] = useState('');
-  const [assignMethod, setAssignMethod] = useState('tra');
+  const [assignWt, setAssignWt] = useState('tra');   // tra | rcm | closer_sales | closer_dispo
   const [assigning, setAssigning] = useState(false);
   const [sortKey, setSortKey] = useState('time');
   const [sortDir, setSortDir] = useState('desc');
@@ -1257,15 +1257,18 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
   const clearSel = () => setSel({});
   const toggleExpand = (key) => setExpanded(m => ({ ...m, [key]: !m[key] }));
 
-  // suggest method from selection: all transferred → TRA, else RCM
+  // suggest work type from selection: all transferred → TRA, all not → RCM
   useEffect(() => {
     const s = Object.values(sel);
     if (!s.length) return;
-    setAssignMethod(s.every(g => g.transferred) ? 'tra' : s.every(g => !g.transferred) ? 'rcm' : assignMethod);
+    setAssignWt(s.every(g => g.transferred) ? 'tra' : s.every(g => !g.transferred) ? 'rcm' : assignWt);
   }, [selCount]); // eslint-disable-line
 
+  const WT_LABEL = { tra: 'TRA', rcm: 'RCM', closer_sales: 'Closed Sale', closer_dispo: 'Unclosed Sale' };
   const assign = async () => {
-    if (!assignTo) return toast.error('Pick a QA agent');
+    const equal = assignTo === '__equal__';
+    if (!assignTo) return toast.error('Pick a QA agent (or “All QA agents — equal split”)');
+    if (equal && allMode) return toast.error('Equal split needs one company — pick a company in the header first.');
     setAssigning(true);
     try {
       // one task per selected group: the primary clip + all its dials as parts
@@ -1278,9 +1281,11 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
           parts: g.parts.map(x => ({ box_id: x.box_id, recording_id: x.recording_id, lead_id: x.lead_id, location: x.location, start_time: x.start_time, duration: x.duration, agent_user: x.agent_user })),
         };
       });
-      const r = await client.post('qa/assignments/from-recordings', { company_id: agentScope, assigned_to: assignTo, method: assignMethod, subject_role: 'fronter', date, recordings });
+      const body = { company_id: agentScope, work_type: assignWt, date, recordings };
+      if (equal) body.distribute_equally = true; else body.assigned_to = assignTo;
+      const r = await client.post('qa/assignments/from-recordings', body);
       const extra = [r.data.skipped ? `${r.data.skipped} already assigned` : '', r.data.skipped_no_company ? `${r.data.skipped_no_company} unmapped company` : ''].filter(Boolean).join(', ');
-      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${assignMethod.toUpperCase()} task(s)${extra ? ` (${extra})` : ''}`);
+      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${WT_LABEL[assignWt]} call(s)${r.data.distributed ? ` split equally across ${r.data.agents} agent(s)` : ''}${extra ? ` (${extra})` : ''}`);
       else toast.error(r.data.error || `Nothing assigned${extra ? ` — ${extra}` : ''}`);
       clearSel();
     } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
@@ -1336,13 +1341,17 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
         <div className="flex items-center gap-2 flex-wrap mb-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-primary-600)' }}>
           <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{selCount} selected</span>
           <button onClick={clearSel} className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>
-          <ArrowRightLeft size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-          <select value={assignMethod} onChange={e => setAssignMethod(e.target.value)} style={inp}>
-            <option value="tra">as TRA</option><option value="rcm">as RCM</option>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>as</span>
+          <select value={assignWt} onChange={e => setAssignWt(e.target.value)} style={inp} title="Which of the 4 QA work types these calls become">
+            <option value="tra">TRA · Transfer (fronter)</option>
+            <option value="rcm">RCM · Random (fronter)</option>
+            <option value="closer_sales">Closed Sale (closer)</option>
+            <option value="closer_dispo">Unclosed Sale (closer)</option>
           </select>
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>to</span>
-          <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 170 }}>
+          <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 190 }}>
             <option value="">Select QA agent…</option>
+            <option value="__equal__">⚖ All QA agents — equal split</option>
             {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.role === 'qa_manager' ? ' (mgr)' : ''}</option>)}
           </select>
           <button onClick={assign} disabled={assigning || !assignTo} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"

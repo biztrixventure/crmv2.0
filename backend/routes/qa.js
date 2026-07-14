@@ -843,21 +843,41 @@ router.get('/agents', asyncHandler(async (req, res) => {
   res.json({ agents });
 }));
 
-// ── manager assigns raw day-recordings to a qa_agent as TRA/RCM tasks ─────────
+// ── manager assigns raw day-recordings as QA tasks ────────────────────────────
+// The ONE distribution path: the QA manager loads a dialer day and hands the
+// calls to QA agents. Accepts a WORK TYPE (tra|rcm|closer_sales|closer_dispo)
+// and either a single assigned_to OR distribute_equally:true (round-robin the
+// calls evenly across all the company's QA agents).
+const WT_TO_METHOD = { tra: 'tra', rcm: 'rcm', closer_sales: 'rcm', closer_dispo: 'rcm' };
+const WT_TO_ROLE   = { tra: 'fronter', rcm: 'fronter', closer_sales: 'closer', closer_dispo: 'closer' };
 router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
-  const { company_id, assigned_to, method, date } = req.body || {};
+  const { company_id, assigned_to, date } = req.body || {};
+  const distributeEqually = req.body?.distribute_equally === true;
   const recordings = Array.isArray(req.body?.recordings) ? req.body.recordings : [];
-  const subject_role = ['fronter', 'closer'].includes(req.body?.subject_role) ? req.body.subject_role : 'fronter';
+  // work_type is the new first-class selector; fall back to legacy `method`.
+  const work_type = WORK_TYPES.includes(req.body?.work_type) ? req.body.work_type
+    : (['tra', 'rcm'].includes(req.body?.method) ? req.body.method : null);
+  if (!work_type || !recordings.length) return res.status(400).json({ error: 'work_type (tra|rcm|closer_sales|closer_dispo) and recordings[] are required' });
+  const method = WT_TO_METHOD[work_type];
+  const subject_role = WT_TO_ROLE[work_type];
   const wantAll = company_id === '__all__';
   const companyId = wantAll ? null : (company_id || req.user.company_id);
-  if (!['tra', 'rcm'].includes(method) || !recordings.length) return res.status(400).json({ error: 'method (tra|rcm) and recordings[] are required' });
   const allowed = await allowedCompanyIds(req);
   if (!wantAll && allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
-  // if assigning straight to an agent, they must be bound to this method (mig 180)
-  if (assigned_to) {
-    const am = await agentMethods(assigned_to);
-    if (!am.includes(method)) return res.status(400).json({ error: `This agent isn't set up for ${method.toUpperCase()} — bind that method to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
+
+  // resolve the target agent(s): equal split across the company's QA agents, or
+  // a single agent. (No method-binding gate — Load-Day distribution is the
+  // manager's explicit choice.)
+  let targetAgents = [];
+  if (distributeEqually) {
+    if (wantAll) return res.status(400).json({ error: 'Pick one company to distribute equally.' });
+    const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+    targetAgents = [...new Set((ucr || []).filter(r => (Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level) === 'qa_agent').map(r => r.user_id))];
+    if (!targetAgents.length) return res.status(400).json({ error: 'No QA agents in this company to distribute to. Add a QA Agent first.' });
+  } else if (assigned_to) {
+    targetAgents = [assigned_to];
   }
 
   // Cross-company ("All my companies"): route each recording to the company its
@@ -870,8 +890,9 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
   const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
   let skippedNoCompany = 0;
+  let rr = 0;   // round-robin cursor for equal distribution
   const rows = recordings.filter(r => r && r.box_id && r.recording_id).map(r => ({
-    company_id: rowCompany(r), method, subject_role, source: 'day_recording',
+    company_id: rowCompany(r), method, subject_role, work_type, source: 'day_recording',
     transfer_id: r.transfer_id || null,
     // recording_ref = the primary clip + its sibling legs/redials (grouped by
     // number+agent) as `parts`, so the reviewer can hear every attempt like the
@@ -884,7 +905,9 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
     },
     recording_date: date || (r.start_time ? String(r.start_time).slice(0, 10) : null),
     subject_agent: r.agent_user || null,        // the reviewed agent's dialer id/login (name in recording_ref.agent_name)
-    assigned_to: assigned_to || null, assigned_by: req.user.id, assigned_at: now,
+    // even split across QA agents (round-robin), or the single chosen agent, or pool
+    assigned_to: targetAgents.length ? targetAgents[rr++ % targetAgents.length] : null,
+    assigned_by: req.user.id, assigned_at: now,
     sampled: method === 'rcm', status: 'pending',
   })).filter(row => {
     if (!row.company_id) { skippedNoCompany++; return false; }   // unresolved company (All mode) → skip, don't misfile
@@ -923,15 +946,16 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
       if (e1) skipped++; else inserted++;
     }
   }
-  if (assigned_to && inserted) {
-    notifyUsers([assigned_to], {
+  // notify every agent who received work (single or the whole equal-split set)
+  if (targetAgents.length && inserted) {
+    notifyUsers(targetAgents, {
       companyId: companyId || rows[0]?.company_id, type: 'qa_assignment',
-      title: `${inserted} ${method.toUpperCase()} call(s) assigned for QA`,
+      title: `New ${work_type.toUpperCase().replace('CLOSER_', '')} QA calls assigned`,
       message: 'A QA manager assigned recordings for you to review.',
-      data: { method, count: inserted },
+      data: { work_type, count: inserted },
     }).catch(() => {});
   }
-  res.json({ ok: true, inserted, skipped, skipped_no_company: skippedNoCompany });
+  res.json({ ok: true, inserted, skipped, skipped_no_company: skippedNoCompany, agents: targetAgents.length, distributed: distributeEqually });
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter
@@ -1601,31 +1625,23 @@ router.get('/admin/overview', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const { data: companies } = await supabaseAdmin.from('companies').select('id, name, company_type').order('name');
 
-  // coverage map: company_id → { tra:[names], rcm:[names] }, built once
-  const { data: cov } = await supabaseAdmin.from('qa_agent_methods').select('user_id, company_id, method');
-  const covUids = [...new Set((cov || []).map(r => r.user_id))];
-  let nameById = {};
-  if (covUids.length) {
-    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', covUids);
-    nameById = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p) || p.user_id.slice(0, 6)]));
-  }
-  const coverageByCo = {};
-  for (const r of (cov || [])) {
-    const co = (coverageByCo[r.company_id] ||= { tra: [], rcm: [] });
-    if (co[r.method] && !co[r.method].includes(nameById[r.user_id])) co[r.method].push(nameById[r.user_id] || '?');
+  // how many QA AGENTS are assigned to each company (for the card note)
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+    .select('company_id, custom_roles(level)').eq('is_active', true);
+  const agentsByCo = {};
+  for (const r of (ucr || [])) {
+    if ((Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level) === 'qa_agent') {
+      agentsByCo[r.company_id] = (agentsByCo[r.company_id] || 0) + 1;
+    }
   }
 
   const out = [];
   for (const c of (companies || [])) {
     const methods = await getConfig(c.id, 'qa.methods', []);
-    const { count } = await supabaseAdmin.from('qa_assignments')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', c.id).eq('status', 'pending').is('assigned_to', null);
     out.push({
       id: c.id, name: c.name, company_type: c.company_type,
       methods: Array.isArray(methods) ? methods : [],
-      coverage: coverageByCo[c.id] || { tra: [], rcm: [] },
-      unassigned: count || 0,
+      qa_agents: agentsByCo[c.id] || 0,
     });
   }
   res.json({ companies: out });

@@ -83,48 +83,13 @@ export default function QaAdminTab() {
       loadUsers(); loadRules();
     } catch { toast.error('Remove failed'); }
   };
-  const [pulling, setPulling] = useState(null);   // company id whose RCM is being pulled
-  const [rcmDay, setRcmDay] = useState({});        // company id → chosen YYYY-MM-DD
-  const pullRcm = async (co) => {
-    setPulling(co.id);
-    try {
-      const day = rcmDay[co.id] || undefined;      // default = yesterday (backend)
-      const r = await client.post('qa/admin/sample-rcm', { company_id: co.id, ...(day ? { date: day } : {}) });
-      const reasonMsg = {
-        no_mapped_users: 'no fronter/closer here has a dialer id mapped',
-        no_recordings_that_day: `no dialer calls found for ${r.data.day}`,
-        all_calls_are_in_crm: 'every call that day is already in the CRM (those are TRA, not RCM)',
-        already_sampled: 'already sampled',
-        nothing_new: 'nothing new to add',
-      };
-      if (r.data.sampled) toast.success(`Pulled ${r.data.sampled} random call(s) from ${r.data.day} and routed ${r.data.routed}.`);
-      else toast.info(`No RCM added for ${r.data.day} — ${reasonMsg[r.data.reason] || r.data.reason}.`, { duration: 7000 });
-      load();
-    } catch (e) { toast.error(e.response?.data?.error || 'Pull failed'); }
-    finally { setPulling(null); }
-  };
-  const yesterdayISO = () => { const d = new Date(Date.now() - 864e5); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
-  const [distributing, setDistributing] = useState(null);   // company id being distributed
-  const distribute = async (co) => {
-    setDistributing(co.id);
-    try {
-      const r = await client.post('qa/admin/auto-assign', { company_id: co.id });
-      const held = r.data.held || 0;
-      if (r.data.assigned) toast.success(`Routed ${r.data.assigned} task(s) to ${co.name}'s covering agents${held ? ` — ${held} waiting behind the workload cap` : ''}`);
-      else if (held) toast.info(`All covering reviewers are at their workload cap — ${held} task(s) will flow in as reviews get done.`);
-      else toast.info(co.coverage && (co.coverage.tra.length || co.coverage.rcm.length) ? 'Nothing waiting to route — all caught up.' : 'No covering agent yet. Assign work to a QA person below first.');
-      load();
-    } catch (e) { toast.error(e.response?.data?.error || 'Distribute failed'); }
-    finally { setDistributing(null); }
-  };
-  // bind an agent's review method(s) for a company (else manual assigns 400).
+  // bind an agent's review method(s) for a company (drives which scorecard).
   const setAgentMethod = async (userId, companyId, current, m) => {
     const methods = current.includes(m) ? current.filter(x => x !== m) : [...current, m];
     setUsers(us => us.map(u => u.user_id === userId ? { ...u, companies: u.companies.map(c => c.company_id === companyId ? { ...c, methods } : c) } : u));
     try { await client.put('qa/agent-methods', { user_id: userId, company_id: companyId, methods }); }
     catch { toast.error('Method update failed'); loadUsers(); }
   };
-
   return (
     <div className="space-y-6 pb-6">
       <div className="flex items-center gap-2 flex-wrap">
@@ -150,9 +115,8 @@ export default function QaAdminTab() {
         {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : <div className="space-y-2">
               {companies.map(co => {
-                const noCoverage = co.methods.length > 0 && !((co.coverage?.tra || []).length || (co.coverage?.rcm || []).length);
                 return (
-                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: noCoverage && co.unassigned > 0 ? '1px solid rgba(217,119,6,0.5)' : '1px solid var(--color-border)' }}>
+                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <div className="flex items-center gap-2 p-2.5">
                     <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                     <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
@@ -169,51 +133,13 @@ export default function QaAdminTab() {
                       <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
                     </button>
                   </div>
-                  {/* who reviews this company's calls + waiting work */}
+                  {/* who's a QA reviewer here — assignment happens in the QA
+                      manager's Load Day (fetch a dialer day → distribute). */}
                   {co.methods.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
-                      <span className="text-[10px] font-bold uppercase inline-flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>Reviewers
-                        <InfoTip text="The QA people currently set up to receive this company's calls, per review type. 'nobody yet' = tasks are being created but have no owner — assign a person in the QA Team below and they start flowing." />
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {co.qa_agents ? `${co.qa_agents} QA agent${co.qa_agents === 1 ? '' : 's'} assigned here` : 'No QA agents assigned yet'} · calls are distributed by the QA manager from Load Day
                       </span>
-                      {METHODS.filter(([k]) => co.methods.includes(k)).map(([k, l]) => {
-                        const names = (co.coverage?.[k]) || [];
-                        return (
-                          <span key={k} className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                            <span className="font-bold" style={{ color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{l}</span>
-                            {names.length ? <span style={{ color: 'var(--color-text-secondary)' }}>{names.join(', ')}</span> : <span style={{ color: 'var(--color-error-600)' }}>nobody yet</span>}
-                          </span>
-                        );
-                      })}
-                      {co.unassigned > 0 && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-lg" title="Review tasks created for this company that no QA person owns yet. They wait in the pool (and expire after the task-expiry days) until someone is assigned."
-                        style={{ background: 'rgba(217,119,6,0.12)', color: 'var(--color-warning-600)' }}>{co.unassigned} call{co.unassigned === 1 ? '' : 's'} waiting for a reviewer</span>}
-                      {co.methods.includes('rcm') && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{ background: 'rgba(217,119,6,0.10)', border: '1px solid rgba(217,119,6,0.35)' }}>
-                          <Shuffle size={11} style={{ color: 'var(--color-warning-600)' }} />
-                          <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-warning-600)' }}>Pull RCM</span>
-                          <input type="date" value={rcmDay[co.id] || yesterdayISO()} max={yesterdayISO()}
-                            onChange={e => setRcmDay(m => ({ ...m, [co.id]: e.target.value }))}
-                            title="Which day's random raw dialer calls to fetch. Defaults to yesterday — change it if yesterday was a day off (e.g. Sunday)."
-                            style={{ ...inp, fontSize: 11, padding: '2px 4px' }} onClick={e => e.stopPropagation()} />
-                          <button onClick={() => pullRcm(co)} disabled={pulling === co.id}
-                            className="text-[10px] font-bold px-2 py-0.5 rounded"
-                            style={{ background: 'var(--color-warning-600)', color: '#fff', opacity: pulling === co.id ? 0.6 : 1 }}
-                            title="Fetch that day's random raw dialer calls LIVE from the dialer now, and route them. Tells you exactly why if nothing comes.">
-                            {pulling === co.id ? <Loader2 size={11} className="animate-spin inline" /> : 'Fetch'}
-                          </button>
-                        </span>
-                      )}
-                      <button onClick={() => distribute(co)} disabled={distributing === co.id}
-                        className="ml-auto text-[11px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1"
-                        style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)', opacity: distributing === co.id ? 0.6 : 1 }}
-                        title="Hand the waiting calls to this company's reviewers now (does nothing while there are no reviewers)">
-                        {distributing === co.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Distribute
-                      </button>
-                    </div>
-                  )}
-                  {/* the one action that fixes a 'nobody yet' company, spelled out */}
-                  {noCoverage && co.unassigned > 0 && (
-                    <div className="px-2.5 pb-2.5 -mt-1 text-[11px] flex items-center gap-1.5" style={{ color: 'var(--color-warning-600)' }}>
-                      ⚠ Work is piling up with no reviewer. Fix: <b>QA Team below → pick a person → Assign work → {co.name}</b> — the waiting calls route to them instantly.
                     </div>
                   )}
                   {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} companyType={co.company_type} />}
@@ -223,35 +149,25 @@ export default function QaAdminTab() {
             </div>}
       </section>
 
-      {/* STEP 2 — QA TEAM: person-centric assignment console */}
+      {/* STEP 2 — QA TEAM: who is a QA reviewer, and in which companies */}
       <section>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={2} /> QA Team — pick a person, assign anything
-          <InfoTip w={300} text="Only QUALITY people show here (QA managers & agents — the Super Admin creates them). Click one to open their file: which companies they can work, what they currently listen to, and an Assign-work builder that combines everything — one/many/all agents, TRA, RCM, closer sales, closer-landed dispositions — in a single flow." />
+          <StepBadge n={2} /> QA Team — who reviews, and where
+          <InfoTip w={300} text="Every QA manager & agent (the Super Admin creates the accounts). Give a person access to the companies they should review. The actual call assignment is done by the QA MANAGER from Load Day — fetch a dialer day, then distribute the calls (equally or to one agent)." />
         </div>
-        <TeamConsole companies={companies || []} users={users} rules={rules}
-          reloadUsers={loadUsers} reloadRules={loadRules} reloadAll={load}
+        <TeamConsole companies={companies || []} users={users}
+          reloadUsers={loadUsers} reloadAll={load}
           removeAssign={removeAssign} setAgentMethod={setAgentMethod} />
-      </section>
-
-      {/* STEP 3 — read-only overview of the SAME assignments, grouped by company */}
-      <section>
-        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={3} /> Listening overview — by company
-          <InfoTip w={300} text="The same assignments you created in the QA Team console above, viewed by company: who listens to what in each one. Run now pulls matching calls and routes them immediately; pause/× manage a rule. New assignments are made in the QA Team console — one place only, no duplicates." />
-        </div>
-        <RulesSection rules={rules} reload={loadRules} />
       </section>
     </div>
   );
 }
 
 // ── STEP 2 — the person-centric console ──────────────────────────────────────
-function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reloadAll, removeAssign, setAgentMethod }) {
+function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, setAgentMethod }) {
   const [q, setQ] = useState('');
   const [lvl, setLvl] = useState('');
   const [sel, setSel] = useState(null);          // selected user_id
-  const [assigning, setAssigning] = useState(false);
   const [addCo, setAddCo] = useState('');        // add-to-company picker
   const [addLvl, setAddLvl] = useState('qa_agent');
   const [confirmRemove, setConfirmRemove] = useState(null);   // ucr_id awaiting confirmation
@@ -265,8 +181,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
   }, [users, q, lvl]);
 
   const person = (users || []).find(u => u.user_id === sel) || null;
-  const personRules = (rules || []).filter(r => r.reviewer_id === sel);
-  useEffect(() => { setAssigning(false); setAddCo(''); setConfirmRemove(null); }, [sel]);
+  useEffect(() => { setAddCo(''); setConfirmRemove(null); }, [sel]);
 
   const addToCompany = async () => {
     if (!person || !addCo) return;
@@ -275,15 +190,6 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
       toast.success(`${person.name} added as QA ${lvlLabel(addLvl).toLowerCase()}`);
       setAddCo(''); reloadUsers();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not add'); }
-  };
-
-  const toggleRule = async (rule) => {
-    try { await client.put(`qa/admin/rules/${rule.id}`, { is_active: !rule.is_active }); reloadRules(); }
-    catch { toast.error('Could not update rule'); }
-  };
-  const removeRule = async (rule) => {
-    try { await client.delete(`qa/admin/rules/${rule.id}`); toast.success('Assignment removed'); reloadRules(); }
-    catch { toast.error('Could not remove'); }
   };
 
   if (users === null) return <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />;
@@ -310,7 +216,6 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
         <div className="max-h-[380px] overflow-auto">
           {!shown.length ? <div className="text-[11px] p-3" style={{ color: 'var(--color-text-tertiary)' }}>No QA people match.</div>
             : shown.map(u => {
-              const nRules = (rules || []).filter(r => r.reviewer_id === u.user_id && r.is_active).length;
               const active = sel === u.user_id;
               return (
                 <button key={u.user_id} onClick={() => setSel(u.user_id)}
@@ -321,7 +226,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</span>
-                    <span className="block text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} co · {nRules} rule{nRules === 1 ? '' : 's'}</span>
+                    <span className="block text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} compan{u.companies.length === 1 ? 'y' : 'ies'}</span>
                   </span>
                   {u.open_tasks > 0 && (
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums" title={`${u.open_tasks} open call(s) on their plate right now`}
@@ -344,7 +249,7 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
         <div className="rounded-xl p-8 text-center" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
           <Headphones size={22} className="inline mb-2" style={{ color: 'var(--color-text-tertiary)' }} />
           <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Pick a QA person on the left</div>
-          <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Then assign them any combination: one or many agents to listen to, transfer calls (TRA), random calls (RCM), closer sales, closer-landed dispositions — all in one flow.</div>
+          <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Then give them access to the companies they should review. The QA manager assigns the actual calls from Load Day.</div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -358,26 +263,16 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
               <div className="flex items-center gap-1 mt-0.5">{person.levels.map(l => <span key={l} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}</div>
             </div>
             <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-lg tabular-nums"
-              title="Open (unscored) calls on their plate right now — routing pauses at the company's workload cap so they never drown"
+              title="Open (unscored) calls on their plate right now"
               style={(person.open_tasks || 0) >= 25 ? { background: 'rgba(220,38,38,0.10)', color: '#dc2626' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
               <Headphones size={11} /> {person.open_tasks || 0} on their plate
             </span>
-            <button onClick={() => setAssigning(a => !a)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold text-white"
-              style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>
-              <Headphones size={13} /> Assign work
-            </button>
           </div>
-
-          {/* the assign-work builder (person-fixed) */}
-          {assigning && (
-            <RuleBuilder companies={companies} fixedReviewer={person}
-              onDone={() => { setAssigning(false); reloadAll(); }} onCancel={() => setAssigning(false)} />
-          )}
 
           {/* company access */}
           <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <div className="text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
-              Company access <InfoTip text="The companies this person can work. For agents, TRA/RCM chips show which method they cover there (needed for manual assigns; work rules route regardless). × removes them from that company." />
+              Company access <InfoTip text="The companies this person can review. For agents, the TRA/RCM chips set which scorecard applies to that type. The QA manager then distributes the actual calls from Load Day. × removes them from that company." />
             </div>
             <div className="flex flex-wrap gap-1.5 items-center">
               {person.companies.map(c => {
@@ -424,38 +319,9 @@ function TeamConsole({ companies, users, rules, reloadUsers, reloadRules, reload
             </div>
           </div>
 
-          {/* their current listening assignments */}
-          <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <div className="text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
-              What they listen to <InfoTip text="Every listening assignment this person holds — the kinds of calls, whose calls, which company. Pause stops routing without deleting; × removes it." />
-              <span className="font-normal normal-case">— {personRules.length || 'none yet'}</span>
-            </div>
-            {!personRules.length ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned yet — click <b>Assign work</b> above.</div>
-              : <div className="space-y-1.5">
-                  {personRules.map(r => (
-                    <div key={r.id} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', opacity: r.is_active ? 1 : 0.45 }}>
-                      <Building2 size={12} className="mt-1" style={{ color: 'var(--color-text-tertiary)' }} />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>{r.company_name || r.company_id.slice(0, 6)}</div>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(r.work_types || []).map(k => { const d = wtDef(k); const I = d.icon; return (
-                            <span key={k} className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${d.tint}18`, color: d.tint }}><I size={10} />{d.label}</span>
-                          ); })}
-                          {(r.work_types || []).includes('closer_dispo') && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
-                              {(r.dispositions || []).length ? `dispo: ${r.dispositions.join(', ')}` : 'dispo: any non-SALE'}
-                            </span>
-                          )}
-                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
-                            {(r.subject_names || []).length ? <><User size={10} />{r.subject_names.join(', ')}</> : <><Users size={10} />all agents</>}
-                          </span>
-                        </div>
-                      </div>
-                      <button onClick={() => toggleRule(r)} className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={r.is_active ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.is_active ? 'Active' : 'Paused'}</button>
-                      <button onClick={() => removeRule(r)} title="Remove"><X size={13} style={{ color: 'var(--color-error-600)' }} /></button>
-                    </div>
-                  ))}
-                </div>}
+          <div className="text-[11px] p-2.5 rounded-xl leading-relaxed" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <Headphones size={12} className="inline mr-1" style={{ color: 'var(--color-primary-600)' }} />
+            Calls are assigned to this person by the <b>QA manager</b> in the <b>Load Day</b> screen — fetch a dialer day, then distribute the calls (equally across agents or to one). Here you only control which companies they can review.
           </div>
         </div>
       )}
