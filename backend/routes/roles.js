@@ -670,8 +670,11 @@ const CLOSER_DEFAULTS = [
 const QA_GLOBAL_ROLES = [
   {
     name: 'QA Manager', level: 'qa_manager',
-    description: 'Quality department lead — assigns reviews, builds scorecards, sees all QA reports',
-    permissions: ['view_qa_queue', 'submit_qa_review', 'assign_qa_tasks', 'manage_qa_config', 'override_qa_review', 'view_all_qa_reviews', 'view_qa_reports'],
+    description: 'Quality department lead — assigns reviews, builds scorecards, sees QA reports for their assigned companies',
+    // NO view_all_qa_reviews: a QA manager is scoped to the companies compliance
+    // assigns them (allowedCompanyIds → getUserCompanies). view_qa_reports still
+    // gives the manager cross-agent report visibility WITHIN those companies.
+    permissions: ['view_qa_queue', 'submit_qa_review', 'assign_qa_tasks', 'manage_qa_config', 'override_qa_review', 'view_qa_reports'],
   },
   {
     name: 'QA Agent', level: 'qa_agent',

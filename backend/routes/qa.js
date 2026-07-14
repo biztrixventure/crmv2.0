@@ -680,6 +680,15 @@ async function resolveDayAgents(req) {
   return await agentIdsForCompany(companyId);
 }
 
+// Day-recording cache lifetime (ms). Compliance sets qa.day_cache_days per
+// company (default 2); a fetched dialer day is kept and re-served that long
+// without re-hitting the dialer. Clamp 1..14 days.
+async function dayCacheTtl(companyId) {
+  const raw = Number(await getConfig(companyId, 'qa.day_cache_days', 2));
+  const days = Number.isFinite(raw) ? Math.min(14, Math.max(1, Math.round(raw))) : 2;
+  return days * 86400000;
+}
+
 // Disposition map (box|lead → code) for a set of recordings — per-lead
 // lead_field_info (cross-box), fully filled. Used by the synchronous path.
 async function buildDispoMap(rows) {
@@ -700,7 +709,8 @@ router.get('/day-dispositions', asyncHandler(async (req, res) => {
   if (agentRes.error) return res.status(agentRes.status || 400).json({ error: agentRes.error });
   if (!agentRes.ids.length) return res.json({ date, dispos: {}, dispo_counts: {}, remaining: 0, done: true });
 
-  const rows = await listDayRecordings({ date, agentIds: agentRes.ids });   // cached
+  const ttlMs = await dayCacheTtl(req.query.company_id || req.user.company_id);
+  const rows = await listDayRecordings({ date, agentIds: agentRes.ids, ttlMs });   // cached N days
   const pairs = rows.filter(r => r.lead_id).map(r => ({ boxId: r.box_id, leadId: r.lead_id }));
   const { map, remaining, total } = await resolveDispos(pairs, { budget: 900 });
 
@@ -726,7 +736,8 @@ router.get('/day-recordings', asyncHandler(async (req, res) => {
   const { ids, nameByAgent } = agentRes;
   if (!ids.length) return res.json({ date, agents: 0, total: 0, recordings: [], note: 'No dialer agent ids mapped for this company.' });
 
-  const rows = await listDayRecordings({ date, agentIds: ids });
+  const ttlMs = await dayCacheTtl(req.query.company_id || req.user.company_id);
+  const rows = await listDayRecordings({ date, agentIds: ids, ttlMs });
   const cls = await classifyTransferred(rows, req.query.company_id || req.user.company_id, date);
 
   // Disposition enrichment (bulk + per-lead fill). Skipped with ?dispo=0 so the
@@ -839,7 +850,16 @@ router.get('/agents', asyncHandler(async (req, res) => {
   const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
   const nameById = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
   const roleById = Object.fromEntries(qaRows.map(r => [r.user_id, levelOf(r.custom_roles)]));
-  const agents = ids.map(id => ({ id, name: nameById[id] || id, role: roleById[id] }));
+  // undone (pending + in_review) count per agent IN THIS company — drives the
+  // manager's per-agent workload + "clear undone" control.
+  const undone = {};
+  if (!scopeAll) {
+    const companyId = req.query.company_id || req.user.company_id;
+    const { data: open } = await supabaseAdmin.from('qa_assignments')
+      .select('assigned_to').eq('company_id', companyId).in('status', ['pending', 'in_review']).in('assigned_to', ids);
+    for (const r of (open || [])) if (r.assigned_to) undone[r.assigned_to] = (undone[r.assigned_to] || 0) + 1;
+  }
+  const agents = ids.map(id => ({ id, name: nameById[id] || id, role: roleById[id], undone: undone[id] || 0 }));
   res.json({ agents });
 }));
 
@@ -1464,7 +1484,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
-const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap'];
+const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id || req.user.company_id;
@@ -1502,6 +1522,30 @@ router.post('/materialize', asyncHandler(async (req, res) => {
   }
   const result = await materializeCompany(companyId, methods);
   res.json({ ok: true, ...result });
+}));
+
+// ── clear UNDONE work off QA agents ───────────────────────────────────────────
+// Deletes the still-pending / in-review (unscored) tasks for a company — or one
+// agent — so a manager can wipe leftover work. DONE (scored) reviews are NEVER
+// touched: they stay in Completed. Gated on assign_qa_tasks AND the compliance
+// toggle qa.manager_can_clear (superadmin always allowed).
+router.post('/clear-undone', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.body?.company_id || req.user.company_id;
+  if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  // compliance must have granted the clear right (superadmin bypasses)
+  if (!(await isSuperAdmin(req.user.id))) {
+    const can_clear = await getConfig(companyId, 'qa.manager_can_clear', false);
+    if (!can_clear) return res.status(403).json({ error: 'Clearing tasks is turned off for QA managers here. Compliance can enable it in the company settings.', code: 'CLEAR_DISABLED' });
+  }
+  let q = supabaseAdmin.from('qa_assignments').delete()
+    .eq('company_id', companyId).in('status', ['pending', 'in_review']);
+  if (req.body?.agent_id) q = q.eq('assigned_to', req.body.agent_id);
+  const { data, error } = await q.select('id');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, cleared: (data || []).length });
 }));
 
 // ── per-agent method binding (mig 180) ───────────────────────────────────────
@@ -1964,7 +2008,7 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
 
 // full per-company QA config (compliance controls each company's QA setup —
 // methods, RCM sampling, covers, TRA population, retention, card fields).
-const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap'];
+const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
 router.get('/admin/company-config', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;

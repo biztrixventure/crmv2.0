@@ -4,7 +4,7 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -2103,12 +2103,39 @@ const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true
 function AgentsTab({ companyId, canManage }) {
   const [agents, setAgents] = useState(null);
   const [fields, setFields] = useState(null);
+  const [undone, setUndone] = useState({});        // agentId → open (pending+in_review) count
+  const [canClear, setCanClear] = useState(false); // compliance-granted clear-tasks right
+  const [clearing, setClearing] = useState(null);  // agentId | '__all__' while a clear runs
 
   const load = useCallback(() => {
     client.get('qa/agent-methods', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => setAgents([]));
-    client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => setFields(DEFAULT_CARD_FIELDS));
+    client.get('qa/config', { params: { company_id: companyId } }).then(r => {
+      setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) });
+      setCanClear(!!r.data.config?.['qa.manager_can_clear']);
+    }).catch(() => setFields(DEFAULT_CARD_FIELDS));
+    client.get('qa/agents', { params: { company_id: companyId } })
+      .then(r => setUndone(Object.fromEntries((r.data.agents || []).map(a => [a.id, a.undone || 0]))))
+      .catch(() => setUndone({}));
   }, [companyId]);
   useEffect(() => { load(); }, [load]);
+
+  const totalUndone = Object.values(undone).reduce((s, n) => s + n, 0);
+  const clearUndone = async (agentId) => {
+    const who = agentId ? (agents?.find(a => a.id === agentId)?.name || 'this agent') : 'ALL QA agents';
+    const n = agentId ? (undone[agentId] || 0) : totalUndone;
+    if (!n) { toast('Nothing to clear — no un-scored tasks.'); return; }
+    if (!window.confirm(`Clear ${n} un-scored task(s) for ${who}?\n\nOnly PENDING / in-progress tasks are removed. Completed (scored) work stays.`)) return;
+    setClearing(agentId || '__all__');
+    try {
+      const body = { company_id: companyId };
+      if (agentId) body.agent_id = agentId;
+      const r = await client.post('qa/clear-undone', body);
+      toast.success(`Cleared ${r.data.cleared} un-scored task(s).`);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Could not clear tasks.');
+    } finally { setClearing(null); }
+  };
 
   const toggleMethod = async (agent, m) => {
     const methods = agent.methods.includes(m) ? agent.methods.filter(x => x !== m) : [...agent.methods, m];
@@ -2128,14 +2155,26 @@ function AgentsTab({ companyId, canManage }) {
       {/* agent → method binding */}
       <div>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. Manual assigns require the binding; compliance work rules route regardless. Bind one or both." /></div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to the company selected in the header picker. Bind one or both methods.</div>
+        <div className="text-[11px] mb-3 flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+          <span>Applies to the company selected in the header picker. Bind one or both methods.</span>
+          {canManage && canClear && agents?.length > 0 && (
+            <button onClick={() => clearUndone(null)} disabled={clearing !== null || !totalUndone}
+              className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
+              style={{ background: totalUndone ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: totalUndone ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', border: '1px solid currentColor', opacity: clearing !== null ? 0.6 : 1 }}
+              title="Delete every un-scored (pending / in-progress) task for all agents. Completed work stays.">
+              {clearing === '__all__' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Clear all un-scored ({totalUndone})
+            </button>
+          )}
+        </div>
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
           : <div className="space-y-2">
               {agents.map(a => (
                 <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <User size={15} style={{ color: 'var(--color-text-tertiary)' }} />
-                  <div className="min-w-0 flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
+                  <div className="min-w-0 flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}
+                    {undone[a.id] > 0 && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{undone[a.id]} to do</span>}
+                  </div>
                   {['tra', 'rcm'].map(m => {
                     const on = a.methods.includes(m);
                     return (
@@ -2148,6 +2187,13 @@ function AgentsTab({ companyId, canManage }) {
                       </button>
                     );
                   })}
+                  {canManage && canClear && (
+                    <button onClick={() => clearUndone(a.id)} disabled={clearing !== null || !undone[a.id]}
+                      className="p-1.5 rounded" title={undone[a.id] ? `Clear ${undone[a.id]} un-scored task(s) for ${a.name}. Completed work stays.` : 'No un-scored tasks'}
+                      style={{ background: 'transparent', color: undone[a.id] ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', opacity: (!undone[a.id] || clearing !== null) ? 0.4 : 1 }}>
+                      {clearing === a.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>}
@@ -2393,7 +2439,9 @@ export default function QAShell() {
   const canReports = isSuper || hasPermission('view_qa_reports');
   const canAssign = isSuper || hasPermission('assign_qa_tasks');
   const canOverride = isSuper || hasPermission('override_qa_review');
-  const [tab, setTab] = useState('queue');
+  // Manager starts on Day Recordings — the CRM "Queue" browser is disabled for
+  // now (QA is dialer-driven from Load Day).
+  const [tab, setTab] = useState('day');
 
   // A QA AGENT (no manager-side permission at all) gets the focused agent
   // console. ANY manager-side permission — assign, config, or reports — opens
@@ -2407,7 +2455,7 @@ export default function QAShell() {
   // concrete company, so they fall back to the primary company.
   const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
-    { key: 'queue', label: 'Queue', icon: ListChecks, show: true },
+    // { key: 'queue', ... }  ← CRM Transfers/Sales browser: DISABLED for now.
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: isSuper || canAssign },
     { key: 'agents', label: 'Agents', icon: UserPlus, show: isSuper || canAssign },
     { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: true },
@@ -2434,7 +2482,6 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'queue' && <QueueTab canOverride={canOverride} canManage={canManage} selfId={user?.id} companyId={scoped} />}
         {tab === 'day' && <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />}
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}

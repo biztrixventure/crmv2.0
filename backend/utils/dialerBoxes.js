@@ -420,15 +420,19 @@ function phoneFromLocation(loc) {
 // Returns rows enriched with the customer phone parsed from the filename.
 const _dayCache = new Map();   // key → { at, rows }
 const DAY_TTL = 15 * 60 * 1000;
-async function listDayRecordings({ date, agentIds = [], concurrency = 15 } = {}) {
+// ttlMs overrides the default cache lifetime — the QA day browser passes the
+// compliance-configured window (qa.day_cache_days) so a fetched day is kept and
+// re-served for N days without hitting the dialer again.
+async function listDayRecordings({ date, agentIds = [], concurrency = 15, ttlMs } = {}) {
   const day = String(date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
   const ids = [...new Set((agentIds || []).filter(Boolean).map(a => String(a).toUpperCase()))];
   if (!ids.length) return [];
 
+  const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : DAY_TTL;
   const key = day + '|' + ids.slice().sort().join(',');
   const hit = _dayCache.get(key);
-  if (hit && Date.now() - hit.at < DAY_TTL) return hit.rows;
+  if (hit && Date.now() - hit.at < ttl) return hit.rows;
 
   const boxes = BOXES;
   const tasks = [];

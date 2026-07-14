@@ -684,6 +684,20 @@ function CompanyConfig({ companyId, methods, companyType }) {
         <input type="number" min={5} max={200} value={cfg['qa.reviewer_cap'] ?? 25} onChange={e => setKey('qa.reviewer_cap', Math.max(5, Math.min(200, +e.target.value || 25)))} style={{ ...inp, width: 60 }} />
         <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>open calls</span>
       </Row>
+      <Row title="Keep a loaded day for"
+        sub="Once the QA manager loads a dialer day for this company, the calls are cached this long — reloading the same day is instant and doesn't hit the dialer again."
+        tip="How long a fetched Load Day stays cached. Higher = fewer dialer fetches but staler dispositions. 2 days is a good default.">
+        <input type="number" min={1} max={14} value={cfg['qa.day_cache_days'] ?? 2} onChange={e => setKey('qa.day_cache_days', Math.max(1, Math.min(14, +e.target.value || 2)))} style={{ ...inp, width: 60 }} />
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>days</span>
+      </Row>
+      <Row title="QA manager can clear tasks"
+        sub="Lets this company's QA manager delete un-scored (pending / in-progress) tasks off their agents' queues. Completed, scored work is always kept."
+        tip="When on, the QA manager sees a 'clear un-scored' control per agent and for the whole team. Only pending / in-progress tasks are removed — scored reviews stay. Off by default.">
+        <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <input type="checkbox" checked={!!cfg['qa.manager_can_clear']} onChange={e => setKey('qa.manager_can_clear', e.target.checked)} />
+          {cfg['qa.manager_can_clear'] ? 'Allowed' : 'Not allowed'}
+        </label>
+      </Row>
     </div>
   );
 }
