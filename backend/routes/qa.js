@@ -994,6 +994,257 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   res.json({ ok: true, inserted, skipped, skipped_no_company: skippedNoCompany, agents: targetAgents.length, distributed: distributeEqually });
 }));
 
+// ── CRM-day fetch: the three sections that already live in the CRM ────────────
+// TRA (fronter transfer leg), Closed Sale (closer leg), Unclosed Sale (closer
+// leg of a transfer that never became a sale). RCM is dialer-only — handled by
+// the day-recording browser above. This path is CRM-first: the CRM is the
+// authoritative list of the day's calls, and recordings attach to each row (they
+// resolve at play time via the candidates endpoint, which already handles the
+// cross-box fronter/closer split). Nothing here touches the dialer-driven flow.
+//
+// A "sale happened" = a linked sale in one of these statuses (a sale CALL took
+// place; cancelled = sold then cancelled — still worth reviewing).
+const SOLD_SALE_STATUSES = ['closed_won', 'pending_review', 'cancelled'];
+
+function dayBounds(date) {
+  const d = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const start = new Date(d + 'T00:00:00.000Z');
+  const end = new Date(start.getTime() + 86400000);
+  return { start: start.toISOString(), end: end.toISOString(), day: d };
+}
+const isPastDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < new Date().toISOString().slice(0, 10);
+
+// Build the day's three CRM sections for a company. Rows are shaped for both the
+// preview and the assign path (transfer_id/sale_id + subject_role + hints).
+async function buildCrmDay(companyId, date) {
+  const b = dayBounds(date);
+  if (!b) return null;
+  const { data: transfers } = await supabaseAdmin.from('transfers')
+    .select('id, vicidial_vendor_code, vicidial_agent, normalized_phone, created_at, created_by, assigned_closer_id')
+    .eq('company_id', companyId).gte('created_at', b.start).lt('created_at', b.end);
+  const tids = (transfers || []).map(t => t.id);
+  let sales = [];
+  if (tids.length) {
+    // chunk the .in() so a big day can't overflow the PostgREST URL
+    for (let i = 0; i < tids.length; i += 150) {
+      const { data } = await supabaseAdmin.from('sales')
+        .select('id, transfer_id, customer_phone, normalized_phone, sale_date, closer_id, status, vicidial_vendor_code, vicidial_agent')
+        .in('transfer_id', tids.slice(i, i + 150)).in('status', SOLD_SALE_STATUSES);
+      if (data) sales.push(...data);
+    }
+  }
+  const saleByTransfer = {};
+  for (const s of sales) if (!saleByTransfer[s.transfer_id]) saleByTransfer[s.transfer_id] = s;
+
+  const tra = [], closer_sales = [], closer_dispo = [];
+  for (const t of (transfers || [])) {
+    tra.push({ transfer_id: t.id, subject_role: 'fronter', phone: t.normalized_phone, agent: t.vicidial_agent || null, date: b.day, has_code: !!t.vicidial_vendor_code });
+    const s = saleByTransfer[t.id];
+    if (s) closer_sales.push({ sale_id: s.id, transfer_id: t.id, subject_role: 'closer', phone: s.customer_phone || s.normalized_phone || t.normalized_phone, closer_id: s.closer_id || t.assigned_closer_id || null, date: b.day, has_code: !!s.vicidial_vendor_code, status: s.status });
+    else closer_dispo.push({ transfer_id: t.id, subject_role: 'closer', phone: t.normalized_phone, closer_id: t.assigned_closer_id || null, date: b.day, has_code: false });
+  }
+  return { day: b.day, tra, closer_sales, closer_dispo };
+}
+
+// vicidial agent ids for a set of CRM user ids (the closers' dialer logins).
+async function agentIdsForUsers(userIds) {
+  const uids = [...new Set((userIds || []).filter(Boolean))];
+  if (!uids.length) return { byUser: {}, all: [] };
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, vicidial_agent_ids').in('user_id', uids);
+  const byUser = {}; const all = new Set();
+  for (const p of (profs || [])) { const ids = (p.vicidial_agent_ids || []).filter(Boolean).map(a => String(a).toUpperCase()); byUser[p.user_id] = ids; ids.forEach(a => all.add(a)); }
+  return { byUser, all: [...all] };
+}
+
+// Best-effort lead-id backfill from the fetched dialer day. Matches each CRM row
+// missing a lead code by phone; on ambiguity (a phone dialed more than once that
+// day) it REQUIRES an agent match (agent+phone) and otherwise SKIPS — never
+// writes a possibly-wrong lead id. Writes only-when-empty and logs every write.
+//   • tra          → transfers.vicidial_vendor_code (fronter leg), company agents
+//   • closer_sales → sales.vicidial_vendor_code (closer leg), the closers' agents
+//   • closer_dispo → NOT written (the transfer's code is the fronter leg; the
+//                    unclosed closer leg has no CRM home — it resolves live)
+async function backfillLeadIds({ companyId, date, items, work_type, closerAgentsByUser, userId }) {
+  if (work_type === 'closer_dispo') return 0;
+  const table = work_type === 'closer_sales' ? 'sales' : 'transfers';
+  const leg = work_type === 'tra' ? 'fronter' : 'closer';
+  const need = items.filter(it => !it.has_code && it.phone && (work_type === 'closer_sales' ? it.sale_id : it.transfer_id));
+  if (!need.length) return 0;
+
+  // dialer agent ids to fetch the day for
+  let agentIds = [];
+  if (leg === 'fronter') agentIds = (await agentIdsForCompany(companyId)).ids;
+  else agentIds = [...new Set(need.flatMap(it => closerAgentsByUser?.[it.closer_id] || []))];
+  if (!agentIds.length) return 0;
+
+  const dayRows = await listDayRecordings({ date, agentIds });
+  if (!dayRows.length) return 0;
+  const prefixByBox = Object.fromEntries(getBoxes().map(x => [x.id, x.prefix]));
+  const byPhone = new Map();
+  for (const r of dayRows) { const t = phoneTail(r.phone); if (!t || !r.lead_id) continue; if (!byPhone.has(t)) byPhone.set(t, []); byPhone.get(t).push(r); }
+
+  let n = 0;
+  for (const it of need) {
+    const tail = phoneTail(it.phone); if (!tail) continue;
+    const pool = byPhone.get(tail) || [];
+    if (!pool.length) continue;
+    let cands = pool, matchedBy = 'phone_date';
+    if (pool.length > 1) {
+      // ambiguous → disambiguate by agent (agent+phone). tra uses the transfer's
+      // fronter agent; closer legs use the closer's own dialer ids.
+      const agentSet = new Set((leg === 'fronter'
+        ? [it.agent]
+        : (closerAgentsByUser?.[it.closer_id] || [])).filter(Boolean).map(a => String(a).toUpperCase()));
+      if (!agentSet.size) continue;
+      cands = pool.filter(c => agentSet.has(String(c.agent_user || '').toUpperCase()));
+      matchedBy = 'agent_phone_date';
+      if (cands.length !== 1) continue;   // still ambiguous / none → leave for manual
+    }
+    const hit = cands[0];
+    const prefix = prefixByBox[hit.box_id]; if (!prefix || !hit.lead_id) continue;
+    const vendor = `${prefix}${hit.lead_id}`;
+    const recId = work_type === 'closer_sales' ? it.sale_id : it.transfer_id;
+    // only-when-empty guard at the DB (never overwrite an existing code)
+    const { data: wrote } = await supabaseAdmin.from(table)
+      .update({ vicidial_vendor_code: vendor, vicidial_agent: hit.agent_user || null })
+      .eq('id', recId).is('vicidial_vendor_code', null).select('id');
+    if (wrote && wrote.length) {
+      n++; it.has_code = true;
+      await supabaseAdmin.from('qa_lead_backfill_log').insert({
+        record_type: table === 'sales' ? 'sale' : 'transfer', record_id: recId, company_id: companyId,
+        leg, box_id: hit.box_id, lead_id: String(hit.lead_id), vendor_code: vendor,
+        agent: hit.agent_user || null, phone: it.phone, matched_by: matchedBy, created_by: userId,
+      }).catch(() => {});
+    }
+  }
+  return n;
+}
+
+// GET /qa/crm-day?company_id=&date=YYYY-MM-DD — preview the day's 3 CRM sections
+// with counts + how many are already assigned, so the manager can distribute.
+router.get('/crm-day', asyncHandler(async (req, res) => {
+  if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
+  const companyId = req.query.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  const date = String(req.query.date || '').slice(0, 10);
+  if (!dayBounds(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD required' });
+  if (!isPastDate(date)) return res.status(400).json({ error: 'Pick a past date — today’s calls are still in progress.' });
+
+  const s = await buildCrmDay(companyId, date);
+  // already-assigned counts for the day (recording_date), per work_type
+  const assigned = { tra: 0, closer_sales: 0, closer_dispo: 0 };
+  const { data: asg } = await supabaseAdmin.from('qa_assignments')
+    .select('work_type').eq('company_id', companyId).eq('recording_date', date)
+    .in('work_type', ['tra', 'closer_sales', 'closer_dispo']);
+  for (const r of (asg || [])) if (assigned[r.work_type] != null) assigned[r.work_type]++;
+
+  const linkable = (rows) => rows.filter(r => r.has_code).length;
+  res.json({
+    day: s.day,
+    sections: {
+      tra:          { total: s.tra.length,          linked: linkable(s.tra),          assigned: assigned.tra },
+      closer_sales: { total: s.closer_sales.length, linked: linkable(s.closer_sales), assigned: assigned.closer_sales },
+      closer_dispo: { total: s.closer_dispo.length, linked: linkable(s.closer_dispo), assigned: assigned.closer_dispo },
+    },
+  });
+}));
+
+// POST /qa/assignments/from-crm { company_id, date, work_type, distribute_equally|assigned_to, backfill }
+// Builds the section server-side (authoritative — never trusts a client list) and
+// creates CRM-anchored QA tasks, equal-split across the company's QA agents or to
+// one agent. Optionally backfills lead ids from the dialer day first.
+router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
+  const work_type = req.body?.work_type;
+  if (!['tra', 'closer_sales', 'closer_dispo'].includes(work_type)) {
+    return res.status(400).json({ error: 'work_type must be tra | closer_sales | closer_dispo (RCM uses the dialer path)' });
+  }
+  const companyId = req.body?.company_id || req.user.company_id;
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  const date = String(req.body?.date || '').slice(0, 10);
+  if (!dayBounds(date)) return res.status(400).json({ error: 'date=YYYY-MM-DD required' });
+  if (!isPastDate(date)) return res.status(400).json({ error: 'Pick a past date — today’s calls are still in progress.' });
+  const distributeEqually = req.body?.distribute_equally === true;
+  const doBackfill = req.body?.backfill !== false;   // default on
+
+  const s = await buildCrmDay(companyId, date);
+  const items = s[work_type] || [];
+  if (!items.length) return res.json({ ok: true, inserted: 0, skipped: 0, backfilled: 0, note: 'No records in this section for that day.' });
+
+  // closer legs need the closers' dialer ids (for backfill + subject_agent)
+  let closerAgentsByUser = {};
+  if (work_type !== 'tra') {
+    const { byUser } = await agentIdsForUsers(items.map(it => it.closer_id));
+    closerAgentsByUser = byUser;
+  }
+
+  let backfilled = 0;
+  if (doBackfill) {
+    try { backfilled = await backfillLeadIds({ companyId, date, items, work_type, closerAgentsByUser, userId: req.user.id }); }
+    catch (e) { logger.warn('QA', `crm-day backfill: ${e.message}`); }
+  }
+
+  // resolve target QA agent(s)
+  let targetAgents = [];
+  if (distributeEqually) {
+    const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+    targetAgents = [...new Set((ucr || []).filter(r => (Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level) === 'qa_agent').map(r => r.user_id))];
+    if (!targetAgents.length) return res.status(400).json({ error: 'No QA agents in this company to distribute to. Add a QA Agent first.' });
+  } else if (req.body?.assigned_to) {
+    targetAgents = [req.body.assigned_to];
+  }
+
+  const method = WT_TO_METHOD[work_type];
+  const subject_role = WT_TO_ROLE[work_type];
+  const now = new Date().toISOString();
+  let rr = 0;
+  const rows = items.map(it => ({
+    company_id: companyId, method, subject_role, work_type, source: 'day_recording',
+    transfer_id: it.transfer_id || null, sale_id: it.sale_id || null,
+    recording_date: date,
+    subject_agent: work_type === 'tra' ? (it.agent || null) : ((closerAgentsByUser[it.closer_id] || [])[0] || null),
+    assigned_to: targetAgents.length ? targetAgents[rr++ % targetAgents.length] : null,
+    assigned_by: req.user.id, assigned_at: now,
+    sampled: false, status: 'pending',
+  }));
+
+  // enrich customer identity (CRM-first), bounded
+  const ENRICH_CAP = 400;
+  const dialerBudget = { n: 60 };
+  const toEnrich = rows.slice(0, ENRICH_CAP);
+  for (let i = 0; i < toEnrich.length; i += 25) {
+    await Promise.all(toEnrich.slice(i, i + 25).map(async (row) => {
+      Object.assign(row, await resolveCustomer({ companyId: row.company_id, transferId: row.transfer_id, saleId: row.sale_id, dialerBudget }));
+    }));
+  }
+
+  // insert; unique (transfer_id|sale_id, method) drops already-assigned rows
+  let inserted = 0, skipped = 0;
+  const { data, error } = await supabaseAdmin.from('qa_assignments').insert(rows).select('id');
+  if (error && !/duplicate key|unique/i.test(error.message)) return res.status(500).json({ error: error.message });
+  if (!error) inserted = (data || []).length;
+  else {
+    for (const row of rows) {
+      const { error: e1 } = await supabaseAdmin.from('qa_assignments').insert(row);
+      if (e1) skipped++; else inserted++;
+    }
+  }
+
+  if (targetAgents.length && inserted) {
+    notifyUsers(targetAgents, {
+      companyId, type: 'qa_assignment',
+      title: `New ${work_type.toUpperCase().replace('CLOSER_', '')} QA calls assigned`,
+      message: 'A QA manager assigned CRM calls for you to review.',
+      data: { work_type, count: inserted },
+    }).catch(() => {});
+  }
+  res.json({ ok: true, inserted, skipped, backfilled, agents: targetAgents.length, distributed: distributeEqually });
+}));
+
 // resolve the scorecard for a (company, method): company override → global starter
 async function resolveScorecard(companyId, method) {
   const cfgId = await getConfig(companyId, `qa.scorecard.${method}`, null);

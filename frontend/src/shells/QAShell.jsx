@@ -1126,6 +1126,107 @@ function groupRecordings(recs) {
   return out.sort((a, b) => String(b.latest || '').localeCompare(String(a.latest || '')));
 }
 
+// ── CRM-day panel: score the three sections that already live in the CRM ──────
+// TRA (transfer calls), Closed Sales, Unclosed Sales — pulled from the CRM for a
+// chosen past day and handed to QA agents (equal split or one agent). Recordings
+// attach automatically; RCM stays in the dialer browser below. This is the
+// CRM-first path: the CRM is the authoritative day, so nothing is missed.
+const CRM_WT = [
+  { key: 'tra',          label: 'TRA · Transfers',   tint: '#2563eb', Icon: ArrowRightLeft, hint: 'Every fronter transfer call in the CRM for this day.' },
+  { key: 'closer_sales', label: 'Closed Sales',      tint: '#059669', Icon: DollarSign,     hint: 'Closer calls that closed a sale (the closer leg).' },
+  { key: 'closer_dispo', label: 'Unclosed Sales',    tint: '#dc2626', Icon: PhoneOff,       hint: 'Transfers a closer worked but did NOT close (the closer leg).' },
+];
+function CrmDayPanel({ companyId, scoped, canAssign }) {
+  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const [date, setDate] = useState(yesterday);
+  const [data, setData] = useState(null);      // { day, sections:{tra,closer_sales,closer_dispo} }
+  const [loading, setLoading] = useState(false);
+  const [agents, setAgents] = useState([]);
+  const [assignTo, setAssignTo] = useState('__equal__');
+  const [busy, setBusy] = useState('');
+  const allMode = companyId === ALL_CO;
+  const co = scoped;
+
+  useEffect(() => { if (canAssign && co) client.get('qa/agents', { params: { company_id: co } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else setAgents([]); }, [canAssign, co]);
+  useEffect(() => { setData(null); }, [companyId]);
+
+  const load = async () => {
+    if (allMode || !co) return toast.error('Pick one company in the header first.');
+    setLoading(true); setData(null);
+    try { const r = await client.get('qa/crm-day', { params: { company_id: co, date } }); setData(r.data); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not load the day.'); }
+    finally { setLoading(false); }
+  };
+  const assign = async (wt) => {
+    if (!assignTo) return toast.error('Pick a QA agent or “equal split”.');
+    setBusy(wt);
+    try {
+      const body = { company_id: co, date, work_type: wt };
+      if (assignTo === '__equal__') body.distribute_equally = true; else body.assigned_to = assignTo;
+      const r = await client.post('qa/assignments/from-crm', body);
+      const label = CRM_WT.find(w => w.key === wt)?.label || wt;
+      const bf = r.data.backfilled ? `, linked ${r.data.backfilled} lead id(s)` : '';
+      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${label}${r.data.distributed ? ` split across ${r.data.agents} agent(s)` : ''}${bf}`);
+      else toast.message(`${r.data.note || 'Nothing new to assign'}${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}${bf}`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <div className="mb-4 p-3 rounded-xl" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Score the CRM day</span>
+        <InfoTip w={320} text="The three sections that are already in the CRM: TRA (transfer calls), Closed Sales, and Unclosed Sales. Pick a past day, Load, then hand each section to your QA agents (equal split or one agent). Recordings attach automatically. RCM (raw dialer calls, never in the CRM) is the browser below." />
+        <label className="flex items-center gap-1 text-xs ml-2" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} /> Day</label>
+        <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
+        <button onClick={load} disabled={loading} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+          style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: loading ? 0.5 : 1 }}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Load day
+        </button>
+        {canAssign && (
+          <label className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-secondary)' }}>Assign to
+            <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 180 }}>
+              <option value="__equal__">⚖ All QA agents — equal split</option>
+              {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.undone ? ` · ${a.undone} to do` : ''}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {allMode && <div className="text-[11px] mb-1" style={{ color: 'var(--color-warning-600)' }}>Pick one company in the top-right header to score its CRM day.</div>}
+      {!data ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a past day and press <b>Load day</b> to see its transfers and sales.</div>
+        : <div className="grid grid-cols-3 gap-2.5">
+            {CRM_WT.map(({ key, label, tint, Icon, hint }) => {
+              const s = data.sections[key] || { total: 0, linked: 0, assigned: 0 };
+              const remaining = Math.max(0, s.total - s.assigned);
+              return (
+                <div key={key} className="p-2.5 rounded-xl" style={{ background: `${tint}0d`, border: `1px solid ${tint}33` }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Icon size={14} style={{ color: tint }} />
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{label}</span>
+                    <InfoTip text={hint} />
+                  </div>
+                  <div className="text-2xl font-extrabold tabular-nums" style={{ color: tint }}>{s.total}</div>
+                  <div className="text-[10px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {s.assigned} assigned · <b style={{ color: 'var(--color-text-secondary)' }}>{remaining}</b> left
+                    {key !== 'closer_dispo' && <> · {s.linked}/{s.total} lead-linked</>}
+                  </div>
+                  {canAssign && (
+                    <button onClick={() => assign(key)} disabled={!!busy || !remaining || !assignTo}
+                      className="w-full text-[11px] font-bold px-2 py-1.5 rounded-lg text-white inline-flex items-center justify-center gap-1"
+                      style={{ background: tint, opacity: (!!busy || !remaining || !assignTo) ? 0.45 : 1 }}>
+                      {busy === key ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                      {remaining ? `Assign ${remaining}` : 'All assigned'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>}
+    </div>
+  );
+}
+
 function DayRecordingsTab({ canAssign, companyId, scoped }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
   const [date, setDate] = useState(yesterday);
@@ -1295,8 +1396,8 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-1.5 mb-2">
-        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Day recordings</span>
-        <InfoTip text="Pull EVERY dialer call for a chosen day straight from VICIdial, grouped by number + agent and tagged Transferred (→ TRA) or not (→ RCM). Select the ones you want and Assign them to a QA agent as scoring tasks. Only the agents of the company picked in the top-right header are pulled." />
+        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Dialer calls · RCM &amp; raw</span>
+        <InfoTip text="Raw dialer calls for a day (for RCM — the random calls never entered in the CRM). Pull EVERY call straight from VICIdial, grouped by number + agent and tagged Transferred or not. Select and assign as scoring tasks. TRA / Closed / Unclosed are scored from the CRM panel above. Only the agents of the company picked in the top-right header are pulled." />
         <span className="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
           <Building2 size={11} />{companyId === ALL_CO ? 'All my companies' : 'Selected company'}
         </span>
@@ -2482,7 +2583,10 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
-        {tab === 'day' && <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />}
+        {tab === 'day' && <>
+          <CrmDayPanel companyId={companyId} scoped={scoped} canAssign={isSuper || canAssign} />
+          <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />
+        </>}
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
