@@ -16,6 +16,7 @@ import { fmtSaleDate } from '../../utils/timezone';
 import { useAuth } from '../../contexts/AuthContext';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
+import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -31,6 +32,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // with legacy statuses always render correctly.
   const { allStatuses: cfgAll, editStatuses: cfgEdit, labelOf, badgeOf } = useComplianceStatuses();
   const { activeReasons: cancelReasonChoices } = useCancellationReasons();
+  const { colorFor: highlightFor } = useSaleHighlight();
   const ALL_SALE_STATUSES        = cfgAll?.length  ? cfgAll  : FALLBACK_ALL;
   const COMPLIANCE_EDIT_STATUSES = cfgEdit?.length ? cfgEdit : FALLBACK_EDIT;
   const [sales, setSales]       = useState([]);
@@ -342,19 +344,28 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               <tbody>
                 {sales.map(s => {
                   const focused = focusedId && String(focusedId) === String(s.id);
+                  const hl = highlightFor(s);                       // config-driven duplicate-sale tint
+                  const baseBg = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'transparent');
+                  const dupN = s.dupe_active_count || 0;
                   return (
                   <Fragment key={s.id}>
                     <tr className="cursor-pointer"
                       ref={focused ? focusRef : null}
                       style={{ borderBottom: '1px solid var(--color-border)',
-                        backgroundColor: focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent',
-                        boxShadow: focused ? 'inset 3px 0 0 var(--color-primary-500, #6366f1)' : 'none',
+                        backgroundColor: baseBg,
+                        boxShadow: focused ? 'inset 3px 0 0 var(--color-primary-500, #6366f1)' : (hl ? 'inset 3px 0 0 #f59e0b' : 'none'),
                         transition: 'background-color 0.3s' }}
                       onClick={() => setDetailSale(s)}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent'}>
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'var(--color-bg-secondary)')}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = baseBg}>
                       <td className="px-4 py-3">
-                        <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</p>
+                        <p className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}
+                          {dupN >= 2 && (
+                            <span title={`${dupN} live sales share this customer number${s.dupe_sale_count > dupN ? ` (${s.dupe_sale_count} total incl. cancelled)` : ''}`}
+                              className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full"
+                              style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{dupN}</span>
+                          )}
+                        </p>
                         <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{s.customer_phone || ''}</p>
                         {s.reference_no && (
                           <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</p>

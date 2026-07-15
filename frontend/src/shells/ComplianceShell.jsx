@@ -53,7 +53,7 @@ const CODE_TABS = [
   { key: 'number_lists', label: 'Number Assignment', icon: ListChecks, flag: 'number_assignment' },
   { key: 'bulk_status', label: 'Bulk Status Update', icon: ListChecks },
   { key: 'transfers',   label: 'Transfers',          icon: ArrowRight },
-  { key: 'double_sold', label: 'Double-Sold',        icon: AlertTriangle },
+  { key: 'double_sold', label: 'Duplicate Sold',     icon: AlertTriangle },
   { key: 'callbacks',   label: 'Callbacks',          icon: PhoneCall },
   { key: 'reviews',     label: 'Call Reviews',       icon: Star },
   { key: 'numbers',     label: 'Call Numbers',       icon: Hash },

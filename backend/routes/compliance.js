@@ -732,6 +732,125 @@ router.get('/double-sold', asyncHandler(async (req, res) => {
   res.json({ customers: out, total: out.length });
 }));
 
+// ── GET /compliance/duplicate-sold ────────────────────────────────────────────
+// The BROAD duplicate-sold report: every customer number (customer_uuid) with
+// >= 2 real sales (status <> 'open'). Surfaces the whole picture compliance
+// sorts/filters by — same number sold repeatedly (even in ONE company), the same
+// number tied to DIFFERENT client names, the same number worked by DIFFERENT
+// closers, cross-company double-sells — with the underlying sales for each group.
+// Reads v_duplicate_sold_customers (mig 193); falls back to an inline group.
+const DUP_SOLD_STATUSES = "('closed_won','pending_review','cancelled')";
+router.get('/duplicate-sold', asyncHandler(async (req, res) => {
+  const minSales = Math.max(2, parseInt(req.query.min_sales, 10) || 2);
+
+  // 1) the grouped signal rows (view first, inline fallback)
+  let groups = null;
+  const { data: viewRows, error: viewErr } = await supabaseAdmin
+    .from('v_duplicate_sold_customers').select('*');
+  if (!viewErr && Array.isArray(viewRows)) {
+    groups = viewRows;
+  } else {
+    const all = [];
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabaseAdmin.from('sales')
+        .select('customer_uuid, company_id, closer_id, client_name, customer_name, normalized_phone, reference_no, status, created_at')
+        .not('customer_uuid', 'is', null).neq('status', 'open').range(from, from + 999);
+      if (error) return res.status(500).json({ error: error.message });
+      all.push(...(data || []));
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    const m = new Map();
+    for (const s of all) {
+      let g = m.get(s.customer_uuid);
+      if (!g) { g = { customer_uuid: s.customer_uuid, rows: [] }; m.set(s.customer_uuid, g); }
+      g.rows.push(s);
+    }
+    groups = [...m.values()].filter(g => g.rows.length >= 2).map(g => {
+      const active = g.rows.filter(r => r.status === 'closed_won' || r.status === 'pending_review');
+      const newest = g.rows.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+      return {
+        customer_uuid: g.customer_uuid, sale_count: g.rows.length,
+        active_sale_count: active.length,
+        closed_won_count: g.rows.filter(r => r.status === 'closed_won').length,
+        pending_count: g.rows.filter(r => r.status === 'pending_review').length,
+        cancelled_count: g.rows.filter(r => r.status === 'cancelled').length,
+        company_count: new Set(g.rows.map(r => r.company_id)).size,
+        closer_count: new Set(g.rows.map(r => r.closer_id).filter(Boolean)).size,
+        client_count: new Set(g.rows.map(r => (r.client_name || '').trim().toLowerCase()).filter(Boolean)).size,
+        reference_count: new Set(g.rows.map(r => (r.reference_no || '').trim().toUpperCase()).filter(Boolean)).size,
+        company_ids: [...new Set(g.rows.map(r => r.company_id))],
+        first_sale_at: g.rows.reduce((a, b) => (a.created_at < b.created_at ? a : b)).created_at,
+        last_sale_at: newest.created_at,
+        customer_name: newest.customer_name, normalized_phone: newest.normalized_phone,
+      };
+    });
+  }
+  groups = groups.filter(g => g.sale_count >= minSales);
+  if (!groups.length) return res.json({ customers: [], total: 0 });
+
+  // 2) pull the underlying sales for each group (compact) — for the drill-down +
+  //    the closer/client/company lists. Chunk the .in() to stay under the URL cap.
+  const uuids = groups.map(g => g.customer_uuid);
+  const sales = [];
+  for (let i = 0; i < uuids.length; i += 100) {
+    const { data } = await supabaseAdmin.from('sales')
+      .select('id, customer_uuid, company_id, closer_id, client_name, reference_no, status, sale_date, created_at, monthly_payment')
+      .in('customer_uuid', uuids.slice(i, i + 100)).neq('status', 'open')
+      .order('created_at', { ascending: false });
+    if (data) sales.push(...data);
+  }
+
+  // 3) resolve company + closer names in one batch each
+  const coIds = [...new Set(sales.map(s => s.company_id).filter(Boolean))];
+  const clIds = [...new Set(sales.map(s => s.closer_id).filter(Boolean))];
+  const [{ data: cos }, { data: profs }] = await Promise.all([
+    coIds.length ? supabaseAdmin.from('companies').select('id, name').in('id', coIds) : Promise.resolve({ data: [] }),
+    clIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', clIds) : Promise.resolve({ data: [] }),
+  ]);
+  const coName = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+  const clName = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || null]));
+
+  const salesByUuid = new Map();
+  for (const s of sales) {
+    if (!salesByUuid.has(s.customer_uuid)) salesByUuid.set(s.customer_uuid, []);
+    salesByUuid.get(s.customer_uuid).push({
+      id: s.id, company: coName[s.company_id] || null, closer: clName[s.closer_id] || null,
+      client_name: s.client_name || null, reference_no: s.reference_no || null,
+      status: s.status, sale_date: s.sale_date, created_at: s.created_at,
+      monthly_payment: s.monthly_payment,
+    });
+  }
+
+  const out = groups.map(g => {
+    const rows = salesByUuid.get(g.customer_uuid) || [];
+    return {
+      customer_uuid: g.customer_uuid,
+      customer_name: g.customer_name || null,
+      phone: g.normalized_phone || null,
+      sale_count: g.sale_count,
+      active_sale_count: g.active_sale_count,
+      closed_won_count: g.closed_won_count,
+      pending_count: g.pending_count,
+      cancelled_count: g.cancelled_count,
+      company_count: g.company_count,
+      closer_count: g.closer_count,
+      client_count: g.client_count,
+      reference_count: g.reference_count,
+      companies: [...new Set(rows.map(r => r.company).filter(Boolean))],
+      closers: [...new Set(rows.map(r => r.closer).filter(Boolean))],
+      clients: [...new Set(rows.map(r => r.client_name).filter(Boolean))],
+      references: [...new Set(rows.map(r => r.reference_no).filter(Boolean))],
+      first_sale_at: g.first_sale_at,
+      last_sale_at: g.last_sale_at,
+      sales: rows,
+    };
+  });
+
+  res.json({ customers: out, total: out.length });
+}));
+
 // ── GET /compliance/users ─────────────────────────────────────────────────────
 // Returns all users (or filtered by company) for export user-selector.
 router.get('/users', asyncHandler(async (req, res) => {
@@ -888,6 +1007,27 @@ router.get('/sales', asyncHandler(async (req, res) => {
       user_profiles: profileMap[s.closer_id] || null,
     };
   });
+
+  // Duplicate-sale highlight: how many sales share this customer's number, and
+  // how many are LIVE (closed_won / pending_review). Read from the duplicate view
+  // which is recomputed on every read — so cancelling a sale drops the active
+  // count and the row's highlight changes on the next load. Best-effort.
+  try {
+    const dupUuids = [...new Set(enriched.map(s => s.customer_uuid).filter(Boolean))];
+    const dupBy = {};
+    for (let i = 0; i < dupUuids.length; i += 100) {
+      const { data: dv } = await supabaseAdmin.from('v_duplicate_sold_customers')
+        .select('customer_uuid, sale_count, active_sale_count, cancelled_count')
+        .in('customer_uuid', dupUuids.slice(i, i + 100));
+      for (const r of (dv || [])) dupBy[r.customer_uuid] = r;
+    }
+    for (const s of enriched) {
+      const d = dupBy[s.customer_uuid];
+      const live = s.status === 'closed_won' || s.status === 'pending_review';
+      s.dupe_sale_count   = d ? d.sale_count : 1;
+      s.dupe_active_count = d ? d.active_sale_count : (live ? 1 : 0);
+    }
+  } catch { /* highlight is best-effort — never fail the list over it */ }
 
   // True per-status totals for the WHOLE filtered set (so the stats strip is
   // consistent across pages — page-only counts made "Today" look bigger than

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -12,6 +12,7 @@ import NotificationsRules from './NotificationsRules';
 import DrawerLayoutRules from './DrawerLayoutRules';
 import SystemRules from './SystemRules';
 import BatchRules from './BatchRules';
+import SaleHighlightRules from './SaleHighlightRules';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -23,6 +24,7 @@ const PAGES = [
   { id: 'dedup',        label: 'Dedup & Search',         icon: Search,      Component: DedupRules },
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
+  { id: 'sale_highlight', label: 'Sale Highlight',       icon: Highlighter, Component: SaleHighlightRules },
   { id: 'transfer',     label: 'Transfer Lifecycle',     icon: Workflow,    Component: TransferStatusRules },
   { id: 'batch_rules',  label: 'Batch Distribution',     icon: Boxes,       Component: BatchRules },
   { id: 'vehicle',      label: 'Vehicle Eligibility',    icon: Car,         Component: VehicleEligibilityRules },
