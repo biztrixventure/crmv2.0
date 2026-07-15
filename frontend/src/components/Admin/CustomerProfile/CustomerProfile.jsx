@@ -10,6 +10,20 @@ import SaleStatusBadge from '../../UI/SaleStatusBadge';
 import CopyableNumber from '../../UI/CopyableNumber';
 import NumberRiskCheck from '../../Shared/NumberRiskCheck';
 import { fmtSaleDate, fmtDateTimeET } from '../../../utils/timezone';
+import { salePaidTenure } from '../../../utils/saleTenure';
+
+// Small amber "paid N months" chip for a cancelled sale (sale_date → cancel_date).
+const PaidChip = ({ sale }) => {
+  const t = salePaidTenure(sale);
+  if (!t) return null;
+  return (
+    <span title={`Kept paying ${t.label} — from ${sale.sale_date} to ${sale.cancellation_date || sale.date}`}
+      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+      style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>
+      paid {t.label}
+    </span>
+  );
+};
 
 // ── CSV export of a customer's full record (client-side, no backend) ─────────
 const csvCell = (v) => {
@@ -468,6 +482,7 @@ export default function CustomerProfile() {
                   {s.is_resell && <Pill color="#7c3aed" tip="A resell / renewal of an earlier policy">resell</Pill>}
                 </span>
                 <span className="flex items-center gap-2 flex-shrink-0">
+                  <PaidChip sale={s} />
                   <SaleStatusBadge sale={{ status: s.status, cancellation_date: s.cancellation_date }} />
                   <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}><DateTip value={s.sale_date} /></span>
                 </span>
@@ -497,6 +512,7 @@ export default function CustomerProfile() {
             <Row key={c.sale_id}>
               <span className="font-semibold flex items-center gap-2">{c.plan || 'Policy'} {c.reference_no && <Tip text={`Reference: ${c.reference_no}`} className="cursor-help"><span className="text-[11px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>{c.reference_no}</span></Tip>}</span>
               <span className="flex items-center gap-2">
+                <PaidChip sale={{ sale_date: c.sale_date, cancellation_date: c.date }} />
                 {c.reason_key && <Pill color="#dc2626" tip="Recorded cancellation reason">{c.reason_key}</Pill>}
                 <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}><DateTip value={c.date} /></span>
               </span>

@@ -5,6 +5,7 @@ import SaleStatusBadge from '../UI/SaleStatusBadge';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtSaleDate } from '../../utils/timezone';
+import { salePaidTenure } from '../../utils/saleTenure';
 import ResellModal from '../Closer/ResellModal';
 import CustomerTimeline from './CustomerTimeline';
 import NumberRiskCheck from './NumberRiskCheck';
@@ -213,6 +214,9 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     sale_date: sale.sale_date ? <Row key="sale_date" label="Sale Date" value={fmtSaleDate(sale.sale_date)} /> : null,
     status:  <Row key="status" label="Status" value={SALE_LABEL[sale.status] || sale.status} />,
     cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" /> : null,
+    // How long the customer kept paying (sale date → cancellation date). Only
+    // meaningful once a cancel date is set; hidden otherwise.
+    paid_for: (() => { const t = salePaidTenure(sale); return t ? <Row key="paid_for" label="Paid For" value={<span className="inline-flex items-center gap-1.5">{t.label}<span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309' }}>{t.monthsFloat}mo</span></span>} highlight="#b45309" /> : null; })(),
     cancellation_reason: sale.cancellation_reason_key ? <Row key="cancellation_reason" label="Cancellation Reason" value={reasonLabelOf(sale.cancellation_reason_key)} highlight="var(--color-error-600, #dc2626)" /> : null,
     closer_disposition: sale.closer_disposition ? <Row key="closer_disposition" label="Closer Disposition" value={sale.closer_disposition} highlight="var(--color-primary-600)" /> : null,
     monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="#16a34a" /> : null,
@@ -231,7 +235,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
   const DEFAULT_FIELDS = {
     customer:  ['name', 'phone', 'phone_2', 'email', 'address'],
     vehicle:   ['year', 'make', 'model', 'miles', 'vin'],
-    sale_info: ['client', 'plan', 'sale_date', 'status', 'cancellation_date', 'cancellation_reason', 'closer_disposition'],
+    sale_info: ['client', 'plan', 'sale_date', 'status', 'cancellation_date', 'paid_for', 'cancellation_reason', 'closer_disposition'],
     financial: ['monthly_payment', 'down_payment', 'payment_due_note'],
     people:    ['closer', 'fronter'],
     timeline:  ['created', 'updated', 'submitted_for_review', 'compliance_reviewed'],
@@ -481,6 +485,13 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                           cancelled {c.cancellation_date}
                         </span>
                       )}
+                      {(() => { const t = salePaidTenure(c); return t ? (
+                        <span title={`Paid from ${c.sale_date} to ${c.cancellation_date}`}
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: '#f59e0b22', color: '#b45309' }}>
+                          paid {t.label}
+                        </span>
+                      ) : null; })()}
                     </div>
                   );
                 })}

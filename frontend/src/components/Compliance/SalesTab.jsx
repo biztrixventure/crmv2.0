@@ -17,6 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { useSaleHighlight } from '../../hooks/useSaleHighlight';
+import { salePaidTenure } from '../../utils/saleTenure';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -374,6 +375,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <SaleStatusBadge sale={s} size="sm" />
+                          {(() => { const t = salePaidTenure(s); return t ? (
+                            <span title={`Kept paying ${t.label} — sale ${fmtSaleDate(s.sale_date)} → cancelled ${fmtSaleDate(s.cancellation_date)}`}
+                              className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>
+                              paid {t.short}
+                            </span>
+                          ) : null; })()}
                           {s.is_resell && (
                             <span title={`Resell · ${s.resell_intent || ''}`}
                               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
