@@ -80,7 +80,7 @@ export default function DoubleSoldTab() {
     const col = COLS.find(c => c.key === sort.col) || COLS[2];
     out = [...out].sort((a, b) => {
       const va = col.get(a), vb = col.get(b);
-      const cmp = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+      const cmp = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va ?? '').localeCompare(String(vb ?? ''));
       return sort.dir === 'asc' ? cmp : -cmp;
     });
     return out;

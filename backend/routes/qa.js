@@ -1036,13 +1036,19 @@ async function buildCrmDay(companyId, date) {
     // chunk the .in() so a big day can't overflow the PostgREST URL
     for (let i = 0; i < tids.length; i += 150) {
       const { data } = await supabaseAdmin.from('sales')
-        .select('id, transfer_id, customer_phone, normalized_phone, sale_date, closer_id, status, vicidial_vendor_code, vicidial_agent')
-        .in('transfer_id', tids.slice(i, i + 150)).in('status', SOLD_SALE_STATUSES);
+        .select('id, transfer_id, customer_phone, normalized_phone, sale_date, created_at, closer_id, status, vicidial_vendor_code, vicidial_agent')
+        .in('transfer_id', tids.slice(i, i + 150)).in('status', SOLD_SALE_STATUSES)
+        .order('created_at', { ascending: false });   // deterministic pick below
       if (data) sales.push(...data);
     }
   }
+  // A transfer can have >1 sale (multi-car bundle). Keep the NEWEST per transfer
+  // (ordered created_at desc within each chunk); deterministic across re-runs.
   const saleByTransfer = {};
-  for (const s of sales) if (!saleByTransfer[s.transfer_id]) saleByTransfer[s.transfer_id] = s;
+  for (const s of sales) {
+    const cur = saleByTransfer[s.transfer_id];
+    if (!cur || String(s.created_at) > String(cur.created_at)) saleByTransfer[s.transfer_id] = s;
+  }
 
   const tra = [], closer_sales = [], closer_dispo = [];
   for (const t of (transfers || [])) {
@@ -1211,7 +1217,14 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
   let rr = 0;
   const rows = items.map(it => ({
     company_id: companyId, method, subject_role, work_type, source: 'day_recording',
-    transfer_id: it.transfer_id || null, sale_id: it.sale_id || null,
+    // closer_sales anchors on the SALE only: it and closer_dispo both map to
+    // method 'rcm', so carrying transfer_id on both would collide on the
+    // (transfer_id, method) unique index (a transfer's dispo task and its later
+    // closed-sale task would clash). sale_id uses its own (sale_id, method)
+    // index, and candidate/customer resolution re-derives the transfer from the
+    // sale — so dropping transfer_id here loses nothing.
+    transfer_id: work_type === 'closer_sales' ? null : (it.transfer_id || null),
+    sale_id: it.sale_id || null,
     recording_date: date,
     subject_agent: work_type === 'tra' ? (it.agent || null) : ((closerAgentsByUser[it.closer_id] || [])[0] || null),
     assigned_to: targetAgents.length ? targetAgents[rr++ % targetAgents.length] : null,
@@ -1237,7 +1250,12 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
   else {
     for (const row of rows) {
       const { error: e1 } = await supabaseAdmin.from('qa_assignments').insert(row);
-      if (e1) skipped++; else inserted++;
+      if (e1) {
+        skipped++;
+        // a duplicate is expected (already assigned); anything else is a real
+        // failure and must not hide inside the "skipped" count.
+        if (!/duplicate key|unique/i.test(e1.message)) logger.warn('QA', `from-crm insert failed (${work_type}, transfer ${row.transfer_id || '-'}, sale ${row.sale_id || '-'}): ${e1.message}`);
+      } else inserted++;
     }
   }
 

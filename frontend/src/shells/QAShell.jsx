@@ -2254,8 +2254,8 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
   const clearUndone = async (agentId) => {
     const who = agentId ? (agents?.find(a => a.id === agentId)?.name || 'this agent') : 'ALL QA agents';
     const scope = clearWt ? ` ${SLOT_LABEL[clearWt] || clearWt}` : '';
-    const n = agentId ? (undone[agentId] || 0) : totalUndone;   // note: count is across all sections
-    if (!clearWt && !n) { toast('Nothing to clear — no un-scored tasks.'); return; }
+    const n = agentId ? (undone[agentId] || 0) : totalUndone;   // total across sections (a section is a subset)
+    if (!n) { toast('Nothing to clear — no un-scored tasks.'); return; }
     if (!window.confirm(`Clear${scope} un-scored task(s) for ${who}?\n\nOnly PENDING / in-progress tasks are removed. Completed (scored) work stays.`)) return;
     setClearing(agentId || '__all__');
     try {
@@ -2299,7 +2299,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
                 <option value="closer_dispo">Unclosed Sale</option>
                 <option value="rcm">RCM · Random</option>
               </select>
-              <button onClick={() => clearUndone(null)} disabled={clearing !== null || (!clearWt && !totalUndone)}
+              <button onClick={() => clearUndone(null)} disabled={clearing !== null || !totalUndone}
                 className="text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
                 style={{ background: totalUndone ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: totalUndone ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', border: '1px solid currentColor', opacity: clearing !== null ? 0.6 : 1 }}
                 title="Delete un-scored (pending / in-progress) tasks for all agents in the chosen section. Completed work stays.">

@@ -310,7 +310,10 @@ async function salesCountByUuid() {
   if (complete) _phoneCount = { map, at: Date.now() };
   return map;
 }
-const countFor = (map, uuid) => (uuid ? (map.get(uuid) || 1) : 0);
+// Sales-on-phone for a customer. The map counts only non-open sales, so a
+// customer whose ONLY sales are drafts (status='open') is absent → 0 (NOT 1;
+// an earlier `|| 1` wrongly inflated those to 1 and skewed the filter/column).
+const countFor = (map, uuid) => (uuid ? (map.get(uuid) || 0) : 0);
 
 // Pull the sales_on_phone filters out of the list and compile a numeric
 // predicate (eq / gte / lte / between). Returns { rest, pred } where rest is the

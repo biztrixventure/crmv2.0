@@ -423,7 +423,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
               this is the cross-co dedup signal auto-warranty audit asks
               for. Single-company lifetime rolls into the chain section
               below, so we hide this banner when there's nothing new. */}
-          {lifetime && Array.isArray(lifetime.companies) && lifetime.companies.length > 1 && (
+          {lifetime && Array.isArray(lifetime.companies) && Array.isArray(lifetime.sales) && lifetime.companies.length > 1 && (
             <div className="mb-4 rounded-xl p-3 flex items-start gap-2"
               style={{ backgroundColor: 'var(--color-info-50, #eff6ff)', border: '1px solid var(--color-info-200, #bfdbfe)' }}>
               <span className="text-lg leading-none">🧬</span>
