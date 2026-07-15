@@ -295,15 +295,19 @@ const PHONE_COUNT_TTL = 60_000;
 async function salesCountByUuid() {
   if (_phoneCount.map && Date.now() - _phoneCount.at < PHONE_COUNT_TTL) return _phoneCount.map;
   const map = new Map();
+  let complete = true;
   for (let from = 0; from < 5_000_000; from += 1000) {
     const { data, error } = await supabaseAdmin
       .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
       .neq('status', 'open').range(from, from + 999);
-    if (error) break;
+    if (error) { complete = false; console.error('[data-analyzer] salesCountByUuid page error', { from, message: error.message }); break; }
     for (const r of (data || [])) map.set(r.customer_uuid, (map.get(r.customer_uuid) || 0) + 1);
     if (!data || data.length < 1000) break;
   }
-  _phoneCount = { map, at: Date.now() };
+  // Only cache a FULLY-scanned map. On a partial scan we still return what we
+  // have for this request, but leave the cache untouched so the next call
+  // retries instead of serving an undercounted total for the whole 60s TTL.
+  if (complete) _phoneCount = { map, at: Date.now() };
   return map;
 }
 const countFor = (map, uuid) => (uuid ? (map.get(uuid) || 1) : 0);

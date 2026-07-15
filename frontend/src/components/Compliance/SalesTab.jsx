@@ -33,7 +33,10 @@ const statusUpdatedAt = (s) => {
   const hist = Array.isArray(s?.edit_history) ? s.edit_history : [];
   for (let i = hist.length - 1; i >= 0; i--) {
     const h = hist[i];
-    if (h && (h.new_status || h.previous_status)) return h.edited_at || h.at || null;
+    if (h && (h.new_status || h.previous_status)) {
+      const ts = h.edited_at || h.at;
+      if (ts) return ts;   // keep scanning older entries if this one has no timestamp
+    }
   }
   return (s?.updated_at && s.updated_at !== s.created_at) ? s.updated_at : null;
 };
