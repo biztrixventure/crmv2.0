@@ -24,6 +24,14 @@ const SALE_LABEL = {
   closed_won: 'Approved', closed_lost: 'Lost',
   pending_review: 'In Review', needs_revision: 'Needs Revision',
 };
+// Per-status tint for the multi-sale tab strip (bg/color).
+const TAB_TINT = {
+  closed_won: { bg: '#d1fae5', c: '#047857' }, sold: { bg: '#d1fae5', c: '#047857' },
+  pending_review: { bg: '#fef3c7', c: '#b45309' }, needs_revision: { bg: '#fee2e2', c: '#b91c1c' },
+  cancelled: { bg: '#fee2e2', c: '#b91c1c' }, closed_lost: { bg: '#fee2e2', c: '#b91c1c' },
+  open: { bg: '#dbeafe', c: '#1d4ed8' }, follow_up: { bg: '#fef9c3', c: '#a16207' },
+  _default: { bg: 'var(--color-surface-hover)', c: 'var(--color-text-secondary)' },
+};
 
 const SKIP_KEYS = new Set([
   'customer_name', 'customer_phone', 'customer_email', 'customer_address',
@@ -324,6 +332,37 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
             </button>
           )}
         </div>
+
+        {/* Multi-sale tabs — when this customer's NUMBER has more than one sale,
+            show every sale as a tab across the top so the reviewer can flip
+            between them without leaving the drawer. Active tab = current sale. */}
+        {Array.isArray(lifetime?.sales) && lifetime.sales.length > 1 && (
+          <div className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 overflow-x-auto"
+            style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+            <span className="text-[10px] font-bold uppercase tracking-wide mr-1 flex-shrink-0 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+              {lifetime.sales.length} sales
+            </span>
+            {lifetime.sales.map((ls, i) => {
+              const active = String(ls.id) === String(sale.id);
+              const tint = TAB_TINT[ls.status] || TAB_TINT._default;
+              const goto = () => { if (active) return; if (String(ls.id) === String(saleProp?.id)) setViewSale(null); else openSibling(ls.id); };
+              const paid = salePaidTenure(ls);
+              return (
+                <button key={ls.id} onClick={goto} type="button"
+                  title={`Sale #${i + 1}${ls.reference_no ? ` · ${ls.reference_no}` : ''}${ls.plan ? ` · ${ls.plan}` : ''}${ls.sale_date ? ` · sold ${ls.sale_date}` : ''}${paid ? ` · paid ${paid.label}` : ''}`}
+                  className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-1.5 transition-colors"
+                  style={active
+                    ? { background: tint.bg, color: tint.c, border: `1px solid ${tint.c}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
+                    : { background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint.c }} />
+                  <span className="opacity-60">#{i + 1}</span>
+                  <span>{ls.reference_no ? `${ls.reference_no}`.toUpperCase() : (ls.sale_date || 'sale')}</span>
+                  {paid && <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#f59e0b22', color: '#b45309' }}>{paid.short}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Compliance note banner */}
         {sale.status === 'needs_revision' && sale.compliance_note && (

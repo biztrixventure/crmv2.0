@@ -25,6 +25,19 @@ import {
   Overlay, ModalBox, ModalHeader, fetchAllForExport,
 } from './shared';
 
+// When the sale's status was last changed. The edit_history audit trail records
+// every status transition with its timestamp — the latest one is the "status
+// updated" date (e.g. the moment an approved sale was flipped to cancelled).
+// Falls back to updated_at when there's no recorded transition.
+const statusUpdatedAt = (s) => {
+  const hist = Array.isArray(s?.edit_history) ? s.edit_history : [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && (h.new_status || h.previous_status)) return h.edited_at || h.at || null;
+  }
+  return (s?.updated_at && s.updated_at !== s.created_at) ? s.updated_at : null;
+};
+
 const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
   const { user, isReadOnly } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
@@ -338,6 +351,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
                   <SortTh col="sale_date" sort={sort} onSort={toggleSort}>Sale Date</SortTh>
+                  <Th>Status Updated</Th>
                   {isPostDate && <Th>Charge Date</Th>}
                   <Th>Actions</Th>
                 </tr>
@@ -405,6 +419,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           bulk uploads) instead of the upload moment. Falls back to
                           created_at on legacy rows where sale_date wasn't captured. */}
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at)}</td>
+                      {/* When the status was last changed (approve, cancel, …). */}
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: statusUpdatedAt(s) ? 'var(--color-text-secondary)' : 'var(--color-text-tertiary)' }}>
+                        {(() => { const d = statusUpdatedAt(s); return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'; })()}
+                      </td>
                       {isPostDate && (
                         <td className="px-4 py-3 text-xs font-semibold" style={{ color: s.charge_at ? '#b45309' : 'var(--color-text-tertiary)' }}>
                           {s.charge_at ? new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
@@ -477,7 +495,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={isPostDate ? 8 : 7} className="px-5 py-3">
+                        <td colSpan={isPostDate ? 9 : 8} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (
