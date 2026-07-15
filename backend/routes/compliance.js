@@ -76,6 +76,9 @@ const SALE_SORT = {
   customer: 'customer_name', status: 'status', created_at: 'created_at',
   sale_date: 'sale_date', reference: 'reference_no', monthly_payment: 'monthly_payment',
   fronter: 'fronter_id', closer: 'closer_id', plan: 'plan',
+  // "Status Updated" column → sort by the row's last-change timestamp (a status
+  // change bumps updated_at; the displayed value comes from edit_history).
+  status_updated: 'updated_at', updated_at: 'updated_at',
 };
 const TRANSFER_SORT = {
   customer: 'form_data->>customer_name', status: 'status', created_at: 'created_at',

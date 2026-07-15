@@ -353,7 +353,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
                   <Th>Company</Th>
                   <SortTh col="sale_date" sort={sort} onSort={toggleSort}>Sale Date</SortTh>
-                  <Th>Status Updated</Th>
+                  <SortTh col="status_updated" sort={sort} onSort={toggleSort}>Status Updated</SortTh>
                   {isPostDate && <Th>Charge Date</Th>}
                   <Th>Actions</Th>
                 </tr>
