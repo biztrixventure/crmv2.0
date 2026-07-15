@@ -122,6 +122,14 @@ const DATASETS = {
     columns: [
       { key: 'customer_name', label: 'Customer' },
       { key: 'customer_phone', label: 'Phone' },
+      // How many sales exist in the whole CRM for this customer's number.
+      { key: 'sales_on_phone', label: '# Sales', render: r => {
+        const n = r.sales_on_phone;
+        if (n == null) return '—';
+        return n >= 2
+          ? <span className="inline-block px-1.5 py-0.5 rounded-full text-xs font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>{n}</span>
+          : <span style={{ color: 'var(--color-text-tertiary)' }}>{n}</span>;
+      } },
       { key: '_car',          label: 'Car', render: r => [r.car_year, r.car_make, r.car_model].filter(Boolean).join(' ') || '—' },
       { key: 'plan',          label: 'Plan' },
       { key: 'down_payment',  label: 'Down',  render: r => r.down_payment ? `$${Number(r.down_payment).toLocaleString()}` : '—' },
@@ -695,10 +703,16 @@ const DataAnalyzer = () => {
     ];
   }, [dataset, agentOpts]);
 
+  // Derived "Sales on Phone" filter (sales only): how many sales exist in the
+  // whole CRM for a row's customer number. Range control → Min/Max (set both to
+  // the same number for an exact count, e.g. 6, or 2–6 for a range). Backend
+  // resolves the aggregate + attaches the count to every row/export.
+  const salesCountField = useMemo(() => ({ name: 'sales_on_phone', label: 'Sales on Phone (whole CRM)', field_type: 'number', __synthetic: true }), []);
+
   // Status + Disposition + Agents are always present (dataset-specific); before form_fields.
   const allFilterFields = useMemo(
-    () => [statusField, dispositionField, ...agentFields, ...fields],
-    [statusField, dispositionField, agentFields, fields],
+    () => [statusField, dispositionField, ...agentFields, ...(dataset === 'sales' ? [salesCountField] : []), ...fields],
+    [statusField, dispositionField, agentFields, salesCountField, fields, dataset],
   );
 
   // Apply the saved drag-and-drop order; new/unordered fields fall to the end.

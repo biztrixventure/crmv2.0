@@ -58,6 +58,9 @@ const ALLOWED_OPS = new Set(['eq', 'neq', 'in', 'gte', 'lte', 'between', 'ilike'
 
 function applyFilter(query, f, cfg) {
   if (!f || !f.field || !ALLOWED_OPS.has(f.op)) return query;
+  // sales_on_phone is an aggregate (count of sales per customer number) — it can
+  // never be a column filter; it's resolved in JS by the callers that support it.
+  if (f.field === 'sales_on_phone') return query;
   // Resolve an alias (e.g. Miles → miles_num) so range ops hit a numeric column.
   const field = (cfg.aliases && cfg.aliases[f.field]) || f.field;
   const isTyped = cfg.typed.has(field);
@@ -277,6 +280,53 @@ function aggregateTransfers(rows) {
   };
 }
 
+// ── "Sales on this phone" derived metric ─────────────────────────────────────
+// How many sales exist in the WHOLE CRM for a row's customer number
+// (customer_uuid = UUIDv5 of normalized phone). It's an aggregate, so it can't be
+// a PostgREST column filter — we build a customer_uuid→count map once (cached),
+// attach `sales_on_phone` to every sales row (shown as a column + exported), and
+// when the user filters by it we filter IN JS (fetch-all → paginate) so any
+// count/range works without an IN() URL blow-up.
+const PHONE_COUNT_FIELD = 'sales_on_phone';
+let _phoneCount = { map: null, at: 0 };
+const PHONE_COUNT_TTL = 60_000;
+async function salesCountByUuid() {
+  if (_phoneCount.map && Date.now() - _phoneCount.at < PHONE_COUNT_TTL) return _phoneCount.map;
+  const map = new Map();
+  for (let from = 0; from < 5_000_000; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('sales').select('customer_uuid').not('customer_uuid', 'is', null).range(from, from + 999);
+    if (error) break;
+    for (const r of (data || [])) map.set(r.customer_uuid, (map.get(r.customer_uuid) || 0) + 1);
+    if (!data || data.length < 1000) break;
+  }
+  _phoneCount = { map, at: Date.now() };
+  return map;
+}
+const countFor = (map, uuid) => (uuid ? (map.get(uuid) || 1) : 0);
+
+// Pull the sales_on_phone filters out of the list and compile a numeric
+// predicate (eq / gte / lte / between). Returns { rest, pred } where rest is the
+// normal column filters and pred is null when no count filter is set.
+function splitPhoneCountFilter(filters) {
+  const rest = [], pc = [];
+  for (const f of filters) (f && f.field === PHONE_COUNT_FIELD ? pc : rest).push(f);
+  if (!pc.length) return { rest, pred: null };
+  const tests = [];
+  for (const f of pc) {
+    const v = f.value;
+    if (f.op === 'eq' && v !== '' && v != null) { const n = +v; if (Number.isFinite(n)) tests.push(x => x === n); }
+    else if (f.op === 'gte' && v !== '' && v != null) { const n = +v; if (Number.isFinite(n)) tests.push(x => x >= n); }
+    else if (f.op === 'lte' && v !== '' && v != null) { const n = +v; if (Number.isFinite(n)) tests.push(x => x <= n); }
+    else if (f.op === 'between') {
+      const [lo, hi] = Array.isArray(v) ? v : [];
+      if (lo !== '' && lo != null) { const l = +lo; if (Number.isFinite(l)) tests.push(x => x >= l); }
+      if (hi !== '' && hi != null) { const h = +hi; if (Number.isFinite(h)) tests.push(x => x <= h); }
+    }
+  }
+  return { rest, pred: tests.length ? (n => tests.every(t => t(n))) : null };
+}
+
 // ============================================================================
 // POST /query — paginated rows + aggregates
 // ============================================================================
@@ -289,13 +339,37 @@ router.post('/query', asyncHandler(async (req, res) => {
 
   const offset = (page - 1) * limit;
 
+  // sales_on_phone is an aggregate filter → handled in JS, not PostgREST.
+  const { rest, pred } = dataset === 'sales' ? splitPhoneCountFilter(filters) : { rest: filters, pred: null };
+  const countMap = dataset === 'sales' ? await salesCountByUuid() : null;
+  const withCount = (rows) => (countMap ? rows.map(r => ({ ...r, sales_on_phone: countFor(countMap, r.customer_uuid) })) : rows);
+
+  // ── Count-filter path: fetch all matching (light), filter by count in JS, then
+  // paginate. Only used when the user actually filters by sales_on_phone. ──────
+  if (pred) {
+    const light = await fetchAll('sales', rest, { columns: 'id, customer_uuid, status, down_payment, monthly_payment, closer_id, created_at' });
+    const matched = light.filter(r => pred(countFor(countMap, r.customer_uuid)));
+    const total = matched.length;
+    const pageIds = matched.slice(offset, offset + limit).map(r => r.id);
+    let data = [];
+    if (pageIds.length) {
+      const { data: full, error: fErr } = await supabaseAdmin.from(cfg.table).select('*').in('id', pageIds);
+      if (fErr) return res.status(500).json({ error: fErr.message, code: fErr.code });
+      const pos = new Map(pageIds.map((id, i) => [id, i]));
+      data = (full || []).sort((a, b) => pos.get(a.id) - pos.get(b.id));
+    }
+    const enriched = await enrichNames(withCount(data), dataset);
+    const aggregates = aggregateSales(matched);   // light rows carry the agg columns
+    return res.json({ rows: enriched, total, page, limit, dataset, aggregates });
+  }
+
   // Deferred-join pagination: ORDER BY + LIMIT on a NARROW (id) projection so the
   // sort operates on tiny tuples, not full form_data rows. Selecting * and
   // ordering directly made the planner sort the whole filtered set of wide JSONB
   // rows into temp files (hundreds of MB spilled to disk per call). We page the
   // ids here, then fetch the wide rows for just this page.
   let idQuery = supabaseAdmin.from(cfg.table).select('id', { count: 'exact' }).order('created_at', { ascending: false });
-  for (const f of filters) idQuery = applyFilter(idQuery, f, cfg);
+  for (const f of rest) idQuery = applyFilter(idQuery, f, cfg);
   idQuery = idQuery.range(offset, offset + limit - 1);
 
   const { data: idRows, error: idErr, count } = await idQuery;
@@ -319,11 +393,11 @@ router.post('/query', asyncHandler(async (req, res) => {
     data = (full || []).sort((a, b) => pos.get(a.id) - pos.get(b.id));
   }
 
-  const enriched = await enrichNames(data || [], dataset);
+  const enriched = await enrichNames(withCount(data), dataset);
 
   // Aggregates run against the FULL filtered set (every row, light columns) so
   // the banner stays honest even when paging through page 5 of 20.
-  const all = await fetchAll(dataset, filters, { columns: AGG_COLUMNS[dataset] });
+  const all = await fetchAll(dataset, rest, { columns: AGG_COLUMNS[dataset] });
   const aggregates = dataset === 'sales' ? aggregateSales(all) : aggregateTransfers(all);
 
   res.json({ rows: enriched, total: count || 0, page, limit, dataset, aggregates });
@@ -335,7 +409,16 @@ router.post('/query', asyncHandler(async (req, res) => {
 router.post('/export', asyncHandler(async (req, res) => {
   const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
   const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
-  const all = await fetchAll(dataset, filters);
+  const { rest, pred } = dataset === 'sales' ? splitPhoneCountFilter(filters) : { rest: filters, pred: null };
+  let all = await fetchAll(dataset, rest);
+  // Attach the sales-on-phone count to every sales row (exported as a column so
+  // the downloaded file can be filtered/sorted in Excel), then apply the count
+  // filter if one is set.
+  if (dataset === 'sales') {
+    const countMap = await salesCountByUuid();
+    all = all.map(r => ({ ...r, sales_on_phone: countFor(countMap, r.customer_uuid) }));
+    if (pred) all = all.filter(r => pred(r.sales_on_phone));
+  }
 
   // ── Egress governance (server-side): enforce row cap + daily count BEFORE
   // building/streaming, and log allow/deny. Reuses the same guard as every
@@ -365,6 +448,8 @@ router.post('/export', asyncHandler(async (req, res) => {
     fieldOrder.set(f.name, f.order ?? i);
     fieldLabel.set(f.name, f.label || f.name);
   });
+  // Friendly header for the derived count column.
+  fieldLabel.set('sales_on_phone', 'Sales on Phone');
 
   const esc = (v) => {
     // Always quote so embedded commas / newlines / quotes survive Excel + Sheets.
@@ -378,6 +463,7 @@ router.post('/export', asyncHandler(async (req, res) => {
   // Base typed columns per dataset. Same as before — these stay first in the
   // CSV so existing reports keep their column positions.
   const TYPED_SALES = ['id', 'sale_date', 'status', 'closer_disposition', 'customer_name', 'customer_phone', 'customer_email',
+    'sales_on_phone',
     'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
     'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
     'closer_name', 'fronter_name', 'company_name', 'created_at'];
@@ -493,8 +579,12 @@ router.post('/breakdown', asyncHandler(async (req, res) => {
   const top     = Math.min(50, Math.max(1, parseInt(req.body?.top || 20)));
 
   const cfg = pickDataset(dataset);
-  // Breakdown only needs the grouped column (typed) or form_data (JSONB key).
-  const all = await fetchAll(dataset, filters, { columns: cfg.typed.has(group) ? group : 'form_data' });
+  const { rest, pred } = dataset === 'sales' ? splitPhoneCountFilter(filters) : { rest: filters, pred: null };
+  // Breakdown only needs the grouped column (typed) or form_data (JSONB key);
+  // add customer_uuid when a sales-on-phone filter is active so we can apply it.
+  const groupCol = cfg.typed.has(group) ? group : 'form_data';
+  let all = await fetchAll(dataset, rest, { columns: pred ? `customer_uuid, ${groupCol}` : groupCol });
+  if (pred) { const cm = await salesCountByUuid(); all = all.filter(r => pred(countFor(cm, r.customer_uuid))); }
 
   // Resolve the field's raw value off each row, picking from the typed column
   // when it exists and falling back to form_data.
@@ -551,8 +641,10 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
   if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
 
   // light columns; dedupe by the last-10 of the normalized phone
-  const columns = dataset === 'sales' ? 'customer_phone,customer_phone_2,customer_name' : 'normalized_phone';
-  const all = await fetchAll(dataset, filters, { columns, cap: 50_000 });
+  const { rest, pred } = dataset === 'sales' ? splitPhoneCountFilter(filters) : { rest: filters, pred: null };
+  const baseCols = dataset === 'sales' ? 'customer_phone,customer_phone_2,customer_name' : 'normalized_phone';
+  let all = await fetchAll(dataset, rest, { columns: pred ? `customer_uuid,${baseCols}` : baseCols, cap: 50_000 });
+  if (pred) { const cm = await salesCountByUuid(); all = all.filter(r => pred(countFor(cm, r.customer_uuid))); }
 
   const dig = (s) => String(s || '').replace(/\D/g, '');
   const tail = (d) => (d.length >= 10 ? d.slice(-10) : d);
@@ -606,8 +698,10 @@ router.post('/send-batch', asyncHandler(async (req, res) => {
 // Pull the current analyzer result and reduce to DISTINCT last-10 phone numbers.
 // Shared by the modal's "resolve phones once" + preview-fallback paths (R1).
 async function resolveDistinctPhones(dataset, filters) {
-  const columns = dataset === 'sales' ? 'customer_phone,customer_phone_2' : 'normalized_phone';
-  const all = await fetchAll(dataset, filters, { columns, cap: 50_000 });
+  const { rest, pred } = dataset === 'sales' ? splitPhoneCountFilter(filters) : { rest: filters, pred: null };
+  const baseCols = dataset === 'sales' ? 'customer_phone,customer_phone_2' : 'normalized_phone';
+  let all = await fetchAll(dataset, rest, { columns: pred ? `customer_uuid,${baseCols}` : baseCols, cap: 50_000 });
+  if (pred) { const cm = await salesCountByUuid(); all = all.filter(r => pred(countFor(cm, r.customer_uuid))); }
   const dig = (s) => String(s || '').replace(/\D/g, '');
   const tail = (d) => (d.length >= 10 ? d.slice(-10) : d);
   const set = new Set();
