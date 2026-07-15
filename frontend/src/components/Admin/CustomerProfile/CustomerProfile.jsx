@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Search, User, Phone, Mail, MapPin, Car, Shield, ArrowLeftRight,
   FileText, XCircle, ChevronLeft, Building2, UserCheck, Headphones, Briefcase,
@@ -24,6 +24,65 @@ const PaidChip = ({ sale }) => {
     </span>
   );
 };
+
+// ── Sales-as-circles ────────────────────────────────────────────────────────
+// One circle per sale in chronological order: a filled ring = sold (green),
+// amber = in-review, and a red ring with a diagonal slash = cancelled. Hover a
+// circle for the sale's client, dates and how long the customer kept paying.
+const DOT = 18;
+const SaleDot = memo(({ s }) => {
+  const cancelled = s.status === 'cancelled';
+  const pending   = s.status === 'pending_review';
+  const c = cancelled ? '#dc2626' : pending ? '#d97706' : '#16a34a';
+  const t = salePaidTenure({ sale_date: s.date, cancellation_date: s.cancel_date });
+  const tip = [
+    cancelled ? 'Cancelled sale' : pending ? 'Sale in review' : 'Active sale',
+    s.client ? `Client: ${s.client}` : null,
+    s.ref ? `Ref: ${s.ref}` : null,
+    s.date ? `Sold: ${fmtSaleDate(s.date)}` : null,
+    cancelled && s.cancel_date ? `Cancelled: ${fmtSaleDate(s.cancel_date)}` : null,
+    cancelled && t ? `Paid: ${t.label}` : (!cancelled && !pending ? 'Still active' : null),
+    (s.monthly != null && s.monthly !== '') ? `${money(s.monthly)}/mo` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    // focusable + labelled so keyboard/screen-reader users get the same detail
+    <Tip text={tip} className="cursor-help">
+      <svg width={DOT} height={DOT} viewBox="0 0 20 20" className="flex-shrink-0 block outline-none rounded-full"
+        role="img" aria-label={tip} tabIndex={0}>
+        {/* pending = dashed ring so status reads without relying on color alone */}
+        <circle cx="10" cy="10" r="7.5" fill={`${c}22`} stroke={c} strokeWidth="2.2" strokeDasharray={pending ? '3 2.5' : undefined} />
+        {cancelled && <line x1="4.6" y1="15.4" x2="15.4" y2="4.6" stroke={c} strokeWidth="2.2" strokeLinecap="round" />}
+      </svg>
+    </Tip>
+  );
+});
+SaleDot.displayName = 'SaleDot';
+const SalesDots = ({ seq, max = 18 }) => {
+  const sorted = useMemo(
+    () => (Array.isArray(seq) ? [...seq] : []).sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))),
+    [seq],
+  );
+  if (!sorted.length) return null;
+  const shown = sorted.slice(0, max);
+  const extra = sorted.length - shown.length;
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap align-middle">
+      {shown.map((s, i) => <SaleDot key={s.ref || `${s.date || ''}-${i}`} s={s} />)}
+      {extra > 0 && <span className="text-[11px] font-bold ml-0.5" style={{ color: 'var(--color-text-tertiary)' }}>+{extra}</span>}
+    </span>
+  );
+};
+// Tiny legend explaining the circles.
+const LegendDot = ({ color, dash, slash }) => (
+  <svg width="12" height="12" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill={`${color}22`} stroke={color} strokeWidth="2.5" strokeDasharray={dash ? '3 2.5' : undefined} />{slash && <line x1="4.6" y1="15.4" x2="15.4" y2="4.6" stroke={color} strokeWidth="2.5" />}</svg>
+);
+const DotsLegend = () => (
+  <span className="inline-flex items-center gap-2 text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+    <span className="inline-flex items-center gap-1"><LegendDot color="#16a34a" />sold</span>
+    <span className="inline-flex items-center gap-1"><LegendDot color="#d97706" dash />in review</span>
+    <span className="inline-flex items-center gap-1"><LegendDot color="#dc2626" slash />cancelled</span>
+  </span>
+);
 
 // ── CSV export of a customer's full record (client-side, no backend) ─────────
 const csvCell = (v) => {
@@ -92,7 +151,7 @@ const Tip = ({ text, children, className = '' }) => (
     {children}
     {text != null && text !== '' && (
       <span role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded-md text-[11px] font-medium leading-snug opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50 shadow-lg"
+        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded-md text-[11px] font-medium leading-snug opacity-0 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100 transition-opacity duration-150 z-50 shadow-lg"
         style={{ backgroundColor: 'var(--color-text)', color: 'var(--color-surface)', whiteSpace: 'normal', width: 'max-content', maxWidth: '220px', textAlign: 'center' }}>
         {text}
       </span>
@@ -328,16 +387,17 @@ export default function CustomerProfile() {
   const [err, setErr] = useState('');
   const [segment, setSegment] = useState('all');
   const [sort, setSort] = useState('score');
+  const [minSales, setMinSales] = useState(0);   // "N+ sales" filter for the dots strip
 
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
 
   useEffect(() => {
     let alive = true;
-    client.get('customer-profile/browse', { params: { q: debounced, segment, sort } })
+    client.get('customer-profile/browse', { params: { q: debounced, segment, sort, min_sales: minSales || undefined } })
       .then(r => { if (alive) setResults(r.data.results || []); })
       .catch(() => { if (alive) setResults([]); });
     return () => { alive = false; };
-  }, [debounced, segment, sort]);
+  }, [debounced, segment, sort, minSales]);
 
   const open = useCallback(async (uuid) => {
     setLoading(true); setErr('');
@@ -345,6 +405,12 @@ export default function CustomerProfile() {
     catch (e) { setErr(e?.response?.data?.error || 'Failed to load profile'); }
     finally { setLoading(false); }
   }, []);
+
+  // Sale-circles sequence for the opened profile (built once per profile load).
+  const profileSeq = useMemo(
+    () => (profile?.sales || []).map(s => ({ status: s.status, date: s.sale_date, cancel_date: s.cancellation_date, client: s.client_name, ref: s.reference_no, monthly: s.monthly_payment })),
+    [profile],
+  );
 
   // ── profile view ──
   if (profile) {
@@ -416,6 +482,16 @@ export default function CustomerProfile() {
           <StatCard label="Vehicles" value={stats.vehicles} tip="Distinct cars on this customer's policies (by VIN)" />
           <StatCard label="Companies" value={stats.companies} tip="How many closer companies hold this customer's policies" />
         </div>
+
+        {/* sales at a glance — one circle per sale, sold vs cancelled, in order */}
+        {profile.sales.length > 0 && (
+          <div className="rounded-xl p-3 flex items-center gap-3 flex-wrap"
+            style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <span className="text-[11px] font-bold uppercase tracking-wide flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>Sales</span>
+            <SalesDots seq={profileSeq} max={40} />
+            <span className="ml-auto"><DotsLegend /></span>
+          </div>
+        )}
 
         {/* financials */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -565,6 +641,19 @@ export default function CustomerProfile() {
           })}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* "N+ sales" filter — narrows to customers with at least this many
+              sales, so the circle strip focuses on repeat buyers. */}
+          <Tip text="Only customers with at least this many sales (active + cancelled)" className="cursor-help">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold rounded-lg border px-2 py-1"
+              style={{ backgroundColor: 'var(--color-surface)', borderColor: minSales ? 'var(--color-primary-500)' : 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <span style={{ color: 'var(--color-text-tertiary)' }}>≥</span>
+              <input type="number" min={0} max={99} value={minSales || ''} placeholder="0"
+                aria-label="Minimum sales filter"
+                onChange={e => setMinSales(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                className="w-9 bg-transparent outline-none text-center" style={{ color: 'var(--color-text)' }} />
+              <span style={{ color: 'var(--color-text-tertiary)' }}>sales</span>
+            </span>
+          </Tip>
           <SlidersHorizontal size={13} style={{ color: 'var(--color-text-tertiary)' }} />
           <select value={sort} onChange={e => setSort(e.target.value)}
             className="text-xs font-semibold rounded-lg border px-2 py-1.5"
@@ -573,6 +662,7 @@ export default function CustomerProfile() {
           </select>
         </div>
       </div>
+      <div className="flex justify-end -mt-1"><DotsLegend /></div>
 
       {err && <p className="text-sm text-red-600">{err}</p>}
       {loading && <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>}
@@ -607,6 +697,10 @@ export default function CustomerProfile() {
                     <Tip text="Cancellations" className="cursor-help"><span className="inline-flex items-center gap-0.5"><XCircle size={11} /> {r.cancellations ?? 0}</span></Tip>
                     {(r.resells ?? 0) > 0 && <Tip text="Resells" className="cursor-help"><span className="inline-flex items-center gap-0.5"><RefreshCw size={11} /> {r.resells}</span></Tip>}
                   </span>
+                  {/* sales as circles — sold vs cancelled, in order; hover for detail */}
+                  {Array.isArray(r.sale_seq) && r.sale_seq.length > 0 && (
+                    <span className="block mt-1.5" onClick={e => e.stopPropagation()}><SalesDots seq={r.sale_seq} /></span>
+                  )}
                 </span>
               </span>
               <span className="flex flex-col items-end gap-1 flex-shrink-0">

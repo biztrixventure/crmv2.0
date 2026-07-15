@@ -401,7 +401,7 @@ class CustomerProfileRepository {
    * segment presets + numeric floors + name/phone search + sort. Gracefully
    * falls back to the simple search if the view isn't applied yet.
    */
-  static async browse({ segment = 'all', sort = 'score', dir = 'desc', q = '', limit = 50, minT = 0, minP = 0, minC = 0 } = {}) {
+  static async browse({ segment = 'all', sort = 'score', dir = 'desc', q = '', limit = 50, minT = 0, minP = 0, minC = 0, minS = 0 } = {}) {
     const cap = Math.min(limit, 100);
     const asc = dir === 'asc';
 
@@ -421,6 +421,7 @@ class CustomerProfileRepository {
       if (minT) qb = qb.gte('transfers_total', minT);
       if (minP) qb = qb.gte('active_policies', minP);
       if (minC) qb = qb.gte('cancellations', minC);
+      if (minS) qb = qb.gte('sales_total', minS);   // "N+ sales" filter for the dots strip
       if (q && q.trim()) {
         const d = q.replace(/\D/g, '');
         qb = d.length >= 4 ? qb.ilike('phone', `%${d}%`) : qb.ilike('name', `%${q.trim()}%`);
@@ -440,14 +441,44 @@ class CustomerProfileRepository {
     if (error && sortCol === 'score') ({ data, error } = await build('last_activity'));
     if (error) {
       const rows = await this.search(q, limit);   // view missing entirely → no breakdown
-      return rows.map(r => ({ ...r, _fallback: true }));
+      return this.#attachSaleSeq(rows.map(r => ({ ...r, _fallback: true })));
     }
-    return (data || []).map(r => ({
+    const rows = (data || []).map(r => ({
       ...r,
       last_sale_date: r.last_sale_date || null,
       stars: r.score != null ? r.score : starRating(r),
       segment_label: segmentLabel(r),
     }));
+    return this.#attachSaleSeq(rows);
+  }
+
+  // Attach a compact, chronological sale sequence per customer — powers the
+  // "sales as circles" strip (O = sold, Ø = cancelled) with hover details. One
+  // chunked query over the page's customer_uuids; capped so the payload stays
+  // small. Best-effort: any error → rows returned unchanged (empty seq).
+  static async #attachSaleSeq(rows) {
+    const SEQ_CAP = 40;
+    const uuids = [...new Set(rows.map(r => r.customer_uuid).filter(Boolean))];
+    if (!uuids.length) return rows;
+    const byUuid = new Map();
+    try {
+      for (let i = 0; i < uuids.length; i += 100) {
+        const { data } = await supabaseAdmin.from('sales')
+          .select('customer_uuid, status, sale_date, cancellation_date, client_name, reference_no, monthly_payment')
+          .in('customer_uuid', uuids.slice(i, i + 100))
+          .neq('status', 'open')
+          .order('sale_date', { ascending: true });
+        for (const s of (data || [])) {
+          if (!byUuid.has(s.customer_uuid)) byUuid.set(s.customer_uuid, []);
+          const arr = byUuid.get(s.customer_uuid);
+          if (arr.length < SEQ_CAP) arr.push({
+            status: s.status, date: s.sale_date, cancel_date: s.cancellation_date,
+            client: s.client_name || null, ref: s.reference_no || null, monthly: s.monthly_payment ?? null,
+          });
+        }
+      }
+    } catch { /* best-effort — leave seq empty */ }
+    return rows.map(r => ({ ...r, sale_seq: byUuid.get(r.customer_uuid) || [] }));
   }
 }
 

@@ -28,6 +28,7 @@ router.get('/browse', superOnly, asyncHandler(async (req, res) => {
     minT: parseInt(req.query.min_transfers, 10)    || 0,
     minP: parseInt(req.query.min_policies, 10)      || 0,
     minC: parseInt(req.query.min_cancellations, 10) || 0,
+    minS: parseInt(req.query.min_sales, 10)         || 0,
   }) });
 }));
 
