@@ -39,6 +39,8 @@ const MethodPill = ({ m }) => {
   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `${p.tint}1f`, color: p.tint }}>{p.label}</span>;
 };
 const SLOT_LABEL = { tra: 'TRA · Transfers', rcm: 'RCM · Random', closer_sales: 'Closed Sale', closer_dispo: 'Unclosed Sale' };
+// [slot, short toggle label, tint] — the 4 sections an agent can be bound to.
+const AGENT_METHODS = [['tra', 'TRA', '#2563eb'], ['closer_sales', 'SALE', '#059669'], ['closer_dispo', 'UNCL', '#dc2626'], ['rcm', 'RCM', '#d97706']];
 const StatusPill = ({ s }) => {
   const map = { pending: ['Pending', 'var(--color-text-tertiary)'], in_review: ['In review', 'var(--color-warning-600)'], scored: ['Scored', 'var(--color-success-600)'], skipped: ['Skipped', 'var(--color-text-tertiary)'] };
   const [label, color] = map[s] || [s, 'var(--color-text-tertiary)'];
@@ -2226,7 +2228,7 @@ const CARD_FIELDS = [
 ];
 const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true]));
 
-function AgentsTab({ companyId, canManage }) {
+function AgentsTab({ companyId, canManage, isSuper = false }) {
   const [agents, setAgents] = useState(null);
   const [fields, setFields] = useState(null);
   const [undone, setUndone] = useState({});        // agentId → open (pending+in_review) count
@@ -2238,12 +2240,14 @@ function AgentsTab({ companyId, canManage }) {
     client.get('qa/agent-methods', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => setAgents([]));
     client.get('qa/config', { params: { company_id: companyId } }).then(r => {
       setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) });
-      setCanClear(!!r.data.config?.['qa.manager_can_clear']);
+      // superadmin can always clear (backend bypasses the toggle); managers need
+      // compliance to have granted it per-company.
+      setCanClear(isSuper || !!r.data.config?.['qa.manager_can_clear']);
     }).catch(() => setFields(DEFAULT_CARD_FIELDS));
     client.get('qa/agents', { params: { company_id: companyId } })
       .then(r => setUndone(Object.fromEntries((r.data.agents || []).map(a => [a.id, a.undone || 0]))))
       .catch(() => setUndone({}));
-  }, [companyId]);
+  }, [companyId, isSuper]);
   useEffect(() => { load(); }, [load]);
 
   const totalUndone = Object.values(undone).reduce((s, n) => s + n, 0);
@@ -2308,20 +2312,20 @@ function AgentsTab({ companyId, canManage }) {
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
           : <div className="space-y-2">
               {agents.map(a => (
-                <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <User size={15} style={{ color: 'var(--color-text-tertiary)' }} />
                   <div className="min-w-0 flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}
                     {undone[a.id] > 0 && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{undone[a.id]} to do</span>}
                   </div>
-                  {['tra', 'rcm'].map(m => {
+                  {AGENT_METHODS.map(([m, label, tint]) => {
                     const on = a.methods.includes(m);
                     return (
-                      <button key={m} onClick={() => toggleMethod(a, m)}
-                        className="text-[11px] font-bold px-2.5 py-1 rounded uppercase"
+                      <button key={m} onClick={() => toggleMethod(a, m)} title={SLOT_LABEL[m]}
+                        className="text-[10px] font-bold px-2 py-1 rounded uppercase whitespace-nowrap"
                         style={on
-                          ? { background: m === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: m === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' }
+                          ? { background: `${tint}26`, color: tint, border: '1px solid currentColor' }
                           : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>
-                        {on ? '✓ ' : ''}{m}
+                        {on ? '✓ ' : ''}{label}
                       </button>
                     );
                   })}
@@ -2624,7 +2628,7 @@ export default function QAShell() {
           <CrmDayPanel companyId={companyId} scoped={scoped} canAssign={isSuper || canAssign} />
           <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />
         </>}
-        {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} />}
+        {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} isSuper={isSuper} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
         {tab === 'reports' && canReports && <ReportsTab companyId={scoped} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}

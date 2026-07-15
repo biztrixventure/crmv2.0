@@ -35,6 +35,9 @@ const axios = require('axios');
 
 const router = express.Router();
 
+// Plain-language label per work-type slot (used in agent-facing messages).
+const SLOT_LABELS = { tra: 'TRA · Transfers', rcm: 'RCM · Random', closer_sales: 'Closed Sale', closer_dispo: 'Unclosed Sale' };
+
 // permission gate: superadmin bypass, else per (user, primary company).
 async function can(req, key) {
   if (await isSuperAdmin(req.user.id)) return true;
@@ -402,15 +405,19 @@ router.post('/crm-records/:kind/:id/open', asyncHandler(async (req, res) => {
 router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
   const assignedTo = req.body?.assigned_to || null;   // null clears back to the pool
-  const { data: a } = await supabaseAdmin.from('qa_assignments').select('id, company_id, method').eq('id', req.params.id).maybeSingle();
+  const { data: a } = await supabaseAdmin.from('qa_assignments').select('id, company_id, method, work_type, transfer_id, sale_id, subject_role').eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
-  // an agent can only be handed a method they're bound to (mig 180)
+  // an agent can only be handed a SECTION (work type) they're bound to (mig 180 +
+  // 192). Legacy tra/rcm bindings still satisfy the tra/rcm work types since the
+  // slot value equals the method there.
   if (assignedTo) {
+    const wt = workTypeOf(a);
     const methods = await agentMethods(assignedTo);
-    if (!methods.includes(a.method)) {
-      return res.status(400).json({ error: `This agent isn't set up for ${a.method.toUpperCase()} — bind that method to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
+    if (!methods.includes(wt) && !methods.includes(a.method)) {
+      const label = SLOT_LABELS[wt] || wt.toUpperCase();
+      return res.status(400).json({ error: `This agent isn't set up for ${label} — bind that section to them in the Agents panel first.`, code: 'METHOD_UNBOUND' });
     }
   }
   const { data, error } = await supabaseAdmin.from('qa_assignments')
@@ -1862,7 +1869,7 @@ router.put('/agent-methods', asyncHandler(async (req, res) => {
   if (!(await isManager(req))) return res.status(403).json({ error: 'Forbidden' });
   const { user_id, company_id } = req.body || {};
   const companyId = company_id || req.user.company_id;
-  const methods = Array.isArray(req.body?.methods) ? [...new Set(req.body.methods.filter(m => ['tra', 'rcm'].includes(m)))] : [];
+  const methods = Array.isArray(req.body?.methods) ? [...new Set(req.body.methods.filter(m => WORK_TYPES.includes(m)))] : [];
   if (!user_id) return res.status(400).json({ error: 'user_id is required' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
