@@ -36,9 +36,9 @@ const SaleHighlightRules = ({ config, onSave }) => {
           <h2 className="text-base font-bold text-text">Sale Record Highlight</h2>
         </div>
         <p className="text-xs text-text-secondary mb-4 max-w-2xl leading-relaxed">
-          On the compliance <b>Sale Records</b> list, tint a row by how many <b>live</b> sales (approved or in-review)
-          share the same customer number — deeper color for more repeats. Cancelling a sale removes it from the count,
-          so the color updates automatically. A <b>×N</b> badge on each row shows the live count.
+          On the compliance <b>Sale Records</b> list, tint a row by how many sales share the same customer number —
+          counting <b>all</b> records, active <b>and</b> cancelled — with a deeper color for more repeats. Every row on
+          that number (active or cancelled) is tinted, and a <b>×N</b> badge shows the total count.
         </p>
 
         <label className="flex items-center gap-3 mb-4 cursor-pointer">
@@ -90,7 +90,7 @@ const SaleHighlightRules = ({ config, onSave }) => {
                   Sample customer
                   {n >= 2 && <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{n}</span>}
                 </span>
-                <span className="text-xs text-text-tertiary">{n} live sale{n === 1 ? '' : 's'} on this number</span>
+                <span className="text-xs text-text-tertiary">{n} sale{n === 1 ? '' : 's'} on this number</span>
               </div>
             ))}
           </div>

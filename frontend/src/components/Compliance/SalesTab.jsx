@@ -361,7 +361,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   const focused = focusedId && String(focusedId) === String(s.id);
                   const hl = highlightFor(s);                       // config-driven duplicate-sale tint
                   const baseBg = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'transparent');
-                  const dupN = s.dupe_active_count || 0;
+                  const dupN = s.dupe_sale_count || 0;              // ALL sales on this number (active + cancelled)
                   return (
                   <Fragment key={s.id}>
                     <tr className="cursor-pointer"
@@ -376,7 +376,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       <td className="px-4 py-3">
                         <p className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}
                           {dupN >= 2 && (
-                            <span title={`${dupN} live sales share this customer number${s.dupe_sale_count > dupN ? ` (${s.dupe_sale_count} total incl. cancelled)` : ''}`}
+                            <span title={`${dupN} sales on this customer number (active + cancelled)${s.dupe_active_count != null ? ` · ${s.dupe_active_count} active` : ''}`}
                               className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full"
                               style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{dupN}</span>
                           )}

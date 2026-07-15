@@ -282,8 +282,10 @@ function aggregateTransfers(rows) {
 
 // ── "Sales on this phone" derived metric ─────────────────────────────────────
 // How many sales exist in the WHOLE CRM for a row's customer number
-// (customer_uuid = UUIDv5 of normalized phone). It's an aggregate, so it can't be
-// a PostgREST column filter — we build a customer_uuid→count map once (cached),
+// (customer_uuid = UUIDv5 of normalized phone), counting ALL real records —
+// active AND cancelled (status <> 'open', so un-submitted drafts are ignored),
+// matching the compliance duplicate view. It's an aggregate, so it can't be a
+// PostgREST column filter — we build a customer_uuid→count map once (cached),
 // attach `sales_on_phone` to every sales row (shown as a column + exported), and
 // when the user filters by it we filter IN JS (fetch-all → paginate) so any
 // count/range works without an IN() URL blow-up.
@@ -295,7 +297,8 @@ async function salesCountByUuid() {
   const map = new Map();
   for (let from = 0; from < 5_000_000; from += 1000) {
     const { data, error } = await supabaseAdmin
-      .from('sales').select('customer_uuid').not('customer_uuid', 'is', null).range(from, from + 999);
+      .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
+      .neq('status', 'open').range(from, from + 999);
     if (error) break;
     for (const r of (data || [])) map.set(r.customer_uuid, (map.get(r.customer_uuid) || 0) + 1);
     if (!data || data.length < 1000) break;
