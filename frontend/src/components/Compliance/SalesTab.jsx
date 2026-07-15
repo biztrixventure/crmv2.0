@@ -65,7 +65,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [expanded, setExpanded] = useState(null);
-  const [sort, setSort]         = useState({ col: 'created_at', dir: 'desc' });
+  // Default: newest SALE first (by the Sale Date column the list shows), so the
+  // latest sales lead. sale_date nulls sort last; created_at is the tiebreaker.
+  const [sort, setSort]         = useState({ col: 'sale_date', dir: 'desc' });
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
