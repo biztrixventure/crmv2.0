@@ -1159,9 +1159,9 @@ function groupRecordings(recs) {
 // attach automatically; RCM stays in the dialer browser below. This is the
 // CRM-first path: the CRM is the authoritative day, so nothing is missed.
 const CRM_WT = [
-  { key: 'tra',          label: 'TRA · Transfers',   tint: '#2563eb', Icon: ArrowRightLeft, hint: "Every lead this company TRANSFERRED on the selected day — the day's cohort. The two sections below are what became of these same transfers." },
-  { key: 'closer_sales', label: 'Closed Sales',      tint: '#059669', Icon: DollarSign,     hint: "How many of THIS DAY'S transfers became a sale — counted by the transfer day, NOT the sale date (a lead transferred today is usually closed a day or two later). Review the closer's winning call." },
-  { key: 'closer_dispo', label: 'Unclosed Sales',    tint: '#dc2626', Icon: PhoneOff,       hint: "This day's transfers a closer worked but did NOT close into a sale (transfers − closed). Review the closer's call." },
+  { key: 'tra',          label: 'TRA · Transfers',   tint: '#2563eb', Icon: ArrowRightLeft, hint: "Every lead this company TRANSFERRED on the selected day — the fronter transfer calls to review." },
+  { key: 'closer_sales', label: 'Closed Sales',      tint: '#059669', Icon: DollarSign,     hint: "Sales that CLOSED on the selected day (by sale date), for this company's leads — the actual sales that day, matching the CRM's daily sales. A lead transferred earlier can close today. Review the closer's winning call." },
+  { key: 'closer_dispo', label: 'Unclosed Sales',    tint: '#dc2626', Icon: PhoneOff,       hint: "This day's transfers that have NOT closed into a sale yet. Review the closer's call." },
 ];
 function CrmDayPanel({ companyId, scoped, canAssign }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -1227,12 +1227,13 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
               CONVERSION of this day's transfers, not sales dated that day */}
           {(() => {
             const t = data.sections.tra?.total || 0, c = data.sections.closer_sales?.total || 0, u = data.sections.closer_dispo?.total || 0;
-            const pct = t ? Math.round((c / t) * 100) : 0;
-            return t ? (
+            return (t || c || u) ? (
               <div className="text-[11px] mb-2 px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
-                Of the <b style={{ color: 'var(--color-text)' }}>{t}</b> lead{t === 1 ? '' : 's'} transferred on <b style={{ color: 'var(--color-text)' }}>{data.day}</b>,
-                {' '}<b style={{ color: '#059669' }}>{c}</b> became sales and <b style={{ color: '#dc2626' }}>{u}</b> did not
-                {' '}<span style={{ color: 'var(--color-text-tertiary)' }}>({pct}% close rate · counted by transfer day, the sale itself may close later)</span>.
+                On <b style={{ color: 'var(--color-text)' }}>{data.day}</b>:
+                {' '}<b style={{ color: '#2563eb' }}>{t}</b> lead{t === 1 ? '' : 's'} transferred ·
+                {' '}<b style={{ color: '#059669' }}>{c}</b> sale{c === 1 ? '' : 's'} closed that day ·
+                {' '}<b style={{ color: '#dc2626' }}>{u}</b> not yet closed
+                {' '}<span style={{ color: 'var(--color-text-tertiary)' }}>(sales are counted by their sale date, so they need not come from this day's transfers)</span>.
               </div>
             ) : null;
           })()}

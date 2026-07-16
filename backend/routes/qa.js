@@ -1031,32 +1031,31 @@ async function buildCrmDay(companyId, date) {
     .select('id, vicidial_vendor_code, vicidial_agent, normalized_phone, created_at, created_by, assigned_closer_id')
     .eq('company_id', companyId).gte('created_at', b.start).lt('created_at', b.end);
   const tids = (transfers || []).map(t => t.id);
-  let sales = [];
+  // Which of the day's transfers already produced a real sale (any sold status).
+  // Used only to split TRA into "not yet closed" (Unclosed) — NOT for the Closed
+  // section, which is sale-date based below.
+  const soldTransferIds = new Set();
   if (tids.length) {
-    // chunk the .in() so a big day can't overflow the PostgREST URL
-    for (let i = 0; i < tids.length; i += 150) {
+    for (let i = 0; i < tids.length; i += 150) {   // chunk .in() to stay under the URL cap
       const { data } = await supabaseAdmin.from('sales')
-        .select('id, transfer_id, customer_phone, normalized_phone, sale_date, created_at, closer_id, status, vicidial_vendor_code, vicidial_agent')
-        .in('transfer_id', tids.slice(i, i + 150)).in('status', SOLD_SALE_STATUSES)
-        .order('created_at', { ascending: false });   // deterministic pick below
-      if (data) sales.push(...data);
+        .select('transfer_id').in('transfer_id', tids.slice(i, i + 150)).in('status', SOLD_SALE_STATUSES);
+      for (const s of (data || [])) if (s.transfer_id) soldTransferIds.add(s.transfer_id);
     }
   }
-  // A transfer can have >1 sale (multi-car bundle). Keep the NEWEST per transfer
-  // (ordered created_at desc within each chunk); deterministic across re-runs.
-  const saleByTransfer = {};
-  for (const s of sales) {
-    const cur = saleByTransfer[s.transfer_id];
-    if (!cur || String(s.created_at) > String(cur.created_at)) saleByTransfer[s.transfer_id] = s;
-  }
 
-  const tra = [], closer_sales = [], closer_dispo = [];
-  for (const t of (transfers || [])) {
-    tra.push({ transfer_id: t.id, subject_role: 'fronter', phone: t.normalized_phone, agent: t.vicidial_agent || null, date: b.day, has_code: !!t.vicidial_vendor_code });
-    const s = saleByTransfer[t.id];
-    if (s) closer_sales.push({ sale_id: s.id, transfer_id: t.id, subject_role: 'closer', phone: s.customer_phone || s.normalized_phone || t.normalized_phone, closer_id: s.closer_id || t.assigned_closer_id || null, date: b.day, has_code: !!s.vicidial_vendor_code, status: s.status });
-    else closer_dispo.push({ transfer_id: t.id, subject_role: 'closer', phone: t.normalized_phone, closer_id: t.assigned_closer_id || null, date: b.day, has_code: false });
-  }
+  // Closed Sales = sales that CLOSED on the selected day (by sale_date), for THIS
+  // company's leads (scoped via the transfer link). This is the "actual sales
+  // that day" number — a lead transferred earlier can close today, and a lead
+  // transferred today usually closes a day or two later — so this is NOT a subset
+  // of TRA and is counted by sale date, matching the CRM's daily sales.
+  const { data: closedToday } = await supabaseAdmin.from('sales')
+    .select('id, transfer_id, customer_phone, normalized_phone, sale_date, closer_id, status, vicidial_vendor_code, transfers!inner(company_id)')
+    .eq('transfers.company_id', companyId).eq('sale_date', b.day).in('status', SOLD_SALE_STATUSES);
+
+  const tra = (transfers || []).map(t => ({ transfer_id: t.id, subject_role: 'fronter', phone: t.normalized_phone, agent: t.vicidial_agent || null, date: b.day, has_code: !!t.vicidial_vendor_code }));
+  const closer_sales = (closedToday || []).map(s => ({ sale_id: s.id, transfer_id: s.transfer_id, subject_role: 'closer', phone: s.customer_phone || s.normalized_phone, closer_id: s.closer_id || null, date: b.day, has_code: !!s.vicidial_vendor_code, status: s.status }));
+  const closer_dispo = (transfers || []).filter(t => !soldTransferIds.has(t.id))
+    .map(t => ({ transfer_id: t.id, subject_role: 'closer', phone: t.normalized_phone, closer_id: t.assigned_closer_id || null, date: b.day, has_code: false }));
   return { day: b.day, tra, closer_sales, closer_dispo };
 }
 
