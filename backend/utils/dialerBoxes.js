@@ -629,10 +629,45 @@ async function listDayDispositions({ date, statuses = [], boxIds = null, concurr
   return map;
 }
 
+// ── Agent roster (agent_stats_export) ───────────────────────────────────────
+// Pull the list of agents who were active on a box over a window, as
+// { login, full_name, group, calls }. `login` is the dialer user UPPERCASED —
+// exactly what vicidial_agent_ids stores — so the mapping UI can suggest + add
+// it directly. One box or all; a dead box just contributes nothing.
+async function fetchAgentRoster({ boxId = null, days = 7 } = {}) {
+  const boxes = boxId ? BOXES.filter(b => b.id === boxId) : BOXES;
+  const end = new Date();
+  const start = new Date(end.getTime() - Math.max(1, days) * 86400000);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const results = await Promise.all(boxes.map(async (box) => {
+    try {
+      const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+        params: { source: 'crm', user: box.user, pass: box.pass, function: 'agent_stats_export', stage: 'pipe', header: 'YES',
+          datetime_start: `${fmt(start)} 00:00:00`, datetime_end: `${fmt(end)} 23:59:59` },
+        timeout: 30000, responseType: 'text',
+      });
+      const text = typeof r.data === 'string' ? r.data : String(r.data || '');
+      if (!text || /^ERROR|PERMISSION|INVALID|NO RECORDS/i.test(text.trim())) return [];
+      const out = [];
+      for (const line of text.split(/\r?\n/).slice(1)) {   // slice(1): drop the header row
+        const p = line.split('|');
+        const raw = (p[0] || '').trim();
+        if (!raw || !(p[1] || '').trim()) continue;
+        out.push({ box_id: box.id, prefix: box.prefix, login: raw.toUpperCase(), full_name: (p[1] || '').trim(), group: (p[2] || '').trim(), calls: parseInt(p[3], 10) || 0 });
+      }
+      return out;
+    } catch { return []; }
+  }));
+  const seen = new Set(); const flat = [];
+  for (const r of results.flat()) { const k = r.box_id + '|' + r.login; if (!seen.has(k)) { seen.add(k); flat.push(r); } }
+  return flat;
+}
+
 // NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
 // get the LIVE list/prefixes, not a stale snapshot captured at require-time.
 module.exports = {
   getBoxes: () => BOXES,
+  fetchAgentRoster,
   boxPrefixes,
   refreshBoxes,
   lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,

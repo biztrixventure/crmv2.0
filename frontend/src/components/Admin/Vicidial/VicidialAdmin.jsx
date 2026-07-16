@@ -176,29 +176,65 @@ const XferDispoCell = ({ c, onSaved }) => {
 };
 
 // ── Agent mapping ────────────────────────────────────────────────────────────
-const AgentRow = ({ a, onSaved }) => {
-  const [val, setVal] = useState(a.vicidial_agent_id || '');
+// Name → order-independent token key, so "M. Abu Zar" (CRM) matches "M Abu Zar"
+// (dialer) regardless of punctuation/word order.
+const nameKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean).sort().join(' ');
+const PREFIX_TINT = { WTI: '#2563eb', TMC: '#d97706', ETC: '#7c3aed', OAT: '#0891b2' };
+const idTint = (id) => { const m = String(id).match(/^([A-Za-z]+)/); return (m && PREFIX_TINT[m[1].toUpperCase()]) || '#64748b'; };
+const IdChip = ({ id, onRemove }) => {
+  const c = idTint(id);
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full font-mono" style={{ background: `${c}1f`, color: c, border: `1px solid ${c}55` }}>
+      {id}{onRemove && <button onClick={onRemove} title="Remove this id" className="opacity-60 hover:opacity-100 font-sans">×</button>}
+    </span>
+  );
+};
+
+const AgentRow = ({ a, roster, onSaved }) => {
+  const [ids, setIds] = useState(a.agent_ids || []);
+  const [txt, setTxt] = useState('');
   const [busy, setBusy] = useState(false);
-  const dirty = val.trim() !== (a.vicidial_agent_id || '');
-  const save = async () => {
+  useEffect(() => { setIds(a.agent_ids || []); }, [a.agent_ids]);
+
+  const commit = async (next) => {
     setBusy(true);
-    try { await client.post('vicidial/agents', { user_id: a.user_id, agent_id: val.trim() }); toast.success('Saved'); onSaved(); }
-    catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
+    try { await client.post('vicidial/agents', { user_id: a.user_id, agent_id: next.join(',') }); setIds(next); toast.success('Saved'); onSaved?.(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Failed'); setIds(a.agent_ids || []); }
     finally { setBusy(false); }
   };
+  const addId = (raw) => { const u = String(raw || '').trim().toUpperCase(); if (!u || ids.includes(u)) return; commit([...ids, u]); };
+  const removeId = (id) => commit(ids.filter(x => x !== id));
+
+  // dialer logins whose name matches this user and aren't mapped yet
+  const key = nameKey(a.name);
+  const suggestions = (roster || []).filter(r => nameKey(r.full_name) === key && !ids.includes(r.login) && !r.mapped_to);
+
   return (
     <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <td className="px-4 py-2.5">
+      <td className="px-4 py-2.5 align-top">
         <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{a.name}</p>
         <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{[a.role, a.company].filter(Boolean).join(' · ') || '—'}</p>
       </td>
-      <td className="px-4 py-2.5">
-        <input value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && dirty) save(); }} placeholder="e.g. ETC0895, 2006" className="input py-1.5 text-sm" style={{ maxWidth: 240, fontFamily: 'monospace' }} />
+      <td className="px-4 py-2.5 align-top">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {ids.length ? ids.map(id => <IdChip key={id} id={id} onRemove={() => removeId(id)} />) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+          {busy && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />}
+        </div>
       </td>
-      <td className="px-4 py-2.5">
-        <button onClick={save} disabled={!dirty || busy} className="text-xs font-bold px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}>
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save
-        </button>
+      <td className="px-4 py-2.5 align-top">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {suggestions.map(s => (
+            <button key={s.box_id + s.login} onClick={() => addId(s.login)} disabled={busy}
+              title={`${s.full_name} · ${s.prefix} box · ${s.group || '—'} · ${s.calls} calls`}
+              className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full font-mono"
+              style={{ color: idTint(s.login), border: `1px dashed ${idTint(s.login)}88`, background: 'transparent' }}>
+              + {s.login}
+            </button>
+          ))}
+          <input value={txt} onChange={e => setTxt(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { addId(txt); setTxt(''); } }}
+            placeholder="add id…" className="input py-1 text-xs" style={{ maxWidth: 120, fontFamily: 'monospace' }} />
+        </div>
       </td>
     </tr>
   );
@@ -208,29 +244,68 @@ const Agents = () => {
   const [q, setQ] = useState('');
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [boxes, setBoxes] = useState([]);
+  const [box, setBox] = useState('');
+  const [days, setDays] = useState(14);
+  const [roster, setRoster] = useState([]);
+  const [rosterLoading, setRosterLoading] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try { const r = await client.get('vicidial/agents', { params: { q: q || undefined } }); setAgents(r.data.agents || []); }
     catch { /* ignore */ } finally { setLoading(false); }
   }, [q]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+  useEffect(() => { client.get('vicidial/boxes').then(r => setBoxes(r.data.boxes || r.data || [])).catch(() => {}); }, []);
+
+  const loadRoster = async () => {
+    setRosterLoading(true);
+    try {
+      const r = await client.get('vicidial/agents/roster', { params: { box: box || undefined, days } });
+      setRoster(r.data.roster || []);
+      if (r.data.boxes?.length) setBoxes(bs => bs.length ? bs : r.data.boxes);
+      toast.success(`Loaded ${r.data.roster?.length || 0} dialer agents — name-matched suggestions now show below`);
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not load the dialer roster'); }
+    finally { setRosterLoading(false); }
+  };
+
+  const suggestedCount = roster.length ? agents.reduce((n, a) => {
+    const key = nameKey(a.name);
+    return n + (roster.some(r => nameKey(r.full_name) === key && !(a.agent_ids || []).includes(r.login) && !r.mapped_to) ? 1 : 0);
+  }, 0) : 0;
 
   return (
     <div className="space-y-3">
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        Map each VICIdial agent id (the dialer's <code>user</code>) to a CRM user, so pending transfers + dispositions route to the right person. A person who works <b>more than one box</b> has a different id per box — list all of them <b>comma-separated</b> (e.g. <code>ETC0895, 2006</code>) and any of them maps here.
+        Map each VICIdial agent id (the dialer's <code>user</code>) to a CRM user. A person who works <b>more than one box</b> — or who kept an <b>old login and got a new one</b> (e.g. a <code>TMC…</code> id plus a new <code>WTI…</code> id) — should have <b>all of them</b> mapped so every recording resolves. Load the dialer roster to get <b>one-click, name-matched suggestions</b>.
       </p>
+
+      {/* dialer-roster loader */}
+      <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Dialer roster</span>
+        <select value={box} onChange={e => setBox(e.target.value)} className="input py-1.5 text-sm" style={{ maxWidth: 180 }}>
+          <option value="">All boxes</option>
+          {boxes.map(b => <option key={b.id} value={b.id}>{b.name || b.id}{b.prefix ? ` (${b.prefix})` : ''}</option>)}
+        </select>
+        <label className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>last
+          <input type="number" min={1} max={60} value={days} onChange={e => setDays(Math.max(1, Math.min(60, +e.target.value || 14)))} className="input py-1 text-sm text-center" style={{ width: 56 }} /> days</label>
+        <button onClick={loadRoster} disabled={rosterLoading} className="text-xs font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
+          {rosterLoading ? <Loader2 size={13} className="animate-spin" /> : <Users size={13} />} Load dialer roster
+        </button>
+        {roster.length > 0 && <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{roster.length} dialer agents · <b style={{ color: 'var(--color-warning-700, #b45309)' }}>{suggestedCount}</b> user{suggestedCount === 1 ? '' : 's'} with a suggestion</span>}
+      </div>
+
       <div className="relative max-w-md">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people or agent id…" className="input" style={{ paddingLeft: 34 }} />
       </div>
       {loading ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div> : agents.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users.</p> : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="rounded-2xl overflow-x-auto" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-              {['User', 'VICIdial agent id', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+              {['User', 'Mapped agent ids', 'Add / suggested from dialer'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
             </tr></thead>
-            <tbody>{agents.map(a => <AgentRow key={a.user_id} a={a} onSaved={load} />)}</tbody>
+            <tbody>{agents.map(a => <AgentRow key={a.user_id} a={a} roster={roster} onSaved={load} />)}</tbody>
           </table>
         </div>
       )}

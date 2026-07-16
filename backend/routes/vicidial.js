@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 
 const ingest = express.Router();
@@ -1223,9 +1223,33 @@ api.get('/agents', superOnly, asyncHandler(async (req, res) => {
     const all = (p.vicidial_agent_ids && p.vicidial_agent_ids.length) ? p.vicidial_agent_ids : (p.vicidial_agent_id ? [p.vicidial_agent_id] : []);
     return {
       user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User',
-      vicidial_agent_id: all.join(', '), company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
+      vicidial_agent_id: all.join(', '),   // legacy joined string (kept for back-compat)
+      agent_ids: all,                       // array → the UI renders removable chips
+      company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
     };
   }) });
+}));
+
+// Dialer agent roster (agent_stats_export) for a box over a recent window, each
+// login tagged with the CRM user it's already mapped to (if any). Powers the
+// "load roster → suggest ids by name → one-click add" mapping helper.
+api.get('/agents/roster', superOnly, asyncHandler(async (req, res) => {
+  const boxId = (req.query.box || '').trim() || null;
+  const days = Math.min(60, Math.max(1, parseInt(req.query.days, 10) || 14));
+  const roster = await fetchAgentRoster({ boxId, days });
+  const logins = [...new Set(roster.map(r => r.login))];
+  const mappedBy = {};
+  for (let i = 0; i < logins.length; i += 100) {
+    const { data } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, first_name, last_name, vicidial_agent_ids').overlaps('vicidial_agent_ids', logins.slice(i, i + 100));
+    for (const p of (data || [])) for (const id of (p.vicidial_agent_ids || [])) {
+      if (logins.includes(id)) mappedBy[id] = { user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User' };
+    }
+  }
+  res.json({
+    boxes: getBoxes().map(b => ({ id: b.id, prefix: b.prefix })),
+    roster: roster.map(r => ({ ...r, mapped_to: mappedBy[r.login] || null })),
+  });
 }));
 
 api.post('/agents', superOnly, asyncHandler(async (req, res) => {
