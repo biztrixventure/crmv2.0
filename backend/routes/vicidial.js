@@ -1372,6 +1372,7 @@ api.post('/boxes', superOnly, asyncHandler(async (req, res) => {
     is_active: b.is_active !== false,
     sort_order: parseInt(b.sort_order, 10) || 0,
     note: b.note ? String(b.note).trim() : null,
+    validation_url: b.validation_url ? String(b.validation_url).trim() : null,
   };
   if (!row.name || !row.prefix || !row.base_url || !row.api_user) return res.status(400).json({ error: 'name, prefix, base_url and api_user are required' });
   const { data, error } = await supabaseAdmin.from('vicidial_boxes').insert(row).select().single();
@@ -1391,6 +1392,7 @@ api.patch('/boxes/:id', superOnly, asyncHandler(async (req, res) => {
   if (b.is_active !== undefined) patch.is_active = !!b.is_active;
   if (b.sort_order !== undefined) patch.sort_order = parseInt(b.sort_order, 10) || 0;
   if (b.note !== undefined) patch.note = b.note ? String(b.note).trim() : null;
+  if (b.validation_url !== undefined) patch.validation_url = b.validation_url ? String(b.validation_url).trim() : null;
   const { data, error } = await supabaseAdmin.from('vicidial_boxes').update(patch).eq('id', req.params.id).select().single();
   if (error) return res.status(error.code === '23505' ? 409 : 500).json({ error: error.code === '23505' ? 'A box with that name already exists' : error.message });
   await refreshBoxes();

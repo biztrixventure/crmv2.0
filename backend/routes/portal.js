@@ -334,18 +334,37 @@ router.post('/admin/validate-ip', authMiddleware, superOnly, asyncHandler(async 
   const qsBody = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
   const targets = req.body.box ? BOXES.filter(b => b.id === req.body.box) : BOXES;
 
-  const validate = async (box) => {
+  // Resolve the IP-validation portal URLs for a box. Priority:
+  //   1. explicit body.validation_url  (ad-hoc test before saving a dialer)
+  //   2. box.validationUrl             (saved per-box full URL, any scheme/port/path)
+  //   3. legacy default                http://<host>:81/index.php
+  // getUrl = page that renders the login form (to read the password field name)
+  // postUrl = form action that whitelists the submitting (server) IP.
+  const resolvePortal = (box) => {
+    const custom = String(req.body.validation_url || box.validationUrl || '').trim();
+    if (custom) {
+      // Full URL as-is. If it ends at a directory (no file), append index.php.
+      const postUrl = /\/[^/?#]+\.[a-z0-9]+([?#]|$)/i.test(custom) ? custom : custom.replace(/\/*$/, '/') + 'index.php';
+      // GET the same page to read the form (works whether it's the file or dir).
+      return { getUrl: postUrl, postUrl, label: postUrl };
+    }
     const host = box.base.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     const portal = `http://${host}:81`;
+    return { getUrl: portal + '/', postUrl: portal + '/index.php', label: portal };
+  };
+
+  const validate = async (box) => {
+    const { getUrl, postUrl, label } = resolvePortal(box);
+    const portal = label;
     const userid = req.body.userid || box.user;
     const password = req.body.password || box.pass;
     try {
       // 1. GET the form → read the (obfuscated) password field name
-      const g = await axios.get(portal + '/', { timeout: 15000, responseType: 'text', validateStatus: () => true });
+      const g = await axios.get(getUrl, { timeout: 15000, responseType: 'text', validateStatus: () => true });
       const pm = String(g.data || '').match(/<input[^>]*type="password"[^>]*>/i);
       const field = (pm && pm[0].match(/name="([^"]+)"/)) ? pm[0].match(/name="([^"]+)"/)[1] : 'password';
       // 2. POST credentials → the portal whitelists the submitting (server) IP
-      const post = await axios.post(portal + '/index.php',
+      const post = await axios.post(postUrl,
         qsBody({ userid, password: '', [field]: password, submit: 'SUBMIT' }),
         { timeout: 15000, responseType: 'text', maxRedirects: 0, validateStatus: () => true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
       const said = /success/i.test(String(post.data || ''));

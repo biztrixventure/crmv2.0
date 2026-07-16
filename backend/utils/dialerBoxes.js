@@ -62,10 +62,10 @@ async function refreshBoxes() {
   try {
     const { supabaseAdmin } = require('../config/database');
     const { data, error } = await supabaseAdmin
-      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass')
+      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass, validation_url')
       .eq('is_active', true).order('sort_order', { ascending: true });
     if (error || !data || !data.length) return;
-    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase() }));
+    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase(), validationUrl: String(b.validation_url || '').trim() }));
     BOX_BY_PREFIX = Object.fromEntries(BOXES.map(b => [b.prefix, b.id]));
   } catch { /* keep current values */ }
 }

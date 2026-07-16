@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info, Server } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info, Server, ShieldCheck, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -9,6 +9,7 @@ import client from '../../../api/client';
 // → CRM-user map (routes pending transfers + dispositions to the right person).
 const TABS = [
   { k: 'boxes',    label: 'Dialer boxes',     icon: Server },
+  { k: 'validate', label: 'IP validation',    icon: ShieldCheck },
   { k: 'prefixes', label: 'Prefix registry',  icon: Hash },
   { k: 'agents',   label: 'Agent mapping',    icon: Users },
   { k: 'dispo',    label: 'Disposition map',  icon: ListChecks },
@@ -44,7 +45,7 @@ const Boxes = () => {
 
 const BoxRow = ({ box, onSaved, onDelete }) => {
   const isNew = !box;
-  const [f, setF] = useState({ name: box?.name || '', prefix: box?.prefix || '', base_url: box?.base_url || '', api_user: box?.api_user || '', api_pass: box ? '' : '', is_active: box ? box.is_active : true });
+  const [f, setF] = useState({ name: box?.name || '', prefix: box?.prefix || '', base_url: box?.base_url || '', api_user: box?.api_user || '', api_pass: box ? '' : '', validation_url: box?.validation_url || '', is_active: box ? box.is_active : true });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const save = async () => {
@@ -63,6 +64,12 @@ const BoxRow = ({ box, onSaved, onDelete }) => {
         <div className="sm:col-span-2"><Field label="Base URL" v={f.base_url} onChange={v => set('base_url', v)} ph="https://host.i5.tel" /></div>
         <Field label="API user" v={f.api_user} onChange={v => set('api_user', v)} ph="apiuser" />
         <Field label={isNew ? 'API pass' : 'API pass (blank=keep)'} v={f.api_pass} onChange={v => set('api_pass', v)} ph="••••" type="text" />
+      </div>
+      <div className="mt-2">
+        <Field label="IP validation URL (optional)" v={f.validation_url} onChange={v => set('validation_url', v)} ph="https://host:81/PATH/index.php — blank = http://<host>:81/index.php" />
+        <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          Full URL of the dialer's IP-validation portal. Leave blank for the classic <code>http://&lt;host&gt;:81/index.php</code> form. Set it for dialers with a custom scheme/port/path (e.g. <code>https://host:81/KyZvls/index.php</code>).
+        </p>
       </div>
       <div className="flex items-center justify-between mt-2">
         <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
@@ -83,6 +90,160 @@ const Field = ({ label, v, onChange, ph, disabled, type = 'text' }) => (
     <input type={type} value={v} onChange={e => onChange(e.target.value)} placeholder={ph} disabled={disabled} className="input text-sm" />
   </div>
 );
+
+// ── IP validation (moved here from Chat Control) ─────────────────────────────
+// Submits THIS server's IP to each dialer's IP-validation portal so the dialer
+// whitelists the CRM server (required before recording fetch works). Supports
+// each box's saved validation_url (any scheme/port/path) plus an ad-hoc URL
+// test for a dialer you haven't saved yet.
+const IPValidation = () => {
+  const [boxes, setBoxes] = useState(null);
+  const [val, setVal] = useState(null);
+  const [valBusy, setValBusy] = useState('');      // '' | 'all' | box name
+  const [diag, setDiag] = useState(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [adhoc, setAdhoc] = useState({ box: '', validation_url: '', userid: '', password: '' });
+  const [adhocBusy, setAdhocBusy] = useState(false);
+
+  useEffect(() => { client.get('vicidial/boxes').then(r => setBoxes(r.data.boxes || [])).catch(() => setBoxes([])); }, []);
+
+  const runValidate = async (boxName) => {
+    setValBusy(boxName || 'all'); setVal(null);
+    try {
+      const r = await client.post('portal/admin/validate-ip', boxName ? { box: boxName } : {});
+      setVal(r.data);
+      if ((r.data.results || []).some(x => x.api_open)) { toast.success('Server IP validated — dialer reachable'); runDiag(); }
+      else toast.message('Submitted to the validation portal — re-test in a moment');
+    } catch (e) { setVal({ error: e.response?.data?.error || 'Validation failed' }); }
+    finally { setValBusy(''); }
+  };
+
+  const runDiag = async () => {
+    setDiagBusy(true); setDiag(null);
+    try { const r = await client.get('portal/admin/diag'); setDiag(r.data); }
+    catch (e) { setDiag({ error: e.response?.data?.error || 'Diagnostic failed' }); }
+    finally { setDiagBusy(false); }
+  };
+
+  const runAdhoc = async () => {
+    if (!adhoc.validation_url.trim() && !adhoc.box) { toast.error('Pick a dialer or enter a validation URL'); return; }
+    setAdhocBusy(true); setVal(null);
+    try {
+      const body = {};
+      if (adhoc.box) body.box = adhoc.box;
+      if (adhoc.validation_url.trim()) body.validation_url = adhoc.validation_url.trim();
+      if (adhoc.userid.trim()) body.userid = adhoc.userid.trim();
+      if (adhoc.password) body.password = adhoc.password;
+      const r = await client.post('portal/admin/validate-ip', body);
+      setVal(r.data);
+      if ((r.data.results || []).some(x => x.api_open)) toast.success('Validated — dialer reachable');
+      else toast.message('Submitted — re-test in a moment');
+    } catch (e) { setVal({ error: e.response?.data?.error || 'Validation failed' }); }
+    finally { setAdhocBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Before the CRM can pull dispositions + recordings, each dialer must whitelist this server's IP. Hit <strong>Validate</strong> to submit this server's IP to a dialer's IP-validation portal, then <strong>Test dialer access</strong> to confirm the API opened. Set a per-dialer <strong>IP validation URL</strong> on the Dialer boxes tab for dialers whose portal isn't the classic <code>http://&lt;host&gt;:81/index.php</code>.
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button onClick={() => runValidate()} disabled={!!valBusy} variant="primary" className="text-sm">
+          {valBusy === 'all' ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <ShieldCheck size={14} className="inline mr-1" />} Validate all dialers
+        </Button>
+        <Button onClick={runDiag} disabled={diagBusy} variant="secondary" className="text-sm">
+          {diagBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Wifi size={14} className="inline mr-1" />} Test dialer access
+        </Button>
+      </div>
+
+      {/* Per-box validate */}
+      {boxes === null ? <div className="flex justify-center py-4"><Loader2 className="animate-spin" /></div> : boxes.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {boxes.map(b => (
+            <div key={b.id} className="flex items-center justify-between gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <div className="min-w-0">
+                <div className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{b.name} <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>({b.prefix})</span></div>
+                <div className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text-tertiary)' }}>{b.validation_url || `http://${String(b.base_url || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '')}:81/index.php`}</div>
+              </div>
+              <Button onClick={() => runValidate(b.name)} disabled={!!valBusy} variant="secondary" className="text-xs shrink-0">
+                {valBusy === b.name ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <Check size={13} className="inline mr-1" />} Validate
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ad-hoc test for an unsaved dialer */}
+      <div className="rounded-xl p-3 space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Test a dialer before saving it</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Field label="Validation URL" v={adhoc.validation_url} onChange={v => setAdhoc(p => ({ ...p, validation_url: v }))} ph="https://tmcsolinb.i5.tel:81/KyZvls/index.php" />
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Use saved box creds (optional)</label>
+            <select value={adhoc.box} onChange={e => setAdhoc(p => ({ ...p, box: e.target.value }))} className="input text-sm">
+              <option value="">— enter creds below —</option>
+              {(boxes || []).map(b => <option key={b.id} value={b.name}>{b.name} ({b.prefix})</option>)}
+            </select>
+          </div>
+          <Field label="API user (if not using a box)" v={adhoc.userid} onChange={v => setAdhoc(p => ({ ...p, userid: v }))} ph="apiuser" />
+          <Field label="API pass (if not using a box)" v={adhoc.password} onChange={v => setAdhoc(p => ({ ...p, password: v }))} ph="••••" />
+        </div>
+        <Button onClick={runAdhoc} disabled={adhocBusy} variant="primary" className="text-sm">
+          {adhocBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <ShieldCheck size={14} className="inline mr-1" />} Validate this URL
+        </Button>
+      </div>
+
+      {val && (
+        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {val.error ? <span style={{ color: 'var(--color-error-600)' }}>{val.error}</span> : (
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Submitted this server's IP to the dialer's validation portal</div>
+              {(val.results || []).map(r => (
+                <div key={r.box} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: r.api_open ? 'var(--color-success-500)' : r.submitted ? 'var(--color-warning-500)' : 'var(--color-error-500)' }} />
+                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.box}</span>
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    {r.error ? r.error : r.api_open ? 'validated — API reachable ✓' : r.submitted ? 'submitted (re-test in a moment)' : 'could not reach portal'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {diag && (
+        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {diag.error ? <span style={{ color: 'var(--color-error-600)' }}>{diag.error}</span> : (
+            <div className="space-y-1">
+              {diag.server_ip && (
+                <div className="flex items-center gap-2 mb-2 pb-2 flex-wrap" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Whitelist this IP on the dialer:</span>
+                  <code className="px-2 py-0.5 rounded font-mono text-sm font-bold" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-primary-700)' }}>{diag.server_ip}</code>
+                  <button onClick={() => { navigator.clipboard?.writeText(diag.server_ip); toast.success('IP copied'); }}
+                    className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>Copy</button>
+                </div>
+              )}
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Dialer reachability from this server</div>
+              {(diag.boxes || []).map(b => {
+                const ok = b.status === 'reachable';
+                return (
+                  <div key={b.box} className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: ok ? 'var(--color-success-500)' : 'var(--color-error-500)' }} />
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{b.box}</span>
+                    <span style={{ color: ok ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{b.status}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{b.ms}ms {b.error || ''}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ── Prefix registry ──────────────────────────────────────────────────────────
 const Prefixes = () => {
@@ -807,6 +968,7 @@ const VicidialAdmin = () => {
       </div>
 
       {tab === 'boxes'    && <Boxes />}
+      {tab === 'validate' && <IPValidation />}
       {tab === 'prefixes' && <Prefixes />}
       {tab === 'agents'   && <Agents />}
       {tab === 'dispo'    && <DispoMap />}

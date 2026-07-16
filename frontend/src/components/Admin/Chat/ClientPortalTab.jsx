@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search, Wifi, Sparkles } from 'lucide-react';
+import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Search, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
@@ -12,28 +12,8 @@ export default function ClientPortalTab() {
   const [closers, setClosers] = useState([]);
   const [editing, setEditing] = useState(null);   // client obj or 'new'
   const [auditFor, setAuditFor] = useState(null);
-  const [diag, setDiag] = useState(null);
-  const [diagBusy, setDiagBusy] = useState(false);
 
-  const runDiag = async () => {
-    setDiagBusy(true); setDiag(null); setVal(null);
-    try { const r = await client.get('portal/admin/diag'); setDiag(r.data); }
-    catch (e) { setDiag({ error: e.response?.data?.error || 'Diagnostic failed' }); }
-    finally { setDiagBusy(false); }
-  };
-
-  const [val, setVal] = useState(null);
-  const [valBusy, setValBusy] = useState(false);
-  const runValidate = async () => {
-    setValBusy(true); setVal(null);
-    try {
-      const r = await client.post('portal/admin/validate-ip', {});
-      setVal(r.data);
-      if ((r.data.results || []).some(x => x.api_open)) { toast.success('Server IP validated — dialer reachable'); runDiag(); }
-      else toast.message('Submitted to the validation portal — re-test in a moment');
-    } catch (e) { setVal({ error: e.response?.data?.error || 'Validation failed' }); }
-    finally { setValBusy(false); }
-  };
+  // IP validation + dialer-access diagnostics moved to Superadmin → VICIdial → IP validation.
 
   const [ta, setTa] = useState({ enabled: false, url: '', label: 'Visualizer demo' });
   const [taBusy, setTaBusy] = useState(false);
@@ -105,70 +85,11 @@ export default function ClientPortalTab() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button onClick={runValidate} disabled={valBusy} variant="secondary" className="text-sm">
-            {valBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Check size={14} className="inline mr-1" />} Validate server IP
-          </Button>
-          <Button onClick={runDiag} disabled={diagBusy} variant="secondary" className="text-sm">
-            {diagBusy ? <Loader2 size={14} className="animate-spin inline mr-1" /> : <Wifi size={14} className="inline mr-1" />} Test dialer access
-          </Button>
           <Button onClick={() => setEditing('new')} variant="primary" className="text-sm">
             <Plus size={15} className="inline mr-1" /> New client
           </Button>
         </div>
       </div>
-
-      {val && (
-        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          {val.error ? <span style={{ color: 'var(--color-error-600)' }}>{val.error}</span> : (
-            <div className="space-y-1">
-              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Submitted this server's IP to each dialer's :81 validation portal</div>
-              {(val.results || []).map(r => (
-                <div key={r.box} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ background: r.api_open ? 'var(--color-success-500)' : r.submitted ? 'var(--color-warning-500)' : 'var(--color-error-500)' }} />
-                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.box}</span>
-                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {r.error ? r.error : r.api_open ? 'validated — API reachable ✓' : r.submitted ? 'submitted (re-test in a moment)' : 'could not reach portal'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {diag && (
-        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          {diag.error ? <span style={{ color: 'var(--color-error-600)' }}>{diag.error}</span> : (
-            <div className="space-y-1">
-              {diag.server_ip && (
-                <div className="flex items-center gap-2 mb-2 pb-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Whitelist this IP on the dialer (:81):</span>
-                  <code className="px-2 py-0.5 rounded font-mono text-sm font-bold" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-primary-700)' }}>{diag.server_ip}</code>
-                  <button onClick={() => { navigator.clipboard?.writeText(diag.server_ip); toast.success('IP copied'); }}
-                    className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>Copy</button>
-                </div>
-              )}
-              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Dialer reachability from this server</div>
-              {(diag.boxes || []).map(b => {
-                const ok = b.status === 'reachable';
-                return (
-                  <div key={b.box} className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ background: ok ? 'var(--color-success-500)' : 'var(--color-error-500)' }} />
-                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{b.box}</span>
-                    <span style={{ color: ok ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{b.status}</span>
-                    <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{b.ms}ms {b.error || ''}</span>
-                  </div>
-                );
-              })}
-              {(diag.boxes || []).every(b => b.status !== 'reachable') && (
-                <p className="text-xs mt-1" style={{ color: 'var(--color-warning-700)' }}>
-                  All boxes unreachable → this server's IP is likely not whitelisted on the dialer. Recordings can't be fetched until it is.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Strict review gate — superadmin cutover control (no env change needed) */}
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
