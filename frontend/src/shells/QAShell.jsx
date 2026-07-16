@@ -1159,9 +1159,9 @@ function groupRecordings(recs) {
 // attach automatically; RCM stays in the dialer browser below. This is the
 // CRM-first path: the CRM is the authoritative day, so nothing is missed.
 const CRM_WT = [
-  { key: 'tra',          label: 'TRA · Transfers',   tint: '#2563eb', Icon: ArrowRightLeft, hint: 'Every fronter transfer call in the CRM for this day.' },
-  { key: 'closer_sales', label: 'Closed Sales',      tint: '#059669', Icon: DollarSign,     hint: 'Closer calls that closed a sale (the closer leg).' },
-  { key: 'closer_dispo', label: 'Unclosed Sales',    tint: '#dc2626', Icon: PhoneOff,       hint: 'Transfers a closer worked but did NOT close (the closer leg).' },
+  { key: 'tra',          label: 'TRA · Transfers',   tint: '#2563eb', Icon: ArrowRightLeft, hint: "Every lead this company TRANSFERRED on the selected day — the day's cohort. The two sections below are what became of these same transfers." },
+  { key: 'closer_sales', label: 'Closed Sales',      tint: '#059669', Icon: DollarSign,     hint: "How many of THIS DAY'S transfers became a sale — counted by the transfer day, NOT the sale date (a lead transferred today is usually closed a day or two later). Review the closer's winning call." },
+  { key: 'closer_dispo', label: 'Unclosed Sales',    tint: '#dc2626', Icon: PhoneOff,       hint: "This day's transfers a closer worked but did NOT close into a sale (transfers − closed). Review the closer's call." },
 ];
 function CrmDayPanel({ companyId, scoped, canAssign }) {
   const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -1222,7 +1222,21 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
       </div>
       {allMode && <div className="text-[11px] mb-1" style={{ color: 'var(--color-warning-600)' }}>Pick one company in the top-right header to score its CRM day.</div>}
       {!data ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a past day and press <b>Load day</b> to see its transfers and sales.</div>
-        : <div className="grid grid-cols-3 gap-2.5">
+        : <>
+          {/* plain-language cohort summary — makes clear the sale counts are the
+              CONVERSION of this day's transfers, not sales dated that day */}
+          {(() => {
+            const t = data.sections.tra?.total || 0, c = data.sections.closer_sales?.total || 0, u = data.sections.closer_dispo?.total || 0;
+            const pct = t ? Math.round((c / t) * 100) : 0;
+            return t ? (
+              <div className="text-[11px] mb-2 px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                Of the <b style={{ color: 'var(--color-text)' }}>{t}</b> lead{t === 1 ? '' : 's'} transferred on <b style={{ color: 'var(--color-text)' }}>{data.day}</b>,
+                {' '}<b style={{ color: '#059669' }}>{c}</b> became sales and <b style={{ color: '#dc2626' }}>{u}</b> did not
+                {' '}<span style={{ color: 'var(--color-text-tertiary)' }}>({pct}% close rate · counted by transfer day, the sale itself may close later)</span>.
+              </div>
+            ) : null;
+          })()}
+          <div className="grid grid-cols-3 gap-2.5">
             {CRM_WT.map(({ key, label, tint, Icon, hint }) => {
               const s = data.sections[key] || { total: 0, linked: 0, assigned: 0 };
               const remaining = Math.max(0, s.total - s.assigned);
@@ -1249,7 +1263,8 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
                 </div>
               );
             })}
-          </div>}
+          </div>
+        </>}
     </div>
   );
 }
