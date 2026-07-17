@@ -176,33 +176,54 @@ router.put('/b/:token/reorder', withBoard, asyncHandler(async (req, res) => {
 }));
 
 // ── attachments (images + annotations, stored as base64 data URLs) ──
+// The grid list ships only the small thumbnail (thumb_url) — never the full
+// bytes — so a card with several screenshots opens fast. Full image is fetched
+// on demand (lightbox / annotate) via GET …/attachments/:id/full.
 router.get('/b/:token/cards/:id/attachments', withBoard, asyncHandler(async (req, res) => {
   const { data } = await supabaseAdmin.from('kanban_attachments')
-    .select('id, name, data_url, created_by_name, created_at').eq('card_id', req.params.id).order('created_at', { ascending: true });
-  res.json({ attachments: data || [] });
+    .select('id, name, thumb_url, data_url, created_by_name, created_at').eq('card_id', req.params.id).order('created_at', { ascending: true });
+  const attachments = (data || []).map(a => ({
+    id: a.id, name: a.name, created_by_name: a.created_by_name, created_at: a.created_at,
+    thumb_url: a.thumb_url || a.data_url,        // fall back to full for pre-thumb rows
+  }));
+  res.json({ attachments });
 }));
+
+// Full-resolution image for one attachment (lazy — only when opened/annotated).
+router.get('/b/:token/attachments/:id/full', withBoard, asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('kanban_attachments')
+    .select('id, name, data_url').eq('id', req.params.id).eq('board_id', req.board.id).maybeSingle();
+  if (!data) return res.status(404).json({ error: 'Not found' });
+  res.json({ attachment: data });
+}));
+
+const isImg = (u) => /^data:image\/(png|jpe?g|webp|gif);base64,/.test(String(u || ''));
 
 router.post('/b/:token/cards/:id/attachments', withBoard, asyncHandler(async (req, res) => {
   const data_url = String(req.body?.data_url || '');
-  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/.test(data_url)) return res.status(400).json({ error: 'A base64 image data URL is required' });
+  const thumb_url = req.body?.thumb_url ? String(req.body.thumb_url) : null;
+  if (!isImg(data_url)) return res.status(400).json({ error: 'A base64 image data URL is required' });
   if (data_url.length > 12 * 1024 * 1024) return res.status(413).json({ error: 'Image too large (max ~9 MB)' });
   const { data, error } = await supabaseAdmin.from('kanban_attachments').insert({
     card_id: req.params.id, board_id: req.board.id,
-    name: clip(req.body?.name, 200), data_url,
+    name: clip(req.body?.name, 200), data_url, thumb_url: isImg(thumb_url) ? thumb_url : null,
     created_by_name: cleanName(req.body?.author_name),
-  }).select('id, name, data_url, created_by_name, created_at').single();
+  }).select('id, name, thumb_url, created_by_name, created_at').single();
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json({ attachment: data });
+  res.status(201).json({ attachment: { ...data, thumb_url: data.thumb_url || null } });
 }));
 
 // Replace an attachment's image in place (annotation save over the same image).
 router.put('/b/:token/attachments/:id', withBoard, asyncHandler(async (req, res) => {
   const data_url = String(req.body?.data_url || '');
-  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/.test(data_url)) return res.status(400).json({ error: 'A base64 image data URL is required' });
+  const thumb_url = req.body?.thumb_url ? String(req.body.thumb_url) : null;
+  if (!isImg(data_url)) return res.status(400).json({ error: 'A base64 image data URL is required' });
   if (data_url.length > 12 * 1024 * 1024) return res.status(413).json({ error: 'Image too large (max ~9 MB)' });
+  const patch = { data_url };
+  if (isImg(thumb_url)) patch.thumb_url = thumb_url;
   const { data, error } = await supabaseAdmin.from('kanban_attachments')
-    .update({ data_url }).eq('id', req.params.id).eq('board_id', req.board.id)
-    .select('id, name, data_url, created_by_name, created_at').single();
+    .update(patch).eq('id', req.params.id).eq('board_id', req.board.id)
+    .select('id, name, thumb_url, created_by_name, created_at').single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ attachment: data });
 }));
