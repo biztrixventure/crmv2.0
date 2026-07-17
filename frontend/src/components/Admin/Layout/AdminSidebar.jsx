@@ -45,6 +45,7 @@ const NAV_SECTIONS = [
       { id: 'data-analyzer',     label: 'Data Analyzer',     icon: Database },
       { id: 'data-cleanup',  label: 'Data Cleanup',  icon: Eraser },
       { id: 'vicidial',      label: 'VICIdial',      icon: PhoneCall },
+      { id: 'task-boards',   label: 'Task Boards',   icon: ClipboardCheck },
     ],
   },
   {
