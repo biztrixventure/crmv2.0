@@ -327,7 +327,25 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     normalized_phone: norm || null,
     form_data: { cli_number: norm || null, customer_phone: phone, Phone: phone },
   }).select('id').single();
-  if (error) { xdbg.outcome = `DB error: ${error.message}`; return res.status(500).json({ ok: false, error: error.message }); }
+  if (error) {
+    // A concurrent XFER webhook for the SAME code raced us: both passed the
+    // existence check above and both inserted → uq_transfers_vicidial_code
+    // (23505). Not an error — re-fetch the row the winner created and treat
+    // this call as the idempotent duplicate (mirrors the `existing` path).
+    if (error.code === '23505') {
+      const { data: dup } = await supabaseAdmin
+        .from('transfers').select('id').eq('vicidial_vendor_code', code).maybeSingle();
+      if (dup) {
+        await supabaseAdmin.from('transfers')
+          .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
+          .eq('id', dup.id);
+        await reconcileQueuedDispoForTransfer({ id: dup.id }, norm);
+        xdbg.outcome = `race — deduped into concurrent transfer ${dup.id}`;
+        return res.json({ ok: true, transfer_id: dup.id, deduped: true });
+      }
+    }
+    xdbg.outcome = `DB error: ${error.message}`; return res.status(500).json({ ok: false, error: error.message });
+  }
 
   logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code})`);
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
