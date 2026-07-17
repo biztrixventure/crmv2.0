@@ -46,18 +46,24 @@ const TeamManagementPanel = ({ companyId: companyIdProp }) => {
     // profile/role only and silently ignores a `password` field. Split it out
     // (same as the admin flow) or a manager's typed reset does nothing.
     setActionErr('');
-    try {
-      const { password, ...profile } = formData;
-      if (Object.keys(profile).length > 0) {
-        await client.put(`users/${editUser.id}`, profile);
-      }
-      if (password && String(password).trim()) {
-        await client.put(`users/${editUser.id}/password`, { password: String(password).trim() });
-      }
-      load();
-    } catch (err) {
-      setActionErr(err.response?.data?.error || 'Failed to save user');
-      throw err;   // keep the modal open so the manager can retry
+    const { password, ...profile } = formData;
+    // Run details + password INDEPENDENTLY so a details error can't block the
+    // password reset (that coupling is exactly why "manager can't change the
+    // password" happened). Attribute each failure.
+    let detailsErr = null, passwordErr = null;
+    if (Object.keys(profile).length > 0) {
+      try { await client.put(`users/${editUser.id}`, profile); }
+      catch (e) { detailsErr = e.response?.data?.error || 'Failed to update details'; }
+    }
+    if (password && String(password).trim()) {
+      try { await client.put(`users/${editUser.id}/password`, { password: String(password).trim() }); }
+      catch (e) { passwordErr = e.response?.data?.error || 'Failed to update password'; }
+    }
+    load();
+    if (detailsErr || passwordErr) {
+      const msg = [detailsErr && `Details: ${detailsErr}`, passwordErr && `Password: ${passwordErr}`].filter(Boolean).join(' · ');
+      setActionErr(msg);
+      throw new Error(msg);   // keep the modal open so the manager can retry
     }
   };
 

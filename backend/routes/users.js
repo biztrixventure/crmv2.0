@@ -673,9 +673,13 @@ router.put(
     body("full_name").trim().optional(),
     body("first_name").trim().optional(),
     body("last_name").trim().optional(),
-    body("role_id").isUUID().optional(),
+    // checkFalsy: an edit form that submits an empty role_id/company_id (the row
+    // didn't carry one) must be treated as "not provided", NOT validated as a
+    // UUID — otherwise the whole details update 400s ("Validation failed"),
+    // which (when chained) also blocked the password reset for managers.
+    body("role_id").optional({ checkFalsy: true }).isUUID(),
     body("is_active").isBoolean().optional(),
-    body("company_id").isUUID().optional(), // NOTE: For future reassignment - not implemented yet
+    body("company_id").optional({ checkFalsy: true }).isUUID(), // reassignment (superadmin only, enforced below)
     body("vicidial_agent_id").optional({ nullable: true }).trim(),
   ],
   asyncHandler(async (req, res) => {
