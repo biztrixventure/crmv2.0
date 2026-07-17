@@ -17,7 +17,7 @@ SELECT cr.id, p.id
 FROM custom_roles cr
 CROSS JOIN permissions p
 WHERE cr.level = 'fronter_manager'
-  AND p.key = 'edit_user'
+  AND p.name = 'edit_user'
   AND NOT EXISTS (
     SELECT 1 FROM role_permissions rp
     WHERE rp.role_id = cr.id AND rp.permission_id = p.id
