@@ -273,16 +273,20 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   // configured transfer dispositions (config.field_map.xfer_dispos) create a
   // pending transfer — otherwise NI/DNC/no-answer calls would spam the CRM.
   // No list configured → accept any (back-compat).
+  //
+  // BUGFIX: when an allowlist IS configured, a MISSING/blank dispo must also be
+  // rejected. Previously the check lived under `if (dispo)`, so a call that
+  // arrived without a dispo (the dialer fired the URL on a non-transfer dispo
+  // like "A" but didn't pass it) skipped the filter entirely and created a
+  // bogus transfer. Require the dispo to be present AND listed.
   const dispo = String(p.dispo || '').trim().toUpperCase();
-  if (dispo) {
-    const { data: cfg } = await supabaseAdmin
-      .from('vicidial_config').select('field_map').eq('company_id', companyId).maybeSingle();
-    const xferDispos = Array.isArray(cfg?.field_map?.xfer_dispos)
-      ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
-    if (xferDispos.length && !xferDispos.includes(dispo)) {
-      xdbg.outcome = `NO TRANSFER — "${dispo}" not in xfer_dispos [${xferDispos.join(',')}]`;
-      return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
-    }
+  const { data: cfg } = await supabaseAdmin
+    .from('vicidial_config').select('field_map').eq('company_id', companyId).maybeSingle();
+  const xferDispos = Array.isArray(cfg?.field_map?.xfer_dispos)
+    ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
+  if (xferDispos.length && !xferDispos.includes(dispo)) {
+    xdbg.outcome = `NO TRANSFER — "${dispo || '(none)'}" not in xfer_dispos [${xferDispos.join(',')}]`;
+    return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
   }
 
   // DEDUP: a fronter who ALSO typed the transfer into the CRM by hand creates a
