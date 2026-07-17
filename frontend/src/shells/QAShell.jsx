@@ -255,13 +255,21 @@ function Candidates({ assignmentId }) {
 // the config's meta_field keys → assignment data.
 function metaAutoFill(cfg, a) {
   const out = {};
+  const rec = a.recording_ref || {};
+  const dispo = a.disposition || a.dispo || rec.disposition || '';
   for (const f of (cfg?.meta_fields || [])) {
     const k = `${f.key} ${f.label || ''}`.toLowerCase();
-    if (/center/.test(k)) continue;                 // center name isn't ours to guess
+    if (/center|company/.test(k)) continue;         // center name isn't ours to guess
+    else if (/call.?id|lead.?id|call_id/.test(k)) out[f.key] = rec.lead_id || a.lead_id || a.call_id || '';
+    else if (/date/.test(k)) { const d = a.subject_date || a.call_date || rec.start_time || a.created_at; out[f.key] = d ? new Date(d).toLocaleDateString() : ''; }
+    else if (/agent/.test(k)) out[f.key] = a.agent_name || a.agent_display || a.subject_name || '';   // BEFORE the /name/ rule
+    else if (/cli|phone|number|caller/.test(k)) out[f.key] = a.customer_phone || rec.phone || '';
+    else if (/actual/.test(k)) continue;            // "Call Disposition Actual" — the QA agent enters the real one
+    else if (/disposition|dispo/.test(k)) out[f.key] = dispo;
     else if (/name/.test(k)) out[f.key] = a.customer_name || '';
     else if (/zip|postal/.test(k)) out[f.key] = a.customer_zip || '';
     else if (/state/.test(k)) out[f.key] = a.customer_state || '';
-    else if (/duration/.test(k)) out[f.key] = a.duration != null ? fmtDur(a.duration) : '';
+    else if (/duration/.test(k)) out[f.key] = a.duration != null ? fmtDur(a.duration) : (rec.duration != null ? fmtDur(rec.duration) : '');
   }
   return out;
 }

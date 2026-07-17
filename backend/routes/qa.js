@@ -1346,6 +1346,7 @@ async function replaceSheetScores(reviewId, cfg, values, out) {
   for (const f of (cfg.tracking_flags || [])) add(f.key, values[f.key], 0);              // tracking-only, no formula
   for (const f of ((cfg.quality_score || {}).fields || [])) add(f.key, values[f.key], isY(values[f.key]) ? 1 : 0);
   if (cfg.call_outcome) add(cfg.call_outcome.key, values[cfg.call_outcome.key], out.call_outcome_score ?? 0);
+  if (cfg.manual_status) add(cfg.manual_status.key, values[cfg.manual_status.key], out.passed == null ? 0 : (out.passed ? 1 : 0));
   await supabaseAdmin.from('qa_review_scores').delete().eq('review_id', reviewId);
   if (rows.length) {
     const { error } = await supabaseAdmin.from('qa_review_scores').insert(rows);
@@ -1357,7 +1358,8 @@ async function replaceSheetScores(reviewId, cfg, values, out) {
 // populated (final or quality as %, max 100) so /qa/reports stays meaningful.
 function sheetComputedCols(cfg, values, out) {
   return {
-    total_score: out.final_score ?? out.quality_score ?? 0, max_score: 100,
+    // manual-verdict cards (fronter RCM) have no numeric score → 100/0 by pass/fail
+    total_score: out.final_score ?? out.quality_score ?? (cfg.manual_status && out.passed != null ? (out.passed ? 100 : 0) : 0), max_score: 100,
     passed: out.passed,                                       // null for Closer (no pass/fail in the sheet)
     base_score: out.base_score, autofail_result: out.autofail_result,
     total_penalty: out.total_penalty, final_score: out.final_score,
@@ -1411,7 +1413,9 @@ router.post('/reviews', asyncHandler(async (req, res) => {
     if (rErr) return res.status(500).json({ error: rErr.message });
     await replaceSheetScores(review.id, cfg, vals, out);
     await supabaseAdmin.from('qa_assignments').update({ status: 'scored' }).eq('id', a.id);
-    const label = out.final_score != null
+    const label = out.manual_status != null
+      ? `QA Overall Status: ${out.manual_status}`
+      : out.final_score != null
       ? `${out.passed ? 'Pass' : 'FAIL'} — Final ${out.final_score}`
       : (out.quality_score != null ? `Quality ${out.quality_score}%` : `Auto-Fail: ${out.autofail_result}`);
     await notifyReviewed(a, subjectUserId, req.user.id,

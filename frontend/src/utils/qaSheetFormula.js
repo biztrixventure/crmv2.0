@@ -34,7 +34,9 @@ export function computeSheetReview(cfg, values = {}) {
   const af = cfg.autofail || { fields: [], formula_type: 'all_yes' };
   const afVals = (af.fields || []).map(f => blank(v(f.key)) ? '' : (isY(v(f.key)) ? 'Y' : 'N'));
   let autofail_result;
-  if (af.formula_type === 'explicit_table') {
+  if (!afVals.length) {
+    autofail_result = null;                       // scorecard has no auto-fail gate (e.g. fronter RCM sheet)
+  } else if (af.formula_type === 'explicit_table') {
     autofail_result = (afVals.length && !afVals.includes('') &&
       (af.pass_combinations || []).some(c => c.length === afVals.length && c.every((x, i) => norm(x) === afVals[i])))
       ? 'Pass' : 'Fail';
@@ -72,5 +74,15 @@ export function computeSheetReview(cfg, values = {}) {
   let call_outcome_score = null;
   if (co) call_outcome_score = String(outcomeRaw ?? '') === (co.closed_value ?? 'Closed') ? 1 : 0;
 
-  return { base_sum: baseSum, base_score, autofail_result, total_penalty, final_score, passed, quality_score, call_outcome_score };
+  // Manual QA verdict — evaluator sets Pass/Fail directly (fronter RCM sheet).
+  // Authoritative when configured; blank → undecided (passed=null).
+  let manual_status = null;
+  const ms = cfg.manual_status;
+  if (ms) {
+    const raw = String(v(ms.key) ?? '').trim();
+    manual_status = raw || null;
+    passed = raw ? (raw === (ms.pass_value ?? 'Pass')) : null;
+  }
+
+  return { base_sum: baseSum, base_score, autofail_result, total_penalty, final_score, passed, quality_score, call_outcome_score, manual_status };
 }

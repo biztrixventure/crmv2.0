@@ -21,16 +21,16 @@ const pretty = (s) => String(s ?? '').replace(/_/g, ' ').trim();
 const GROUP_TINT = {
   meta: 'var(--color-surface-hover)', rating: 'rgba(37,99,235,0.10)', autofail: 'rgba(220,38,38,0.10)',
   penalty: 'rgba(217,119,6,0.10)', tracking: 'rgba(107,114,128,0.12)', quality: 'rgba(22,163,74,0.10)',
-  outcome: 'rgba(124,58,237,0.10)', computed: 'rgba(22,163,74,0.16)',
+  outcome: 'rgba(124,58,237,0.10)', verdict: 'rgba(37,99,235,0.14)', computed: 'rgba(22,163,74,0.16)',
 };
 const GROUP_BAND = {
   meta: 'rgba(107,114,128,0.22)', rating: 'rgba(37,99,235,0.22)', autofail: 'rgba(220,38,38,0.22)',
   penalty: 'rgba(217,119,6,0.22)', tracking: 'rgba(107,114,128,0.20)', quality: 'rgba(22,163,74,0.22)',
-  outcome: 'rgba(124,58,237,0.22)', computed: 'rgba(22,163,74,0.30)',
+  outcome: 'rgba(124,58,237,0.22)', verdict: 'rgba(37,99,235,0.28)', computed: 'rgba(22,163,74,0.30)',
 };
 const GROUP_LABEL = {
   meta: 'Call info', rating: 'Ratings (0–4)', autofail: 'Auto-Fail', penalty: 'Penalties',
-  tracking: 'Tracking', quality: 'Sale Compliance', outcome: 'Outcome', computed: 'Score',
+  tracking: 'Tracking', quality: 'Sale Compliance', outcome: 'Outcome', verdict: 'QA Verdict', computed: 'Score',
 };
 
 function YN({ value, onChange, disabled }) {
@@ -74,7 +74,10 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   const out = useMemo(() => computeSheetReview(config, values), [config, values]);
   const divisor = config.base_score_divisor || 30;
   const basePct = truncPct1(out.base_sum, divisor);          // number
-  const status = config.pass_threshold != null ? (out.passed ? 'Pass' : 'FAIL') : (out.quality_score != null ? `${out.quality_score}%` : '—');
+  const verdictDriven = !!config.manual_status || config.pass_threshold != null;
+  const status = verdictDriven
+    ? (out.passed == null ? '—' : (out.passed ? 'Pass' : 'FAIL'))
+    : (out.quality_score != null ? `${out.quality_score}%` : '—');
 
   // ── build the flat, ordered column list (matches the sheet's left→right order)
   const columns = [];
@@ -85,14 +88,16 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   (config.tracking_flags || []).forEach(f => columns.push({ key: f.key, label: `${f.label} (tracking)`, group: 'tracking', kind: 'yn', w: 108 }));
   ((config.quality_score || {}).fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'quality', kind: 'yn', w: 116 }));
   if (config.call_outcome) columns.push({ key: config.call_outcome.key, label: config.call_outcome.label, group: 'outcome', kind: 'outcome', options: config.call_outcome.options || [], w: 130 });
-  // computed (read-only, live)
-  columns.push({ key: '__base', label: 'Base_Score', group: 'computed', kind: 'calc', w: 92, text: `${basePct}%`, bar: basePct / 100, tint: '#2563eb' });
-  columns.push({ key: '__af', label: 'Auto_Fail', group: 'computed', kind: 'flag', w: 84, text: out.autofail_result, ok: out.autofail_result === 'Pass' });
+  // manual verdict input (fronter RCM: the evaluator's "QA Overall Status")
+  if (config.manual_status) columns.push({ key: config.manual_status.key, label: config.manual_status.label, group: 'verdict', kind: 'verdict', options: config.manual_status.options || ['Pass', 'Fail'], passValue: config.manual_status.pass_value || 'Pass', w: 132 });
+  // computed (read-only, live). Only show a computed column when its inputs exist.
+  if ((config.rating_criteria || []).length) columns.push({ key: '__base', label: 'Base_Score', group: 'computed', kind: 'calc', w: 92, text: `${basePct}%`, bar: basePct / 100, tint: '#2563eb' });
+  if (((config.autofail || {}).fields || []).length) columns.push({ key: '__af', label: 'Auto_Fail', group: 'computed', kind: 'flag', w: 84, text: out.autofail_result, ok: out.autofail_result === 'Pass' });
   if ((config.penalty_flags || []).length) columns.push({ key: '__pen', label: 'Total_Penalty', group: 'computed', kind: 'num', w: 92, text: out.total_penalty ?? 0, neg: (out.total_penalty || 0) < 0 });
   if (config.final_score_formula === 'base_plus_penalty_truncated') columns.push({ key: '__final', label: 'Final_Score', group: 'computed', kind: 'calc', w: 92, text: out.final_score ?? '—', bar: Math.max(0, Math.min(1, (Number(out.final_score) || 0) / 100)), tint: '#16a34a' });
   if (config.quality_score) columns.push({ key: '__q', label: 'Quality Score', group: 'computed', kind: 'calc', w: 96, text: out.quality_score == null ? 'N/A' : `${out.quality_score}%`, bar: (out.quality_score || 0) / 100, tint: '#16a34a' });
   if (config.call_outcome) columns.push({ key: '__os', label: 'Call_Outcome_Score', group: 'computed', kind: 'num', w: 92, text: out.call_outcome_score });
-  columns.push({ key: '__status', label: 'QA Overall Status', group: 'computed', kind: 'status', w: 112, text: status, pass: config.pass_threshold != null ? out.passed : null });
+  columns.push({ key: '__status', label: 'QA Overall Status', group: 'computed', kind: 'status', w: 112, text: status, pass: verdictDriven ? out.passed : null });
 
   // group bands (merge consecutive same-group columns)
   const bands = [];
@@ -108,6 +113,20 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
           <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       );
+      case 'verdict': {
+        const val = values[c.key] ?? '';
+        const pass = val && val === c.passValue;
+        const set2 = val && !pass;
+        return (
+          <div className="relative">
+            <div className="absolute inset-0 rounded pointer-events-none" style={{ background: pass ? 'rgba(22,163,74,0.16)' : set2 ? 'rgba(220,38,38,0.14)' : 'transparent' }} />
+            <select value={val} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
+              style={{ ...selStyle, position: 'relative', fontWeight: 800, color: pass ? '#059669' : set2 ? '#dc2626' : 'var(--color-text)' }}>
+              <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+        );
+      }
       case 'calc': return (
         <div>
           <div className="text-sm font-extrabold tabular-nums" style={{ color: 'var(--color-text)' }}>{c.text}</div>
