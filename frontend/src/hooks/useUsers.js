@@ -59,20 +59,27 @@ export const useUsers = (companyId = null) => {
       const otherUpdates = { ...updates };
       delete otherUpdates.password;
 
-      // Update user profile/role if there are non-password updates
+      // Run the two independently: a failure updating DETAILS must NOT block the
+      // password reset (and vice-versa), and each error is attributed clearly.
+      // Previously they were chained, so a details error silently ate the
+      // password change — that's why "I can't change the password" happened.
+      let detailsErr = null, passwordErr = null;
       if (Object.keys(otherUpdates).length > 0) {
-        await client.put(`users/${userAssignmentId}`, otherUpdates);
+        try { await client.put(`users/${userAssignmentId}`, otherUpdates); }
+        catch (e) { detailsErr = e.response?.data?.error || 'Failed to update user details'; }
       }
-
-      // Update password separately if provided (different endpoint)
       if (passwordUpdate && passwordUpdate.trim()) {
-        await client.put(`users/${userAssignmentId}/password`, {
-          password: passwordUpdate,
-        });
+        try { await client.put(`users/${userAssignmentId}/password`, { password: passwordUpdate }); }
+        catch (e) { passwordErr = e.response?.data?.error || 'Failed to update password'; }
       }
 
       // Refetch to get updated data
       await fetchUsers();
+      if (detailsErr || passwordErr) {
+        const msg = [detailsErr && `Details: ${detailsErr}`, passwordErr && `Password: ${passwordErr}`].filter(Boolean).join(' · ');
+        setError(msg);
+        throw new Error(msg);
+      }
       return true;
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to update user';

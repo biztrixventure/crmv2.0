@@ -18,6 +18,10 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
     vicidial_agent_id: '',
   });
   const [errors, setErrors] = useState({});
+  // Whether the VICIdial field was actually edited. In EDIT mode we only send it
+  // when touched — so opening + saving a user never wipes a mapped id the form
+  // didn't (or couldn't) prefill.
+  const [agentTouched, setAgentTouched] = useState(false);
 
   useEffect(() => { fetchAvailableCompanies(); }, [fetchAvailableCompanies]);
 
@@ -32,6 +36,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         require_verification: false,
         vicidial_agent_id: user.vicidial_agent_id || '',
       });
+      setAgentTouched(false);
     } else {
       const userCompanyId = localStorage.getItem('user_company_id');
       setFormData(prev => ({ ...prev, company_id: userCompanyId || '' }));
@@ -74,11 +79,17 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (validate()) onSubmit(formData);
+    if (!validate()) return;
+    const payload = { ...formData };
+    // EDIT mode: don't send the VICIdial id unless the user actually changed it,
+    // so saving never silently clears a mapped id (present key = "set it" server-side).
+    if (user && !agentTouched) delete payload.vicidial_agent_id;
+    onSubmit(payload);
   };
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
+    if (name === 'vicidial_agent_id') setAgentTouched(true);
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
@@ -135,6 +146,10 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
             onChange={handleInputChange} placeholder="e.g. ETC0895, 2006"
             className="input pl-9" />
         </div>
+        {user && (user.vicidial_agent_id
+          ? <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-success-600)' }}>Currently mapped: {user.vicidial_agent_id} — leave as-is to keep it.</p>
+          : <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>No dialer id mapped. Leave blank if this person isn't on the dialer.</p>
+        )}
       </FormField>
 
       {/* Company — CREATE MODE */}

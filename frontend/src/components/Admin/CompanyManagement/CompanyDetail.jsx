@@ -654,11 +654,19 @@ const MembersPanel = ({ companyId }) => {
     // updateUserById. Sending it in the profile body silently dropped it, so the
     // new password never took effect. Mirror the useUsers hook: split them.
     const { password, ...profile } = formData;
-    await client.put(`users/${editUser.id}`, profile);
+    // Run details + password independently so a details error can't silently
+    // block the password reset. Attribute each failure clearly.
+    let detailsErr = null, passwordErr = null;
+    try { await client.put(`users/${editUser.id}`, profile); }
+    catch (e) { detailsErr = e.response?.data?.error || 'Failed to update user details'; }
     if (password && String(password).trim()) {
-      await client.put(`users/${editUser.id}/password`, { password: String(password).trim() });
+      try { await client.put(`users/${editUser.id}/password`, { password: String(password).trim() }); }
+      catch (e) { passwordErr = e.response?.data?.error || 'Failed to update password'; }
     }
     load();
+    if (detailsErr || passwordErr) {
+      throw new Error([detailsErr && `Details: ${detailsErr}`, passwordErr && `Password: ${passwordErr}`].filter(Boolean).join(' · '));
+    }
   };
 
   const deleteUser = async (id) => {

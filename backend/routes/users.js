@@ -955,15 +955,17 @@ router.put(
       logger.debug('UPDATE_PASSWORD', 'Fetching target user', { id });
       let targetUserId = null;
       let targetCompanyId = null;
+      let targetLevel = null;
       const { data: target } = await supabaseAdmin
         .from("user_company_roles")
-        .select("user_id, company_id")
+        .select("user_id, company_id, custom_roles(level)")
         .eq("id", id)
         .maybeSingle();
 
       if (target?.user_id) {
         targetUserId = target.user_id;
         targetCompanyId = target.company_id;
+        targetLevel = target.custom_roles?.level || null;
         logger.success('UPDATE_PASSWORD', `Resolved via user_company_roles`, { id, user_id: targetUserId, company_id: targetCompanyId });
       } else if (req.user.role === 'superadmin') {
         // Superadmin may target a user directly by auth user_id (covers users
@@ -1000,6 +1002,15 @@ router.put(
         if (!hasPerm) {
           logger.error('UPDATE_PASSWORD', 'Permission denied', new Error('User lacks edit_user permission'));
           return res.status(403).json({ error: "You don't have permission to update user passwords" });
+        }
+        // Hierarchy guard: a manager may only reset passwords for users BELOW
+        // their own authority (mirrors the edit-user guard). Prevents an edit_user
+        // holder from resetting a peer's/superior's password.
+        const myLevel    = ROLE_HIERARCHY[req.user.role] ?? 999;
+        const theirLevel = ROLE_HIERARCHY[targetLevel] ?? -1;
+        if (theirLevel <= myLevel) {
+          logger.error('UPDATE_PASSWORD', 'Hierarchy violation on password reset', new Error('Target has equal or higher authority'));
+          return res.status(403).json({ error: 'You can only reset the password of users below your authority level' });
         }
       }
 
