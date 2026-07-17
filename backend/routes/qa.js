@@ -562,6 +562,16 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
 // qa.transcription flag (default OFF) + a configured worker URL.
 const recKey = (q) => `${q.box_id || ''}:${q.recording_id || ''}`;
 
+// Per-user transcription access. Transcription is OFF for everyone by default;
+// a superadmin / compliance manager enables it per user (global allowlist in
+// business_config → qa.transcription_users). Superadmin is always allowed.
+const TRANSCRIBE_USERS_KEY = 'qa.transcription_users';
+async function transcribeAllowed(userId) {
+  if (await isSuperAdmin(userId)) return true;
+  const list = await getConfig(null, TRANSCRIBE_USERS_KEY, []);
+  return Array.isArray(list) && list.includes(userId);
+}
+
 // GET cached transcript for a recording (drives "show if already transcribed").
 router.get('/recordings/transcript', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
@@ -574,10 +584,9 @@ router.get('/recordings/transcript', asyncHandler(async (req, res) => {
 router.post('/recordings/transcribe', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
 
-  // company override → global → off. Superadmin sets it globally, or a manager
-  // per-company via PUT /qa/config.
-  const enabled = await getConfig(req.user.company_id, 'qa.transcription', false);
-  if (!enabled) return res.status(403).json({ error: 'Transcription is turned off.' });
+  // Per-user access (default OFF). Superadmin / compliance enables it per user
+  // in QA config → Transcription access. Superadmin is always allowed.
+  if (!(await transcribeAllowed(req.user.id))) return res.status(403).json({ error: 'Transcription is not enabled for your account. Ask compliance to enable it.' });
   const workerUrl = (process.env.WHISPER_WORKER_URL || '').replace(/\/$/, '');
   if (!workerUrl) return res.status(503).json({ error: 'Transcription worker is not configured.' });
 
@@ -1792,7 +1801,33 @@ router.get('/config', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id || req.user.company_id;
   const out = {};
   for (const k of QA_KEYS) out[k] = await getConfig(companyId, k, null);
-  res.json({ company_id: companyId, config: out });
+  res.json({ company_id: companyId, config: out, can_transcribe: await transcribeAllowed(req.user.id) });
+}));
+
+// ── per-user transcription access (superadmin / compliance manages) ───────────
+// GET → every CRM user + whether transcription is enabled for them (default OFF).
+router.get('/transcription-access', asyncHandler(async (req, res) => {
+  if (!(await isSuperAdmin(req.user.id)) && !(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
+  const list = await getConfig(null, TRANSCRIBE_USERS_KEY, []);
+  const on = new Set(Array.isArray(list) ? list : []);
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, first_name, last_name').order('first_name', { ascending: true });
+  const users = (profs || [])
+    .filter(p => p.user_id)
+    .map(p => ({ user_id: p.user_id, name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.user_id.slice(0, 8), enabled: on.has(p.user_id) }));
+  res.json({ users });
+}));
+
+// PUT { user_id, enabled } → add/remove the user from the transcription allowlist.
+router.put('/transcription-access', asyncHandler(async (req, res) => {
+  if (!(await isSuperAdmin(req.user.id)) && !(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
+  const { user_id, enabled } = req.body || {};
+  if (!user_id) return res.status(400).json({ error: 'user_id required' });
+  const list = await getConfig(null, TRANSCRIBE_USERS_KEY, []);
+  const set = new Set(Array.isArray(list) ? list : []);
+  if (enabled) set.add(user_id); else set.delete(user_id);
+  await setConfig('global', TRANSCRIBE_USERS_KEY, [...set], req.user.id);
+  res.json({ ok: true, user_id, enabled: !!enabled });
 }));
 router.put('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });

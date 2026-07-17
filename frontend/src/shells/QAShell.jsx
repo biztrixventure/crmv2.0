@@ -4,7 +4,7 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -168,8 +168,9 @@ function Candidates({ assignmentId }) {
     client.get(`qa/assignments/${assignmentId}/candidates`)
       .then(r => { if (!dead) setRows(r.data.candidates || []); })
       .catch(() => { if (!dead) setRows([]); });
-    // Is on-demand transcription turned on? (default OFF)
-    client.get('qa/config').then(r => { if (!dead) setCanTranscribe(!!r.data?.config?.['qa.transcription']); }).catch(() => {});
+    // Is on-demand transcription enabled FOR THIS USER? (per-user, default OFF —
+    // superadmin/compliance grants it in QA config → Transcription access.)
+    client.get('qa/config').then(r => { if (!dead) setCanTranscribe(!!r.data?.can_transcribe); }).catch(() => {});
     return () => { dead = true; if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
   }, [assignmentId]);
 
@@ -959,6 +960,54 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   );
 }
 
+// ── Per-user transcription access (superadmin / compliance) ──────────────────
+// Transcription is OFF for everyone by default; enable it per user here. The
+// grant is global (not per-company) — it follows the user wherever they review.
+function TranscriptionAccess() {
+  const [users, setUsers] = useState(null);
+  const [q, setQ] = useState('');
+  const [saving, setSaving] = useState(null);
+  const load = useCallback(() => client.get('qa/transcription-access').then(r => setUsers(r.data.users || [])).catch(() => setUsers([])), []);
+  useEffect(() => { load(); }, [load]);
+  const toggle = async (u) => {
+    setSaving(u.user_id);
+    try {
+      await client.put('qa/transcription-access', { user_id: u.user_id, enabled: !u.enabled });
+      setUsers(list => list.map(x => x.user_id === u.user_id ? { ...x, enabled: !x.enabled } : x));
+    } catch { toast.error('Could not update transcription access'); }
+    finally { setSaving(null); }
+  };
+  const filtered = (users || []).filter(u => u.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const onCount = (users || []).filter(u => u.enabled).length;
+  return (
+    <div className="mt-6">
+      <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+        <Mic size={15} style={{ color: 'var(--color-primary-600)' }} /> Transcription access
+        <InfoTip side="right" w={300} text="Who can transcribe call recordings. OFF for everyone by default — enable it per user. The transcribe button only appears for enabled users. Superadmins always have it." />
+      </div>
+      <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+        On-demand call transcription is <b>disabled by default</b>. Toggle a user on to let them transcribe recordings. {users && <>· <b>{onCount}</b> enabled</>}
+      </div>
+      <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search users…" style={{ ...inp, width: '100%', marginBottom: 8 }} />
+        {users === null ? <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div> : (
+          <div className="space-y-1 max-h-72 overflow-auto">
+            {filtered.map(u => (
+              <label key={u.user_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: u.enabled ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
+                <input type="checkbox" checked={u.enabled} disabled={saving === u.user_id} onChange={() => toggle(u)} />
+                <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{u.name}</span>
+                {saving === u.user_id && <Loader2 size={12} className="animate-spin ml-auto" style={{ color: 'var(--color-text-tertiary)' }} />}
+                <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={u.enabled ? { background: 'rgba(37,99,235,0.15)', color: 'var(--color-primary-600)' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{u.enabled ? 'On' : 'Off'}</span>
+              </label>
+            ))}
+            {!filtered.length && <div className="text-[11px] py-3 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users match.</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Scorecards & Config tab (qa_manager) ─────────────────────────────────────
 function ConfigTab({ companyId }) {
   const [cards, setCards] = useState([]);
@@ -1092,6 +1141,8 @@ function ConfigTab({ companyId }) {
         </div>
       </div>
       </div>
+
+      <TranscriptionAccess />
     </div>
   );
 }
