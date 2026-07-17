@@ -25,6 +25,7 @@ const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
 const QAShell         = lazy(() => import("./shells/QAShell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
+const KanbanBoard     = lazy(() => import("./pages/KanbanBoard"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
 // Branded loader replaces the old spinner everywhere a route is in flight or
@@ -82,6 +83,7 @@ const AppContent = () => {
           <Route path="/reset-password"    element={<ResetPassword />} />
           <Route path="/accept-invite"     element={<AcceptInvite />} />
           <Route path="/guest/:token"      element={<GuestChat />} />
+          <Route path="/board/:token"      element={<KanbanBoard />} />
           <Route path="/impersonate-callback" element={<ImpersonateCallback />} />
 
           {/* Smart redirect */}

@@ -26,6 +26,7 @@ import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import DataCleanup from "../components/Admin/DataCleanup/DataCleanup";
 import VicidialAdmin from "../components/Admin/Vicidial/VicidialAdmin";
+import TaskBoardsAdmin from "../components/Admin/TaskBoards/TaskBoardsAdmin";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
@@ -119,6 +120,7 @@ const AdminPanel = () => {
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
     ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "vicidial",       label: "VICIdial"             }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "task-boards",    label: "Task Boards"          }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "faqs",           label: "FAQs"                 }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "scripts",        label: "Scripts"              }] : []),
     ...(isSAorRO                                       ? [{ id: "bulk-upload",    label: "Bulk Upload"          }] : []),
@@ -195,6 +197,7 @@ const AdminPanel = () => {
                   {activeTab === "note-shortcodes" && <NoteShortcodesManager />}
                   {activeTab === "data-cleanup" && <DataCleanup />}
                   {activeTab === "vicidial" && <VicidialAdmin />}
+                  {activeTab === "task-boards" && <TaskBoardsAdmin />}
                   {activeTab === "vehicles"     && <VehicleManager />}
                   {activeTab === "clients-plans" && <ClientPlanManager />}
                   {activeTab === "faqs"        && <FAQManager />}

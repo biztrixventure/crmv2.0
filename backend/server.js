@@ -63,6 +63,7 @@ const searchRoutes              = require('./routes/search');
 const customerProfileRoutes     = require('./routes/customerProfile');
 const egressRoutes              = require('./routes/egress');
 const qaRoutes                  = require('./routes/qa');
+const kanbanRoutes              = require('./routes/kanban');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
@@ -155,6 +156,8 @@ app.use(helmet({
 app.use('/api/chat/upload', express.json({ limit: '16mb' }));
 // Email attachments use the same base64 upload flow — same raised limit.
 app.use('/api/emails/upload', express.json({ limit: '16mb' }));
+// Kanban image attachments (+ annotations) are base64 data URLs — raised limit.
+app.use('/api/kanban', express.json({ limit: '14mb' }));
 
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
@@ -268,6 +271,12 @@ app.use('/api/vicidial', vicidialIngest);
 app.use('/api/guest',
   rateLimit({ windowMs: 60 * 1000, max: 120, message: { error: 'Too many requests' } }),
   guestChatRoutes);
+// Kanban task boards — PUBLIC board access via share_token in the URL (admin
+// board-CRUD routes carry authMiddleware per-route inside). Mounted before the
+// authed groups so the public routes aren't gated; rate-limited since it's open.
+app.use('/api/kanban',
+  rateLimit({ windowMs: 60 * 1000, max: 240, message: { error: 'Too many requests' } }),
+  kanbanRoutes);
 
 // ============================================================================
 // PROTECTED ROUTES (auth required)
