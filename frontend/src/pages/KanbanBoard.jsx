@@ -416,7 +416,7 @@ function Annotator({ src, onSave, onCancel }) {
   return (
     <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 70, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 12 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: C.surface, padding: '8px 12px', borderRadius: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {TOOLS.map(([k, ic]) => <button key={k} onClick={() => setTool(k)} style={{ ...btnGhost, background: tool === k ? C.primary : '#eef0f4', color: tool === k ? '#fff' : C.text, fontWeight: 800, minWidth: 36 }}>{ic}</button>)}
+        {TOOLS.map(([k, ic]) => <button key={k} onClick={() => setTool(k)} style={{ ...btnGhost, background: tool === k ? C.primary : 'var(--color-surface-hover)', color: tool === k ? '#fff' : 'var(--color-text)', fontWeight: 800, minWidth: 36 }}>{ic}</button>)}
         {['#e11d48', '#4f46e5', '#059669', '#d97706', '#111827', '#ffffff'].map(c => <button key={c} onClick={() => setColor(c)} style={{ width: 24, height: 24, borderRadius: 7, background: c, border: color === c ? '3px solid #111' : `1px solid ${C.border}`, cursor: 'pointer' }} />)}
         <input type="range" min={2} max={18} value={size} onChange={e => setSize(+e.target.value)} title="brush size" />
         <button onClick={undo} style={btnGhost}>Undo</button>
@@ -424,7 +424,7 @@ function Annotator({ src, onSave, onCancel }) {
       <canvas ref={canvasRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
         style={{ maxWidth: '100%', maxHeight: '70vh', background: '#fff', borderRadius: 10, cursor: 'crosshair', touchAction: 'none' }} />
       <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={onCancel} style={{ ...btnGhost, background: '#fff' }}>Cancel</button>
+        <button onClick={onCancel} style={{ ...btnGhost, background: 'var(--color-surface)', border: `1px solid ${C.border}` }}>Cancel</button>
         <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.85))} style={btnPrimary}>Save annotation</button>
       </div>
     </div>
@@ -469,7 +469,8 @@ function NameGate({ value, onChange, onSave }) {
   );
 }
 
-const inp = { width: '100%', border: `1px solid ${C.border}`, borderRadius: 9, padding: '7px 11px', fontSize: 14, color: C.text, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', background: '#fff' };
+// Themed field: dark surface + light text in dark mode (never white-on-white).
+const inp = { width: '100%', border: `1px solid ${C.border}`, borderRadius: 9, padding: '7px 11px', fontSize: 14, color: 'var(--color-text)', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', background: 'var(--color-surface)' };
 const btnPrimary = { background: C.primary, color: '#fff', border: 'none', borderRadius: 9, padding: '7px 15px', fontWeight: 700, fontSize: 13, cursor: 'pointer' };
 const btnGhost = { background: 'transparent', color: C.text, border: 'none', borderRadius: 9, padding: '6px 10px', fontSize: 13, cursor: 'pointer' };
 
