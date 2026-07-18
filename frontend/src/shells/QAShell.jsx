@@ -2352,6 +2352,8 @@ const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true
 function AgentsTab({ companyId, canManage, isSuper = false }) {
   const [agents, setAgents] = useState(null);
   const [fields, setFields] = useState(null);
+  const [savingId, setSavingId] = useState({});    // agentId → 'saving' | 'saved'
+  const [q, setQ] = useState('');                  // agent name search
   const [undone, setUndone] = useState({});        // agentId → open (pending+in_review) count
   const [canClear, setCanClear] = useState(false); // compliance-granted clear-tasks right
   const [clearing, setClearing] = useState(null);  // agentId | '__all__' while a clear runs
@@ -2391,11 +2393,27 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
     } finally { setClearing(null); }
   };
 
-  const toggleMethod = async (agent, m) => {
-    const methods = agent.methods.includes(m) ? agent.methods.filter(x => x !== m) : [...agent.methods, m];
-    setAgents(list => list.map(a => a.id === agent.id ? { ...a, methods } : a));   // optimistic
-    try { await client.put('qa/agent-methods', { company_id: companyId, user_id: agent.id, methods }); }
-    catch { toast.error('Could not update methods'); load(); }
+  // Derive the next methods from the LATEST state inside the functional update —
+  // so rapid toggles never race on a stale `agent.methods` closure (that race is
+  // why saves seemed to "not stick" / lag). Optimistic + a brief saved ✓.
+  const toggleMethod = (agent, m) => {
+    setAgents(list => {
+      const cur = list.find(a => a.id === agent.id); if (!cur) return list;
+      const methods = cur.methods.includes(m) ? cur.methods.filter(x => x !== m) : [...cur.methods, m];
+      setSavingId(s => ({ ...s, [agent.id]: 'saving' }));
+      client.put('qa/agent-methods', { company_id: companyId, user_id: agent.id, methods })
+        .then(() => { setSavingId(s => ({ ...s, [agent.id]: 'saved' })); setTimeout(() => setSavingId(s => { const n = { ...s }; if (n[agent.id] === 'saved') delete n[agent.id]; return n; }), 1400); })
+        .catch(() => { toast.error('Could not update methods'); setSavingId(s => { const n = { ...s }; delete n[agent.id]; return n; }); load(); });
+      return list.map(a => a.id === agent.id ? { ...a, methods } : a);
+    });
+  };
+  const setAllMethods = (agent, on) => {
+    const methods = on ? AGENT_METHODS.map(([m]) => m) : [];
+    setAgents(list => list.map(a => a.id === agent.id ? { ...a, methods } : a));
+    setSavingId(s => ({ ...s, [agent.id]: 'saving' }));
+    client.put('qa/agent-methods', { company_id: companyId, user_id: agent.id, methods })
+      .then(() => { setSavingId(s => ({ ...s, [agent.id]: 'saved' })); setTimeout(() => setSavingId(s => { const n = { ...s }; if (n[agent.id] === 'saved') delete n[agent.id]; return n; }), 1400); })
+      .catch(() => { toast.error('Could not update methods'); load(); });
   };
   const toggleField = async (key) => {
     const next = { ...fields, [key]: !fields[key] };
@@ -2431,18 +2449,29 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
         </div>
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
-          : <div className="space-y-2">
-              {agents.map(a => (
+          : <>
+            {agents.length > 4 && (
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: 'var(--color-text-tertiary)' }} />
+                <input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${agents.length} agents…`} style={{ ...inp, paddingLeft: 28 }} />
+              </div>
+            )}
+            <div className="space-y-2">
+              {agents.filter(a => !q.trim() || (a.name || '').toLowerCase().includes(q.trim().toLowerCase())).map(a => {
+                const allOn = AGENT_METHODS.every(([m]) => a.methods.includes(m));
+                return (
                 <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <User size={15} style={{ color: 'var(--color-text-tertiary)' }} />
-                  <div className="min-w-0 flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}
-                    {undone[a.id] > 0 && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{undone[a.id]} to do</span>}
+                  <div className="min-w-0 flex-1 text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{a.name}
+                    {savingId[a.id] === 'saving' && <Loader2 size={11} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />}
+                    {savingId[a.id] === 'saved' && <span className="text-[10px] font-bold" style={{ color: 'var(--color-success-600, #059669)' }}>✓ saved</span>}
+                    {undone[a.id] > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{undone[a.id]} to do</span>}
                   </div>
                   {AGENT_METHODS.map(([m, label, tint]) => {
                     const on = a.methods.includes(m);
                     return (
                       <button key={m} onClick={() => toggleMethod(a, m)} title={SLOT_LABEL[m]}
-                        className="text-[10px] font-bold px-2 py-1 rounded uppercase whitespace-nowrap"
+                        className="text-[10px] font-bold px-2 py-1 rounded uppercase whitespace-nowrap transition-colors"
                         style={on
                           ? { background: `${tint}26`, color: tint, border: '1px solid currentColor' }
                           : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>
@@ -2450,6 +2479,10 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
                       </button>
                     );
                   })}
+                  <button onClick={() => setAllMethods(a, !allOn)} title={allOn ? 'Unbind all methods' : 'Bind all methods'}
+                    className="text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                    {allOn ? 'None' : 'All'}
+                  </button>
                   {canManage && canClear && (
                     <button onClick={() => clearUndone(a.id)} disabled={clearing !== null || !undone[a.id]}
                       className="p-1.5 rounded" title={undone[a.id] ? `Clear ${undone[a.id]} un-scored task(s) for ${a.name}. Completed work stays.` : 'No un-scored tasks'}
@@ -2458,8 +2491,10 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
                     </button>
                   )}
                 </div>
-              ))}
-            </div>}
+                );
+              })}
+            </div>
+          </>}
       </div>
       {/* card field visibility */}
       <div>
