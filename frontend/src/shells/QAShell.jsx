@@ -2512,12 +2512,15 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const [day, setDay] = useState('');              // '' = all dates
 
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent } = {}) => {
+    if (!silent) setLoading(true);   // silent refresh never blanks the list
     try { const r = await client.get('qa/queue', { params: { limit: 200 } }); setItems(r.data.items || []); }
-    catch { setItems([]); }
+    catch { if (!silent) setItems([]); }
     finally { setLoading(false); }
   }, []);
+  // After scoring: drop the row locally (the `todo` filter hides scored items) —
+  // NO refetch, so nothing reloads and the recording panel doesn't re-mount.
+  const markScored = (id) => setItems(prev => prev.map(it => it.id === id ? { ...it, status: 'scored' } : it));
   useEffect(() => { load(); }, [load]);
   const show = (k) => fields[k] !== false;
 
@@ -2546,8 +2549,8 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
         <div className="flex items-center gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[['tra', 'TRA · Transfers', ArrowRightLeft], ['rcm', 'RCM · Random', Shuffle], ['closer_sales', 'Closed Sale', DollarSign], ['closer_dispo', 'Unclosed Sale', PhoneOff]].map(([k, label, Icon]) => (
             <button key={k} onClick={() => { setWtab(k); setOpen(null); }}
-              className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
-              style={{ background: wtab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: wtab === k ? '#fff' : 'var(--color-text-secondary)' }}>
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5"
+              style={{ background: wtab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: wtab === k ? '#fff' : 'var(--color-text-secondary)', boxShadow: wtab === k ? '0 2px 10px rgba(79,70,229,0.35)' : 'none' }}>
               <Icon size={12} /> {label}
               <span className="text-[10px] px-1.5 rounded-full" style={{ background: wtab === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: wtab === k ? '#fff' : 'var(--color-text-tertiary)' }}>{byWt[k].length}</span>
             </button>
@@ -2558,16 +2561,21 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
         <input type="date" value={day} list="qa-queue-days" onChange={e => { setDay(e.target.value); setOpen(null); }} style={inp} />
         <datalist id="qa-queue-days">{availableDays.map(d => <option key={d} value={d} />)}</datalist>
         {day && <button onClick={() => setDay('')} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>All dates</button>}
-        <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        <button onClick={() => load({ silent: true })} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh">{loading && items.length ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} /> : <RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} />}</button>
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{byDay.length}</b> to&nbsp;do{day ? ` on ${fmtDate(day)}` : ''}</span>
       </div>
-      {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
-        : !shown.length ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{(() => {
-            const noun = { tra: 'TRA transfers', rcm: 'random (RCM) calls', closer_sales: 'closed-sale calls', closer_dispo: 'unclosed-sale calls' }[wtab] || 'calls';
-            return todo.length
-              ? (day ? `No ${noun} to score on ${fmtDate(day)}.` : `No ${noun} in your queue right now.`)
-              : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here.";
-          })()}</div>
+      {loading && !items.length ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        : !shown.length ? <div className="flex-1 flex flex-col items-center justify-center text-center py-16" style={{ color: 'var(--color-text-tertiary)' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, background: 'var(--color-surface-hover)', display: 'grid', placeItems: 'center', marginBottom: 12 }}>
+              {todo.length ? <ClipboardCheck size={26} style={{ color: 'var(--color-primary-500)' }} /> : <CheckSquare size={26} style={{ color: 'var(--color-success-500)' }} />}
+            </div>
+            <div className="text-sm max-w-xs">{(() => {
+              const noun = { tra: 'TRA transfers', rcm: 'random (RCM) calls', closer_sales: 'closed-sale calls', closer_dispo: 'unclosed-sale calls' }[wtab] || 'calls';
+              return todo.length
+                ? (day ? `No ${noun} to score on ${fmtDate(day)}.` : `No ${noun} in your queue right now.`)
+                : "You're all caught up — nothing left in your queue. New calls your QA manager assigns will show up here.";
+            })()}</div>
+          </div>
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
@@ -2575,8 +2583,8 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
               </thead>
               <tbody>
                 {shown.map(a => (
-                  <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer"
-                    style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                  <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
+                    style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : undefined }}>
                     <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <StatusPill s={a.status} /></td>
                     <td className="px-3 py-2">
                       <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{show('customer_name') ? (a.customer_name || '—') : '—'}</div>
@@ -2602,8 +2610,8 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
           <ReviewingBanner a={open} />
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
-            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
-            : <ScoreForm assignment={open} onScored={() => { setOpen(null); toast.success('Scored — moved to Completed'); load(); }} />}
+            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load({ silent: true })} />
+            : <ScoreForm assignment={open} onScored={() => { markScored(open.id); setOpen(null); toast.success('Scored — moved to Completed'); }} />}
         </div>
       )}
     </div>
