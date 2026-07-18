@@ -7,7 +7,7 @@
 -- compliance all-Y → Auto_Fail Pass, Final = trunc(63.3)+(−10) = 53.3 → Pass.
 -- The TRA card just wasn't wired with that formula, so nothing computed. This
 -- seeds it exactly per the Fronter sheet:
---   • 5 ratings (0–4), all in base; Base = Σ/30
+--   • 5 ratings (1–5), all in base; Base = Σ/30
 --   • Auto_Fail = compliance all-Y (qualifying questions, consent, no misrep)
 --   • 7 penalty flags, −5 each
 --   • Final = TRUNC(Base%,1) + penalties (0 if Auto_Fail) ; Pass if Final > 40
@@ -34,11 +34,11 @@ SELECT NULL, 'tra', 'WaveTech Fronter — TRA', '{
     {"key": "call_out_come",         "label": "Call_Out_Come"}
   ],
   "rating_criteria": [
-    {"key": "communication_energy_level",     "label": "Fronter_Communication_Energy_Level",                  "scale": 4, "included_in_base": true},
-    {"key": "customer_product_understanding", "label": "Fronter_Customer_Product_Understanding_Call_Purpose", "scale": 4, "included_in_base": true},
-    {"key": "rebuttal_usage",                 "label": "Fronter_Rebuttal_Usage",                              "scale": 4, "included_in_base": true},
-    {"key": "pronunciation_clarity",          "label": "Fronter_Communication_Pronunciation_Clarity",         "scale": 4, "included_in_base": true},
-    {"key": "sales_intent",                   "label": "Fronter_Sales_Intent",                                "scale": 4, "included_in_base": true}
+    {"key": "communication_energy_level",     "label": "Fronter_Communication_Energy_Level",                  "min": 1, "scale": 5, "included_in_base": true},
+    {"key": "customer_product_understanding", "label": "Fronter_Customer_Product_Understanding_Call_Purpose", "min": 1, "scale": 5, "included_in_base": true},
+    {"key": "rebuttal_usage",                 "label": "Fronter_Rebuttal_Usage",                              "min": 1, "scale": 5, "included_in_base": true},
+    {"key": "pronunciation_clarity",          "label": "Fronter_Communication_Pronunciation_Clarity",         "min": 1, "scale": 5, "included_in_base": true},
+    {"key": "sales_intent",                   "label": "Fronter_Sales_Intent",                                "min": 1, "scale": 5, "included_in_base": true}
   ],
   "base_score_divisor": 30,
   "autofail": {
