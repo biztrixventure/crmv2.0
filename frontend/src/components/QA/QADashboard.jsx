@@ -119,12 +119,12 @@ function MethodCard({ wt, m, day }) {
 // ── agent dashboard ──────────────────────────────────────────────────────────
 export function QAAgentDashboard({ companyId }) {
   const { data, loading, date, setDate } = useDashboard(companyId);
-  if (loading || !data) return <Loading />;
+  if (!data) return <Loading />;   // spinner only on first load — refetches update in place (no blank/reload flash)
   const t = data.totals || {}, by = data.by_method || {};
   const radar = WT.map(w => ({ label: WT_META[w].label, value: (by[w]?.total) || 0, color: WT_META[w].color }));
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-      <Welcome name={data.me?.name} sub="Here's your QA workload and scoring." date={date} setDate={setDate} methods={data.me?.methods} />
+      <Welcome name={data.me?.name} sub="Here's your QA workload and scoring." date={date} setDate={setDate} methods={data.me?.methods} busy={loading} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat icon={ListTodo} label={date ? 'Pending that day' : 'Pending'} value={date ? (t.day_pending || 0) : (t.pending || 0)} sub={date ? `of ${t.day_total || 0} tasks` : 'tasks to review'} tint="#d97706" />
         <Stat icon={CheckCircle2} label={date ? 'Done that day' : 'Done'} value={date ? (t.done_day || 0) : (t.done || 0)} sub={date ? `on ${date}` : 'in range'} tint="#059669" />
@@ -156,12 +156,12 @@ export function QAAgentDashboard({ companyId }) {
 export function QAManagerDashboard({ companyId, onOpenReports }) {
   const { data, loading, date, setDate } = useDashboard(companyId);
   const [detail, setDetail] = useState(null);   // selected QA agent for drill-down
-  if (loading || !data) return <Loading />;
+  if (!data) return <Loading />;   // spinner only on first load — refetches update in place (no blank/reload flash)
   const t = data.totals || {}, by = data.by_method || {}, agents = data.agents || [];
   const radar = WT.map(w => ({ label: WT_META[w].label, value: (by[w]?.total) || 0, color: WT_META[w].color }));
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <Welcome name={data.me?.name} sub="Your team's QA performance at a glance." date={date} setDate={setDate} />
+      <Welcome name={data.me?.name} sub="Your team's QA performance at a glance." date={date} setDate={setDate} busy={loading} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat icon={Users} label="Active agents" value={agents.length} sub="with work in range" />
         <Stat icon={ListTodo} label={date ? 'Pending that day' : 'Pending'} value={date ? (t.day_pending || 0) : (t.pending || 0)} sub={date ? `of ${t.day_total || 0} tasks` : 'team backlog'} tint="#d97706" />
@@ -319,13 +319,13 @@ function useDashboard(companyId) {
   return { data, loading, date, setDate };
 }
 
-function Welcome({ name, sub, date, setDate, methods }) {
+function Welcome({ name, sub, date, setDate, methods, busy }) {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   return (
     <div className="rounded-2xl p-5 flex items-center gap-4 flex-wrap" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#6366f1,#7c3aed))' }}>
       <div className="flex-1 min-w-0">
-        <div className="text-white/80 text-sm font-semibold">{greet},</div>
+        <div className="text-white/80 text-sm font-semibold flex items-center gap-2">{greet}, {busy && <Loader2 size={13} className="animate-spin text-white/80" />}</div>
         <div className="text-2xl font-extrabold text-white truncate">{name || 'there'} 👋</div>
         <div className="text-white/80 text-sm mt-0.5">{sub}</div>
         {methods && methods.length > 0 && <div className="flex gap-1 mt-2">{methods.map(m => <span key={m} className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{WT_META[m]?.label || m}</span>)}</div>}
