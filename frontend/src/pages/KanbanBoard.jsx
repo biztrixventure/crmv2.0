@@ -8,21 +8,27 @@
 // search bar, client-side image downscaling with thumbnails (fast loads), and a
 // responsive layout that collapses cleanly to phone width.
 // ============================================================================
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { ThemeContext } from '../contexts/ThemeContext';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api' });
 
+// Follow the CRM theme (warm light / obsidian dark) — every colour is a CSS
+// variable from global.css, so the board recolours with the app theme + toggle.
 const C = {
-  bg: '#eef1f6', board: '#e4e8f0', surface: '#ffffff', border: '#dde1ea', text: '#141b2d',
-  sub: '#5b6472', faint: '#8a93a3', primary: '#4f46e5', primarySoft: '#eef0fe', danger: '#e11d48', ok: '#059669',
+  bg: 'var(--color-bg)', board: 'var(--color-bg-secondary)', surface: 'var(--color-surface)',
+  surfaceHover: 'var(--color-surface-hover)', border: 'var(--color-border)', text: 'var(--color-text)',
+  sub: 'var(--color-text-secondary)', faint: 'var(--color-text-tertiary)', primary: 'var(--color-primary)',
+  primarySoft: 'var(--color-primary-100)', danger: 'var(--color-error-600)', ok: 'var(--color-success-500)',
 };
 const TAG_HUES = [231, 160, 32, 350, 265, 190, 315, 96];
 const tagHue = (t) => TAG_HUES[[...String(t)].reduce((a, c) => a + c.charCodeAt(0), 0) % TAG_HUES.length];
+// Translucent hue → readable on both the warm-cream light and obsidian dark themes.
 const tagStyle = (t, on = false) => { const h = tagHue(t); return on
-  ? { background: `hsl(${h} 70% 45%)`, color: '#fff', border: `1px solid hsl(${h} 70% 45%)` }
-  : { background: `hsl(${h} 70% 96%)`, color: `hsl(${h} 65% 34%)`, border: `1px solid hsl(${h} 70% 88%)` }; };
+  ? { background: `hsl(${h} 65% 47%)`, color: '#fff', border: `1px solid hsl(${h} 65% 47%)` }
+  : { background: `hsl(${h} 60% 50% / 0.16)`, color: `hsl(${h} 72% 55%)`, border: `1px solid hsl(${h} 60% 50% / 0.32)` }; };
 
 // Downscale an image (File or dataURL) to a max dimension, return a JPEG dataURL.
 async function downscale(src, maxDim, quality = 0.82) {
@@ -57,6 +63,7 @@ export default function KanbanBoard() {
   const modalOpen = useRef(false);
   const drag = useRef({ active: false, id: null, ghost: null });
   const [dragId, setDragId] = useState(null);
+  const { theme, toggleTheme } = useContext(ThemeContext) || {};
 
   const load = useCallback(async () => {
     try { const r = await api.get(`kanban/b/${token}`); setData(r.data); setErr(''); }
@@ -112,7 +119,7 @@ export default function KanbanBoard() {
         armed = true; drag.current.active = true; drag.current.id = card.id; setDragId(card.id);
         const g = document.createElement('div');
         g.textContent = card.title.slice(0, 60);
-        Object.assign(g.style, { position: 'fixed', zIndex: 9999, pointerEvents: 'none', maxWidth: '240px', padding: '8px 10px', borderRadius: '10px', background: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,.28)', font: '13px system-ui', color: C.text, transform: 'rotate(2deg)' });
+        Object.assign(g.style, { position: 'fixed', zIndex: 9999, pointerEvents: 'none', maxWidth: '240px', padding: '8px 10px', borderRadius: '10px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 8px 24px rgba(0,0,0,.35)', font: '13px system-ui', color: 'var(--color-text)', transform: 'rotate(2deg)' });
         document.body.appendChild(g); drag.current.ghost = g;
       }
       const g = drag.current.ghost; if (g) { g.style.left = ev.clientX + 12 + 'px'; g.style.top = ev.clientY + 12 + 'px'; }
@@ -163,6 +170,9 @@ export default function KanbanBoard() {
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search cards…" style={{ ...inp, width: 'min(46vw, 220px)', paddingLeft: 30 }} />
               <span style={{ position: 'absolute', left: 9, top: 7, color: C.faint, fontSize: 14 }}>⌕</span>
             </div>
+            {toggleTheme && (
+              <button onClick={toggleTheme} title="Toggle light / dark" style={{ ...btnGhost, border: `1px solid ${C.border}`, padding: '5px 9px', fontSize: 15, lineHeight: 1 }}>{theme === 'dark' ? '☀' : '☾'}</button>
+            )}
             <span title="signed-in name" style={{ fontSize: 12, color: C.sub, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 24, height: 24, borderRadius: '50%', background: C.primarySoft, color: C.primary, display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 11 }}>{name.slice(0, 2).toUpperCase()}</span>
               <button onClick={() => { localStorage.removeItem('kanban_name'); setName(''); setNameInput(name); }} style={{ ...btnGhost, padding: '2px 4px', fontSize: 12, color: C.primary }}>change</button>
@@ -184,20 +194,23 @@ export default function KanbanBoard() {
         )}
       </header>
 
-      <div style={{ display: 'flex', gap: 12, padding: 16, alignItems: 'flex-start', overflowX: 'auto', flex: 1, WebkitOverflowScrolling: 'touch' }}>
-        {data.columns.slice().sort((a, b) => a.position - b.position).map(col => (
-          <Column key={col.id} col={col} cards={cardsOf(col.id)} dragId={dragId}
-            onAddCard={addCard} onRename={renameColumn} onDelete={deleteColumn} onStartDrag={startDrag} />
-        ))}
-        <div style={{ width: 'min(84vw, 288px)', flexShrink: 0 }}>
-          {addingCol ? (
-            <div style={{ background: C.surface, borderRadius: 14, padding: 10, border: `1px solid ${C.border}` }}>
-              <input autoFocus value={newCol} onChange={e => setNewCol(e.target.value)} onKeyDown={e => e.key === 'Enter' && addColumn()} placeholder="List title…" style={inp} />
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}><button onClick={addColumn} style={btnPrimary}>Add list</button><button onClick={() => { setAddingCol(false); setNewCol(''); }} style={btnGhost}>Cancel</button></div>
-            </div>
-          ) : (
-            <button onClick={() => setAddingCol(true)} style={{ ...btnGhost, width: '100%', padding: 12, background: 'rgba(255,255,255,.5)', border: `1.5px dashed ${C.border}`, borderRadius: 14, color: C.sub, fontWeight: 600 }}>+ Add another list</button>
-          )}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        <GridBg />
+        <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', gap: 12, padding: 16, alignItems: 'flex-start', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {data.columns.slice().sort((a, b) => a.position - b.position).map(col => (
+            <Column key={col.id} col={col} cards={cardsOf(col.id)} dragId={dragId}
+              onAddCard={addCard} onRename={renameColumn} onDelete={deleteColumn} onStartDrag={startDrag} />
+          ))}
+          <div style={{ width: 'min(84vw, 288px)', flexShrink: 0 }}>
+            {addingCol ? (
+              <div style={{ background: C.surface, borderRadius: 14, padding: 10, border: `1px solid ${C.border}` }}>
+                <input autoFocus value={newCol} onChange={e => setNewCol(e.target.value)} onKeyDown={e => e.key === 'Enter' && addColumn()} placeholder="List title…" style={inp} />
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}><button onClick={addColumn} style={btnPrimary}>Add list</button><button onClick={() => { setAddingCol(false); setNewCol(''); }} style={btnGhost}>Cancel</button></div>
+              </div>
+            ) : (
+              <button onClick={() => setAddingCol(true)} style={{ ...btnGhost, width: '100%', padding: 12, background: 'color-mix(in srgb, var(--color-surface) 55%, transparent)', border: `1.5px dashed ${C.border}`, borderRadius: 14, color: C.sub, fontWeight: 600 }}>+ Add another list</button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -369,18 +382,33 @@ function Annotator({ src, onSave, onCancel }) {
   const pushUndo = () => { const c = canvasRef.current; undoStack.current.push(c.getContext('2d').getImageData(0, 0, c.width, c.height)); if (undoStack.current.length > 30) undoStack.current.shift(); };
   const undo = () => { const s = undoStack.current.pop(); if (s) canvasRef.current.getContext('2d').putImageData(s, 0, 0); };
   const arrow = (ctx, x0, y0, x1, y1) => { const a = Math.atan2(y1 - y0, x1 - x0), h = 12 + size * 2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - h * Math.cos(a - 0.4), y1 - h * Math.sin(a - 0.4)); ctx.lineTo(x1 - h * Math.cos(a + 0.4), y1 - h * Math.sin(a + 0.4)); ctx.closePath(); ctx.fillStyle = color; ctx.fill(); };
+  const pressure = (e) => (e.pressure && e.pressure > 0 && e.pressure < 1 ? e.pressure : (e.pointerType === 'mouse' ? 0.5 : (e.pressure || 0.5)));
   const down = (e) => {
-    e.preventDefault(); const p = pos(e);
-    if (tool === 'text') { const txt = window.prompt('Text:'); if (!txt) return; pushUndo(); const ctx = canvasRef.current.getContext('2d'); ctx.fillStyle = color; ctx.font = `bold ${size * 6}px system-ui`; ctx.fillText(txt, p.x, p.y); return; }
-    pushUndo(); const ctx = canvasRef.current.getContext('2d');
-    draw.current = { active: true, x0: p.x, y0: p.y, snapshot: ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height) };
-    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    e.preventDefault(); if (e.pointerId != null) e.currentTarget.setPointerCapture?.(e.pointerId);
+    const p = pos(e); const ctx = canvasRef.current.getContext('2d');
+    if (tool === 'text') { const txt = window.prompt('Text:'); if (!txt) return; pushUndo(); ctx.fillStyle = color; ctx.font = `bold ${size * 6}px system-ui`; ctx.textBaseline = 'top'; ctx.fillText(txt, p.x, p.y); return; }
+    pushUndo();
+    draw.current = { active: true, x0: p.x, y0: p.y, prev: p, mid: p, snapshot: ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height) };
   };
   const move = (e) => {
-    if (!draw.current.active) return; e.preventDefault(); const p = pos(e); const ctx = canvasRef.current.getContext('2d');
-    ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    if (tool === 'pen') { ctx.lineTo(p.x, p.y); ctx.stroke(); }
-    else { ctx.putImageData(draw.current.snapshot, 0, 0); const { x0, y0 } = draw.current; if (tool === 'rect') ctx.strokeRect(x0, y0, p.x - x0, p.y - y0); else if (tool === 'arrow') arrow(ctx, x0, y0, p.x, p.y); }
+    if (!draw.current.active) return; e.preventDefault();
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (tool === 'pen') {
+      // Smooth: quadratic curve through midpoints. Pressure: variable width from
+      // the stylus (0.5 fallback for mouse). Coalesced events keep fast strokes fluid.
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const ev of evs) {
+        const p = pos(ev); const d = draw.current;
+        const mid = { x: (d.prev.x + p.x) / 2, y: (d.prev.y + p.y) / 2 };
+        ctx.lineWidth = Math.max(0.5, size * (0.35 + pressure(ev) * 1.4));
+        ctx.beginPath(); ctx.moveTo(d.mid.x, d.mid.y); ctx.quadraticCurveTo(d.prev.x, d.prev.y, mid.x, mid.y); ctx.stroke();
+        d.prev = p; d.mid = mid;
+      }
+    } else {
+      const p = pos(e); ctx.putImageData(draw.current.snapshot, 0, 0); ctx.lineWidth = size;
+      const { x0, y0 } = draw.current; if (tool === 'rect') ctx.strokeRect(x0, y0, p.x - x0, p.y - y0); else if (tool === 'arrow') arrow(ctx, x0, y0, p.x, p.y);
+    }
   };
   const up = () => { draw.current.active = false; };
   const TOOLS = [['pen', '✏'], ['rect', '▭'], ['arrow', '↗'], ['text', 'T']];
@@ -407,6 +435,25 @@ function Annotator({ src, onSave, onCancel }) {
 const Center = ({ children }) => <div style={{ minHeight: '100dvh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui' }}>{children}</div>;
 const Section = ({ label, children }) => <div style={{ marginTop: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: C.faint, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>{children}</div>;
 const Spinner = () => <span style={{ width: 18, height: 18, border: `2.5px solid ${C.border}`, borderTopColor: C.primary, borderRadius: '50%', display: 'inline-block', animation: 'kbspin 0.7s linear infinite' }} />;
+
+// Themed grid background — a fine dot grid with hollow boxes + crosses at the
+// coarser meet-points (SVG patterns, tuned subtle so cards/text stay high-contrast).
+const GridBg = () => (
+  <svg aria-hidden="true" width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', color: 'var(--color-border)', opacity: 0.7 }}>
+    <defs>
+      <pattern id="kb-dots" width="26" height="26" patternUnits="userSpaceOnUse">
+        <circle cx="1" cy="1" r="1" fill="currentColor" />
+      </pattern>
+      <pattern id="kb-marks" width="104" height="104" patternUnits="userSpaceOnUse">
+        <rect x="-3.5" y="-3.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+        <rect x="48.5" y="48.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.6" />
+        <path d="M23 78 h6 M26 75 v6 M78 23 h6 M81 20 v6" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#kb-dots)" />
+    <rect width="100%" height="100%" fill="url(#kb-marks)" />
+  </svg>
+);
 
 function NameGate({ value, onChange, onSave }) {
   return (
