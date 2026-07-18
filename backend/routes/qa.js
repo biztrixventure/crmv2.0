@@ -1795,6 +1795,95 @@ router.get('/reports', asyncHandler(async (req, res) => {
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
+// ── dashboard ────────────────────────────────────────────────────────────────
+// Role-aware landing stats. A QA agent sees their OWN workload + scoring; a
+// manager sees a per-agent breakdown for the company. Pending is live (from
+// qa_assignments); "done" + pass/fail + scores are from qa_reviews in the window.
+const QA_WT = ['tra', 'rcm', 'closer_sales', 'closer_dispo'];
+router.get('/dashboard', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const managerView = (await isSuperAdmin(req.user.id))
+    || await hasPermission(req.user.id, req.user.company_id, 'view_qa_reports')
+    || await hasPermission(req.user.id, req.user.company_id, 'assign_qa_tasks')
+    || await hasPermission(req.user.id, req.user.company_id, 'manage_qa_config');
+  const allowed = await allowedCompanyIds(req);          // null = all (superadmin), [] = none
+  const companyFilter = req.query.company_id || null;
+  const today = new Date().toISOString().slice(0, 10);
+  const to = (req.query.to || today).slice(0, 10);
+  const from = (req.query.from || new Date(Date.now() - 13 * 864e5).toISOString().slice(0, 10)).slice(0, 10);
+  const day = req.query.date ? String(req.query.date).slice(0, 10) : null;   // single "day work done"
+
+  const emptyBy = () => Object.fromEntries(QA_WT.map(k => [k, { pending: 0, done: 0, done_day: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 }]));
+  const applyCo = (qb) => { if (allowed) qb = qb.in('company_id', allowed); if (companyFilter) qb = qb.eq('company_id', companyFilter); return qb; };
+  if (allowed && !allowed.length) return res.json({ mode: managerView ? 'manager' : 'agent', me: { id: req.user.id }, range: { from, to, day }, by_method: emptyBy(), totals: { total: 0, pending: 0, done: 0, pass: 0, fail: 0, avg_score: null }, daily: [], agents: [] });
+
+  // Live pending workload (not date-bound).
+  let aq = applyCo(supabaseAdmin.from('qa_assignments').select('assigned_to, work_type, method, status'));
+  if (!managerView) aq = aq.eq('assigned_to', req.user.id);
+  // Reviews in the window (done + outcomes).
+  let rq = applyCo(supabaseAdmin.from('qa_reviews').select('reviewer_id, method, passed, final_score, quality_score, total_score, created_at'))
+    .gte('created_at', from).lte('created_at', `${to}T23:59:59.999Z`).limit(20000);
+  if (!managerView) rq = rq.eq('reviewer_id', req.user.id);
+  const [{ data: assigns = [] }, { data: reviews = [] }] = await Promise.all([aq, rq]);
+
+  const scoreOf = (r) => { const s = r.final_score ?? r.quality_score ?? r.total_score; return Number.isFinite(+s) ? +s : null; };
+  const wtOf = (r) => { const w = (r.work_type || r.method || '').toLowerCase(); return QA_WT.includes(w) ? w : null; };
+
+  // per-user accumulator
+  const perUser = new Map();
+  const u = (id) => { if (!perUser.has(id)) perUser.set(id, { user_id: id, by_method: emptyBy() }); return perUser.get(id); };
+  for (const a of assigns) { const w = wtOf(a); if (!w) continue; if (a.status !== 'scored') u(a.assigned_to).by_method[w].pending++; }
+  const dailyMap = {};   // date → count (whole scope)
+  for (const r of reviews) {
+    const w = wtOf(r); if (!w) continue; const m = u(r.reviewer_id).by_method[w];
+    m.done++; if (r.passed === true) m.pass++; else if (r.passed === false) m.fail++;
+    const s = scoreOf(r); if (s != null) { m.score_sum += s; m.score_n++; }
+    const d = String(r.created_at).slice(0, 10); dailyMap[d] = (dailyMap[d] || 0) + 1;
+    if (day && d === day) m.done_day++;
+  }
+
+  // names + bound methods
+  const ids = [...perUser.keys()].filter(Boolean);
+  const [{ data: profs = [] }, { data: bind = [] }] = await Promise.all([
+    ids.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids) : Promise.resolve({ data: [] }),
+    ids.length ? supabaseAdmin.from('qa_agent_methods').select('user_id, method').in('user_id', ids) : Promise.resolve({ data: [] }),
+  ]);
+  const nameById = Object.fromEntries(profs.map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Agent']));
+  const methodsById = {}; for (const b of bind) (methodsById[b.user_id] = methodsById[b.user_id] || []).push(b.method);
+
+  const rollup = (byMethod) => {
+    const t = { total: 0, pending: 0, done: 0, done_day: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 };
+    for (const w of QA_WT) { const m = byMethod[w]; t.pending += m.pending; t.done += m.done; t.done_day += m.done_day; t.pass += m.pass; t.fail += m.fail; t.score_sum += m.score_sum; t.score_n += m.score_n; }
+    t.total = t.pending + t.done;
+    return { total: t.total, pending: t.pending, done: t.done, done_day: t.done_day, pass: t.pass, fail: t.fail, avg_score: t.score_n ? Math.round((t.score_sum / t.score_n) * 10) / 10 : null };
+  };
+  const cleanBy = (byMethod) => Object.fromEntries(QA_WT.map(w => { const m = byMethod[w]; return [w, { pending: m.pending, done: m.done, done_day: m.done_day, pass: m.pass, fail: m.fail, total: m.pending + m.done, avg_score: m.score_n ? Math.round((m.score_sum / m.score_n) * 10) / 10 : null }]; }));
+
+  // aggregate (whole scope)
+  const agg = emptyBy();
+  for (const rec of perUser.values()) for (const w of QA_WT) { const s = rec.by_method[w], d = agg[w]; d.pending += s.pending; d.done += s.done; d.done_day += s.done_day; d.pass += s.pass; d.fail += s.fail; d.score_sum += s.score_sum; d.score_n += s.score_n; }
+
+  // last-14-day trend
+  const daily = [];
+  for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); daily.push({ date: d, done: dailyMap[d] || 0 }); }
+
+  const body = {
+    mode: managerView ? 'manager' : 'agent',
+    me: { id: req.user.id, name: nameById[req.user.id] || null, methods: methodsById[req.user.id] || [] },
+    range: { from, to, day },
+    totals: rollup(agg),
+    by_method: cleanBy(agg),
+    daily,
+  };
+  if (managerView) {
+    body.agents = [...perUser.values()]
+      .map(rec => ({ user_id: rec.user_id, name: nameById[rec.user_id] || 'Agent', methods: methodsById[rec.user_id] || [], by_method: cleanBy(rec.by_method), ...rollup(rec.by_method) }))
+      .filter(a => a.total > 0 || a.done_day > 0)
+      .sort((a, b) => b.total - a.total);
+  }
+  res.json(body);
+}));
+
 const QA_KEYS = ['qa.methods', 'qa.rcm.covers', 'qa.rcm.sample', 'qa.tra.population', 'qa.scorecard.tra', 'qa.scorecard.rcm', 'qa.scorecard.closer_sales', 'qa.scorecard.closer_dispo', 'qa.card_fields', 'qa.retention_days', 'qa.transcription', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
 router.get('/config', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });

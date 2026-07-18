@@ -4,12 +4,13 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic, LayoutDashboard,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
 import SheetScoreRow from '../components/QA/SheetScoreRow';
+import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboard';
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
 
@@ -2610,12 +2611,12 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
 }
 
 function QAAgentView({ user, logout }) {
-  const [tab, setTab] = useState('tasks');
+  const [tab, setTab] = useState('dashboard');
   const [methods, setMethods] = useState(null);
   const { companies, all, companyId, setCompanyId } = useQaCompanies();
   const scoped = companyId === ALL_CO ? '' : companyId;
   useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
-  const tabs = [{ key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
+  const tabs = [{ key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-bg)' }}>
@@ -2640,9 +2641,9 @@ function QAAgentView({ user, logout }) {
         {/* No method-binding gate here: compliance work rules route tasks straight
             to a reviewer, so an agent must always see what's assigned to them —
             AgentTasks shows its own empty state when there's nothing. */}
-        {tab === 'tasks'
-          ? <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />
-          : <CompletedTab managerView={false} companyId={scoped} />}
+        {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
+        {tab === 'tasks' && <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />}
+        {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} />}
       </main>
     </div>
   );
@@ -2656,9 +2657,8 @@ export default function QAShell() {
   const canReports = isSuper || hasPermission('view_qa_reports');
   const canAssign = isSuper || hasPermission('assign_qa_tasks');
   const canOverride = isSuper || hasPermission('override_qa_review');
-  // Manager starts on Day Recordings — the CRM "Queue" browser is disabled for
-  // now (QA is dialer-driven from Load Day).
-  const [tab, setTab] = useState('day');
+  // Manager lands on the Dashboard (team overview + per-agent cards).
+  const [tab, setTab] = useState('dashboard');
 
   // A QA AGENT (no manager-side permission at all) gets the focused agent
   // console. ANY manager-side permission — assign, config, or reports — opens
@@ -2672,6 +2672,7 @@ export default function QAShell() {
   // concrete company, so they fall back to the primary company.
   const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
+    { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     // { key: 'queue', ... }  ← CRM Transfers/Sales browser: DISABLED for now.
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: isSuper || canAssign },
     { key: 'agents', label: 'Agents', icon: UserPlus, show: isSuper || canAssign },
@@ -2699,6 +2700,7 @@ export default function QAShell() {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden">
+        {tab === 'dashboard' && <div className="h-full overflow-auto"><QAManagerDashboard companyId={scoped} onOpenReports={() => canReports && setTab('reports')} /></div>}
         {tab === 'day' && <>
           <CrmDayPanel companyId={companyId} scoped={scoped} canAssign={isSuper || canAssign} />
           <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />
