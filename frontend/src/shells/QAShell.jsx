@@ -488,8 +488,8 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
   const [pulling, setPulling] = useState(false);
   const LIMIT = 50;
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent } = {}) => {
+    if (!silent) setLoading(true);   // silent refresh (after scoring) never blanks
     try {
       const params = { kind, limit: LIMIT, page };
       if (q) params.search = q;
@@ -497,7 +497,7 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
       const r = await client.get('qa/crm-records', { params });
       setItems(r.data.items || []);
       if (r.data.total != null) { setTotal(r.data.total); setTotals(t => ({ ...t, [kind]: r.data.total })); }
-    } catch { setItems([]); }
+    } catch { if (!silent) setItems([]); }
     finally { setLoading(false); }
   }, [kind, page, q, companyId]);
   useEffect(() => { load(); }, [load]);
@@ -584,7 +584,7 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
           )}
         </div>
 
-        {loading ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        {loading && !items.length ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
           : items.length === 0 ? (
             <div className="text-center py-10 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
               {q ? `No ${label} match that phone.` : `No ${label} in the CRM for your companies yet.`}
@@ -637,8 +637,8 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
           <ReviewingBanner a={open} />
           <RecordingsCollapse assignmentId={open.id} />
           {open.status === 'scored'
-            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load()} />
-            : <ScoreForm assignment={open} onScored={() => { setOpen(null); load(); }} />}
+            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load({ silent: true })} />
+            : <ScoreForm assignment={open} onScored={() => { setOpen(null); toast.success('Scored'); load({ silent: true }); }} />}
         </div>
       )}
     </div>
