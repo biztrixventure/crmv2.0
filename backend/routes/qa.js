@@ -2050,6 +2050,29 @@ router.put('/agent-methods', asyncHandler(async (req, res) => {
   res.json({ ok: true, user_id, company_id: companyId, methods });
 }));
 
+// GET /qa/assignments/:id/crm-fields — the CRM form fields the fronter/closer
+// already entered for THIS call (transfer/sale form_data + a few typed cols), so
+// the scorecard can auto-fill any field whose name matches. Authentic source.
+router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: a } = await supabaseAdmin.from('qa_assignments')
+    .select('id, company_id, transfer_id, sale_id').eq('id', req.params.id).maybeSingle();
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  let fields = {}, extra = {};
+  if (a.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales')
+      .select('form_data, customer_name, customer_phone, customer_address, plan, client_name, sale_date, reference_no').eq('id', a.sale_id).maybeSingle();
+    if (s) { fields = s.form_data && typeof s.form_data === 'object' ? s.form_data : {}; extra = { customer_name: s.customer_name, customer_phone: s.customer_phone, customer_address: s.customer_address, plan: s.plan, client_name: s.client_name, date: s.sale_date, reference_no: s.reference_no }; }
+  } else if (a.transfer_id) {
+    const { data: t } = await supabaseAdmin.from('transfers')
+      .select('form_data, normalized_phone, created_at, latest_disposition, vicidial_vendor_code').eq('id', a.transfer_id).maybeSingle();
+    if (t) { fields = t.form_data && typeof t.form_data === 'object' ? t.form_data : {}; extra = { customer_phone: t.normalized_phone, date: t.created_at, disposition: t.latest_disposition, vendor_code: t.vicidial_vendor_code }; }
+  }
+  res.json({ fields, extra });
+}));
+
 // GET /qa/my-methods — the calling agent's own bound methods (drives their UI).
 router.get('/my-methods', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });

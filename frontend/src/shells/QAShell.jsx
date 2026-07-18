@@ -332,6 +332,23 @@ function metaAutoFill(cfg, a) {
   return out;
 }
 
+// Auto-fill scorecard fields from the CRM fields the fronter/closer actually
+// entered (transfer/sale form_data + typed extras). Matches a scorecard
+// meta_field to a CRM field by normalized name (case/spacing/underscore-agnostic).
+// This is the AUTHENTIC source, so it takes precedence over metaAutoFill guesses.
+const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function crmAutoFill(cfg, fields, extra) {
+  if (!cfg?.meta_fields) return {};
+  const src = { ...(extra || {}), ...(fields || {}) };   // form_data overrides typed extras
+  const byNorm = {};
+  for (const [k, v] of Object.entries(src)) if (v != null && v !== '' && typeof v !== 'object') byNorm[normKey(k)] = v;
+  const out = {};
+  for (const f of (cfg.meta_fields || [])) {
+    for (const cand of [normKey(f.key), normKey(f.label)]) { if (byNorm[cand] != null) { out[f.key] = String(byNorm[cand]); break; } }
+  }
+  return out;
+}
+
 // ── scorecard form ────────────────────────────────────────────────────────────
 function ScoreForm({ assignment, onScored }) {
   const [scorecard, setScorecard] = useState(null);   // null = loading, false = none, obj = loaded
@@ -340,9 +357,12 @@ function ScoreForm({ assignment, onScored }) {
   const [notes, setNotes] = useState({});         // key → note
   const [overall, setOverall] = useState('');
   const [busy, setBusy] = useState(false);
+  const [crm, setCrm] = useState(null);           // { fields, extra } the fronter/closer entered
 
   useEffect(() => {
-    setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall('');
+    setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall(''); setCrm(null);
+    // the CRM fields the fronter/closer already entered → auto-fill matching scorecard fields
+    client.get(`qa/assignments/${assignment.id}/crm-fields`).then(r => setCrm({ fields: r.data.fields || {}, extra: r.data.extra || {} })).catch(() => setCrm({ fields: {}, extra: {} }));
     // fetch by WORK TYPE slot (tra | rcm | closer_sales | closer_dispo) so each
     // section uses its own scorecard; fall back to method for legacy tasks.
     client.get('qa/scorecards', { params: { method: assignment.work_type || assignment.method, company_id: assignment.company_id } })
@@ -369,8 +389,9 @@ function ScoreForm({ assignment, onScored }) {
   if (isSheetConfig(scorecard.criteria)) {
     return (
       <SheetScoreRow
+        key={assignment.id + (crm ? ':crm' : '')}
         config={scorecard.criteria}
-        initialValues={metaAutoFill(scorecard.criteria, assignment)}
+        initialValues={{ ...metaAutoFill(scorecard.criteria, assignment), ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra) }}
         busy={busy}
         onSubmit={async (payload) => {
           setBusy(true);
