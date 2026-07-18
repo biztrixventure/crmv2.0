@@ -1870,7 +1870,10 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
     ids.length ? supabaseAdmin.from('qa_agent_methods').select('user_id, method').in('user_id', ids) : Promise.resolve({ data: [] }),
   ]);
   const nameById = Object.fromEntries(profs.map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Agent']));
-  const methodsById = {}; for (const b of bind) (methodsById[b.user_id] = methodsById[b.user_id] || []).push(b.method);
+  // Dedupe: an agent bound to the same method in >1 company would otherwise
+  // produce duplicate method pills on the dashboard card.
+  const methodSets = {}; for (const b of bind) (methodSets[b.user_id] = methodSets[b.user_id] || new Set()).add(b.method);
+  const methodsById = Object.fromEntries(Object.entries(methodSets).map(([k, s]) => [k, [...s]]));
 
   const rollup = (byMethod) => {
     const t = { pending: 0, done: 0, done_day: 0, day_total: 0, day_pending: 0, day_done: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 };

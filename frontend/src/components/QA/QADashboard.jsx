@@ -79,7 +79,7 @@ function MethodMini({ m }) {
 }
 
 // ── shared bits ──────────────────────────────────────────────────────────────
-const Card = ({ children, style }) => <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 16, padding: 16, ...style }}>{children}</div>;
+const Card = ({ children, style, className }) => <div className={className} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 16, padding: 16, ...style }}>{children}</div>;
 function Stat({ icon: Icon, label, value, sub, tint = 'var(--color-primary-600)' }) {
   return (
     <Card>
@@ -275,13 +275,13 @@ function AgentCard({ a, date, onOpen }) {
   const pending = date ? (a.day_pending || 0) : a.pending;
   const done = date ? (a.done_day || 0) : a.done;
   return (
-    <div onClick={() => onOpen?.()} style={{ cursor: 'pointer' }}>
-      <Card style={{ transition: 'border-color .12s' }}>
+    <div onClick={() => onOpen?.()} className="transition-transform hover:-translate-y-0.5" style={{ cursor: 'pointer' }}>
+      <Card style={{ transition: 'box-shadow .15s' }} className="hover:shadow-md">
         <div className="flex items-center gap-3">
           <span style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--color-primary-100)', color: 'var(--color-primary-700)', display: 'grid', placeItems: 'center', fontWeight: 800 }}>{(a.name || '?').slice(0, 2).toUpperCase()}</span>
           <div className="min-w-0 flex-1">
             <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
-            <div className="flex gap-1 mt-0.5 flex-wrap">{(a.methods || []).map(m => <span key={m} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
+            <div className="flex gap-1 mt-0.5 flex-wrap">{[...new Set(a.methods || [])].map(m => <span key={m} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
           </div>
           <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: '#d97706' }}>{pending}</div><div className="text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{date ? 'Pending·day' : 'Pending'}</div></div>
         </div>
@@ -328,7 +328,7 @@ function Welcome({ name, sub, date, setDate, methods, busy }) {
         <div className="text-white/80 text-sm font-semibold flex items-center gap-2">{greet}, {busy && <Loader2 size={13} className="animate-spin text-white/80" />}</div>
         <div className="text-2xl font-extrabold text-white truncate">{name || 'there'} 👋</div>
         <div className="text-white/80 text-sm mt-0.5">{sub}</div>
-        {methods && methods.length > 0 && <div className="flex gap-1 mt-2">{methods.map(m => <span key={m} className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{WT_META[m]?.label || m}</span>)}</div>}
+        {methods && methods.length > 0 && <div className="flex gap-1 mt-2">{[...new Set(methods)].map(m => <span key={m} className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{WT_META[m]?.label || m}</span>)}</div>}
       </div>
       <label className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.16)' }}>
         <CalendarDays size={16} className="text-white" />
