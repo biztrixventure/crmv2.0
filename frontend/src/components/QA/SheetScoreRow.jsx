@@ -189,8 +189,12 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
         </div>
       </div>
 
-      <div className="flex items-center gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <input placeholder="Overall notes / coaching feedback" value={notes} onChange={e => setNotes(e.target.value)} disabled={readOnly} style={{ ...selStyle, flex: 1 }} />
+      <div className="flex items-end gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
+        <div className="flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Overall notes / coaching feedback</div>
+          <textarea placeholder="Write detailed feedback — multiple lines welcome. Shift+Enter for a new line." value={notes} onChange={e => setNotes(e.target.value)} disabled={readOnly}
+            rows={3} style={{ ...selStyle, width: '100%', minHeight: 64, resize: 'vertical', lineHeight: 1.5, fontFamily: 'inherit' }} />
+        </div>
         {!readOnly && (
           <button onClick={submit} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-bold text-white flex items-center gap-1.5 flex-shrink-0"
             style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: busy ? 0.6 : 1 }}>

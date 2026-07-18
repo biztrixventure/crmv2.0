@@ -150,12 +150,55 @@ function TranscriptView({ tx, active, curTime, onSeek }) {
   );
 }
 
+// Live audio spectrum visualizer — hooks the shared <audio> via Web Audio and
+// draws mirrored frequency bars while playing. Themed to the CRM accent.
+function WaveViz({ audioRef, active }) {
+  const canvasRef = useRef(null);
+  const setup = useRef(null);
+  const raf = useRef(0);
+  useEffect(() => {
+    if (!active) return;
+    const a = audioRef.current, canvas = canvasRef.current; if (!a || !canvas) return;
+    let analyser, ac;
+    try {
+      if (!setup.current) {
+        ac = new (window.AudioContext || window.webkitAudioContext)();
+        const src = ac.createMediaElementSource(a);
+        analyser = ac.createAnalyser(); analyser.fftSize = 256;
+        src.connect(analyser); analyser.connect(ac.destination);
+        setup.current = { ac, analyser };
+      } else { ({ ac, analyser } = setup.current); }
+      ac.resume?.();
+    } catch { return; }
+    const g = canvas.getContext('2d');
+    const bins = new Uint8Array(analyser.frequencyBinCount);
+    const draw = () => {
+      raf.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(bins);
+      const w = canvas.width = canvas.offsetWidth || 600, h = canvas.height;
+      g.clearRect(0, 0, w, h);
+      const n = 56, bw = w / n;
+      for (let i = 0; i < n; i++) {
+        const v = bins[Math.floor(i * bins.length / n)] / 255;
+        const bh = Math.max(3, v * h);
+        g.fillStyle = `hsl(${255 - v * 95} 78% 56%)`;
+        g.fillRect(i * bw + 1.5, (h - bh) / 2, bw - 3, bh);
+      }
+    };
+    draw();
+    return () => cancelAnimationFrame(raf.current);
+  }, [active, audioRef]);
+  useEffect(() => () => { try { setup.current?.ac.close(); } catch {} setup.current = null; }, []);
+  return <canvas ref={canvasRef} height={46} style={{ width: '100%', height: 46, display: 'block', borderRadius: 8, background: 'var(--color-bg-secondary)' }} />;
+}
+
 // ── candidate audio player (blob-streamed with auth, like RecordingReviewTab) ──
 function Candidates({ assignmentId }) {
   const [rows, setRows] = useState(null);
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [loadingId, setLoadingId] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
+  const [rate, setRate] = useState(1);
   const [canTranscribe, setCanTranscribe] = useState(false);   // qa.transcription flag
   const [txById, setTxById]   = useState({});   // recording_id → transcript
   const [txBusy, setTxBusy]   = useState(null); // recording_id being transcribed
@@ -244,10 +287,23 @@ function Candidates({ assignmentId }) {
         </div>
         );
       })}
-      <audio ref={audioRef} controls className="w-full mt-1"
-        onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)}
-        onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)}
-        onTimeUpdate={() => setCurTime(audioRef.current?.currentTime || 0)} />
+      <div className="mt-2 rounded-xl p-2.5 sticky bottom-0" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', display: audioRid ? 'block' : 'none', boxShadow: '0 -2px 10px rgba(0,0,0,0.06)' }}>
+        <WaveViz audioRef={audioRef} active={!!playingRid} />
+        <audio ref={audioRef} controls className="w-full mt-2"
+          onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)}
+          onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)}
+          onTimeUpdate={() => setCurTime(audioRef.current?.currentTime || 0)} />
+        <div className="flex items-center gap-1.5 mt-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Speed</span>
+          {[0.75, 1, 1.5, 2].map(s => (
+            <button key={s} onClick={() => { if (audioRef.current) audioRef.current.playbackRate = s; setRate(s); }}
+              className="text-[11px] px-2 py-0.5 rounded font-bold transition-colors"
+              style={{ background: rate === s ? 'var(--color-primary-600)' : 'var(--color-surface-hover)', color: rate === s ? '#fff' : 'var(--color-text-secondary)' }}>{s}×</button>
+          ))}
+          <button onClick={() => { if (audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10); }} className="text-[11px] px-2 py-0.5 rounded font-bold ml-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title="Back 10s">« 10s</button>
+          <button onClick={() => { if (audioRef.current) audioRef.current.currentTime += 10; }} className="text-[11px] px-2 py-0.5 rounded font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title="Forward 10s">10s »</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -627,20 +683,9 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
           </>}
       </div>
 
-      {/* review panel — sticky bottom sheet */}
-      {open && (
-        <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'}</div>
-            <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
-          </div>
-          <ReviewingBanner a={open} />
-          <RecordingsCollapse assignmentId={open.id} />
-          {open.status === 'scored'
-            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load({ silent: true })} />
-            : <ScoreForm assignment={open} onScored={() => { setOpen(null); toast.success('Scored'); load({ silent: true }); }} />}
-        </div>
-      )}
+      <ScoreModal open={open} onClose={() => setOpen(null)} selfId={selfId} canOverride={canOverride}
+        onScored={() => { setOpen(null); toast.success('Scored'); load({ silent: true }); }}
+        onEdited={() => load({ silent: true })} />
     </div>
   );
 }
@@ -2500,6 +2545,35 @@ function RecordingsCollapse({ assignmentId }) {
   );
 }
 
+// Centered, roomy scoring popup (replaces the old bottom sheet). Backdrop click
+// or Esc closes it; the wide sheet-scorecard scrolls inside.
+function ScoreModal({ open, onClose, selfId, canOverride, onScored, onEdited }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(8,10,18,0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 12px' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(1120px, 97vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 18, boxShadow: '0 30px 90px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
+        <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)' }}>
+          <div className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={16} style={{ color: 'var(--color-primary-600)' }} /> {open.status === 'scored' ? 'Review call' : 'Score call'}</div>
+          <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-tertiary)' }} title="Close (Esc)"><XCircle size={20} /></button>
+        </div>
+        <div className="overflow-auto p-5" style={{ flex: 1 }}>
+          <ReviewingBanner a={open} />
+          <RecordingsCollapse assignmentId={open.id} />
+          {open.status === 'scored'
+            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={onEdited} />
+            : <ScoreForm assignment={open} onScored={onScored} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // AGENT queue — only the tasks still TO DO (a scored/skipped task has already
 // moved to Completed). Transfers/Sales split + a date filter that narrows to the
 // records whose call happened on a chosen day.
@@ -2601,19 +2675,9 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
             </table>
           </div>}
 
-      {open && (
-        <div className="px-4 py-3 overflow-auto" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 45, background: 'var(--color-bg)', borderTop: '2px solid var(--color-primary-600)', borderRadius: '16px 16px 0 0', maxHeight: '60vh', boxShadow: '0 -10px 30px rgba(0,0,0,0.20)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{open.status === 'scored' ? 'Review' : 'Score call'}</div>
-            <button onClick={() => setOpen(null)}><XCircle size={18} style={{ color: 'var(--color-text-tertiary)' }} /></button>
-          </div>
-          <ReviewingBanner a={open} />
-          <RecordingsCollapse assignmentId={open.id} />
-          {open.status === 'scored'
-            ? <ReviewEditor assignment={open} selfId={selfId} canOverride={canOverride} onSaved={() => load({ silent: true })} />
-            : <ScoreForm assignment={open} onScored={() => { markScored(open.id); setOpen(null); toast.success('Scored — moved to Completed'); }} />}
-        </div>
-      )}
+      <ScoreModal open={open} onClose={() => setOpen(null)} selfId={selfId} canOverride={canOverride}
+        onScored={() => { markScored(open.id); setOpen(null); toast.success('Scored — moved to Completed'); }}
+        onEdited={() => load({ silent: true })} />
     </div>
   );
 }
