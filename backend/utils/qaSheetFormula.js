@@ -49,7 +49,8 @@ function computeSheetReview(cfg, values = {}) {
   let baseSum = 0;
   for (const rc of (cfg.rating_criteria || [])) {
     const n = parseInt(v(rc.key), 10);
-    const clamped = Number.isFinite(n) ? Math.max(0, Math.min(rc.scale ?? 4, n)) : 0;
+    const lo = rc.min ?? 0;   // rating floor (0 for 0–4 cards, 1 for 1–5 cards). Blank stays 0 (unscored).
+    const clamped = Number.isFinite(n) ? Math.max(lo, Math.min(rc.scale ?? 4, n)) : 0;
     if (rc.included_in_base) baseSum += clamped;
   }
   const divisor = cfg.base_score_divisor || 30;

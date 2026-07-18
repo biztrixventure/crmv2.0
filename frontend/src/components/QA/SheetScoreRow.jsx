@@ -29,7 +29,7 @@ const GROUP_BAND = {
   outcome: 'rgba(124,58,237,0.22)', verdict: 'rgba(37,99,235,0.28)', computed: 'rgba(22,163,74,0.30)',
 };
 const GROUP_LABEL = {
-  meta: 'Call info', rating: 'Ratings (0–4)', autofail: 'Auto-Fail', penalty: 'Penalties',
+  meta: 'Call info', rating: 'Ratings', autofail: 'Auto-Fail', penalty: 'Penalties',
   tracking: 'Tracking', quality: 'Sale Compliance', outcome: 'Outcome', verdict: 'QA Verdict', computed: 'Score',
 };
 
@@ -46,18 +46,20 @@ function YN({ value, onChange, disabled }) {
   );
 }
 
-// 0–N rating with an in-cell data bar (red→green by value).
-function Rating({ value, scale = 4, onChange, disabled }) {
+// min–scale rating with an in-cell data bar (red→green by value). Cards can set
+// min (e.g. 1 for a 1–5 sheet); default 0 keeps legacy 0–4 cards unchanged.
+function Rating({ value, scale = 4, min = 0, onChange, disabled }) {
   const has = value !== '' && value != null;
   const v = has ? Number(value) : null;
-  const frac = v == null ? 0 : Math.max(0, Math.min(1, v / scale));
-  const hue = Math.round(frac * 120);                    // 0=red → 120=green
+  const span = Math.max(1, scale - min);
+  const frac = v == null ? 0 : Math.max(0, Math.min(1, (v - min) / span));
+  const hue = Math.round(frac * 120);                    // low=red → high=green
   const color = v == null ? 'transparent' : `hsl(${hue},70%,45%)`;
   return (
     <div className="relative rounded" style={{ background: v == null ? 'transparent' : `hsla(${hue},70%,45%,0.14)` }}>
       <select value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700 }}>
         <option value="">—</option>
-        {Array.from({ length: scale + 1 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+        {Array.from({ length: scale - min + 1 }, (_, i) => <option key={i} value={min + i}>{min + i}</option>)}
       </select>
       <div className="absolute left-0.5 right-0.5 bottom-0.5 h-1 rounded-full" style={{ background: 'var(--color-border)' }}>
         <div className="h-1 rounded-full" style={{ width: `${frac * 100}%`, background: color, transition: 'width .25s ease' }} />
@@ -82,7 +84,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   // ── build the flat, ordered column list (matches the sheet's left→right order)
   const columns = [];
   (config.meta_fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'meta', kind: 'text', w: 130 }));
-  (config.rating_criteria || []).forEach(rc => columns.push({ key: rc.key, label: `${rc.label}${rc.included_in_base === false ? ' *' : ''}`, group: 'rating', kind: 'rating', scale: rc.scale ?? 4, w: 108 }));
+  (config.rating_criteria || []).forEach(rc => columns.push({ key: rc.key, label: `${rc.label}${rc.included_in_base === false ? ' *' : ''}`, group: 'rating', kind: 'rating', scale: rc.scale ?? 4, min: rc.min ?? 0, w: 108 }));
   ((config.autofail || {}).fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'autofail', kind: 'yn', w: 108 }));
   (config.penalty_flags || []).forEach(f => columns.push({ key: f.key, label: `${f.label} (${f.penalty ?? -5})`, group: 'penalty', kind: 'yn', w: 108 }));
   (config.tracking_flags || []).forEach(f => columns.push({ key: f.key, label: `${f.label} (tracking)`, group: 'tracking', kind: 'yn', w: 108 }));
@@ -106,7 +108,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   const renderCell = (c) => {
     switch (c.kind) {
       case 'text': return <input value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} placeholder="—" />;
-      case 'rating': return <Rating value={values[c.key]} scale={c.scale} onChange={v => set(c.key, v)} disabled={readOnly} />;
+      case 'rating': return <Rating value={values[c.key]} scale={c.scale} min={c.min} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'yn': return <YN value={values[c.key]} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'outcome': return (
         <select value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle}>
