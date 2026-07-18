@@ -1813,18 +1813,28 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   const from = (req.query.from || new Date(Date.now() - 13 * 864e5).toISOString().slice(0, 10)).slice(0, 10);
   const day = req.query.date ? String(req.query.date).slice(0, 10) : null;   // single "day work done"
 
-  const emptyBy = () => Object.fromEntries(QA_WT.map(k => [k, { pending: 0, done: 0, done_day: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 }]));
+  const emptyBy = () => Object.fromEntries(QA_WT.map(k => [k, { pending: 0, done: 0, done_day: 0, day_total: 0, day_pending: 0, day_done: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 }]));
   const applyCo = (qb) => { if (allowed) qb = qb.in('company_id', allowed); if (companyFilter) qb = qb.eq('company_id', companyFilter); return qb; };
-  if (allowed && !allowed.length) return res.json({ mode: managerView ? 'manager' : 'agent', me: { id: req.user.id }, range: { from, to, day }, by_method: emptyBy(), totals: { total: 0, pending: 0, done: 0, pass: 0, fail: 0, avg_score: null }, daily: [], agents: [] });
+  const dayEnd = (d) => `${d}T23:59:59.999Z`;
+  if (allowed && !allowed.length) return res.json({ mode: managerView ? 'manager' : 'agent', me: { id: req.user.id }, range: { from, to, day }, by_method: emptyBy(), totals: { total: 0, pending: 0, done: 0, done_day: 0, day_total: 0, day_pending: 0, day_done: 0, pass: 0, fail: 0, avg_score: null }, daily: [], agents: [] });
 
-  // Live pending workload (not date-bound).
-  let aq = applyCo(supabaseAdmin.from('qa_assignments').select('assigned_to, work_type, method, status'));
-  if (!managerView) aq = aq.eq('assigned_to', req.user.id);
-  // Reviews in the window (done + outcomes).
+  // Live pending backlog (non-scored, not date-bound).
+  let pq = applyCo(supabaseAdmin.from('qa_assignments').select('assigned_to, work_type, method').in('status', ['pending', 'in_review'])).limit(20000);
+  if (!managerView) pq = pq.eq('assigned_to', req.user.id);
+  // Reviews across the 14-day window (trend + range done / pass / score).
   let rq = applyCo(supabaseAdmin.from('qa_reviews').select('reviewer_id, method, passed, final_score, quality_score, total_score, created_at'))
-    .gte('created_at', from).lte('created_at', `${to}T23:59:59.999Z`).limit(20000);
+    .gte('created_at', from).lte('created_at', dayEnd(to)).limit(20000);
   if (!managerView) rq = rq.eq('reviewer_id', req.user.id);
-  const [{ data: assigns = [] }, { data: reviews = [] }] = await Promise.all([aq, rq]);
+  // When a specific day is picked: that day's TASKS (assignments created that day)
+  // and that day's DONE (reviews that day) — independent of the 14-day window.
+  let daq = Promise.resolve({ data: [] }), drq = Promise.resolve({ data: [] });
+  if (day) {
+    let x = applyCo(supabaseAdmin.from('qa_assignments').select('assigned_to, work_type, method, status')).gte('created_at', day).lte('created_at', dayEnd(day)).limit(20000);
+    if (!managerView) x = x.eq('assigned_to', req.user.id); daq = x;
+    let y = applyCo(supabaseAdmin.from('qa_reviews').select('reviewer_id, method, passed, final_score, quality_score, total_score')).gte('created_at', day).lte('created_at', dayEnd(day)).limit(20000);
+    if (!managerView) y = y.eq('reviewer_id', req.user.id); drq = y;
+  }
+  const [{ data: pendings = [] }, { data: reviews = [] }, { data: dayAssigns = [] }, { data: dayReviews = [] }] = await Promise.all([pq, rq, daq, drq]);
 
   const scoreOf = (r) => { const s = r.final_score ?? r.quality_score ?? r.total_score; return Number.isFinite(+s) ? +s : null; };
   const wtOf = (r) => { const w = (r.work_type || r.method || '').toLowerCase(); return QA_WT.includes(w) ? w : null; };
@@ -1832,15 +1842,16 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   // per-user accumulator
   const perUser = new Map();
   const u = (id) => { if (!perUser.has(id)) perUser.set(id, { user_id: id, by_method: emptyBy() }); return perUser.get(id); };
-  for (const a of assigns) { const w = wtOf(a); if (!w) continue; if (a.status !== 'scored') u(a.assigned_to).by_method[w].pending++; }
-  const dailyMap = {};   // date → count (whole scope)
+  for (const a of pendings) { const w = wtOf(a); if (w) u(a.assigned_to).by_method[w].pending++; }
+  const dailyMap = {};   // date → review count (trend)
   for (const r of reviews) {
     const w = wtOf(r); if (!w) continue; const m = u(r.reviewer_id).by_method[w];
     m.done++; if (r.passed === true) m.pass++; else if (r.passed === false) m.fail++;
     const s = scoreOf(r); if (s != null) { m.score_sum += s; m.score_n++; }
-    const d = String(r.created_at).slice(0, 10); dailyMap[d] = (dailyMap[d] || 0) + 1;
-    if (day && d === day) m.done_day++;
+    dailyMap[String(r.created_at).slice(0, 10)] = (dailyMap[String(r.created_at).slice(0, 10)] || 0) + 1;
   }
+  for (const a of dayAssigns) { const w = wtOf(a); if (!w) continue; const m = u(a.assigned_to).by_method[w]; m.day_total++; if (a.status === 'scored') m.day_done++; else m.day_pending++; }
+  for (const r of dayReviews) { const w = wtOf(r); if (w) u(r.reviewer_id).by_method[w].done_day++; }
 
   // names + bound methods
   const ids = [...perUser.keys()].filter(Boolean);
@@ -1852,16 +1863,15 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   const methodsById = {}; for (const b of bind) (methodsById[b.user_id] = methodsById[b.user_id] || []).push(b.method);
 
   const rollup = (byMethod) => {
-    const t = { total: 0, pending: 0, done: 0, done_day: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 };
-    for (const w of QA_WT) { const m = byMethod[w]; t.pending += m.pending; t.done += m.done; t.done_day += m.done_day; t.pass += m.pass; t.fail += m.fail; t.score_sum += m.score_sum; t.score_n += m.score_n; }
-    t.total = t.pending + t.done;
-    return { total: t.total, pending: t.pending, done: t.done, done_day: t.done_day, pass: t.pass, fail: t.fail, avg_score: t.score_n ? Math.round((t.score_sum / t.score_n) * 10) / 10 : null };
+    const t = { pending: 0, done: 0, done_day: 0, day_total: 0, day_pending: 0, day_done: 0, pass: 0, fail: 0, score_sum: 0, score_n: 0 };
+    for (const w of QA_WT) { const m = byMethod[w]; for (const k of Object.keys(t)) t[k] += m[k]; }
+    return { total: t.pending + t.done, pending: t.pending, done: t.done, done_day: t.done_day, day_total: t.day_total, day_pending: t.day_pending, day_done: t.day_done, pass: t.pass, fail: t.fail, avg_score: t.score_n ? Math.round((t.score_sum / t.score_n) * 10) / 10 : null };
   };
-  const cleanBy = (byMethod) => Object.fromEntries(QA_WT.map(w => { const m = byMethod[w]; return [w, { pending: m.pending, done: m.done, done_day: m.done_day, pass: m.pass, fail: m.fail, total: m.pending + m.done, avg_score: m.score_n ? Math.round((m.score_sum / m.score_n) * 10) / 10 : null }]; }));
+  const cleanBy = (byMethod) => Object.fromEntries(QA_WT.map(w => { const m = byMethod[w]; return [w, { pending: m.pending, done: m.done, done_day: m.done_day, day_total: m.day_total, day_pending: m.day_pending, day_done: m.day_done, pass: m.pass, fail: m.fail, total: m.pending + m.done, avg_score: m.score_n ? Math.round((m.score_sum / m.score_n) * 10) / 10 : null }]; }));
 
   // aggregate (whole scope)
   const agg = emptyBy();
-  for (const rec of perUser.values()) for (const w of QA_WT) { const s = rec.by_method[w], d = agg[w]; d.pending += s.pending; d.done += s.done; d.done_day += s.done_day; d.pass += s.pass; d.fail += s.fail; d.score_sum += s.score_sum; d.score_n += s.score_n; }
+  for (const rec of perUser.values()) for (const w of QA_WT) { const s = rec.by_method[w], d = agg[w]; for (const k of Object.keys(d)) d[k] += s[k]; }
 
   // last-14-day trend
   const daily = [];
@@ -1878,8 +1888,8 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   if (managerView) {
     body.agents = [...perUser.values()]
       .map(rec => ({ user_id: rec.user_id, name: nameById[rec.user_id] || 'Agent', methods: methodsById[rec.user_id] || [], by_method: cleanBy(rec.by_method), ...rollup(rec.by_method) }))
-      .filter(a => a.total > 0 || a.done_day > 0)
-      .sort((a, b) => b.total - a.total);
+      .filter(a => a.total > 0 || a.day_total > 0 || a.done_day > 0)
+      .sort((a, b) => (day ? (b.day_total - a.day_total) : (b.total - a.total)) || b.total - a.total);
   }
   res.json(body);
 }));

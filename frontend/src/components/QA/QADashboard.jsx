@@ -95,17 +95,22 @@ function Stat({ icon: Icon, label, value, sub, tint = 'var(--color-primary-600)'
 
 function MethodCard({ wt, m, day }) {
   const meta = WT_META[wt];
+  // Date picked → show THAT DAY's tasks (assigned that day) + that day's done.
+  // Otherwise → the live pending backlog + range done.
+  const pending = day ? (m.day_pending || 0) : (m.pending || 0);
+  const done = day ? (m.day_done || 0) : (m.done || 0);
+  const mini = day ? { done: m.day_done || 0, pending: m.day_pending || 0, total: m.day_total || 0 } : m;
   return (
     <Card style={{ borderTop: `3px solid ${meta.color}` }}>
       <div className="flex items-baseline justify-between">
         <div><div className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{meta.label}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{meta.sub}</div></div>
-        <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: meta.color }}>{m.pending || 0}</div><div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Pending</div></div>
+        <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: meta.color }}>{pending}</div><div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{day ? 'Pending that day' : 'Pending'}</div></div>
       </div>
-      <div className="mt-3"><MethodMini m={m} /></div>
+      <div className="mt-3"><MethodMini m={mini} /></div>
       <div className="flex items-center justify-between mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-        <span>{day ? 'Done that day' : 'Done'} <b style={{ color: 'var(--color-text)' }}>{day ? (m.done_day || 0) : (m.done || 0)}</b></span>
+        <span>{day ? 'Done that day' : 'Done'} <b style={{ color: 'var(--color-text)' }}>{done}</b></span>
+        {day && <span>Tasks <b style={{ color: 'var(--color-text)' }}>{m.day_total || 0}</b></span>}
         <span>Pass <b style={{ color: '#059669' }}>{pct(m.pass || 0, (m.pass || 0) + (m.fail || 0))}%</b></span>
-        {m.avg_score != null && <span>Avg <b style={{ color: 'var(--color-text)' }}>{m.avg_score}</b></span>}
       </div>
     </Card>
   );
@@ -121,7 +126,7 @@ export function QAAgentDashboard({ companyId }) {
     <div className="max-w-6xl mx-auto space-y-5">
       <Welcome name={data.me?.name} sub="Here's your QA workload and scoring." date={date} setDate={setDate} methods={data.me?.methods} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat icon={ListTodo} label="Pending" value={t.pending || 0} sub="tasks to review" tint="#d97706" />
+        <Stat icon={ListTodo} label={date ? 'Pending that day' : 'Pending'} value={date ? (t.day_pending || 0) : (t.pending || 0)} sub={date ? `of ${t.day_total || 0} tasks` : 'tasks to review'} tint="#d97706" />
         <Stat icon={CheckCircle2} label={date ? 'Done that day' : 'Done'} value={date ? (t.done_day || 0) : (t.done || 0)} sub={date ? `on ${date}` : 'in range'} tint="#059669" />
         <Stat icon={Gauge} label="Pass rate" value={`${pct(t.pass || 0, (t.pass || 0) + (t.fail || 0))}%`} sub={`${t.pass || 0} pass · ${t.fail || 0} fail`} />
         <Stat icon={TrendingUp} label="Avg score" value={t.avg_score ?? '—'} sub="across reviews" tint="#7c3aed" />
@@ -150,6 +155,7 @@ export function QAAgentDashboard({ companyId }) {
 // ── manager dashboard ────────────────────────────────────────────────────────
 export function QAManagerDashboard({ companyId, onOpenReports }) {
   const { data, loading, date, setDate } = useDashboard(companyId);
+  const [detail, setDetail] = useState(null);   // selected QA agent for drill-down
   if (loading || !data) return <Loading />;
   const t = data.totals || {}, by = data.by_method || {}, agents = data.agents || [];
   const radar = WT.map(w => ({ label: WT_META[w].label, value: (by[w]?.total) || 0, color: WT_META[w].color }));
@@ -158,7 +164,7 @@ export function QAManagerDashboard({ companyId, onOpenReports }) {
       <Welcome name={data.me?.name} sub="Your team's QA performance at a glance." date={date} setDate={setDate} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat icon={Users} label="Active agents" value={agents.length} sub="with work in range" />
-        <Stat icon={ListTodo} label="Pending" value={t.pending || 0} sub="team backlog" tint="#d97706" />
+        <Stat icon={ListTodo} label={date ? 'Pending that day' : 'Pending'} value={date ? (t.day_pending || 0) : (t.pending || 0)} sub={date ? `of ${t.day_total || 0} tasks` : 'team backlog'} tint="#d97706" />
         <Stat icon={CheckCircle2} label={date ? 'Done that day' : 'Done'} value={date ? (t.done_day || 0) : (t.done || 0)} sub={date ? `on ${date}` : 'in range'} tint="#059669" />
         <Stat icon={Gauge} label="Team pass rate" value={`${pct(t.pass || 0, (t.pass || 0) + (t.fail || 0))}%`} sub={`avg score ${t.avg_score ?? '—'}`} tint="#7c3aed" />
       </div>
@@ -170,45 +176,132 @@ export function QAManagerDashboard({ companyId, onOpenReports }) {
       </div>
 
       <div>
-        <div className="text-sm font-bold mb-2 flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Users size={16} /> Agents ({agents.length})</div>
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <div className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Users size={16} /> QA agents ({agents.length}) <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>— click an agent for their review report</span></div>
+          {onOpenReports && <button onClick={onOpenReports} className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>Fronter / closer quality reports <ArrowRight size={12} /></button>}
+        </div>
         {agents.length === 0 ? <Card><div className="text-sm text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>No agent activity in this window.</div></Card> : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {agents.map(a => <AgentCard key={a.user_id} a={a} date={date} onOpenReports={onOpenReports} />)}
+            {agents.map(a => <AgentCard key={a.user_id} a={a} date={date} onOpen={() => setDetail(a)} />)}
           </div>
         )}
       </div>
+
+      {detail && <AgentDetail agent={detail} companyId={companyId} date={date} range={data.range} onClose={() => setDetail(null)} />}
     </div>
   );
 }
 
-function AgentCard({ a, date, onOpenReports }) {
-  const radar = WT.map(w => ({ label: WT_META[w].label, value: (a.by_method[w]?.total) || 0, color: WT_META[w].color }));
+// ── per-QA-agent drill-down (the agent's OWN review activity — NOT the
+// fronter/closer quality report, which is the separate Reports tab). ──────────
+function AgentDetail({ agent, companyId, date, range, onClose }) {
+  const [rows, setRows] = useState(null);
+  const from = date || range?.from, to = date || range?.to;
+  useEffect(() => {
+    const params = { reviewer_id: agent.user_id, date_from: from, date_to: to };
+    if (companyId) params.company_id = companyId;
+    client.get('qa/reviews', { params }).then(r => setRows(r.data.reviews || [])).catch(() => setRows([]));
+  }, [agent.user_id, from, to, companyId]);
+  const radar = WT.map(w => ({ label: WT_META[w].label, value: (agent.by_method[w]?.total) || 0, color: WT_META[w].color }));
+  const scoreOf = (r) => r.final_score ?? r.quality_score ?? r.total_score;
   return (
-    <Card>
-      <div className="flex items-center gap-3">
-        <span style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--color-primary-100)', color: 'var(--color-primary-700)', display: 'grid', placeItems: 'center', fontWeight: 800 }}>{(a.name || '?').slice(0, 2).toUpperCase()}</span>
-        <div className="min-w-0 flex-1">
-          <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
-          <div className="flex gap-1 mt-0.5 flex-wrap">{(a.methods || []).map(m => <span key={m} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,35,.5)', zIndex: 60, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '4vh 12px', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} className="w-full" style={{ maxWidth: 860, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 18, padding: 18 }}>
+        <div className="flex items-center gap-3">
+          <span style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--color-primary-100)', color: 'var(--color-primary-700)', display: 'grid', placeItems: 'center', fontWeight: 800 }}>{(agent.name || '?').slice(0, 2).toUpperCase()}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-lg font-extrabold" style={{ color: 'var(--color-text)' }}>{agent.name}</div>
+            <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>QA agent · {date ? `report for ${date}` : `${from} → ${to}`}</div>
+          </div>
+          <button onClick={onClose} style={{ fontSize: 22, color: 'var(--color-text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
         </div>
-        <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: '#d97706' }}>{a.pending}</div><div className="text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Pending</div></div>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mt-3 items-center">
-        <Radar axes={radar} size={150} />
-        <div className="space-y-1.5">
-          {WT.map(w => { const m = a.by_method[w] || {}; if (!m.total && !m.done_day) return null; return (
-            <div key={w} className="text-[11px]">
-              <div className="flex justify-between" style={{ color: 'var(--color-text-secondary)' }}><span style={{ color: WT_META[w].color, fontWeight: 700 }}>{WT_META[w].label}</span><span>{date ? (m.done_day || 0) : (m.done || 0)}/{m.total || 0}</span></div>
-              <MethodMini m={m} />
-            </div>
-          ); })}
+
+        <div className="grid grid-cols-4 gap-2 mt-4">
+          <MiniStat label={date ? 'Pending' : 'Pending'} value={date ? (agent.day_pending || 0) : agent.pending} tint="#d97706" />
+          <MiniStat label={date ? 'Done that day' : 'Done'} value={date ? (agent.done_day || 0) : agent.done} tint="#059669" />
+          <MiniStat label="Pass rate" value={`${pct(agent.pass, agent.pass + agent.fail)}%`} />
+          <MiniStat label="Avg score" value={agent.avg_score ?? '—'} tint="#7c3aed" />
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4 mt-4 items-center">
+          <div className="grid place-items-center"><Radar axes={radar} size={180} /></div>
+          <div className="space-y-2">
+            {WT.map(w => { const m = agent.by_method[w] || {}; return (
+              <div key={w} className="text-xs">
+                <div className="flex justify-between" style={{ color: 'var(--color-text-secondary)' }}><span style={{ color: WT_META[w].color, fontWeight: 700 }}>{WT_META[w].label}</span><span>{date ? `${m.done_day || 0} done · ${m.day_pending || 0} pending` : `${m.done || 0} done · ${m.pending || 0} pending`}</span></div>
+                <MethodMini m={date ? { done: m.day_done || 0, pending: m.day_pending || 0, total: m.day_total || 0 } : m} />
+              </div>
+            ); })}
+          </div>
+        </div>
+
+        <div className="text-sm font-bold mt-5 mb-2" style={{ color: 'var(--color-text)' }}>Reviews by this agent {rows && `(${rows.length})`}</div>
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)', maxHeight: 320, overflowY: 'auto' }}>
+          {rows === null ? <div className="py-6 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+            : rows.length === 0 ? <div className="py-6 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No reviews in this window.</div>
+            : (
+              <table className="w-full text-xs">
+                <thead><tr style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
+                  {['Date', 'Method', 'Reviewed', 'Customer', 'Result', 'Score'].map(h => <th key={h} className="text-left px-3 py-2 font-bold">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                      <td className="px-3 py-1.5 whitespace-nowrap">{r.reviewed_at ? new Date(r.reviewed_at).toLocaleDateString() : '—'}</td>
+                      <td className="px-3 py-1.5"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[r.method]?.color || '#888'} 15%, transparent)`, color: WT_META[r.method]?.color || '#888' }}>{WT_META[r.method]?.label || r.method}</span></td>
+                      <td className="px-3 py-1.5 truncate" style={{ maxWidth: 140, color: 'var(--color-text)' }}>{r.agent || r.subject_name || '—'}</td>
+                      <td className="px-3 py-1.5 truncate" style={{ maxWidth: 130 }}>{r.customer_name || '—'}</td>
+                      <td className="px-3 py-1.5 font-bold" style={{ color: r.passed === false ? '#dc2626' : r.passed === true ? '#059669' : 'var(--color-text-tertiary)' }}>{r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || '—')}</td>
+                      <td className="px-3 py-1.5 font-bold" style={{ color: 'var(--color-text)' }}>{scoreOf(r) != null ? scoreOf(r) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
         </div>
       </div>
-      <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Pass <b style={{ color: '#059669' }}>{pct(a.pass, a.pass + a.fail)}%</b> · Avg <b style={{ color: 'var(--color-text)' }}>{a.avg_score ?? '—'}</b> · Done <b style={{ color: 'var(--color-text)' }}>{a.done}</b></div>
-        {onOpenReports && <button onClick={() => onOpenReports(a)} className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>Reports <ArrowRight size={12} /></button>}
-      </div>
-    </Card>
+    </div>
+  );
+}
+const MiniStat = ({ label, value, tint = 'var(--color-primary-600)' }) => (
+  <div style={{ background: 'var(--color-bg-secondary)', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+    <div className="text-xl font-extrabold" style={{ color: tint }}>{value}</div>
+    <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+  </div>
+);
+
+function AgentCard({ a, date, onOpen }) {
+  const radar = WT.map(w => ({ label: WT_META[w].label, value: (a.by_method[w]?.total) || 0, color: WT_META[w].color }));
+  const pending = date ? (a.day_pending || 0) : a.pending;
+  const done = date ? (a.done_day || 0) : a.done;
+  return (
+    <div onClick={() => onOpen?.()} style={{ cursor: 'pointer' }}>
+      <Card style={{ transition: 'border-color .12s' }}>
+        <div className="flex items-center gap-3">
+          <span style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--color-primary-100)', color: 'var(--color-primary-700)', display: 'grid', placeItems: 'center', fontWeight: 800 }}>{(a.name || '?').slice(0, 2).toUpperCase()}</span>
+          <div className="min-w-0 flex-1">
+            <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
+            <div className="flex gap-1 mt-0.5 flex-wrap">{(a.methods || []).map(m => <span key={m} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
+          </div>
+          <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: '#d97706' }}>{pending}</div><div className="text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{date ? 'Pending·day' : 'Pending'}</div></div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3 items-center">
+          <Radar axes={radar} size={150} />
+          <div className="space-y-1.5">
+            {WT.map(w => { const m = a.by_method[w] || {}; if (!m.total && !m.day_total) return null; return (
+              <div key={w} className="text-[11px]">
+                <div className="flex justify-between" style={{ color: 'var(--color-text-secondary)' }}><span style={{ color: WT_META[w].color, fontWeight: 700 }}>{WT_META[w].label}</span><span>{date ? (m.done_day || 0) : (m.done || 0)}/{date ? (m.day_total || 0) : (m.total || 0)}</span></div>
+                <MethodMini m={date ? { done: m.day_done || 0, pending: m.day_pending || 0, total: m.day_total || 0 } : m} />
+              </div>
+            ); })}
+          </div>
+        </div>
+        <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Pass <b style={{ color: '#059669' }}>{pct(a.pass, a.pass + a.fail)}%</b> · Avg <b style={{ color: 'var(--color-text)' }}>{a.avg_score ?? '—'}</b> · Done <b style={{ color: 'var(--color-text)' }}>{done}</b></div>
+          <span className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>View report <ArrowRight size={12} /></span>
+        </div>
+      </Card>
+    </div>
   );
 }
 
