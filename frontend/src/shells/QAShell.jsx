@@ -966,8 +966,12 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const isGlobal = !scorecard.company_id;
   const hasQuality = !!(cfg.quality_score && Array.isArray(cfg.quality_score.fields));
+  // Rating range taken from the first rating (default 1–5 per the WaveTech sheets).
+  const ratingScale = cfg.rating_criteria?.[0]?.scale ?? 5;
+  const ratingMin = cfg.rating_criteria?.[0]?.min ?? 1;
 
   const patch = fn => setCfg(c => { const n = JSON.parse(JSON.stringify(c)); fn(n); return n; });
+  const setRange = (mn, mx) => patch(n => { n.rating_criteria = (n.rating_criteria || []).map(r => ({ ...r, min: mn, scale: mx })); });
 
   const save = async () => {
     setBusy(true);
@@ -1006,8 +1010,30 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
           </label>
         </div>
 
-        <FieldRows title="Ratings (score 0–4)" tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: '0–4 rating', rating: true }} onChange={v => patch(n => { n.rating_criteria = v; })}
-          info="The main graded questions. The reviewer rates each 0–4; the ones marked “in base” are summed into the Base Score (then turned into a %). Use these for things like tone, script adherence, rebuttals." />
+        {/* scoring settings — the knobs that make the % + auto pass/fail work */}
+        <div className="rounded-xl p-3 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Scoring</span>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Rating scale
+            <select value={`${ratingMin}-${ratingScale}`} onChange={e => { const [mn, mx] = e.target.value.split('-').map(Number); setRange(mn, mx); }} style={{ ...inp, width: 84 }}>
+              <option value="1-5">1 – 5</option><option value="0-4">0 – 4</option><option value="1-10">1 – 10</option><option value="0-10">0 – 10</option>
+            </select>
+            <InfoTip side="right" text="The number range for every rating question on this card. The WaveTech sheets use 1–5." />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Base divisor
+            <input type="number" value={cfg.base_score_divisor ?? 30} onChange={e => patch(n => { n.base_score_divisor = +e.target.value || 30; })} style={{ ...inp, width: 60 }} />
+            <InfoTip side="right" text="Base Score % = (sum of in-base ratings ÷ this divisor) × 100. The WaveTech sheets divide by 30." />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Final score
+            <select value={cfg.final_score_formula || 'none'} onChange={e => patch(n => { n.final_score_formula = e.target.value; })} style={{ ...inp, width: 180 }}>
+              <option value="base_plus_penalty_truncated">Base % + penalties → Pass/Fail</option>
+              <option value="none">No auto score (quality / manual)</option>
+            </select>
+            <InfoTip side="right" text="How the score is computed. 'Base % + penalties' gives a numeric Final Score + Pass/Fail (set a pass threshold above). 'No auto score' suits checklist or manual-verdict cards." />
+          </label>
+        </div>
+
+        <FieldRows title={`Ratings (score ${ratingMin}–${ratingScale})`} tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: `${ratingMin}–${ratingScale} rating`, rating: true, defaults: { included_in_base: true, min: ratingMin, scale: ratingScale } }} onChange={v => patch(n => { n.rating_criteria = v; })}
+          info={`The main graded questions. The reviewer rates each ${ratingMin}–${ratingScale}; the ones marked “in base” are summed into the Base Score (then turned into a %). Use these for things like tone, script adherence, rebuttals.`} />
         <FieldRows title="Compliance — Auto-Fail (Yes / No)" tint="#dc2626" fields={cfg.autofail.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.autofail.fields = v; })}
           info="Hard compliance rules. If the reviewer answers Yes to ANY auto-fail question, the whole call scores 0 and is marked failed — no matter how good the ratings were. Use for deal-breakers (no consent, DNC, misrepresentation)." />
         <FieldRows title="Penalty flags (Yes = deduct)" tint="#d97706" fields={cfg.penalty_flags} extra={{ kind: 'Y / N', penalty: true, defaults: { penalty: -5 } }} onChange={v => patch(n => { n.penalty_flags = v; })}
@@ -1091,7 +1117,7 @@ function ConfigTab({ companyId, companyName }) {
   // builder — no raw JSON.
   const createSheet = async () => {
     if (!draft.name) return;
-    const starter = { model: 'sheet_v2', rating_criteria: [], autofail: { formula_type: 'all_yes', fields: [] }, penalty_flags: [], tracking_flags: [] };
+    const starter = { model: 'sheet_v2', rating_criteria: [], autofail: { formula_type: 'all_yes', fields: [] }, penalty_flags: [], tracking_flags: [], base_score_divisor: 30, final_score_formula: 'base_plus_penalty_truncated' };
     try {
       const r = await client.post('qa/scorecards', { company_id: companyId, method: draft.method, name: draft.name, pass_threshold: draft.pass_threshold === '' ? null : +draft.pass_threshold, criteria: starter });
       toast.success('Scorecard created — add its fields');
