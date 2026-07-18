@@ -1240,30 +1240,24 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
     sampled: false, status: 'pending',
   }));
 
-  // enrich customer identity (CRM-first), bounded
-  const ENRICH_CAP = 400;
-  const dialerBudget = { n: 60 };
-  const toEnrich = rows.slice(0, ENRICH_CAP);
-  for (let i = 0; i < toEnrich.length; i += 25) {
-    await Promise.all(toEnrich.slice(i, i + 25).map(async (row) => {
-      Object.assign(row, await resolveCustomer({ companyId: row.company_id, transferId: row.transfer_id, saleId: row.sale_id, dialerBudget }));
-    }));
-  }
-
-  // insert; unique (transfer_id|sale_id, method) drops already-assigned rows
+  // insert FIRST (fast bulk); unique (transfer_id|sale_id, method) drops
+  // already-assigned rows. Customer enrichment (dialer lookups for up to 400
+  // rows) used to block the response — that's why "Assign" took very long. It
+  // now runs in the BACKGROUND after we reply; the queue shows the tasks
+  // instantly and customer names fill in a moment later.
   let inserted = 0, skipped = 0;
-  const { data, error } = await supabaseAdmin.from('qa_assignments').insert(rows).select('id');
+  const createdRows = [];   // { id, company_id, transfer_id, sale_id }
+  const sel = 'id, company_id, transfer_id, sale_id';
+  const { data, error } = await supabaseAdmin.from('qa_assignments').insert(rows).select(sel);
   if (error && !/duplicate key|unique/i.test(error.message)) return res.status(500).json({ error: error.message });
-  if (!error) inserted = (data || []).length;
+  if (!error) { inserted = (data || []).length; createdRows.push(...(data || [])); }
   else {
     for (const row of rows) {
-      const { error: e1 } = await supabaseAdmin.from('qa_assignments').insert(row);
+      const { data: one, error: e1 } = await supabaseAdmin.from('qa_assignments').insert(row).select(sel).single();
       if (e1) {
         skipped++;
-        // a duplicate is expected (already assigned); anything else is a real
-        // failure and must not hide inside the "skipped" count.
         if (!/duplicate key|unique/i.test(e1.message)) logger.warn('QA', `from-crm insert failed (${work_type}, transfer ${row.transfer_id || '-'}, sale ${row.sale_id || '-'}): ${e1.message}`);
-      } else inserted++;
+      } else { inserted++; if (one) createdRows.push(one); }
     }
   }
 
@@ -1275,7 +1269,23 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
       data: { work_type, count: inserted },
     }).catch(() => {});
   }
-  res.json({ ok: true, inserted, skipped, backfilled, agents: targetAgents.length, distributed: distributeEqually });
+  res.json({ ok: true, inserted, skipped, backfilled, agents: targetAgents.length, distributed: distributeEqually, enriching: createdRows.length > 0 });
+
+  // ── background: enrich customer identity (CRM-first, bounded dialer budget) ──
+  if (createdRows.length) {
+    (async () => {
+      const dialerBudget = { n: 60 };
+      const todo = createdRows.slice(0, 400);
+      for (let i = 0; i < todo.length; i += 25) {
+        await Promise.all(todo.slice(i, i + 25).map(async (r) => {
+          try {
+            const cust = await resolveCustomer({ companyId: r.company_id, transferId: r.transfer_id, saleId: r.sale_id, dialerBudget });
+            if (cust && Object.keys(cust).length) await supabaseAdmin.from('qa_assignments').update(cust).eq('id', r.id);
+          } catch { /* per-row enrich failure is non-fatal */ }
+        }));
+      }
+    })().catch(e => logger.warn('QA', `from-crm bg-enrich: ${e.message}`));
+  }
 }));
 
 // resolve the scorecard for a (company, method): company override → global starter
