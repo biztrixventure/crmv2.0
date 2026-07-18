@@ -1936,13 +1936,15 @@ router.put('/config', asyncHandler(async (req, res) => {
   if (allowed && !allowed.includes(company_id)) return res.status(403).json({ error: 'Forbidden' });
   await setConfig(`company:${company_id}`, key, value, req.user.id);
 
-  // Turning a method ON should fill the queue immediately — no waiting for the
-  // hourly job. Materialize right away for the methods now enabled.
-  let materialized = null;
+  // Turning a method ON fills the queue — but materialize pulls calls from the
+  // dialer (seconds). Do it in the BACKGROUND so the toggle returns instantly;
+  // the queue fills a moment later (or on the next hourly job / "Pull calls now").
+  let materializing = false;
   if (key === 'qa.methods' && Array.isArray(value) && value.length) {
-    try { materialized = await materializeCompany(company_id, value); } catch (e) { logger.warn('QA', `auto-materialize: ${e.message}`); }
+    materializing = true;
+    materializeCompany(company_id, value).catch(e => logger.warn('QA', `auto-materialize (bg): ${e.message}`));
   }
-  res.json({ ok: true, key, value, materialized });
+  res.json({ ok: true, key, value, materializing });
 }));
 
 // ── on-demand "Pull calls now" — run materialization for a company immediately

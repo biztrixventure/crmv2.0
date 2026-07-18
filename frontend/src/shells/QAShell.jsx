@@ -349,7 +349,9 @@ function ScoreForm({ assignment, onScored }) {
       .then(r => {
         const list = r.data.scorecards || [];
         // company-scoped active first, else global template
-        const pick = list.find(s => s.company_id === assignment.company_id && s.is_active) || list.find(s => !s.company_id && s.is_active) || list[0] || null;
+        // ONLY an active card — never fall back to list[0], which could be an
+        // inactive/old card the backend rejects on submit ("no scorecard").
+        const pick = list.find(s => s.company_id === assignment.company_id && s.is_active) || list.find(s => !s.company_id && s.is_active) || null;
         setScorecard(pick || false);
         // legacy weighted cards use an ARRAY of criteria — prefill max_points.
         // sheet_v2 cards use an OBJECT (SheetScoreRow handles its own defaults),
@@ -1055,7 +1057,7 @@ function TranscriptionAccess() {
 }
 
 // ── Scorecards & Config tab (qa_manager) ─────────────────────────────────────
-function ConfigTab({ companyId }) {
+function ConfigTab({ companyId, companyName }) {
   const [cards, setCards] = useState([]);
   const [cfg, setCfg] = useState(null);
   const [draft, setDraft] = useState({ method: 'tra', name: '', pass_threshold: 80 });
@@ -1077,14 +1079,14 @@ function ConfigTab({ companyId }) {
       if (r.data?.scorecard) setEditing(r.data.scorecard);
     } catch (e) { toast.error(e.response?.data?.error || 'Create failed'); }
   };
-  const setCfgKey = async (key, value) => {
-    try {
-      const r = await client.put('qa/config', { company_id: companyId, key, value });
-      const m = r.data.materialized;
-      if (m && (m.tra || m.rcm)) toast.success(`Enabled — pulled ${m.tra || 0} TRA + ${m.rcm || 0} RCM call(s) into the queue`);
-      else toast.success('Config updated');
-      loadCfg();
-    } catch { toast.error('Config update failed'); }
+  // Optimistic: update local config instantly, persist in the background. The
+  // server materializes (pulls dialer calls) in the background too, so the
+  // toggle never waits on it.
+  const setCfgKey = (key, value) => {
+    setCfg(c => ({ ...(c || {}), [key]: value }));
+    client.put('qa/config', { company_id: companyId, key, value })
+      .then(r => { if (key === 'qa.methods' && r.data?.materializing) toast.success('Enabled — pulling calls into the queue…'); })
+      .catch(() => { toast.error('Config update failed'); loadCfg(); });
   };
 
   const methods = Array.isArray(cfg?.['qa.methods']) ? cfg['qa.methods'] : [];
@@ -1111,7 +1113,7 @@ function ConfigTab({ companyId }) {
           Review methods
           <InfoTip text="Which QA reviews run for your company. Nothing is reviewed until you switch at least one method on — an empty list means QA is OFF." />
         </div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to your primary company ({companyId?.slice(0, 8)}…).</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Applies to <b style={{ color: 'var(--color-text-secondary)' }}>{companyName || 'your company'}</b>.</div>
         {cfg === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : (
           <div className="space-y-3">
             {[
@@ -1147,9 +1149,9 @@ function ConfigTab({ companyId }) {
           Scorecards
           <InfoTip w={320} text="The question sheets reviewers fill in per call. Each of the 4 sections — TRA, Closed Sale, Unclosed Sale, RCM — can carry its OWN scorecard, so grading a transfer differs from grading a sale. A section with no scorecard yet simply can't be scored until you add one. Templates are shared starting points — editing one saves a private copy for your company." />
         </div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>One scorecard per section. Right now <b>TRA</b> is set up — add <b>Closed Sale</b>, <b>Unclosed Sale</b> and <b>RCM</b> sheets when you have them. Click <b>Edit fields</b> to change the questions and how they score.</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>One scorecard per section — <b>TRA</b>, <b>Closed Sale</b>, <b>Unclosed Sale</b>, <b>RCM</b>. Each has a ready template; click <b>Edit fields</b> to customize (saves a private copy for your company). Old/disabled cards are hidden.</div>
         <div className="space-y-2 mb-4">
-          {cards.map(c => {
+          {cards.filter(c => c.is_active).map(c => {
             const isSheet = c.criteria && !Array.isArray(c.criteria) && c.criteria.model === 'sheet_v2';
             const fieldCount = isSheet
               ? ((c.criteria.rating_criteria || []).length + ((c.criteria.autofail || {}).fields || []).length + (c.criteria.penalty_flags || []).length + ((c.criteria.quality_score || {}).fields || []).length + (c.criteria.tracking_flags || []).length)
@@ -1163,7 +1165,7 @@ function ConfigTab({ companyId }) {
               </div>
             );
           })}
-          {!cards.length && <div className="text-[11px] p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No scorecards yet — create one below.</div>}
+          {!cards.filter(c => c.is_active).length && <div className="text-[11px] p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No active scorecards — create one below.</div>}
         </div>
         <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>New scorecard <InfoTip side="right" text="Creates a blank scorecard for the chosen method and opens the visual builder so you can add questions. No coding or JSON needed." /></div>
@@ -2814,7 +2816,7 @@ export default function QAShell() {
         </>}
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} isSuper={isSuper} />}
         {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
-        {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} />}
+        {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} companyName={(companies || []).find(c => c.id === (scoped || user?.company_id))?.name} />}
         {tab === 'reports' && canReports && <ReportsTab companyId={scoped} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
       </main>
     </div>
