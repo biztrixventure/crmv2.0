@@ -38,8 +38,8 @@ export default function ChromeTabs({ items = [], value, onChange, variant = 'chr
 
   // chrome — connected rounded-top tabs sitting on a hairline baseline
   return (
-    <div className={`flex items-end gap-1 overflow-x-auto ${className}`} role="tablist"
-      style={{ borderBottom: '1px solid var(--color-border)' }}>
+    <div className={`flex items-end gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden ${className}`} role="tablist"
+      style={{ borderBottom: '1px solid var(--color-border)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
       {items.map(t => {
         const on = t.key === value;
         return (

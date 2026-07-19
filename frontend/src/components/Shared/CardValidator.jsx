@@ -59,7 +59,7 @@ export default function CardValidator({ compact = false }) {
   const brandColor = BRAND_COLOR[res.brand] || 'var(--color-primary-600)';
 
   return (
-    <div className={compact ? '' : 'max-w-2xl mx-auto px-4 py-6'}>
+    <div className={compact ? '' : 'w-full max-w-5xl py-2'}>
       {!compact && (
         <div className="mb-4">
           <h2 className="text-2xl font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><CreditCard size={22} style={{ color: 'var(--color-primary-600)' }} /> Card Validator</h2>
