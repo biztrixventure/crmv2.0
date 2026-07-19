@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Clock, CheckCircle, RotateCcw, Eye, AlertTriangle, User } from 'lucide-react';
 import { Badge, Alert } from '../UI';
+import { FilterSelect } from '../UI/FilterBar';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import ExportModal from './ExportModal';
@@ -85,11 +86,10 @@ const QueueTab = ({ companyList }) => {
         onRefresh={load}
         onExport={() => setExportOpen(true)}
         extra={
-          <select value={company} onChange={e => setCompany(e.target.value)}
-            className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+          <FilterSelect value={company} onChange={e => setCompany(e.target.value)} title="Filter by company">
             <option value="">All companies</option>
             {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </FilterSelect>
         }
       />
 

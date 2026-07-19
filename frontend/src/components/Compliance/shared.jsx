@@ -243,7 +243,8 @@ export const FInput = ({ label, search = false, ...props }) => (
           style={{ padding: '8px 12px 8px 34px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
       </div>
     ) : (
-      <input className="input text-sm" {...props} />
+      <input {...props} className="text-sm outline-none"
+        style={{ padding: '8px 12px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
     )}
   </div>
 );
@@ -251,7 +252,14 @@ export const FInput = ({ label, search = false, ...props }) => (
 export const FSelect = ({ label, children, ...props }) => (
   <div className="flex flex-col gap-1 min-w-[150px]">
     {label && <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
-    <select className="input text-sm" {...props}>{children}</select>
+    <select {...props} className="text-sm font-medium outline-none cursor-pointer"
+      style={{
+        padding: '8px 30px 8px 12px', borderRadius: 999,
+        backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)',
+        appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+      }}>{children}</select>
   </div>
 );
 

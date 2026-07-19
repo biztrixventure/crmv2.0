@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Star } from 'lucide-react';
 import client from '../../api/client';
 import ExportModal from './ExportModal';
+import { FilterSelect } from '../UI/FilterBar';
 import { fmtDate, customerName, downloadCSV, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
 
 const RATING_COLOR = {
@@ -57,11 +58,10 @@ const ReviewsTab = ({ companyList }) => {
         onExport={() => setExportOpen(true)}
         extra={
           <div className="flex items-center gap-2">
-            <select value={company} onChange={e => setCompany(e.target.value)}
-              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+            <FilterSelect value={company} onChange={e => setCompany(e.target.value)} title="Filter by company">
               <option value="">All companies</option>
               {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </FilterSelect>
             <div className="flex gap-1 p-1 rounded-xl"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               {[{ key: 'ratings', label: 'Ratings' }, { key: 'dispos', label: 'Dispositions' }].map(t => (

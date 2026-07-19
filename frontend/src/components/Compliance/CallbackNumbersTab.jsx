@@ -71,7 +71,7 @@ const CallbackNumbersTab = ({ companyList }) => {
       />
 
       <Filters onSubmit={() => { setPage(1); load(); }}>
-        <FInput label="Search" placeholder="Phone number…" value={search} onChange={e => setSearch(e.target.value)} />
+        <FInput search label="Search" placeholder="Phone number…" value={search} onChange={e => setSearch(e.target.value)} />
         <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
           <option value="">All companies</option>
           {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

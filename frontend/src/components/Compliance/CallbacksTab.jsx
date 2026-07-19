@@ -585,7 +585,7 @@ const CallbacksTab = ({ companyList }) => {
         </div>
 
         <Filters onSubmit={() => { setPage(1); load(); }}>
-          <FInput label="Search" placeholder="Name, phone, or record id…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 160 }} />
+          <FInput search label="Search" placeholder="Name, phone, or record id…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 160 }} />
           <FSelect label="Company" value={company} onChange={e => setCompany(e.target.value)}>
             <option value="">All companies</option>
             {sortedCompanies.map(c => <option key={c.id} value={c.id}>{c.name}{c.company_type ? ` (${c.company_type})` : ''}</option>)}

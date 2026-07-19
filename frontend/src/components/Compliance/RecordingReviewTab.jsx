@@ -18,7 +18,7 @@ const fmtDate = (d) => { try { return d ? new Date(String(d).length <= 10 ? d + 
 const fmtTime = (s) => { try { return s ? new Date(String(s).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return s || ''; } };
 const money = (n) => (n == null || n === '' || isNaN(+n)) ? null : `$${(+n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
-const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
+const inp = { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 999, padding: '8px 12px', fontSize: 13, outline: 'none' };
 function Field({ label, children }) {
   return <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</span>{children}</label>;
 }

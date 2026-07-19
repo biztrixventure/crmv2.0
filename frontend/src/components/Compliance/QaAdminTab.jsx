@@ -13,7 +13,7 @@ import client from '../../api/client';
 // QA accounts are created by the Super Admin and appear here automatically.
 // ============================================================================
 
-const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
+const inp = { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 999, padding: '8px 12px', fontSize: 13, outline: 'none' };
 const METHODS = [['tra', 'TRA'], ['rcm', 'RCM']];
 const lvlLabel = (l) => (l === 'qa_manager' ? 'Manager' : 'Agent');
 

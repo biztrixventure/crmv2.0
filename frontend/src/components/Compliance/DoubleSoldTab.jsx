@@ -142,10 +142,10 @@ export default function DoubleSoldTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
-          <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--color-text-muted)' }} />
+          <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-tertiary)' }} />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, phone, company, closer, client, ref#…"
-            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg"
-            style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+            className="w-full text-sm outline-none"
+            style={{ padding: '9px 14px 9px 34px', borderRadius: 999, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
         </div>
         <button onClick={load} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg" style={card} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
