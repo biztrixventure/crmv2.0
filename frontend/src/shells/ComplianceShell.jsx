@@ -216,37 +216,46 @@ const ComplianceShell = () => {
       <EngagementBanners />
       <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8">
 
-        {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
-            Clicking a group jumps straight to its first tab (no dead clicks). */}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <ChromeTabs variant="chrome" className="flex-1 min-w-0"
-            items={groups.map(g => ({
-              key: g.id, label: g.label, icon: g.icon,
-              count: g.tabs.length > 1 ? g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0) : null,
-            }))}
-            value={activeGroupId}
-            onChange={gid => { const g = groups.find(x => x.id === gid); if (g?.tabs[0]) setActiveTab(g.tabs[0].key); }} />
-          {user?.role === 'superadmin' && (
-            <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
-              <Info size={15} /> Numbers info
-            </button>
+        {/* Two-tier nav in one cohesive panel: 6 task groups on top, the active
+            group's tabs below a hairline divider. Clicking a group jumps straight
+            to its first tab (no dead clicks). */}
+        {(() => {
+          const hasSubnav = activeGroup && (activeGroup.tabs.length > 1 || (activeGroupId === dispoHostId && dispoTabs.length > 0));
+          return (
+        <div className="rounded-2xl mb-6 overflow-hidden"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+          <div className="flex items-center justify-between gap-3 px-3 pt-2.5 pb-1 flex-wrap">
+            <ChromeTabs variant="chrome" baseline={false} className="flex-1 min-w-0"
+              items={groups.map(g => ({
+                key: g.id, label: g.label, icon: g.icon,
+                count: g.tabs.length > 1 ? g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0) : null,
+              }))}
+              value={activeGroupId}
+              onChange={gid => { const g = groups.find(x => x.id === gid); if (g?.tabs[0]) setActiveTab(g.tabs[0].key); }} />
+            {user?.role === 'superadmin' && (
+              <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors flex-shrink-0"
+                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                <Info size={14} /> Numbers info
+              </button>
+            )}
+          </div>
+
+          {/* Second tier — the active group's tabs (+ dispo tabs beside All Sales). */}
+          {hasSubnav && (
+            <div className="px-3 py-2.5" style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+              <ChromeTabs variant="pill" size="sm"
+                items={[
+                  ...activeGroup.tabs.map(t => ({ key: t.key, label: t.label, icon: t.icon })),
+                  ...(activeGroupId === dispoHostId ? dispoTabs.map(d => ({ key: `dispo:${d.value}`, label: d.label, icon: CalendarClock })) : []),
+                ]}
+                value={activeTab}
+                onChange={setActiveTab} />
+            </div>
           )}
         </div>
-
-        {/* Second tier — the active group's tabs (+ dispo tabs beside All Sales). */}
-        {activeGroup && (activeGroup.tabs.length > 1 || (activeGroupId === dispoHostId && dispoTabs.length > 0)) && (
-          <ChromeTabs variant="pill" size="sm" className="mt-4 mb-6"
-            items={[
-              ...activeGroup.tabs.map(t => ({ key: t.key, label: t.label, icon: t.icon })),
-              ...(activeGroupId === dispoHostId ? dispoTabs.map(d => ({ key: `dispo:${d.value}`, label: d.label, icon: CalendarClock })) : []),
-            ]}
-            value={activeTab}
-            onChange={setActiveTab} />
-        )}
-        {/* single-tab group still needs its bottom margin */}
-        {activeGroup && activeGroup.tabs.length <= 1 && !(activeGroupId === dispoHostId && dispoTabs.length > 0) && <div className="mb-3" />}
+          );
+        })()}
 
         {infoOpen && <ComplianceInfoModal onClose={() => setInfoOpen(false)} />}
 
