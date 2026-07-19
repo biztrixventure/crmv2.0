@@ -376,7 +376,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       onClick={() => setDetailSale(s)}
                       onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'var(--color-bg-secondary)')}
                       onMouseLeave={e => e.currentTarget.style.backgroundColor = baseBg}>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-1.5">
                         <p className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}
                           {dupN >= 2 && (
                             <span title={`${dupN} sales on this customer number (active + cancelled)${s.dupe_active_count != null ? ` · ${s.dupe_active_count} active` : ''}`}
@@ -389,7 +389,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</p>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-1.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <SaleStatusBadge sale={s} size="sm" />
                           {(() => { const t = salePaidTenure(s); return t ? (
@@ -415,23 +415,23 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
-                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
-                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
+                      <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
+                      <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
+                      <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
                       {/* Show the actual sale_date the closer entered (carries through
                           bulk uploads) instead of the upload moment. Falls back to
                           created_at on legacy rows where sale_date wasn't captured. */}
-                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at)}</td>
+                      <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at)}</td>
                       {/* When the status was last changed (approve, cancel, …). */}
-                      <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: statusUpdatedAt(s) ? 'var(--color-text-secondary)' : 'var(--color-text-tertiary)' }}>
+                      <td className="px-3 py-1.5 text-xs whitespace-nowrap" style={{ color: statusUpdatedAt(s) ? 'var(--color-text-secondary)' : 'var(--color-text-tertiary)' }}>
                         {(() => { const d = statusUpdatedAt(s); return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'; })()}
                       </td>
                       {isPostDate && (
-                        <td className="px-3 py-2 text-xs font-semibold" style={{ color: s.charge_at ? '#b45309' : 'var(--color-text-tertiary)' }}>
+                        <td className="px-3 py-1.5 text-xs font-semibold" style={{ color: s.charge_at ? '#b45309' : 'var(--color-text-tertiary)' }}>
                           {s.charge_at ? new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
                         </td>
                       )}
-                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                      <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPostDate && !isReadOnly && (
                             <button onClick={() => chargeSale(s)} disabled={charging === s.id}
