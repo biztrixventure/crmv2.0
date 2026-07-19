@@ -317,9 +317,9 @@ const AuditLogView = ({ companyList }) => {
               <tbody>
                 {entries.map(e => (
                   <tr key={e.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDateTime(e.created_at)}</td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text)' }}>{e.actor_name || '—'}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDateTime(e.created_at)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text)' }}>{e.actor_name || '—'}</td>
+                    <td className="px-3 py-2">
                       <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
                         {e.customer_name_snapshot || '—'}
                         {e.callback_deleted && (
@@ -333,14 +333,14 @@ const AuditLogView = ({ companyList }) => {
                         <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>{e.customer_phone_snapshot}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge variant={STATUS_BADGE[e.old_status] || 'secondary'} size="sm">{STATUS_LABEL[e.old_status] || e.old_status || '—'}</Badge>
                         <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
                         <Badge variant={STATUS_BADGE[e.new_status] || 'secondary'} size="sm">{STATUS_LABEL[e.new_status] || e.new_status}</Badge>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{e.notes || '—'}</td>
+                    <td className="px-3 py-2 text-xs max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{e.notes || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -655,7 +655,7 @@ const CallbacksTab = ({ companyList }) => {
                       onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
                       onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
 
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{c.customer_name || '—'}</p>
                         {c.customer_phone ? (
                           <button onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: c.customer_phone, customerName: c.customer_name }); }}
@@ -667,22 +667,22 @@ const CallbacksTab = ({ companyList }) => {
                         ) : null}
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <PriorityBadge priority={c.priority} />
                       </td>
 
-                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                         <div className="flex items-center gap-1">
                           {fmtDateTime(c.callback_at)}
                           <OverdueDot callback={c} />
                         </div>
                       </td>
 
-                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                         {fmtDate(c.created_at)}
                       </td>
 
-                      <td className="px-4 py-3 text-xs">
+                      <td className="px-3 py-2 text-xs">
                         {c.company_type === 'fronter' ? (
                           <button
                             onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—', companyName: c.company_name }); }}
@@ -695,7 +695,7 @@ const CallbacksTab = ({ companyList }) => {
                         ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                       </td>
 
-                      <td className="px-4 py-3 text-xs">
+                      <td className="px-3 py-2 text-xs">
                         {c.company_type === 'closer' ? (
                           <button
                             onClick={e => { e.stopPropagation(); setAgentStats({ userId: c.user_id, userName: c.user_name || '—', companyName: c.company_name }); }}
@@ -708,15 +708,15 @@ const CallbacksTab = ({ companyList }) => {
                         ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                       </td>
 
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.company_name || '—'}</td>
+                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.company_name || '—'}</td>
 
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <Badge variant={STATUS_BADGE[c.status] || 'secondary'} size="sm">
                           {STATUS_LABEL[c.status] || c.status?.replace(/_/g,' ')}
                         </Badge>
                       </td>
 
-                      <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td className="px-3 py-2 text-xs max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                         {c.notes || '—'}
                       </td>
                     </tr>

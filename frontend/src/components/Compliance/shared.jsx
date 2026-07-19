@@ -160,7 +160,7 @@ export const Pagination = ({ page, total, limit, onPage }) => {
 };
 
 export const Th = ({ children, className = '' }) => (
-  <th className={`px-4 py-3 text-left text-xs font-bold uppercase tracking-wider ${className}`}
+  <th className={`px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider ${className}`}
     style={{ color: 'var(--color-text-secondary)' }}>{children}</th>
 );
 
@@ -175,7 +175,7 @@ export const SortIcon = ({ col, sort }) => {
 
 export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
   <th onClick={() => onSort(col)}
-    className={`px-4 py-3 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary-600 ${className}`}
+    className={`px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary-600 ${className}`}
     style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
     {children}<SortIcon col={col} sort={sort} />
   </th>

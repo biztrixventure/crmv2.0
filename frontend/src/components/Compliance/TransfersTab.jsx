@@ -282,7 +282,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                     onClick={() => setDetail(t)}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)'}
                     onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent'}>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                         {transferPhone(t) || ''}
@@ -298,13 +298,13 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.created_by_name || '—'}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.assigned_closer_name || '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       {t.latest_disposition?.disposition_name ? (
                         <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
                           style={{ backgroundColor: `${t.latest_disposition.color || '#6b7280'}22`, color: t.latest_disposition.color || '#6b7280' }}
@@ -313,13 +313,13 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                         </span>
                       ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t.company_name || '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       {(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2">
                       {t.sale_status
                         ? (
                           <div>
@@ -335,7 +335,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                         )
                         : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                       {fmtDate(t.created_at)}
                     </td>
                   </tr>
