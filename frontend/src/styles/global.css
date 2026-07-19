@@ -389,6 +389,22 @@ td p, th p {
   margin: 0;
 }
 
+/* Text-selection highlight — themed, not the browser's default blue.
+   The background is a translucent tint of the theme accent so it reads on any
+   surface (cards, tables, coloured badges) and the selected text is forced to
+   the theme's primary text colour, so contrast stays legible in BOTH light and
+   dark. Because it's built from CSS vars, it follows every theme automatically.
+   --color-selection / --color-selection-text can be overridden per theme below
+   if a palette ever needs a custom pairing. */
+::selection {
+  background: var(--color-selection, color-mix(in srgb, var(--color-primary) 30%, transparent));
+  color: var(--color-selection-text, var(--color-text));
+}
+::-moz-selection {
+  background: var(--color-selection, color-mix(in srgb, var(--color-primary) 30%, transparent));
+  color: var(--color-selection-text, var(--color-text));
+}
+
 small {
   font-size: var(--text-sm);
   line-height: var(--line-height-tight);
