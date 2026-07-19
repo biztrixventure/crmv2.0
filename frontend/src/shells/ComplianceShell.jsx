@@ -5,6 +5,7 @@ import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, 
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
+import ChromeTabs from '../components/UI/ChromeTabs';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
@@ -218,31 +219,13 @@ const ComplianceShell = () => {
         {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
             Clicking a group jumps straight to its first tab (no dead clicks). */}
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex flex-wrap gap-1 p-1 rounded-xl w-fit"
-            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-            {groups.map(g => {
-              const active = g.id === activeGroupId;
-              return (
-                <button key={g.id}
-                  onClick={() => { if (!active && g.tabs[0]) setActiveTab(g.tabs[0].key); }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                  style={{
-                    background: active ? 'var(--gradient-sidebar)' : 'transparent',
-                    color:      active ? 'white' : 'var(--color-text-secondary)',
-                    boxShadow:  active ? 'var(--shadow-sm)' : 'none',
-                  }}>
-                  <g.icon size={15} />
-                  {g.label}
-                  {g.tabs.length > 1 && (
-                    <span className="text-[10px] font-bold px-1.5 rounded-full"
-                      style={{ background: active ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: active ? '#fff' : 'var(--color-text-tertiary)' }}>
-                      {g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0)}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <ChromeTabs variant="chrome" className="flex-1 min-w-0"
+            items={groups.map(g => ({
+              key: g.id, label: g.label, icon: g.icon,
+              count: g.tabs.length > 1 ? g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0) : null,
+            }))}
+            value={activeGroupId}
+            onChange={gid => { const g = groups.find(x => x.id === gid); if (g?.tabs[0]) setActiveTab(g.tabs[0].key); }} />
           {user?.role === 'superadmin' && (
             <button onClick={() => setInfoOpen(true)} title="What do these numbers mean?"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
@@ -254,37 +237,13 @@ const ComplianceShell = () => {
 
         {/* Second tier — the active group's tabs (+ dispo tabs beside All Sales). */}
         {activeGroup && (activeGroup.tabs.length > 1 || (activeGroupId === dispoHostId && dispoTabs.length > 0)) && (
-          <div className="flex flex-wrap gap-1 mb-6 w-fit">
-            {activeGroup.tabs.map(t => (
-              <button key={t.key} onClick={() => setActiveTab(t.key)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all"
-                style={{
-                  background: activeTab === t.key ? 'var(--color-primary-100, #e0e7ff)' : 'transparent',
-                  color:      activeTab === t.key ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)',
-                  border:     `1px solid ${activeTab === t.key ? 'var(--color-primary-300, #c7d2fe)' : 'var(--color-border)'}`,
-                }}>
-                <t.icon size={13} />
-                {t.label}
-              </button>
-            ))}
-            {/* Dynamic disposition tabs (e.g. Post Date) sit beside All Sales. */}
-            {activeGroupId === dispoHostId && dispoTabs.map(d => {
-              const k = `dispo:${d.value}`;
-              const active = activeTab === k;
-              return (
-                <button key={k} onClick={() => setActiveTab(k)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all"
-                  style={{
-                    background: active ? 'var(--color-primary-100, #e0e7ff)' : 'transparent',
-                    color:      active ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)',
-                    border:     `1px solid ${active ? 'var(--color-primary-300, #c7d2fe)' : 'var(--color-border)'}`,
-                  }}>
-                  <CalendarClock size={13} />
-                  {d.label}
-                </button>
-              );
-            })}
-          </div>
+          <ChromeTabs variant="pill" size="sm" className="mt-4 mb-6"
+            items={[
+              ...activeGroup.tabs.map(t => ({ key: t.key, label: t.label, icon: t.icon })),
+              ...(activeGroupId === dispoHostId ? dispoTabs.map(d => ({ key: `dispo:${d.value}`, label: d.label, icon: CalendarClock })) : []),
+            ]}
+            value={activeTab}
+            onChange={setActiveTab} />
         )}
         {/* single-tab group still needs its bottom margin */}
         {activeGroup && activeGroup.tabs.length <= 1 && !(activeGroupId === dispoHostId && dispoTabs.length > 0) && <div className="mb-3" />}
