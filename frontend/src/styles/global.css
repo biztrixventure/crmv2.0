@@ -381,6 +381,14 @@ p {
   line-height: var(--line-height-normal);
 }
 
+/* Paragraphs inside table cells must not inherit the base <p> block margin —
+   otherwise stacked lines (name / phone / ref) blow up row height. Tailwind's
+   mt-* only overrides margin-top, leaving the base margin-bottom, which is
+   exactly what made the Compliance record rows look tall. */
+td p, th p {
+  margin: 0;
+}
+
 small {
   font-size: var(--text-sm);
   line-height: var(--line-height-tight);
