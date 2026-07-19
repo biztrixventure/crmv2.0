@@ -214,7 +214,7 @@ const ComplianceShell = () => {
       />
 
       <EngagementBanners />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8">
 
         {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
             Clicking a group jumps straight to its first tab (no dead clicks). */}
