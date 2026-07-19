@@ -89,26 +89,29 @@ export default function ComplianceDncReport() {
   const STATUS_COLOR = { blacklisted: '#dc2626', good: '#16a34a', unchecked: '#6b7280' };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-5">
-      <div>
+    <div className="w-full py-2">
+      <div className="mb-4">
         <h2 className="text-2xl font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Shield size={22} style={{ color: 'var(--color-primary-600)' }} /> DNC / Blacklist</h2>
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Check one number, or scan every sale's number against the DNC / litigation database and report on it.</p>
       </div>
 
-      {/* single lookup */}
-      <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}><DncLookupPanel compact /></div>
+      {/* full-width: left rail = lookup + KPIs + scan, right = report table */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,380px)_1fr] gap-5 items-start">
+       <div className="space-y-4">
+        {/* single lookup */}
+        <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}><DncLookupPanel compact /></div>
 
-      {/* summary counts */}
-      {summary && (
-        <div className="grid grid-cols-3 gap-3">
-          <Stat icon={ShieldCheck} label="Good" value={summary.good.sales} sub={`${summary.good.phones} numbers`} color="#16a34a" />
-          <Stat icon={ShieldAlert} label="Blacklisted" value={summary.blacklisted.sales} sub={`${summary.blacklisted.phones} numbers`} color="#dc2626" />
-          <Stat icon={HelpCircle} label="Not checked" value={summary.unchecked.sales} sub={`${summary.unchecked.phones} numbers`} color="#6b7280" />
-        </div>
-      )}
+        {/* summary counts — stacked on the side */}
+        {summary && (
+          <div className="grid grid-cols-3 gap-2">
+            <Stat icon={ShieldCheck} label="Good" value={summary.good.sales} sub={`${summary.good.phones} #`} color="#16a34a" />
+            <Stat icon={ShieldAlert} label="Blacklisted" value={summary.blacklisted.sales} sub={`${summary.blacklisted.phones} #`} color="#dc2626" />
+            <Stat icon={HelpCircle} label="Not checked" value={summary.unchecked.sales} sub={`${summary.unchecked.phones} #`} color="#6b7280" />
+          </div>
+        )}
 
-      {/* scan */}
-      <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+        {/* scan */}
+        <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Scan all sales numbers</h3>
@@ -134,9 +137,10 @@ export default function ComplianceDncReport() {
             </div>
           </div>
         )}
-      </div>
+        </div>
+       </div>
 
-      {/* report list + filter + export */}
+      {/* report list + filter + export — main column */}
       <div className="rounded-2xl border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
         <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--color-border)' }}>
           <div className="flex items-center gap-1.5">
@@ -154,7 +158,7 @@ export default function ComplianceDncReport() {
         ) : rows.length === 0 ? (
           <p className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>No {filter} sales{filter === 'unchecked' ? '' : ' — run a scan first if this is empty'}.</p>
         ) : (
-          <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+          <div className="overflow-x-auto max-h-[calc(100vh-16rem)] overflow-y-auto">
             <table className="w-full text-sm">
               <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                 {['Customer', 'Phone', 'Lists', 'Plan', 'Status', 'Sale date'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -174,6 +178,7 @@ export default function ComplianceDncReport() {
             </table>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
