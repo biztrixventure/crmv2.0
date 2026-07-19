@@ -8,7 +8,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
-import FilterBar from '../UI/FilterBar';
+import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import DateRangePicker from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
 import { prettyDispo } from '../../utils/dispositions';
@@ -286,16 +286,14 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         }}
         extras={
           <>
-            <select value={company} onChange={e => { setCompany(e.target.value); setPage(1); }}
-              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+            <FilterSelect value={company} onChange={e => { setCompany(e.target.value); setPage(1); }} title="Filter by company">
               <option value="">All companies</option>
               {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
-              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+            </FilterSelect>
+            <FilterSelect value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} title="Filter by status">
               <option value="">All statuses</option>
               {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
-            </select>
+            </FilterSelect>
             {isPostDate && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Charge:</span>

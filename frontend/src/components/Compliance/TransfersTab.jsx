@@ -20,7 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
-import FilterBar from '../UI/FilterBar';
+import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import TransferFormModal from '../Transfers/TransferFormModal';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
 import FetchAllDisposButton from '../Vicidial/FetchAllDisposButton';
@@ -227,16 +227,14 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         }}
         extras={
           <>
-            <select value={company} onChange={e => { setCompany(e.target.value); setPage(1); }}
-              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+            <FilterSelect value={company} onChange={e => { setCompany(e.target.value); setPage(1); }} title="Filter by company">
               <option value="">All companies</option>
               {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
-              className="input text-sm py-1.5" style={{ minWidth: 160 }}>
+            </FilterSelect>
+            <FilterSelect value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} title="Filter by status">
               <option value="">All statuses</option>
               {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-            </select>
+            </FilterSelect>
           </>
         }
         onClearAll={() => {

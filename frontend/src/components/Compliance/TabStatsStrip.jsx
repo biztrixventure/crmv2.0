@@ -98,88 +98,82 @@ export default function TabStatsStrip({
     });
   }
 
-  // Uniform tile dimensions — every tile gets the same width + height so the
-  // strip reads as a tight grid instead of a ragged row.
-  const TILE_W  = 124;
-  const TILE_H  = 48;
+  // Uniform tiles. Number + label always render in theme text colors so they
+  // stay legible on both the cream (light) and obsidian (dark) surface — the
+  // status color lives only in the icon chip + left accent + active ring, which
+  // is what keeps the strip readable in dark mode (the old flat pastel fills
+  // washed out to bright blobs).
+  const TILE_W  = 140;
+  const TILE_H  = 62;
   const tileBase = {
-    minWidth:  TILE_W,
-    maxWidth:  TILE_W,
-    minHeight: TILE_H,
-    height:    TILE_H,
+    minHeight: TILE_H, height: TILE_H,
+    backgroundColor: 'var(--color-surface)',
+  };
+
+  const Tile = ({ color, Icon, label, value, active, onClick, tag, title, accentLabel }) => {
+    const Tag = tag;
+    return (
+      <Tag
+        type={onClick ? 'button' : undefined}
+        onClick={onClick}
+        title={title}
+        className={`relative flex items-center gap-2.5 pl-3.5 pr-3 rounded-xl w-full text-left overflow-hidden transition-all ${onClick ? 'cursor-pointer hover:-translate-y-0.5' : ''}`}
+        style={{
+          ...tileBase,
+          border: `1px solid ${active ? color : 'var(--color-border)'}`,
+          boxShadow: active ? `0 0 0 2px color-mix(in srgb, ${color} 45%, transparent)` : '0 1px 2px rgba(0,0,0,0.03)',
+        }}>
+        {/* left accent bar */}
+        <span className="absolute left-0 top-0 bottom-0" style={{ width: 3, backgroundColor: color }} />
+        <div className="rounded-lg flex-shrink-0 flex items-center justify-center"
+          style={{ width: 30, height: 30, backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` }}>
+          <Icon size={15} style={{ color }} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-wider truncate"
+            style={{ color: accentLabel ? color : 'var(--color-text-secondary)' }}>{label}</p>
+          <p className="text-xl font-extrabold leading-none mt-1 truncate"
+            style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            {Number(value || 0).toLocaleString()}
+          </p>
+        </div>
+      </Tag>
+    );
   };
 
   return (
-    <div className="grid gap-2 mb-3"
-      style={{
-        gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_W}px, 1fr))`,
-      }}>
+    <div className="grid gap-2.5 mb-4"
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_W}px, 1fr))` }}>
       {/* Total tile — primary accent, always first. Clickable → clear status. */}
-      {(() => {
-        const TotalTag = clickable ? 'button' : 'div';
-        const totalActive = clickable && !activeStatus;
-        return (
-      <TotalTag
-        type={clickable ? 'button' : undefined}
+      <Tile
+        tag={clickable ? 'button' : 'div'}
+        color="var(--color-primary)"
+        Icon={Layers}
+        label="Matches"
+        value={total}
+        accentLabel
+        active={clickable && !activeStatus}
         onClick={clickable ? () => onSelectStatus('') : undefined}
-        className={`flex items-center gap-2 px-2.5 rounded-lg w-full text-left ${clickable ? 'cursor-pointer transition-transform hover:scale-[1.03]' : ''}`}
-        style={{
-          ...tileBase,
-          background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, var(--color-surface) 70%)',
-          border: '1px solid var(--color-primary-200, #c7d2fe)',
-          boxShadow: totalActive ? '0 0 0 2px var(--color-primary-500, #6366f1)' : undefined,
-        }}
-        title={clickable ? 'Show all (clear status filter)' : (loaded < total ? `${total.toLocaleString()} total · ${loaded} on this page` : `${total.toLocaleString()} total`)}>
-        <div className="rounded-md flex-shrink-0 flex items-center justify-center"
-          style={{ width: 26, height: 26, backgroundColor: 'var(--color-primary-100, #e0e7ff)' }}>
-          <Layers size={13} style={{ color: 'var(--color-primary-700, #4338ca)' }} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[9px] font-bold uppercase tracking-wider truncate"
-            style={{ color: 'var(--color-primary-700, #4338ca)' }}>Matches</p>
-          <p className="text-base font-bold leading-none mt-0.5 truncate"
-            style={{ color: 'var(--color-primary-700, #4338ca)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-            {total.toLocaleString()}
-          </p>
-        </div>
-      </TotalTag>
-        );
-      })()}
+        title={clickable ? 'Show all (clear status filter)' : (loaded < total ? `${total.toLocaleString()} total · ${loaded} on this page` : `${total.toLocaleString()} total`)}
+      />
 
       {/* Per-status tiles */}
       {tiles.map(t => {
-        const Icon = t.icon;
-        // A status tile filters the list; an extra tile filters only if it
-        // provides its own onClick. Otherwise it's a plain display tile.
         const isExtra   = t.extra === true;
         const canClick  = isExtra ? typeof t.onClick === 'function' : clickable;
         const isActive  = isExtra ? !!t.active : (clickable && activeStatus === t.key);
         const onClick   = isExtra ? t.onClick : (clickable ? () => onSelectStatus(activeStatus === t.key ? '' : t.key) : undefined);
-        const Tag = canClick ? 'button' : 'div';
         return (
-          <Tag key={t.key + ':' + t.label}
-            type={canClick ? 'button' : undefined}
+          <Tile key={t.key + ':' + t.label}
+            tag={canClick ? 'button' : 'div'}
+            color={t.color}
+            Icon={t.icon}
+            label={t.label}
+            value={t.value}
+            active={isActive}
             onClick={onClick}
-            className={`flex items-center gap-2 px-2.5 rounded-lg w-full text-left ${canClick ? 'cursor-pointer transition-transform hover:scale-[1.03]' : ''}`}
-            style={{
-              ...tileBase,
-              backgroundColor: t.bg,
-              border: `1px solid ${t.color}30`,
-              boxShadow: isActive ? `0 0 0 2px ${t.color}` : undefined,
-            }}
-            title={canClick ? `Filter by ${t.label}` : `${t.label}: ${t.value} on this page`}>
-            <div className="rounded-md flex-shrink-0 flex items-center justify-center"
-              style={{ width: 26, height: 26, backgroundColor: `${t.color}1a` }}>
-              <Icon size={13} style={{ color: t.color }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[9px] font-bold uppercase tracking-wider truncate" style={{ color: t.color }}>{t.label}</p>
-              <p className="text-base font-bold leading-none mt-0.5 truncate"
-                style={{ color: t.color, fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                {Number(t.value || 0).toLocaleString()}
-              </p>
-            </div>
-          </Tag>
+            title={canClick ? `Filter by ${t.label}` : `${t.label}: ${t.value} on this page`}
+          />
         );
       })}
     </div>
