@@ -1,4 +1,4 @@
-import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown, Search } from 'lucide-react';
 import { ET_ZONE } from '../../utils/timezone';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import client from '../../api/client';
@@ -184,27 +184,28 @@ export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
 export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => {
   const { isEnabled } = useFeatureFlags();
   return (
-    <div className="flex items-start justify-between mb-5 gap-4">
-      <div>
-        <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
+    <div className="flex items-start justify-between mb-4 gap-4">
+      <div className="min-w-0">
+        <h2 className="text-2xl font-extrabold tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
           {title}
         </h2>
         {subtitle && (
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+          <p className="text-sm mt-1 max-w-2xl leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
         )}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {extra}
         {onExport && isEnabled('exports') && (
           <button onClick={onExport}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition-colors"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
             <Download size={13} /> Export CSV
           </button>
         )}
         {onRefresh && (
-          <button onClick={onRefresh} className="p-2 rounded-lg transition-colors hover:opacity-80"
-            style={{ color: 'var(--color-text-secondary)' }}>
+          <button onClick={onRefresh} aria-label="Refresh"
+            className="p-2 rounded-full border transition-colors"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
             <RefreshCw size={15} />
           </button>
         )}
@@ -213,14 +214,16 @@ export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => {
   );
 };
 
+// Filter/search bar — matches the FilterBar toolbar card so every tab (whether
+// on the new FilterBar or this legacy Filters form) reads as one design.
 export const Filters = ({ onSubmit, children }) => (
-  <div className="rounded-xl p-4 mb-5"
-    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+  <div className="rounded-2xl px-3 py-2.5 mb-4"
+    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
     <form onSubmit={e => { e.preventDefault(); onSubmit?.(); }}
-      className="flex flex-wrap gap-3 items-end">
+      className="flex flex-wrap gap-2.5 items-end">
       {children}
       <button type="submit"
-        className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+        className="px-4 py-2 rounded-full text-sm font-bold text-white transition-transform active:scale-95"
         style={{ background: 'var(--gradient-sidebar)' }}>
         Apply
       </button>
@@ -228,16 +231,26 @@ export const Filters = ({ onSubmit, children }) => (
   </div>
 );
 
-export const FInput = ({ label, ...props }) => (
-  <div className="flex flex-col gap-1 min-w-[120px]">
-    {label && <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
-    <input className="input text-sm" {...props} />
+// A filter text input. Pass `search` to get the pill + magnifier treatment
+// used by the modern FilterBar; otherwise a plain labelled field.
+export const FInput = ({ label, search = false, ...props }) => (
+  <div className="flex flex-col gap-1 min-w-[140px]">
+    {label && <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
+    {search ? (
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+        <input {...props} className="text-sm w-full outline-none"
+          style={{ padding: '8px 12px 8px 34px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+      </div>
+    ) : (
+      <input className="input text-sm" {...props} />
+    )}
   </div>
 );
 
 export const FSelect = ({ label, children, ...props }) => (
-  <div className="flex flex-col gap-1 min-w-[140px]">
-    {label && <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
+  <div className="flex flex-col gap-1 min-w-[150px]">
+    {label && <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
     <select className="input text-sm" {...props}>{children}</select>
   </div>
 );

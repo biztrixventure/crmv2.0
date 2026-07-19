@@ -63,27 +63,38 @@ export default function FilterBar({
     if (onClearAll) onClearAll();
   };
 
+  const [focused, setFocused] = useState(false);
+
   return (
-    <div className={`flex flex-col gap-2 ${compact ? '' : 'mb-3'}`}>
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className={`flex flex-col gap-2 ${compact ? '' : 'mb-4'}`}>
+      <div className={`flex items-center gap-2.5 flex-wrap ${compact ? '' : 'rounded-2xl px-3 py-2.5'}`}
+        style={compact ? undefined : { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
         {/* Search */}
         {search && (
-          <div className="relative flex-1 min-w-[200px] max-w-md">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2"
-              style={{ color: 'var(--color-text-tertiary)' }} />
+          <div className="relative flex-1 min-w-[220px] max-w-lg">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 transition-colors pointer-events-none"
+              style={{ color: focused ? 'var(--color-primary)' : 'var(--color-text-tertiary)' }} />
             <input type="text"
               value={localSearch}
               onChange={e => setLocalSearch(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               placeholder={search?.placeholder || 'Search…'}
-              className="input text-sm py-1.5 pl-8 pr-8 w-full"
-              style={{ borderColor: 'var(--color-border)' }}
+              className="text-sm w-full transition-all outline-none"
+              style={{
+                padding: '9px 34px 9px 36px', borderRadius: 999,
+                backgroundColor: 'var(--color-bg-secondary)',
+                border: `1px solid ${focused ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                boxShadow: focused ? '0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent)' : 'none',
+                color: 'var(--color-text)',
+              }}
               aria-label="Search" />
             {localSearch && (
               <button type="button" onClick={() => setLocalSearch('')}
                 aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-bg-secondary"
-                style={{ color: 'var(--color-text-tertiary)' }}>
-                <X size={12} />
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full transition-colors"
+                style={{ color: 'var(--color-text-tertiary)', backgroundColor: 'var(--color-surface-hover, transparent)' }}>
+                <X size={13} />
               </button>
             )}
           </div>
@@ -105,11 +116,11 @@ export default function FilterBar({
         {/* Extras slot (agent select etc) */}
         {extras}
 
-        {/* Clear all */}
+        {/* Clear all — pushed to the far right */}
         {anyActive && (
           <button onClick={handleClearAll}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-error-50"
-            style={{ color: 'var(--color-error-600, #dc2626)', border: '1px solid var(--color-error-200, #fecaca)' }}>
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-colors ml-auto"
+            style={{ color: 'var(--color-error-600, #dc2626)', border: '1px solid var(--color-error-200, #fecaca)', backgroundColor: 'color-mix(in srgb, var(--color-error-600, #dc2626) 6%, transparent)' }}>
             <X size={11} /> Clear all
           </button>
         )}
