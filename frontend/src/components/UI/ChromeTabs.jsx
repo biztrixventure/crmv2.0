@@ -9,7 +9,7 @@ import React from 'react';
 //   <ChromeTabs items={[{ key, label, icon, count }]} value onChange variant size />
 //
 // `items[i].icon` is an optional lucide component. `count` is an optional badge.
-export default function ChromeTabs({ items = [], value, onChange, variant = 'chrome', size = 'md', className = '', baseline = true }) {
+export default function ChromeTabs({ items = [], value, onChange, variant = 'chrome', size = 'md', className = '' }) {
   const pad = size === 'sm' ? '5px 12px' : '8px 15px';
   const fs = size === 'sm' ? 13 : 14;
   const isz = size === 'sm' ? 13 : 15;
@@ -22,7 +22,7 @@ export default function ChromeTabs({ items = [], value, onChange, variant = 'chr
           const on = t.key === value;
           return (
             <button key={t.key} role="tab" aria-selected={on} onClick={() => onChange?.(t.key)}
-              className={`inline-flex items-center gap-1.5 font-semibold transition-all ${on ? '' : 'hover:bg-[var(--color-surface-hover)]'}`}
+              className={`inline-flex items-center gap-1.5 font-semibold transition-all ${on ? '' : 'hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'}`}
               style={{ padding: pad, fontSize: fs, borderRadius: 999, cursor: 'pointer',
                 background: on ? 'color-mix(in srgb, var(--color-primary) 14%, transparent)' : 'transparent',
                 color: on ? 'var(--color-primary-700, var(--color-primary))' : 'var(--color-text-secondary)',
@@ -36,29 +36,22 @@ export default function ChromeTabs({ items = [], value, onChange, variant = 'chr
     );
   }
 
-  // chrome — connected rounded-top tabs sitting on a hairline baseline.
-  // `baseline={false}` drops the hairline (for use inside a card that already
-  // supplies its own divider) and makes the active tab a self-contained filled
-  // rounded-top chip instead of merging downward into a panel.
+  // chrome — connected rounded-top tabs sitting on a hairline baseline
   return (
-    <div className={`flex items-end gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden ${className}`} role="tablist"
-      style={{ borderBottom: baseline ? '1px solid var(--color-border)' : 'none', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+    <div className={`flex items-end gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden ${className}`} role="tablist"
+      style={{ borderBottom: '1px solid var(--color-border)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
       {items.map(t => {
         const on = t.key === value;
         return (
           <button key={t.key} role="tab" aria-selected={on} onClick={() => onChange?.(t.key)}
-            className={`relative inline-flex items-center gap-2 font-bold whitespace-nowrap transition-all duration-150 ${on ? '' : 'hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'}`}
-            style={{ padding: pad, fontSize: fs,
-              borderRadius: baseline ? `${radius} ${radius} 0 0` : radius, cursor: 'pointer',
-              background: on
-                ? (baseline ? 'var(--color-surface)' : 'color-mix(in srgb, var(--color-primary) 12%, var(--color-surface))')
-                : 'transparent',
+            className={`relative inline-flex items-center gap-2 font-bold whitespace-nowrap transition-colors ${on ? '' : 'hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]'}`}
+            style={{ padding: pad, fontSize: fs, borderRadius: `${radius} ${radius} 0 0`, cursor: 'pointer',
+              background: on ? 'var(--color-surface)' : 'transparent',
               color: on ? 'var(--color-text)' : 'var(--color-text-secondary)',
               border: on ? '1px solid var(--color-border)' : '1px solid transparent',
-              borderBottom: baseline ? (on ? '1px solid var(--color-surface)' : '1px solid transparent') : (on ? '1px solid var(--color-border)' : '1px solid transparent'),
-              marginBottom: baseline ? -1 : 0,
-              boxShadow: on ? '0 1px 3px rgba(0,0,0,0.06)' : 'none' }}>
-            {on && <span style={{ position: 'absolute', top: baseline ? -1 : 5, left: 12, right: 12, height: 3, borderRadius: 3, background: 'var(--color-primary)' }} />}
+              borderBottom: on ? '1px solid var(--color-surface)' : '1px solid transparent',
+              marginBottom: -1, boxShadow: on ? '0 -3px 8px rgba(0,0,0,0.05)' : 'none' }}>
+            {on && <span style={{ position: 'absolute', top: -1, left: 12, right: 12, height: 3, borderRadius: 3, background: 'var(--color-primary)' }} />}
             {t.icon && <t.icon size={isz} style={{ color: on ? 'var(--color-primary)' : 'currentColor' }} />}{t.label}
             {t.count != null && <Badge on={on}>{t.count}</Badge>}
           </button>
