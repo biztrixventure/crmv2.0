@@ -493,7 +493,7 @@ const DrawerLayoutRules = ({ config, scope, onSave, userId = null, userName = ''
   const visibleCount = sections.filter(s => s.visible).length;
 
   return (
-    <div className="max-w-4xl pb-8">
+    <div className="w-full pb-8">
       {/* Per-company override warning */}
       {scope !== 'global' && (
         <div className="rounded-2xl p-4 mb-4 flex items-start gap-3"

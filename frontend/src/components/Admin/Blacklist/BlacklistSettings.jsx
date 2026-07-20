@@ -37,7 +37,7 @@ export default function BlacklistSettings() {
   if (!cfg) return <div className="p-8 text-center text-text-secondary">Loading…</div>;
 
   return (
-    <div className="max-w-4xl mx-auto p-1 space-y-4">
+    <div className="w-full p-1 space-y-4">
       <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Shield size={18} /> Blacklist / DNC Lookup</h3>
         <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>

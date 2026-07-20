@@ -293,7 +293,7 @@ const ResellRules = ({ config, scope, onSave }) => {
     .filter(Boolean).join(', ');
 
   return (
-    <div className="max-w-3xl pb-8">
+    <div className="w-full pb-8">
       {/* ── Hero summary banner ──────────────────────────────────────── */}
       <div className="rounded-2xl p-5 mb-5 flex items-start gap-4 flex-wrap"
         style={{

@@ -101,7 +101,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
   };
 
   return (
-    <div className="max-w-3xl pb-8">
+    <div className="w-full pb-8">
       {scope !== 'global' && (
         <div
           className="rounded-2xl p-4 mb-4 flex items-start gap-3"

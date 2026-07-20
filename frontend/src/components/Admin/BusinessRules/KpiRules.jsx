@@ -261,7 +261,7 @@ const KpiRules = ({ config, scope, onSave }) => {
   const roleLabel = (SHELL_ROLES[kpiShell].find(r => r.key === kpiRole) || {}).label;
 
   return (
-    <div className="max-w-3xl pb-8">
+    <div className="w-full pb-8">
       {scope !== 'global' && (
         <div className="rounded-2xl p-4 mb-4 flex items-start gap-3"
           style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-300, #fcd34d)' }}>

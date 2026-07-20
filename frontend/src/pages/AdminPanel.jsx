@@ -178,16 +178,12 @@ const AdminPanel = () => {
               <CompanyManagement />
             </div>
           ) : (
-            // Data-heavy tabs (analyzer / search / numbers / bulk / chat /
-            // dashboard) drop the max-w cap so the table grids breathe on big
-            // monitors instead of leaving 30% of the screen as empty margins.
-            // Form-style tabs (vehicles, clients-plans, faqs, scripts, etc.)
-            // keep a comfortable reading width — wide forms feel awkward.
+            // Every admin tab fills the full content width (Compliance-shell
+            // style) with responsive padding — no centered max-w cap that
+            // strands empty margins on wide monitors. Individual panels lay
+            // their own content out in grids so the space is used, not stretched.
             (() => {
-              const WIDE = new Set(['dashboard', 'data-analyzer', 'sale-search', 'customer-profiles', 'numbers', 'bulk-upload', 'chat', 'announcements', 'marquee', 'spiff', 'business-rules']);
-              const wrap = WIDE.has(activeTab)
-                ? 'p-4 lg:p-6 w-full'
-                : 'p-4 lg:p-6 max-w-7xl mx-auto w-full';
+              const wrap = 'px-4 sm:px-6 lg:px-8 py-5 w-full';
               return (
                 <div className={wrap}>
                   {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}

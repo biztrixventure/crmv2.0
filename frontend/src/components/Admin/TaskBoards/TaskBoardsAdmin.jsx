@@ -30,7 +30,7 @@ export default function TaskBoardsAdmin() {
   const del = async (b) => { if (!window.confirm(`Delete board "${b.title}" and everything on it? This cannot be undone.`)) return; try { await client.delete(`kanban/boards/${b.id}`); toast.success('Board deleted'); load(); } catch { toast.error('Failed'); } };
 
   return (
-    <div className="space-y-5 max-w-3xl">
+    <div className="space-y-5 w-full">
       <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="relative z-10 flex items-center gap-2.5">
           <LayoutGrid size={22} className="text-white" />

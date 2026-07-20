@@ -797,7 +797,7 @@ const Backfill = () => {
   };
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 w-full">
       <Alert variant="info">
         <p className="font-semibold mb-1">Two ways to recover dispositions.</p>
         <p className="text-sm">
@@ -946,8 +946,8 @@ const Backfill = () => {
 const VicidialAdmin = () => {
   const [tab, setTab] = useState('boxes');
   return (
-    <div className="space-y-5 max-w-4xl">
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
+    <div className="space-y-5 w-full">
+      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="relative z-10 flex items-center gap-2.5">
           <PhoneCall size={22} className="text-white" />
           <div>

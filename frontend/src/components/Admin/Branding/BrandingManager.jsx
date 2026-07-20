@@ -96,7 +96,7 @@ export default function BrandingManager() {
   try { previewHost = b.og_url ? new URL(b.og_url).host : window.location.host; } catch { previewHost = window.location.host; }
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 w-full">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Globe size={18} /> Branding &amp; SEO</h2>

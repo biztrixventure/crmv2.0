@@ -445,9 +445,9 @@ const DataCleanup = () => {
   ];
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="w-full space-y-5">
       {/* Header */}
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
+      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="relative z-10 flex items-center gap-2.5">
           <Eraser size={22} className="text-white" />
           <div>

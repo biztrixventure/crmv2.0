@@ -14,7 +14,7 @@ const SystemRules = ({ config, scope, onSave }) => {
   const isGlobal = scope === 'global';
 
   return (
-    <div className="max-w-3xl pb-8">
+    <div className="w-full pb-8">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-text mb-1 flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
           <Gauge size={20} className="text-primary-600" /> System &amp; Performance
