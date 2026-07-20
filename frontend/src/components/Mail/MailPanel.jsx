@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, Inbox, Send, FileText, Trash2, PenSquare, Search, Loader2, RefreshCw,
   Paperclip, ChevronLeft, Reply, ReplyAll, Forward, Users, CornerUpLeft,
@@ -504,7 +505,7 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
     return `To: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}${it._bulkCount > 1 ? ` · bulk ×${it._bulkCount}` : ''}`;
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-stretch justify-center p-0 sm:p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div className="relative w-full max-w-5xl flex rounded-none sm:rounded-2xl overflow-hidden animate-scale-in"
         style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
@@ -615,6 +616,7 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
 
         {sigOpen && <SignatureEditor onClose={() => setSigOpen(false)} />}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -352,7 +352,7 @@ const EventsCalendar = ({ canEdit = false }) => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 animate-fade-in">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-6 animate-fade-in">
       {/* Hero header */}
       <div className="rounded-2xl p-5 sm:p-6 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
         style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md, 0 8px 24px rgba(0,0,0,0.12))' }}>

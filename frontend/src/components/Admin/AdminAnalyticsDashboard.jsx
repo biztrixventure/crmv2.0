@@ -545,14 +545,14 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const navToCompanies = () => document.dispatchEvent(new CustomEvent('admin-nav', { detail: 'companies' }));
 
   const metrics = [
-    { icon: Users,       label: 'Users',         value: stats.totalUsers,         accent: '#6366f1', onClick: navToCompanies,                          hint: 'View all companies & users' },
-    { icon: Building2,   label: 'Companies',     value: stats.totalCompanies,     accent: '#10b981', onClick: navToCompanies,                          hint: 'Manage companies' },
-    { icon: Activity,    label: 'Transfers',     value: stats.totalTransfers,     accent: '#f59e0b', onClick: () => jumpToData('transfers'),            hint: 'View all transfers' },
-    { icon: DollarSign,  label: 'Total Sales',   value: stats.totalSales,         accent: '#8b5cf6', onClick: () => jumpToData('sales'),               hint: 'View all sales' },
-    { icon: CheckCircle, label: 'Approved',      value: stats.closedWon,          accent: '#10b981', onClick: () => jumpToData('sales', 'closed_won'),  hint: 'View approved sales' },
-    { icon: Target,      label: 'Conversion',    value: stats.conversionRate ? `${stats.conversionRate}%` : '0%', accent: '#3b82f6', onClick: () => jumpToData('sales'), hint: 'View sales pipeline' },
-    { icon: TrendingUp,  label: 'In Review',     value: stats.awaitingCompliance, accent: '#f59e0b', onClick: () => jumpToData('sales', 'pending_review'), hint: 'Sales awaiting review' },
-    { icon: Layers,      label: 'Pending Xfers', value: stats.pendingTransfers,   accent: '#ef4444', onClick: () => jumpToData('transfers', 'pending'), hint: 'View pending transfers' },
+    { icon: Users,       label: 'Users',         value: stats.totalUsers,         accent: 'var(--color-primary)', onClick: navToCompanies,                          hint: 'View all companies & users' },
+    { icon: Building2,   label: 'Companies',     value: stats.totalCompanies,     accent: 'var(--color-success-500)', onClick: navToCompanies,                          hint: 'Manage companies' },
+    { icon: Activity,    label: 'Transfers',     value: stats.totalTransfers,     accent: 'var(--color-warning-500)', onClick: () => jumpToData('transfers'),            hint: 'View all transfers' },
+    { icon: DollarSign,  label: 'Total Sales',   value: stats.totalSales,         accent: 'var(--color-accent)', onClick: () => jumpToData('sales'),               hint: 'View all sales' },
+    { icon: CheckCircle, label: 'Approved',      value: stats.closedWon,          accent: 'var(--color-success-500)', onClick: () => jumpToData('sales', 'closed_won'),  hint: 'View approved sales' },
+    { icon: Target,      label: 'Conversion',    value: stats.conversionRate ? `${stats.conversionRate}%` : '0%', accent: 'var(--color-info-500)', onClick: () => jumpToData('sales'), hint: 'View sales pipeline' },
+    { icon: TrendingUp,  label: 'In Review',     value: stats.awaitingCompliance, accent: 'var(--color-warning-500)', onClick: () => jumpToData('sales', 'pending_review'), hint: 'Sales awaiting review' },
+    { icon: Layers,      label: 'Pending Xfers', value: stats.pendingTransfers,   accent: 'var(--color-error-500)', onClick: () => jumpToData('transfers', 'pending'), hint: 'View pending transfers' },
   ];
 
   const SALE_STATUSES = [
@@ -614,7 +614,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center transition-transform duration-200 group-hover:scale-110"
-                  style={{ backgroundColor: `${m.accent}18` }}>
+                  style={{ backgroundColor: `color-mix(in srgb, ${m.accent} 14%, transparent)` }}>
                   <m.icon size={13} style={{ color: m.accent }} />
                 </div>
                 {!statsLoading && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: m.accent }} />}

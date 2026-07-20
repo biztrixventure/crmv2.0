@@ -1343,3 +1343,21 @@ select optgroup {
   background-color: var(--color-surface);
   color: var(--color-text);
 }
+
+/* ── FullCalendar (EventsCalendar) — rounded, theme-driven ────────────────
+   The lib draws a square bordered grid; clip it to a rounded card and round
+   the toolbar buttons so the calendar matches the rest of the rounded UI in
+   both the Compliance and SuperAdmin shells. */
+.biztrix-calendar .fc-scrollgrid {
+  border-radius: 14px;
+  overflow: hidden;
+  border-color: var(--color-border);
+}
+.biztrix-calendar .fc .fc-button,
+.biztrix-calendar .fc .fc-button-primary {
+  border-radius: 10px !important;
+}
+.biztrix-calendar .fc .fc-button-group > .fc-button:not(:first-child) {
+  margin-left: 4px;
+}
+.biztrix-calendar .fc .fc-toolbar-title { font-weight: 700; }
