@@ -26,10 +26,10 @@ const SALE_LABEL = {
 };
 // Per-status tint for the multi-sale tab strip (bg/color).
 const TAB_TINT = {
-  closed_won: { bg: '#d1fae5', c: '#047857' }, sold: { bg: '#d1fae5', c: '#047857' },
-  pending_review: { bg: '#fef3c7', c: '#b45309' }, needs_revision: { bg: '#fee2e2', c: '#b91c1c' },
-  cancelled: { bg: '#fee2e2', c: '#b91c1c' }, closed_lost: { bg: '#fee2e2', c: '#b91c1c' },
-  open: { bg: '#dbeafe', c: '#1d4ed8' }, follow_up: { bg: '#fef9c3', c: '#a16207' },
+  closed_won: { bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', c: 'var(--color-success-700)' }, sold: { bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', c: 'var(--color-success-700)' },
+  pending_review: { bg: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', c: 'var(--color-warning-700)' }, needs_revision: { bg: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)', c: 'var(--color-error-700)' },
+  cancelled: { bg: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)', c: 'var(--color-error-700)' }, closed_lost: { bg: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)', c: 'var(--color-error-700)' },
+  open: { bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', c: 'var(--color-info-700)' }, follow_up: { bg: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', c: 'var(--color-warning-700)' },
   _default: { bg: 'var(--color-surface-hover)', c: 'var(--color-text-secondary)' },
 };
 
@@ -221,13 +221,13 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     plan:    sale.plan        ? <Row key="plan"   label="Plan"   value={sale.plan} /> : null,
     sale_date: sale.sale_date ? <Row key="sale_date" label="Sale Date" value={fmtSaleDate(sale.sale_date)} /> : null,
     status:  <Row key="status" label="Status" value={SALE_LABEL[sale.status] || sale.status} />,
-    cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, #dc2626)" /> : null,
+    cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, var(--color-error-600))" /> : null,
     // How long the customer kept paying (sale date → cancellation date). Only
     // meaningful once a cancel date is set; hidden otherwise.
-    paid_for: (() => { const t = salePaidTenure(sale); return t ? <Row key="paid_for" label="Paid For" value={<span className="inline-flex items-center gap-1.5">{t.label}<span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309' }}>{t.monthsFloat}mo</span></span>} highlight="#b45309" /> : null; })(),
-    cancellation_reason: sale.cancellation_reason_key ? <Row key="cancellation_reason" label="Cancellation Reason" value={reasonLabelOf(sale.cancellation_reason_key)} highlight="var(--color-error-600, #dc2626)" /> : null,
+    paid_for: (() => { const t = salePaidTenure(sale); return t ? <Row key="paid_for" label="Paid For" value={<span className="inline-flex items-center gap-1.5">{t.label}<span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{t.monthsFloat}mo</span></span>} highlight="var(--color-warning-700)" /> : null; })(),
+    cancellation_reason: sale.cancellation_reason_key ? <Row key="cancellation_reason" label="Cancellation Reason" value={reasonLabelOf(sale.cancellation_reason_key)} highlight="var(--color-error-600, var(--color-error-600))" /> : null,
     closer_disposition: sale.closer_disposition ? <Row key="closer_disposition" label="Closer Disposition" value={sale.closer_disposition} highlight="var(--color-primary-600)" /> : null,
-    monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="#16a34a" /> : null,
+    monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="var(--color-success-600)" /> : null,
     down_payment:     (canFinancial && sale.down_payment)     ? <Row key="down_payment" label="Down Payment" value={`$${Number(sale.down_payment).toLocaleString()}`} /> : null,
     payment_due_note: (canFinancial && sale.payment_due_note) ? <Row key="payment_due_note" label="Due Note" value={sale.payment_due_note} /> : null,
     closer:  sale.closer_name  ? <Row key="closer"  label="Closer"  value={sale.closer_name} /> : null,
@@ -264,7 +264,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     open: 'var(--color-info-600)',
     pending_review: 'var(--color-warning-600)',
     needs_revision: 'var(--color-error-600)',
-    closed_won: '#16a34a',
+    closed_won: 'var(--color-success-600)',
     closed_lost: 'var(--color-error-600)',
   }[sale.status];
 
@@ -309,7 +309,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
           <SaleStatusBadge sale={sale} size="md" />
           {sale.is_resell && (
             <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded inline-flex items-center gap-1"
-              style={{ backgroundColor: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700, #4338ca)' }}>
+              style={{ backgroundColor: 'var(--color-primary-100, color-mix(in srgb, var(--color-primary) 16%, transparent))', color: 'var(--color-primary-700, #4338ca)' }}>
               <RefreshCw size={10} /> Resell{sale.resell_intent ? ` · ${sale.resell_intent}` : ''}
             </span>
           )}
@@ -357,7 +357,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                   <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint.c }} />
                   <span className="opacity-60">#{i + 1}</span>
                   <span>{ls.reference_no ? `${ls.reference_no}`.toUpperCase() : (ls.sale_date || 'sale')}</span>
-                  {paid && <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#f59e0b22', color: '#b45309' }}>{paid.short}</span>}
+                  {paid && <span className="text-[9px] font-bold px-1 rounded" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{paid.short}</span>}
                 </button>
               );
             })}
@@ -425,10 +425,10 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
               below, so we hide this banner when there's nothing new. */}
           {lifetime && Array.isArray(lifetime.companies) && Array.isArray(lifetime.sales) && lifetime.companies.length > 1 && (
             <div className="mb-4 rounded-xl p-3 flex items-start gap-2"
-              style={{ backgroundColor: 'var(--color-info-50, #eff6ff)', border: '1px solid var(--color-info-200, #bfdbfe)' }}>
+              style={{ backgroundColor: 'var(--color-info-50, color-mix(in srgb, var(--color-info-500) 14%, transparent))', border: '1px solid var(--color-info-200, color-mix(in srgb, var(--color-info-500) 30%, transparent))' }}>
               <span className="text-lg leading-none">🧬</span>
               <div className="flex-1 text-xs">
-                <p className="font-bold" style={{ color: 'var(--color-info-700, #1d4ed8)' }}>
+                <p className="font-bold" style={{ color: 'var(--color-info-700, var(--color-info-700))' }}>
                   Lifetime customer — {lifetime.sales.length} sale{lifetime.sales.length === 1 ? '' : 's'} across {lifetime.companies.length} companies
                 </p>
                 <p className="mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -443,7 +443,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
               inside) the resell chain — a bundle is one deal, not a lineage. */}
           {groupSiblings.length > 0 && (
             <div className="mb-5">
-              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#065f46' }}>
+              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-success-700)' }}>
                 Multi-Vehicle Deal · {groupSiblings.length + 1} cars
               </p>
               <div className="space-y-1.5">
@@ -509,7 +509,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                       )}
                       <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
                         style={{
-                          backgroundColor: c.is_resell ? '#ede9fe' : '#dcfce7',
+                          backgroundColor: c.is_resell ? 'color-mix(in srgb, var(--color-primary) 16%, transparent)' : 'color-mix(in srgb, var(--color-success-500) 16%, transparent)',
                           color:           c.is_resell ? '#6d28d9' : '#166534',
                         }}>
                         {c.is_resell ? 'resell' : 'original'}
@@ -520,14 +520,14 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                       </span>
                       {c.cancellation_date && (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)' }}>
+                          style={{ backgroundColor: 'var(--color-error-50, color-mix(in srgb, var(--color-error-500) 14%, transparent))', color: 'var(--color-error-700, var(--color-error-700))' }}>
                           cancelled {c.cancellation_date}
                         </span>
                       )}
                       {(() => { const t = salePaidTenure(c); return t ? (
                         <span title={`Paid from ${c.sale_date} to ${c.cancellation_date}`}
                           className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: '#f59e0b22', color: '#b45309' }}>
+                          style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>
                           paid {t.label}
                         </span>
                       ) : null; })()}
@@ -555,8 +555,8 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                   const actionLabel = h.action === 'approved' ? '✓ Approved'
                     : h.action === 'returned' ? '↩ Returned'
                     : h.action ? h.action.replace(/_/g, ' ') : 'Updated';
-                  const actionColor = h.action === 'approved' ? '#16a34a'
-                    : h.action === 'returned' ? '#d97706'
+                  const actionColor = h.action === 'approved' ? 'var(--color-success-600)'
+                    : h.action === 'returned' ? 'var(--color-warning-600)'
                     : 'var(--color-text-secondary)';
                   // Entry vocabulary converged on edited_at, but older writers
                   // (reassign, the first cancel entries) used `at` — tolerate both
@@ -577,7 +577,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                         </p>
                       )}
                       {h.cancellation_reason_key && (
-                        <p className="mb-1 font-semibold" style={{ color: 'var(--color-error-700, #b91c1c)' }}>
+                        <p className="mb-1 font-semibold" style={{ color: 'var(--color-error-700, var(--color-error-700))' }}>
                           Reason: {reasonLabelOf(h.cancellation_reason_key)}
                         </p>
                       )}

@@ -11,9 +11,9 @@ const STATUS_BADGE = {
 };
 
 const PRIORITY_CONFIG = {
-  High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
-  Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: '#d97706' },
-  Low:    { dot: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', text: '#2563eb' },
+  High:   { dot: 'var(--color-error-500)', bg: 'color-mix(in srgb, var(--color-error-500) 14%, transparent)', border: 'color-mix(in srgb, var(--color-error-500) 30%, transparent)', text: 'var(--color-error-600)' },
+  Medium: { dot: '#f59e0b', bg: '#fffbeb', border: '#fde68a', text: 'var(--color-warning-600)' },
+  Low:    { dot: 'var(--color-info-500)', bg: 'color-mix(in srgb, var(--color-info-500) 14%, transparent)', border: 'color-mix(in srgb, var(--color-info-500) 30%, transparent)', text: 'var(--color-info-600)' },
 };
 
 // Section id → icon, so a config-driven section still gets its glyph.
@@ -156,7 +156,7 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           {callback.priority && <PriorityBadge priority={callback.priority} />}
           {isOverdue && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border"
-              style={{ backgroundColor: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }}>
+              style={{ backgroundColor: 'color-mix(in srgb, var(--color-error-500) 14%, transparent)', color: 'var(--color-error-600)', borderColor: 'color-mix(in srgb, var(--color-error-500) 30%, transparent)' }}>
               <AlertCircle size={10} /> Overdue
             </span>
           )}

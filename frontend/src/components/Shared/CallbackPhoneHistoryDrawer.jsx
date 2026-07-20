@@ -89,7 +89,7 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
             )}
             {hasDuplicates && (
               <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full"
-                style={{ backgroundColor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-600)', border: '1px solid #fde68a' }}>
                 <AlertTriangle size={11} />
                 {pendingCount} agents scheduled this number
               </span>
@@ -133,11 +133,11 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
               {/* Duplicate warning box */}
               {hasDuplicates && (
                 <div className="mb-4 p-3 rounded-xl flex items-start gap-2"
-                  style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a' }}>
-                  <AlertTriangle size={15} style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+                  style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', border: '1px solid #fde68a' }}>
+                  <AlertTriangle size={15} style={{ color: 'var(--color-warning-600)', flexShrink: 0, marginTop: 1 }} />
                   <div>
-                    <p className="text-xs font-bold" style={{ color: '#d97706' }}>Duplicate Active Callbacks</p>
-                    <p className="text-xs mt-0.5" style={{ color: '#92400e' }}>
+                    <p className="text-xs font-bold" style={{ color: 'var(--color-warning-600)' }}>Duplicate Active Callbacks</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--color-warning-800)' }}>
                       {pendingCount} agents have this number pending simultaneously.
                       Only <strong>{callbacks.find(c => c.status === 'pending')?.agent_name}</strong> scheduled it first.
                     </p>
@@ -172,13 +172,13 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
                             <span className="font-semibold text-sm text-text">{cb.agent_name}</span>
                             {isFirst && (
                               <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                                style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>
+                                style={{ backgroundColor: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', color: 'var(--color-info-700)' }}>
                                 First
                               </span>
                             )}
                             {cb.status === 'pending' && !isFirst && (
                               <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                                style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>
+                                style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-600)' }}>
                                 Also pending
                               </span>
                             )}

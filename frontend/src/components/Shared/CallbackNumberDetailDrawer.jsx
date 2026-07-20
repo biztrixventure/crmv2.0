@@ -12,23 +12,23 @@ import { transferPhone } from '../../utils/phone';
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const OUTCOME_META = {
-  answered_sold:     { label: 'Answered — Sold',       color: '#16a34a', bg: '#dcfce7', icon: CheckCircle2 },
-  answered_no_sale:  { label: 'Answered — No Sale',    color: '#2563eb', bg: '#dbeafe', icon: PhoneCall    },
-  answered_callback: { label: 'Answered — Callback',   color: '#7c3aed', bg: '#ede9fe', icon: Calendar     },
-  no_answer:         { label: 'No Answer',             color: '#d97706', bg: '#fef3c7', icon: PhoneMissed  },
-  voicemail:         { label: 'Voicemail',             color: '#0891b2', bg: '#cffafe', icon: Voicemail    },
-  wrong_number:      { label: 'Wrong Number',          color: '#dc2626', bg: '#fee2e2', icon: XCircle      },
-  do_not_call:       { label: 'Do Not Call',           color: '#7f1d1d', bg: '#fecaca', icon: PhoneOff     },
+  answered_sold:     { label: 'Answered — Sold',       color: 'var(--color-success-600)', bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', icon: CheckCircle2 },
+  answered_no_sale:  { label: 'Answered — No Sale',    color: 'var(--color-info-600)', bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', icon: PhoneCall    },
+  answered_callback: { label: 'Answered — Callback',   color: 'var(--color-primary)', bg: 'color-mix(in srgb, var(--color-primary) 16%, transparent)', icon: Calendar     },
+  no_answer:         { label: 'No Answer',             color: 'var(--color-warning-600)', bg: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', icon: PhoneMissed  },
+  voicemail:         { label: 'Voicemail',             color: 'var(--color-info-600)', bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', icon: Voicemail    },
+  wrong_number:      { label: 'Wrong Number',          color: 'var(--color-error-600)', bg: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)', icon: XCircle      },
+  do_not_call:       { label: 'Do Not Call',           color: 'var(--color-error-700)', bg: 'color-mix(in srgb, var(--color-error-500) 30%, transparent)', icon: PhoneOff     },
 };
 
 const EVENT_CONFIG = {
-  created:        { icon: PlusCircle, color: '#3b82f6', bg: '#dbeafe', label: 'Number Created'       },
-  claimed:        { icon: UserPlus,   color: '#16a34a', bg: '#dcfce7', label: 'Ownership Claimed'    },
-  owner_released: { icon: UserMinus,  color: '#6b7280', bg: '#f3f4f6', label: 'Ownership Released'   },
-  field_updated:  { icon: Edit3,      color: '#7c3aed', bg: '#ede9fe', label: 'Field Updated'        },
-  status_changed: { icon: Activity,   color: '#d97706', bg: '#fef3c7', label: 'Status Changed'       },
-  reassigned:     { icon: Shuffle,    color: '#6366f1', bg: '#e0e7ff', label: 'Reassigned by Manager'},
-  attempt:        { icon: Phone,      color: '#0f172a', bg: '#f8fafc', label: 'Call Attempt'         },
+  created:        { icon: PlusCircle, color: 'var(--color-info-500)', bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', label: 'Number Created'       },
+  claimed:        { icon: UserPlus,   color: 'var(--color-success-600)', bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', label: 'Ownership Claimed'    },
+  owner_released: { icon: UserMinus,  color: 'var(--color-text-secondary)', bg: 'var(--color-bg-secondary)', label: 'Ownership Released'   },
+  field_updated:  { icon: Edit3,      color: 'var(--color-primary)', bg: 'color-mix(in srgb, var(--color-primary) 16%, transparent)', label: 'Field Updated'        },
+  status_changed: { icon: Activity,   color: 'var(--color-warning-600)', bg: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', label: 'Status Changed'       },
+  reassigned:     { icon: Shuffle,    color: 'var(--color-primary)', bg: 'color-mix(in srgb, var(--color-primary) 16%, transparent)', label: 'Reassigned by Manager'},
+  attempt:        { icon: Phone,      color: 'var(--color-text)', bg: 'var(--color-bg-secondary)', label: 'Call Attempt'         },
 };
 
 const RELEASE_REASON_LABEL = {
@@ -130,7 +130,7 @@ const ClaimCard = ({ claim, isCurrent }) => {
         <div className="flex items-center justify-between gap-2 mb-0.5">
           <span className="font-semibold text-sm text-text truncate">{claim.owner_name}</span>
           {isCurrent
-            ? <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: '#16a34a', backgroundColor: '#dcfce7' }}>Current</span>
+            ? <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: 'var(--color-success-600)', backgroundColor: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)' }}>Current</span>
             : <span className="text-xs text-text-tertiary">{days}d</span>}
         </div>
         <p className="text-xs text-text-secondary mb-1">
@@ -144,7 +144,7 @@ const ClaimCard = ({ claim, isCurrent }) => {
           {claim.last_outcome && <OutcomePill outcome={claim.last_outcome} />}
           {!isCurrent && claim.release_reason && (
             <span className="text-xs px-2 py-0.5 rounded"
-              style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>
+              style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-600)' }}>
               {RELEASE_REASON_LABEL[claim.release_reason] || claim.release_reason}
             </span>
           )}
@@ -218,12 +218,12 @@ const TimelineEvent = ({ event }) => {
             </p>
             <div className="flex items-start gap-2">
               <span className="px-1.5 py-0.5 rounded line-through opacity-60"
-                style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)', color: 'var(--color-error-600)' }}>
                 {event.old_value || '(empty)'}
               </span>
               <ArrowRight size={12} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />
               <span className="px-1.5 py-0.5 rounded font-medium"
-                style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', color: 'var(--color-success-600)' }}>
                 {event.new_value || '(empty)'}
               </span>
             </div>
@@ -256,7 +256,7 @@ const TimelineEvent = ({ event }) => {
         {event._type === 'claimed' && (
           <div className="flex flex-wrap gap-1.5 mt-1">
             <span className="text-xs px-2 py-0.5 rounded"
-              style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>
+              style={{ backgroundColor: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)', color: 'var(--color-success-600)' }}>
               {event._actor} took ownership
             </span>
             {event.attempt_count > 0 && (
@@ -270,14 +270,14 @@ const TimelineEvent = ({ event }) => {
 
         {event._type === 'owner_released' && event.release_reason && (
           <span className="text-xs px-2 py-0.5 rounded mt-1 inline-block"
-            style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-600)' }}>
             {RELEASE_REASON_LABEL[event.release_reason] || event.release_reason}
           </span>
         )}
 
         {event._type === 'created' && event.metadata?.source && (
           <span className="text-xs px-2 py-0.5 rounded mt-1 inline-block capitalize"
-            style={{ backgroundColor: '#dbeafe', color: '#3b82f6' }}>
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)', color: 'var(--color-info-500)' }}>
             Source: {event.metadata.source}
           </span>
         )}

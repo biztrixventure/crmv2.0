@@ -3,11 +3,11 @@ import { Badge } from '../UI';
 import UserPermissionsPanel from '../Admin/UserManagement/UserPermissionsPanel';
 
 const LEVEL_COLOR = {
-  superadmin:          '#6366f1',
+  superadmin:          'var(--color-primary)',
   readonly_admin:      '#8b5cf6',
   compliance_manager:  '#f59e0b',
-  company_admin:       '#ef4444',
-  operations_manager:  '#3b82f6',
+  company_admin:       'var(--color-error-500)',
+  operations_manager:  'var(--color-info-500)',
   closer_manager:      '#10b981',
   fronter_manager:     '#10b981',
   closer:              '#6b7280',

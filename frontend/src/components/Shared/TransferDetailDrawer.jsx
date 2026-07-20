@@ -9,14 +9,14 @@ import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 import client from '../../api/client';
 
 const SALE_STATUS_CONFIG = {
-  open:           { label: 'Sale Open',      color: '#2563eb', bg: '#dbeafe',  icon: Clock        },
-  sold:           { label: 'Sold',           color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
-  pending_review: { label: 'In Review',      color: '#d97706', bg: '#fef3c7',  icon: Clock        },
-  needs_revision: { label: 'Needs Revision', color: '#dc2626', bg: '#fee2e2',  icon: AlertTriangle},
-  closed_won:     { label: 'Approved',       color: '#16a34a', bg: '#dcfce7',  icon: CheckCircle  },
-  closed_lost:    { label: 'Lost',           color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
-  follow_up:      { label: 'Follow Up',      color: '#8b5cf6', bg: '#ede9fe',  icon: Clock        },
-  cancelled:      { label: 'Cancelled',      color: '#6b7280', bg: '#f3f4f6',  icon: XCircle      },
+  open:           { label: 'Sale Open',      color: 'var(--color-info-600)', bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)',  icon: Clock        },
+  sold:           { label: 'Sold',           color: 'var(--color-success-600)', bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)',  icon: CheckCircle  },
+  pending_review: { label: 'In Review',      color: 'var(--color-warning-600)', bg: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)',  icon: Clock        },
+  needs_revision: { label: 'Needs Revision', color: 'var(--color-error-600)', bg: 'color-mix(in srgb, var(--color-error-500) 16%, transparent)',  icon: AlertTriangle},
+  closed_won:     { label: 'Approved',       color: 'var(--color-success-600)', bg: 'color-mix(in srgb, var(--color-success-500) 16%, transparent)',  icon: CheckCircle  },
+  closed_lost:    { label: 'Lost',           color: 'var(--color-text-secondary)', bg: 'var(--color-bg-secondary)',  icon: XCircle      },
+  follow_up:      { label: 'Follow Up',      color: 'var(--color-primary)', bg: 'color-mix(in srgb, var(--color-primary) 16%, transparent)',  icon: Clock        },
+  cancelled:      { label: 'Cancelled',      color: 'var(--color-text-secondary)', bg: 'var(--color-bg-secondary)',  icon: XCircle      },
 };
 
 const XFER_BADGE = {
@@ -171,7 +171,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
   // ── Special (non-field) blocks, rendered by section id. Their visibility is
   // still controlled by the layout config.
   const saleBlock = () => {
-    const cfg = SALE_STATUS_CONFIG[transfer.sale_status] || { label: transfer.sale_status, color: '#6b7280', bg: '#f3f4f6', icon: Clock };
+    const cfg = SALE_STATUS_CONFIG[transfer.sale_status] || { label: transfer.sale_status, color: 'var(--color-text-secondary)', bg: 'var(--color-bg-secondary)', icon: Clock };
     const Icon = cfg.icon;
     return (
       <div className="mb-5" key="sale">
@@ -188,8 +188,8 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           </div>
           {transfer.sale_status === 'needs_revision' && transfer.sale_compliance_note && (
             <div className="mt-2 flex items-start gap-1.5">
-              <AlertTriangle size={12} style={{ color: '#dc2626', marginTop: 1, flexShrink: 0 }} />
-              <p className="text-xs" style={{ color: '#dc2626' }}>{transfer.sale_compliance_note}</p>
+              <AlertTriangle size={12} style={{ color: 'var(--color-error-600)', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-xs" style={{ color: 'var(--color-error-600)' }}>{transfer.sale_compliance_note}</p>
             </div>
           )}
         </div>
@@ -212,8 +212,8 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
       ) : dispoHistory.length === 0 ? (
         <div className="px-4 py-3 rounded-xl flex items-center gap-2 flex-wrap"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#9ca3af' }} />
-          <span className="text-xs font-semibold" style={{ color: '#6b7280' }}>In Progress</span>
+          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-text-tertiary)' }} />
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>In Progress</span>
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No actions yet</span>
           <span className="ml-auto"><FetchDispoButton transferId={transfer.id} onFetched={loadHistory} /></span>
         </div>
@@ -224,7 +224,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
             {dispoHistory.map((d, i) => (
               <div key={d.id || i} className="flex gap-3">
                 <div className="w-3.5 h-3.5 rounded-full flex-shrink-0 mt-1 relative z-10 ring-2"
-                  style={{ backgroundColor: d.color || '#6b7280', ringColor: 'var(--color-surface)' }} />
+                  style={{ backgroundColor: d.color || 'var(--color-text-secondary)', ringColor: 'var(--color-surface)' }} />
                 <div className="flex-1 pb-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{d.disposition_name}</span>
