@@ -887,7 +887,7 @@ const StaffShell = () => {
 
       <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10"
+      <main className="w-full px-4 sm:px-6 lg:px-8 py-6 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <SpiffWidget />
 
