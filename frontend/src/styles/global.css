@@ -1326,3 +1326,20 @@ html.dark .skeleton {
   -ms-user-select: text !important;
   user-select: text !important;
 }
+
+/* ── Native <select> fallback theming ─────────────────────────────────────
+   The full fix for dropdowns is <ThemedSelect> (components/UI/Select.jsx),
+   which draws the popup in the DOM so it follows the theme with a visible
+   hover state in every mode. Until every native <select> is converted, this
+   keeps the closed control + the option list on-palette instead of a white
+   OS box in dark / custom themes. The popup's hover HIGHLIGHT is OS-drawn and
+   can't be fully themed here — that's exactly why ThemedSelect exists.
+   Low element-specificity so any inline / .input styling still wins. */
+select {
+  color: var(--color-text);
+}
+select option,
+select optgroup {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}

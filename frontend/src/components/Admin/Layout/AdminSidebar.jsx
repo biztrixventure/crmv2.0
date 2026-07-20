@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid } from 'lucide-react';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -74,8 +74,32 @@ const NAV_SECTIONS = [
   },
 ];
 
+// Icons for items that live in navItems but have no NAV_SECTIONS home yet.
+// Purely cosmetic — anything missing here still renders with a default icon.
+const EXTRA_ICONS = {
+  numbers: Hash,
+  batches: Send,
+  roster: Users,
+  'note-shortcodes': Tag,
+};
+
 const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) => {
   const navigate = useNavigate();
+
+  // navItems is the source of truth for WHICH tabs exist (it already carries
+  // every role/permission gate from AdminPanel). NAV_SECTIONS only supplies
+  // icons + grouping. Any navItems entry with no section mapping falls into a
+  // trailing "More" group instead of silently vanishing — so a newly added tab
+  // always shows in the sidebar even if nobody remembers to slot it here.
+  const knownIds = new Set(NAV_SECTIONS.flatMap(s => s.items.map(i => i.id)));
+  const extraItems = navItems.filter(n => !knownIds.has(n.id));
+  const sections = extraItems.length
+    ? [...NAV_SECTIONS, {
+        label: 'More',
+        items: extraItems.map(n => ({ id: n.id, label: n.label, icon: EXTRA_ICONS[n.id] || LayoutGrid })),
+      }]
+    : NAV_SECTIONS;
+
   return (
     <aside className="w-64 flex-shrink-0 flex flex-col"
       style={{
@@ -88,7 +112,7 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-5">
-        {NAV_SECTIONS.map(section => (
+        {sections.map(section => (
           <div key={section.label}>
             <p className="text-xs font-bold uppercase tracking-widest px-3 mb-2"
               style={{ color: 'var(--color-text-tertiary)' }}>

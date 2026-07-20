@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, Filter as FilterIcon } from 'lucide-react';
 import DateRangePicker, { getPresetRange } from './DateRangePicker';
+import ThemedSelect from './Select';
 
 /*
  * FilterBar — shared list-page filter chrome.
@@ -157,27 +158,21 @@ export default function FilterBar({
 }
 
 // Compact pill dropdown for FilterBar `extras` — sizes to its content instead
-// of the full-width `.input`, so a row of filters stays tidy. Themed via vars.
-export function FilterSelect({ value, onChange, children, title, className = '', ...rest }) {
+// of the full-width `.input`, so a row of filters stays tidy. Now a fully themed
+// DOM popup (ThemedSelect) so the option list + hover state follow the theme in
+// dark/light/custom instead of the native OS box.
+export function FilterSelect({ value, onChange, children, title, className = '', style, ...rest }) {
   return (
-    <select
+    <ThemedSelect
+      variant="pill"
       value={value}
       onChange={onChange}
       title={title}
-      className={`text-sm font-medium outline-none cursor-pointer transition-colors ${className}`}
-      style={{
-        padding: '8px 30px 8px 12px', borderRadius: 999,
-        backgroundColor: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border)',
-        color: 'var(--color-text)',
-        // custom chevron so it reads as a pill, not an OS box
-        appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
-        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
-        maxWidth: 200,
-      }}
-      {...rest}>
+      className={className}
+      style={{ maxWidth: 220, ...style }}
+      {...rest}
+    >
       {children}
-    </select>
+    </ThemedSelect>
   );
 }
