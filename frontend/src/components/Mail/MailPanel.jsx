@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Inbox, Send, FileText, Trash2, PenSquare, Search, Loader2, RefreshCw,
-  Paperclip, ChevronLeft, Reply, ReplyAll, Forward, Users, CornerUpLeft,
+  Paperclip, ChevronLeft, Reply, ReplyAll, Forward, Users, CornerUpLeft, MoreHorizontal,
   BookTemplate, PenLine, Check, Plus, Download, Mail, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -107,6 +107,8 @@ function Compose({ me, preset, onClose, onSent }) {
   // body handled by RichTextEditor (uncontrolled-ish; we keep latest html in a ref + state seed)
   const [body, setBody] = useState(preset?.body_html ?? null);   // null → signature not applied yet
   const [seed, setSeed] = useState(preset?.body_html || '');
+  const [quoted] = useState(preset?.quoted_html || '');   // reply quote — collapsed behind a … toggle
+  const [showQuote, setShowQuote] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
 
   // signature auto-insert on fresh composes (not replies-with-body or reopened drafts)
@@ -155,7 +157,7 @@ function Compose({ me, preset, onClose, onSent }) {
 
   const payload = () => ({
     to: to.map(u => u.id), cc: cc.map(u => u.id), bcc: bcc.map(u => u.id),
-    subject, body_html: body || '', attachments,
+    subject, body_html: (body || '') + (quoted || ''), attachments,
     thread_id: preset?.thread_id || null, reply_to_email_id: preset?.reply_to_email_id || null,
     is_forward: !!preset?.is_forward,
   });
@@ -249,6 +251,25 @@ function Compose({ me, preset, onClose, onSent }) {
             : <RichTextEditor key={editorKey} value={seed} onChange={setBody} placeholder="Write your email…" minHeight={180} />}
         </div>
 
+        {/* Quoted original — hidden behind a … toggle (Gmail-style) so the reply
+            opens on a blank body; it's appended to body_html on send. */}
+        {quoted && (
+          <div className="pb-3">
+            <button type="button" onClick={() => setShowQuote(s => !s)}
+              title={showQuote ? 'Hide quoted email' : 'Show quoted email'}
+              aria-expanded={showQuote}
+              className="inline-flex items-center justify-center w-9 h-6 rounded-md transition-colors"
+              style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <MoreHorizontal size={16} />
+            </button>
+            {showQuote && (
+              <div className="mt-2 rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                <RichView html={quoted} />
+              </div>
+            )}
+          </div>
+        )}
+
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 pb-2">
             {attachments.map((a, i) => (
@@ -334,7 +355,7 @@ function ThreadView({ threadId, meId, onBack, onCompose, refreshUnread }) {
     e.recipients.filter(r => r.kind !== 'bcc' && r.user_id !== meId).forEach(r => ids.set(r.user_id, r.name));
     onCompose({
       to: [...ids.entries()].map(([id, name]) => ({ id, name })),
-      subject: reSubject(data.thread.subject), body_html: quote(e),
+      subject: reSubject(data.thread.subject), body_html: '', quoted_html: quote(e),
       thread_id: threadId, reply_to_email_id: e.id,
     });
   };
