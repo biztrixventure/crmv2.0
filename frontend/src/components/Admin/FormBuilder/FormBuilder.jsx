@@ -194,7 +194,7 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
   const isClient = type === 'client';
   const label    = isClient ? 'Client' : 'Plan';
   const Icon     = isClient ? Tag : ListChecks;
-  const accent   = isClient ? '#6366f1' : '#f59e0b';
+  const accent   = isClient ? 'var(--color-accent)' : 'var(--color-primary)';
 
   const handleAdd = async () => {
     if (!newVal.trim()) return;
@@ -203,12 +203,12 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
   };
 
   return (
-    <div className="max-w-2xl animate-fade-in">
+    <div className="w-full animate-fade-in">
       {/* Page header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: `${accent}18` }}>
+            style={{ backgroundColor: `color-mix(in srgb, ${accent} 12%, transparent)` }}>
             <Icon size={20} style={{ color: accent }} />
           </div>
           <div>
@@ -233,7 +233,7 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
             <Icon size={16} style={{ color: accent }} />
             <span className="font-bold text-sm text-text">{label}s</span>
             <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
-              style={{ backgroundColor: `${accent}18`, color: accent }}>
+              style={{ backgroundColor: `color-mix(in srgb, ${accent} 12%, transparent)`, color: accent }}>
               {items.length}
             </span>
           </div>
@@ -256,7 +256,7 @@ const ConfigPanel = ({ type, items, loading, onAdd, onDelete, saving, deleting }
               className="flex items-center justify-between px-5 py-3.5 group hover:bg-bg-secondary transition-colors">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${accent}15` }}>
+                  style={{ backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)` }}>
                   <Icon size={13} style={{ color: accent }} />
                 </div>
                 <span className="text-sm font-medium text-text truncate">{item.value}</span>
@@ -369,7 +369,7 @@ const MappingPanel = ({ clients, plans, configLoading }) => {
   return (
     // bsx-allow-select overrides the shell-wide bsx-no-select so creators can
     // still copy/paste field names, options, and labels while configuring forms.
-    <div className="max-w-3xl animate-fade-in bsx-allow-select">
+    <div className="w-full animate-fade-in bsx-allow-select">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3 mb-6">
         <div className="flex items-center gap-3">
@@ -1176,8 +1176,8 @@ const FieldCard = ({
       onDragEnd={onDragEnd}
       className={`rounded-xl border-2 transition-all duration-150 select-none ${SPAN_CLASS[field.column_span || 1]}`}
       style={{
-        borderColor:     isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : isCloserDeal ? 'rgba(245,158,11,0.35)' : isSale ? 'var(--color-primary-200)' : 'var(--color-border)',
-        backgroundColor: isDragOver ? 'var(--color-primary-50)' : isCloserDeal ? 'rgba(245,158,11,0.06)' : isSale ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
+        borderColor:     isDragOver ? 'var(--color-primary-500)' : isDragging ? 'transparent' : isCloserDeal ? 'color-mix(in srgb, var(--color-primary) 35%, transparent)' : isSale ? 'var(--color-primary-200)' : 'var(--color-border)',
+        backgroundColor: isDragOver ? 'var(--color-primary-50)' : isCloserDeal ? 'color-mix(in srgb, var(--color-primary) 6%, transparent)' : isSale ? 'var(--color-primary-50, #faf5ff)' : 'var(--color-surface)',
         opacity:         isDragging ? 0.35 : 1,
         cursor:          'grab',
         boxShadow:       isDragOver ? '0 0 0 3px var(--color-primary-200)' : 'none',
@@ -1186,7 +1186,7 @@ const FieldCard = ({
       {/* Top bar */}
       <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 min-w-0 overflow-hidden">
         <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
-        <span style={{ flexShrink: 0, color: isCloserDeal ? '#d97706' : isSale ? 'var(--color-primary-500)' : 'var(--color-text-secondary)' }}>
+        <span style={{ flexShrink: 0, color: isCloserDeal ? 'var(--color-primary-700)' : isSale ? 'var(--color-primary-500)' : 'var(--color-text-secondary)' }}>
           <FieldIcon type={field.field_type} />
         </span>
         {editingLabel ? (
@@ -1241,7 +1241,7 @@ const FieldCard = ({
       {isCloserDeal && (
         <div className="px-3 pb-1">
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold"
-            style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)', color: 'var(--color-primary-700)' }}>
             <UserX size={9} /> Closer Only · Deal Field
           </span>
         </div>
@@ -1283,7 +1283,7 @@ const FieldCard = ({
         {/* Visibility — locked for closer deal fields */}
         {isCloserDeal ? (
           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
-            style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#b45309' }}>
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 10%, transparent)', color: 'var(--color-primary-700)' }}>
             <UserX size={9} /> Closer Only
           </span>
         ) : (
@@ -1325,7 +1325,7 @@ const FieldCard = ({
         {(field.field_type === 'select' || field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') && !editingOptions && (
           <button onClick={() => { setOptionsVal((field.options || []).join(', ')); setEditingOptions(true); }}
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-all flex-shrink-0 hover:opacity-80"
-            style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)', color: 'var(--color-primary-700)' }}>
             <List size={9} /> Options ({(field.options || []).length})
           </button>
         )}
@@ -1817,15 +1817,15 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                       onClick={() => addCloserDealField(f)}
                       className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all hover:shadow-md hover:scale-[1.02]"
                       style={{
-                        borderColor:     'rgba(245,158,11,0.3)',
-                        backgroundColor: 'rgba(245,158,11,0.04)',
+                        borderColor:     'color-mix(in srgb, var(--color-primary) 30%, transparent)',
+                        backgroundColor: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
                       }}>
-                      <span style={{ color: '#d97706', flexShrink: 0 }}><FieldIcon type={f.field_type} /></span>
+                      <span style={{ color: 'var(--color-primary-700)', flexShrink: 0 }}><FieldIcon type={f.field_type} /></span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-text truncate">{f.label}</p>
                         <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>Closer only</p>
                       </div>
-                      <Plus size={13} style={{ color: '#d97706', flexShrink: 0 }} />
+                      <Plus size={13} style={{ color: 'var(--color-primary-700)', flexShrink: 0 }} />
                     </button>
                   </div>
                 );
@@ -2010,7 +2010,7 @@ const FormBuilder = () => {
       <FormBuilderSidebar active={activeSection} onChange={setActiveSection} />
 
       <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--color-bg)' }}>
-        <div className="p-6 lg:p-8 max-w-7xl">
+        <div className="p-6 lg:p-8 w-full">
           {activeSection === 'layout' && (
             <FormLayoutPanel saleClients={clients} salePlans={plans} />
           )}

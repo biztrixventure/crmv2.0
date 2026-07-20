@@ -10,7 +10,7 @@ import CopyableNumber from '../UI/CopyableNumber';
 // settings panel (window / reminder offsets / notify roles / enable).
 const STATUS = {
   pending:   { label: 'Pending',   color: '#f59e0b', bg: '#fffbeb' },
-  collected: { label: 'Collected', color: '#16a34a', bg: '#f0fdf4' },
+  collected: { label: 'Collected', color: 'var(--color-success-600)', bg: '#f0fdf4' },
   at_risk:   { label: 'At risk',   color: '#dc2626', bg: '#fef2f2' },
   cancelled: { label: 'Cancelled', color: '#6b7280', bg: 'var(--color-bg-secondary)' },
 };
@@ -77,7 +77,7 @@ export default function PaymentRemindersPanel() {
   const openDetail = (r) => { setSelected(r); setNoteText(r.note || ''); };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-4 animate-fade-in">
+    <div className="w-full px-4 sm:px-6 py-6 space-y-4 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-2xl font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -99,7 +99,7 @@ export default function PaymentRemindersPanel() {
 
       {isSuper && <SuperSettings onSaved={load} />}
 
-      {msg && <p className="text-sm font-semibold" style={{ color: msg.type === 'err' ? '#dc2626' : '#16a34a' }}>{msg.text}</p>}
+      {msg && <p className="text-sm font-semibold" style={{ color: msg.type === 'err' ? '#dc2626' : 'var(--color-success-600)' }}>{msg.text}</p>}
 
       {/* Client filter — click a client to show only that client's reminders. */}
       {clients.length > 1 && (
@@ -135,7 +135,7 @@ export default function PaymentRemindersPanel() {
         <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
       ) : visibleRows.length === 0 ? (
         <div className="rounded-xl border p-12 text-center" style={{ borderColor: 'var(--color-border)' }}>
-          <CheckCircle size={40} className="mx-auto mb-3" style={{ color: '#16a34a' }} />
+          <CheckCircle size={40} className="mx-auto mb-3" style={{ color: 'var(--color-success-600)' }} />
           <p style={{ color: 'var(--color-text-secondary)' }}>
             {clientFilter ? `No reminders for ${clientFilter} in this window.` : isCompliance ? 'No payments flagged at risk.' : 'Nothing due in this window — all caught up.'}
           </p>
@@ -186,7 +186,7 @@ export default function PaymentRemindersPanel() {
                           <>
                             <button disabled={busy === r.id} onClick={() => act(r.id, 'collected')}
                               className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50"
-                              style={{ backgroundColor: '#16a34a', color: '#fff' }}>
+                              style={{ backgroundColor: 'var(--color-success-600)', color: '#fff' }}>
                               <CheckCircle size={12} /> Collected
                             </button>
                             <button disabled={busy === r.id} onClick={() => act(r.id, 'at_risk')}
@@ -261,7 +261,7 @@ export default function PaymentRemindersPanel() {
                   {!isCompliance && (
                     <>
                       <button disabled={busy === selected.id} onClick={() => act(selected.id, 'collected', noteText)}
-                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: '#16a34a' }}>
+                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-success-600)' }}>
                         <CheckCircle size={14} /> Payment collected
                       </button>
                       <button disabled={busy === selected.id} onClick={() => act(selected.id, 'at_risk', noteText)}

@@ -418,7 +418,7 @@ const DispositionManager = () => {
   };
 
   return (
-    <div className="max-w-2xl animate-fade-in">
+    <div className="w-full animate-fade-in">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3 mb-6">
         <div className="flex items-center gap-3">
