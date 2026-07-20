@@ -178,6 +178,12 @@ export default function ThemedDate({
         <div
           ref={menuRef}
           role="dialog"
+          // The popup is portaled to <body>, so a click inside it would
+          // otherwise reach a containing modal/drawer's outside-click handler
+          // and close it mid-interaction (dates felt "unclickable"). Keep the
+          // events inside the popup.
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           style={{
             ...menuStyle, zIndex: 10000,
             background: 'var(--color-surface)', border: '1px solid var(--color-border)',
