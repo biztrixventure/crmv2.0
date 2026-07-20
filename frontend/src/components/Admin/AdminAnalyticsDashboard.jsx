@@ -94,6 +94,15 @@ const ExTd = ({ value, mono, truncate }) => (
 );
 const dt = (d) => d ? new Date(d).toLocaleString() : null;
 
+// A labeled filter control — small uppercase caption above a pill, so the
+// dashboard filter row reads like the Compliance filter bar.
+const FilterField = ({ label, children, grow = false }) => (
+  <div className={`flex flex-col gap-1 ${grow ? 'flex-1 min-w-[150px]' : ''}`}>
+    <label className="text-[10px] font-bold uppercase tracking-wide px-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
+    {children}
+  </div>
+);
+
 // ─── Interactive MiniCalendar ─────────────────────────────────────────────────
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_ABBR    = ['S','M','T','W','T','F','S'];
@@ -702,89 +711,80 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         );
       })()}
 
-      {/* ── Filter bar ──────────────────────────────────────────────────── */}
-      <div className="rounded-xl px-3 py-2.5"
+      {/* ── Filter bar — Compliance-style labeled pills ─────────────────── */}
+      <div className="rounded-2xl px-3 py-2.5"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Filter size={12} style={{ color: 'var(--color-primary-600)', flexShrink: 0 }} />
+        <div className="flex items-end gap-2.5 flex-wrap">
+          <FilterField label="Date range">
+            <DateRangePicker onChange={handleDateRangeChange} defaultPreset="30d" value={dateRange} />
+          </FilterField>
 
-          {/* Date range picker — synced with MiniCalendar */}
-          <DateRangePicker
-            onChange={handleDateRangeChange}
-            defaultPreset="30d"
-            value={dateRange}
-          />
-
-          {/* Company */}
-          <ThemedSelect value={filters.companyId} onChange={e => setFilter('companyId', e.target.value)}
-            style={{ ...sel, minWidth: 140 }}>
-            <option value="">All Companies</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name} ({c.company_type})</option>)}
-          </ThemedSelect>
-
-          {/* Callbacks: Fronter / Closer toggle */}
-          {dataTab === 'callbacks' && (
-            <div className="flex gap-0.5 p-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              {[{k:'fronter',l:'Fronters'},{k:'closer',l:'Closers'}].map(t => (
-                <button key={t.k} onClick={() => { setCbType(t.k); setFilter('closerId',''); setPage(1); }}
-                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all"
-                  style={{
-                    background: cbType===t.k ? 'var(--gradient-sidebar)' : 'transparent',
-                    color: cbType===t.k ? 'white' : 'var(--color-text-secondary)',
-                  }}>
-                  {t.l}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Agent / Closer */}
-          <ThemedSelect value={filters.closerId} onChange={e => setFilter('closerId', e.target.value)}
-            style={{ ...sel, minWidth: 140 }}>
-            <option value="">{dataTab === 'callbacks' ? 'All Agents' : 'All Closers'}</option>
-            {(dataTab === 'callbacks'
-              ? (cbType === 'fronter' ? fronters : closers)
-              : closers
-            ).map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} — {u.company_name||'?'}</option>)}
-          </ThemedSelect>
-
-          {/* Status */}
-          <ThemedSelect value={filters.status} onChange={e => setFilter('status', e.target.value)}
-            style={{ ...sel, minWidth: 110 }}>
-            {(dataTab==='sales' ? SALE_STATUSES : dataTab==='transfers' ? XFER_STATUSES : CB_STATUSES_OPTS)
-              .map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
-          </ThemedSelect>
-
-          {/* Priority (callbacks only) */}
-          {dataTab === 'callbacks' && (
-            <ThemedSelect value={filters.priority} onChange={e => setFilter('priority', e.target.value)}
-              style={{ ...sel, minWidth: 100 }}>
-              <option value="">All Priority</option>
-              <option value="High">🔴 High</option>
-              <option value="Medium">🟡 Medium</option>
-              <option value="Low">🔵 Low</option>
+          <FilterField label="Company">
+            <ThemedSelect variant="pill" value={filters.companyId} onChange={e => setFilter('companyId', e.target.value)} style={{ minWidth: 150 }}>
+              <option value="">All Companies</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name} ({c.company_type})</option>)}
             </ThemedSelect>
+          </FilterField>
+
+          {dataTab === 'callbacks' && (
+            <FilterField label="View">
+              <div className="flex gap-0.5 p-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                {[{k:'fronter',l:'Fronters'},{k:'closer',l:'Closers'}].map(t => (
+                  <button key={t.k} onClick={() => { setCbType(t.k); setFilter('closerId',''); setPage(1); }}
+                    className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all"
+                    style={{ background: cbType===t.k ? 'var(--gradient-sidebar)' : 'transparent', color: cbType===t.k ? 'white' : 'var(--color-text-secondary)' }}>
+                    {t.l}
+                  </button>
+                ))}
+              </div>
+            </FilterField>
           )}
 
-          {/* Search (sales + callbacks) */}
+          <FilterField label={dataTab === 'callbacks' ? 'Agent' : 'Closer'}>
+            <ThemedSelect variant="pill" value={filters.closerId} onChange={e => setFilter('closerId', e.target.value)} style={{ minWidth: 150 }}>
+              <option value="">{dataTab === 'callbacks' ? 'All Agents' : 'All Closers'}</option>
+              {(dataTab === 'callbacks' ? (cbType === 'fronter' ? fronters : closers) : closers)
+                .map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} — {u.company_name||'?'}</option>)}
+            </ThemedSelect>
+          </FilterField>
+
+          <FilterField label="Status">
+            <ThemedSelect variant="pill" value={filters.status} onChange={e => setFilter('status', e.target.value)} style={{ minWidth: 120 }}>
+              {(dataTab==='sales' ? SALE_STATUSES : dataTab==='transfers' ? XFER_STATUSES : CB_STATUSES_OPTS)
+                .map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+            </ThemedSelect>
+          </FilterField>
+
+          {dataTab === 'callbacks' && (
+            <FilterField label="Priority">
+              <ThemedSelect variant="pill" value={filters.priority} onChange={e => setFilter('priority', e.target.value)} style={{ minWidth: 110 }}>
+                <option value="">All Priority</option>
+                <option value="High">🔴 High</option>
+                <option value="Medium">🟡 Medium</option>
+                <option value="Low">🔵 Low</option>
+              </ThemedSelect>
+            </FilterField>
+          )}
+
           {dataTab !== 'transfers' && (
-            <div className="relative flex items-center">
-              <Search size={11} className="absolute left-2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
-              <input type="text" value={filters.search} onChange={e => setFilter('search', e.target.value)}
-                placeholder="Search…"
-                style={{ ...sel, paddingLeft: 22, minWidth: 150, cursor: 'text' }} />
-              {filters.search && (
-                <button onClick={() => setFilter('search', '')} className="absolute right-1.5"
-                  style={{ color: 'var(--color-text-tertiary)' }}><X size={10} /></button>
-              )}
-            </div>
+            <FilterField label="Search" grow>
+              <div className="relative flex items-center">
+                <Search size={13} className="absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                <input type="text" value={filters.search} onChange={e => setFilter('search', e.target.value)} placeholder="Search…"
+                  className="text-sm w-full outline-none"
+                  style={{ padding: '9px 12px 9px 32px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+                {filters.search && (
+                  <button onClick={() => setFilter('search', '')} className="absolute right-2.5" style={{ color: 'var(--color-text-tertiary)' }}><X size={12} /></button>
+                )}
+              </div>
+            </FilterField>
           )}
 
           {hasActiveFilters && (
             <button onClick={clearFilters}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold ml-auto transition-all hover:scale-105"
-              style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>
-              <X size={10} /> Clear all
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ml-auto self-end transition-all hover:scale-105"
+              style={{ backgroundColor: 'color-mix(in srgb, var(--color-error-500) 8%, transparent)', color: 'var(--color-error-600)', border: '1px solid color-mix(in srgb, var(--color-error-500) 25%, transparent)' }}>
+              <X size={11} /> Clear all
             </button>
           )}
         </div>
