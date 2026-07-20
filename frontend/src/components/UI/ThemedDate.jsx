@@ -181,7 +181,7 @@ export default function ThemedDate({
           style={{
             ...menuStyle, zIndex: 10000,
             background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-            borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: 10,
+            borderRadius: 16, boxShadow: 'var(--shadow-lg)', padding: 10,
           }}
         >
           <div className="flex items-center justify-between mb-2">

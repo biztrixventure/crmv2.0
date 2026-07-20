@@ -299,7 +299,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, al
       {open && createPortal((
         <div
           ref={popRef}
-          className="fixed z-[9999] rounded-xl shadow-xl p-2 overflow-y-auto"
+          className="fixed z-[9999] rounded-2xl shadow-xl p-2 overflow-y-auto"
           style={{
             top:             popPos.top,
             left:            popPos.left,
@@ -318,7 +318,7 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, al
                 onClick={() => selectPreset(p.key)}
                 className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                 style={{
-                  backgroundColor: preset === p.key && !isCustom ? 'var(--color-primary-50)' : 'transparent',
+                  backgroundColor: preset === p.key && !isCustom ? 'color-mix(in srgb, var(--color-primary) 14%, var(--color-surface))' : 'transparent',
                   color:           preset === p.key && !isCustom ? 'var(--color-primary-600)' : 'var(--color-text)',
                   fontWeight:      preset === p.key && !isCustom ? '600' : '400',
                 }}
@@ -366,10 +366,10 @@ const DateRangePicker = ({ onChange, defaultPreset = 'today', value, onClear, al
                     disabled={future}
                     onClick={() => pickDay(iso)}
                     onMouseEnter={() => pickStart && setHoverDay(iso)}
-                    className="h-7 text-xs rounded-md transition-colors flex items-center justify-center"
+                    className="h-8 text-xs rounded-md transition-colors flex items-center justify-center"
                     style={{
                       backgroundColor: isEndpoint ? 'var(--color-primary-600)'
-                                      : inRange   ? 'var(--color-primary-50, #eef2ff)'
+                                      : inRange   ? 'color-mix(in srgb, var(--color-primary) 16%, var(--color-surface))'
                                       : 'transparent',
                       color:      isEndpoint ? '#fff' : 'var(--color-text)',
                       fontWeight: (isEndpoint || isToday) ? 700 : 400,
