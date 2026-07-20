@@ -121,19 +121,24 @@ function semRamp(base) {
 // Derive the full --color-* map (+ gradients) the stylesheet references, from
 // the 7 core tokens (+ optional advanced/semantic overrides). Semantic scales
 // only emit when overridden, so they otherwise fall through to global.css.
-export function buildCssVars(core, mode) {
+export function buildCssVars(core, mode, borderStrength = 'normal') {
   const { bg, surface, border, text, textSecondary, primary, accent } = core;
   const p = ramp(primary, mode);
   const d = advancedDefaults(core, mode);
   const bgSecondary = core.bgSecondary || d.bgSecondary;
   const surfaceHover = core.surfaceHover || d.surfaceHover;
+  // Border emphasis: strong = pull toward text (more visible on light bg),
+  // subtle = pull toward bg (softer). Drives every var(--color-border) border.
+  const borderVal = borderStrength === 'strong' ? mix(border, text, 0.42)
+                  : borderStrength === 'subtle' ? mix(border, bg, 0.45)
+                  : border;
 
   const vars = {
     '--color-bg': bg,
     '--color-bg-secondary': bgSecondary,
     '--color-surface': surface,
     '--color-surface-hover': surfaceHover,
-    '--color-border': border,
+    '--color-border': borderVal,
 
     '--color-text': text,
     '--color-text-secondary': textSecondary,
@@ -194,8 +199,9 @@ const serialize = (vars) =>
 // Full stylesheet text for a theme object.
 export function themeToCss(theme) {
   if (!theme || !theme.light || !theme.dark) return '';
-  const light = serialize(buildCssVars(theme.light, 'light'));
-  const dark = serialize(buildCssVars(theme.dark, 'dark'));
+  const b = theme.borders || 'normal';
+  const light = serialize(buildCssVars(theme.light, 'light', b));
+  const dark = serialize(buildCssVars(theme.dark, 'dark', b));
   return `:root{${light}}\nhtml.dark{${dark}}`;
 }
 

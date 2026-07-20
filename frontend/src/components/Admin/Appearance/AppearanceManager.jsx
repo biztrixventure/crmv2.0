@@ -110,7 +110,7 @@ export default function AppearanceManager() {
       const r = await client.get('business-config', { params: scopeParams(s) });
       const saved = r.data?.config?.theme;
       setDraft(saved && saved.light && saved.dark
-        ? { preset: saved.preset || DEFAULT_PRESET_ID, light: { ...saved.light }, dark: { ...saved.dark } }
+        ? { preset: saved.preset || DEFAULT_PRESET_ID, borders: saved.borders || 'normal', light: { ...saved.light }, dark: { ...saved.dark } }
         : themeFromPreset(DEFAULT_PRESET_ID));
     } catch {
       setDraft(themeFromPreset(DEFAULT_PRESET_ID));
@@ -145,7 +145,7 @@ export default function AppearanceManager() {
   const clearField = (key) =>
     setDraft((d) => { const m = { ...d[mode] }; delete m[key]; return { ...d, [mode]: m }; });
 
-  const pickPreset = (id) => setDraft(themeFromPreset(id));
+  const pickPreset = (id) => setDraft((d) => ({ ...themeFromPreset(id), borders: d?.borders || 'normal' }));
 
   const save = async () => {
     setSaving(true);
@@ -238,6 +238,21 @@ export default function AppearanceManager() {
         <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
           Editing <strong style={{ color: 'var(--color-text-secondary)' }}>{mode}</strong> palette
         </span>
+
+        {/* Border strength — global (both modes). Boosts every var(--color-border)
+            so cards/inputs/rows stay visible, especially in the light theme. */}
+        <div className="flex items-center gap-2 ml-auto">
+          <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Borders</span>
+          <div className="flex items-center rounded-lg overflow-hidden" style={card}>
+            {['subtle', 'normal', 'strong'].map((b) => (
+              <button key={b} type="button" onClick={() => setDraft((d) => ({ ...d, borders: b }))}
+                className="px-3 py-2 text-sm capitalize"
+                style={(draft.borders || 'normal') === b ? { background: 'var(--color-primary-600)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}>
+                {b}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Preset cards */}
