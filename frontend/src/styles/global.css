@@ -1387,3 +1387,15 @@ select optgroup {
 .fc .fc-col-header-cell-cushion,
 .fc .fc-daygrid-day-number { color: var(--color-text); }
 .fc .fc-col-header-cell-cushion { color: var(--color-text-secondary); }
+
+/* ── Detail-drawer open/close animations ─────────────────────────────────
+   The right-side record drawers (Sale/Transfer/Callback/User) slide in and
+   out; the scrim fades. (The old `animate-slide-in-right` class was never
+   defined, so drawers appeared with no motion.) */
+@keyframes bsx-drawer-in  { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes bsx-drawer-out { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes bsx-scrim-in   { from { opacity: 0; } to { opacity: 1; } }
+.animate-slide-in-right  { animation: bsx-drawer-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both; will-change: transform; }
+.animate-slide-out-right { animation: bsx-drawer-out 220ms cubic-bezier(0.4, 0, 1, 1) both; will-change: transform; }
+.bsx-scrim     { animation: bsx-scrim-in 220ms ease both; }
+.bsx-scrim-out { animation: bsx-scrim-in 200ms ease reverse both; }

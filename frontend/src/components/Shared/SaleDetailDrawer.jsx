@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw, Copy, Check } from 'lucide-react';
 import { Badge, SmartText, BalancedText } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
@@ -90,6 +91,8 @@ const Section = ({ title, children }) => (
 );
 
 export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) {
+  const [closing, setClosing] = useState(false);
+  const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections } = useDrawerLayout('sale');
   // Reason keys → readable labels (same catalog the cancel modals use).
@@ -268,12 +271,12 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     closed_lost: 'var(--color-error-600)',
   }[sale.status];
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
-        onClick={onClose} />
+      <div className={`fixed inset-0 z-[60] ${closing ? 'bsx-scrim-out' : 'bsx-scrim'}`} style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
+        onClick={requestClose} />
 
-      <div className="fixed right-0 top-0 h-full z-50 flex flex-col shadow-2xl animate-slide-in-right"
+      <div className={`fixed right-0 top-0 h-full z-[61] flex flex-col shadow-2xl ${closing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}
         style={{
           width: 'min(480px, 100vw)',
           backgroundColor: 'var(--color-surface)',
@@ -296,7 +299,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
           </div>
           <div className="flex items-center gap-2">
             <SaleCopyBar sale={sale} canFinancial={canFinancial} canManage={canManageCopy} />
-            <button onClick={onClose}
+            <button onClick={requestClose}
               className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
               <X size={18} className="text-white" />
             </button>
@@ -608,6 +611,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
         onClose={() => setResellOpen(false)}
         onSuccess={(newSale, oldSale) => { setResellOpen(false); onResold?.(newSale, oldSale); }}
       />
-    </>
+    </>,
+    document.body,
   );
 }

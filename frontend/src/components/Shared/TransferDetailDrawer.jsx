@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
@@ -75,6 +76,8 @@ const ROLE_LABELS = {
 };
 
 export default function TransferDetailDrawer({ transfer, onClose }) {
+  const [closing, setClosing] = useState(false);
+  const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
   const { hasPermission } = useAuth();
   const { sections } = useDrawerLayout('transfer');
   const [dispoHistory, setDispoHistory] = useState([]);
@@ -274,14 +277,14 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
     </div>
   );
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
-        onClick={onClose} />
+      <div className={`fixed inset-0 z-[60] ${closing ? 'bsx-scrim-out' : 'bsx-scrim'}`} style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
+        onClick={requestClose} />
 
       {/* Drawer */}
-      <div className="fixed right-0 top-0 h-full z-50 flex flex-col shadow-2xl animate-slide-in-right"
+      <div className={`fixed right-0 top-0 h-full z-[61] flex flex-col shadow-2xl ${closing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}
         style={{
           width: 'min(480px, 100vw)',
           backgroundColor: 'var(--color-surface)',
@@ -300,7 +303,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
               <p className="text-xs text-white/70">Transfer Details</p>
             </div>
           </div>
-          <button onClick={onClose}
+          <button onClick={requestClose}
             className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
             <X size={18} className="text-white" />
           </button>
@@ -381,6 +384,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           <ReassignOwnership kind="transfer" record={transfer} onDone={onClose} />
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
