@@ -155,7 +155,7 @@ export default function ThemedDate({
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%',
           cursor: 'pointer', textAlign: 'left', outline: 'none',
-          padding: '8px 12px', borderRadius: 8, fontSize: 14,
+          padding: '8px 12px', borderRadius: 12, fontSize: 14,
           backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)',
           color: hasVal ? 'var(--color-text)' : 'var(--color-placeholder)',
           opacity: disabled ? 0.6 : 1,

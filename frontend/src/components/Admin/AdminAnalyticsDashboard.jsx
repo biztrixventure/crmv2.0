@@ -570,7 +570,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   ];
 
   const sel = {
-    height: 30, padding: '0 8px', borderRadius: 7, fontSize: 12, fontWeight: 500,
+    height: 30, padding: '0 10px', borderRadius: 999, fontSize: 12, fontWeight: 500,
     border: '1px solid var(--color-border)',
     backgroundColor: 'var(--color-surface)',
     color: 'var(--color-text)', outline: 'none', cursor: 'pointer',
@@ -724,10 +724,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
 
           {/* Callbacks: Fronter / Closer toggle */}
           {dataTab === 'callbacks' && (
-            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <div className="flex gap-0.5 p-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               {[{k:'fronter',l:'Fronters'},{k:'closer',l:'Closers'}].map(t => (
                 <button key={t.k} onClick={() => { setCbType(t.k); setFilter('closerId',''); setPage(1); }}
-                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all"
+                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all"
                   style={{
                     background: cbType===t.k ? 'var(--gradient-sidebar)' : 'transparent',
                     color: cbType===t.k ? 'white' : 'var(--color-text-secondary)',

@@ -70,7 +70,7 @@ const variantStyle = (variant) => {
   // input (default)
   return {
     ...TRIGGER_BASE,
-    padding: '8px 12px', borderRadius: 8,
+    padding: '8px 12px', borderRadius: 12,
     backgroundColor: 'var(--color-bg)',
     border: '1px solid var(--color-border)',
     fontSize: 14,

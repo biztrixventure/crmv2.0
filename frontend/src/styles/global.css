@@ -701,7 +701,7 @@ textarea {
 
   /* ========== INPUT COMPONENT ========== */
   .input {
-    @apply px-3 py-2 rounded-lg border transition-all duration-300 w-full;
+    @apply px-3 py-2 rounded-xl border transition-all duration-300 w-full;
     background-color: var(--color-bg);
     color: var(--color-text);
     border-color: var(--color-border);
