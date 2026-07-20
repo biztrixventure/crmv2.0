@@ -15,6 +15,7 @@ import AcceptInvite from "./pages/AcceptInvite";
 import ImpersonateCallback from "./pages/ImpersonateCallback";
 import GuestChat from "./pages/GuestChat";
 import BrandedLoader from "./components/UI/BrandedLoader";
+import ThemeRuntime from "./components/ThemeRuntime";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
@@ -76,6 +77,8 @@ const AppContent = () => {
 
   return (
     <Router>
+      {/* Injects the saved Appearance theme (business_config `theme`) app-wide. */}
+      <ThemeRuntime />
       <Suspense fallback={<PageSpinner />}>
         <Routes>
           <Route path="/login"              element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />

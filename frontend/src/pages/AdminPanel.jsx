@@ -34,6 +34,7 @@ import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
+import AppearanceManager from "../components/Admin/Appearance/AppearanceManager";
 import NumberAssignmentPanel from "../components/Numbers/NumberAssignmentPanel";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
@@ -134,6 +135,7 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "appearance",     label: "Appearance"           }] : []),
     ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
@@ -213,6 +215,7 @@ const AdminPanel = () => {
                   {activeTab === "blacklist" && <BlacklistSettings />}
                   {activeTab === "egress"       && <EgressGovernance />}
                   {activeTab === "branding"     && <BrandingManager />}
+                  {activeTab === "appearance"   && <AppearanceManager />}
                   {activeTab === "number-lists" && <NumberAssignmentPanel user={user} />}
                   {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
                   <DevCredit />
