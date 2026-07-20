@@ -7,6 +7,7 @@ import UpdateBanner from "../components/UI/UpdateBanner";
 import BatchInbox from "../components/Distribution/BatchInbox";
 import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
+import ThemedSelect from '../components/UI/Select';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -900,13 +901,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 />
               }
               extras={isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
-                <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
+                <ThemedSelect value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
                   {companyAgents.map(a => (
                     <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
                   ))}
-                </select>
+                </ThemedSelect>
               )}
               onClearAll={() => { setXferSearch(''); setXferStatus(''); setXferAgent(''); setXferPage(1); }}
             />
@@ -1025,13 +1026,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 />
               }
               extras={isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
-                <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
+                <ThemedSelect value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
                   {companyAgents.map(a => (
                     <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
                   ))}
-                </select>
+                </ThemedSelect>
               )}
               onClearAll={() => { setSalesSearch(''); setSalesStatus(''); setSalesAgent(''); setSalesPage(1); }}
             />
@@ -1154,7 +1155,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
               {companyAgents.length > 0 && (
-                <select
+                <ThemedSelect
                   value={activityAgent}
                   onChange={e => { setActivityAgent(e.target.value); setActivityPage(1); }}
                   className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
@@ -1164,7 +1165,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
                     </option>
                   ))}
-                </select>
+                </ThemedSelect>
               )}
             </div>
             {activityLoading ? (
@@ -1330,9 +1331,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
             </h3>
             <p className="text-sm text-text-secondary mb-4">Customer: <strong>{dispoTarget.form_data?.customer_name || dispoTarget.form_data?.FirstName || 'Unknown'}</strong></p>
-            <select value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
+            <ThemedSelect value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
               {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
-            </select>
+            </ThemedSelect>
             <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
               placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}

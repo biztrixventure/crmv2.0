@@ -3,6 +3,7 @@ import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
+import ThemedSelect from '../../UI/Select';
 
 // Superadmin config for the VICIdial integration: the per-company prefix
 // registry (makes the correlation code globally unique) and the VICIdial-agent

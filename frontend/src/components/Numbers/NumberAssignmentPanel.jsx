@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Building2 } from 'lucide-react';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 import NumberUploadManager from './NumberUploadManager';
 
 // Company-scoped wrapper for cross-company roles (superadmin / compliance): pick
@@ -27,10 +28,10 @@ export default function NumberAssignmentPanel({ user }) {
         <span className="text-sm font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
           <Building2 size={15} style={{ color: 'var(--color-primary-600)' }} /> Company
         </span>
-        <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm" style={{ minWidth: 220 }}>
+        <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm" style={{ minWidth: 220 }}>
           <option value="">— Select a company —</option>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.company_type ? ` · ${c.company_type}` : ''}</option>)}
-        </select>
+        </ThemedSelect>
         <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Pick a company to upload &amp; assign its numbers.</span>
       </div>
 

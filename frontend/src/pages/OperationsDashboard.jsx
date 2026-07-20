@@ -10,6 +10,7 @@ import {
   Activity, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Card, Badge, Button } from "../components/UI";
+import ThemedSelect from '../components/UI/Select';
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
@@ -775,12 +776,12 @@ const OperationsDashboard = () => {
                   : reassignTarget.form_data?.customer_name || 'Unknown'}
               </strong>
             </p>
-            <select value={reassignCloser} onChange={e => setReassignCloser(e.target.value)} className="input mb-4">
+            <ThemedSelect value={reassignCloser} onChange={e => setReassignCloser(e.target.value)} className="input mb-4">
               <option value="">— Select closer —</option>
               {availableClosers.map(c => (
                 <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>
               ))}
-            </select>
+            </ThemedSelect>
             <div className="flex gap-3">
               <button onClick={() => setReassignTarget(null)}
                 className="flex-1 py-2 rounded-lg border font-semibold text-sm"

@@ -3,6 +3,7 @@ import { Shuffle, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 /*
  * ReassignOwnership — SUPERADMIN-ONLY ownership editor for a transfer or a sale.
@@ -89,21 +90,21 @@ export default function ReassignOwnership({ kind, record, onDone }) {
                 <span>{f.label}</span>
                 <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>now: {f.current}</span>
               </label>
-              <select value={sel[f.key] || ''} onChange={e => setSel(s => ({ ...s, [f.key]: e.target.value }))}
+              <ThemedSelect value={sel[f.key] || ''} onChange={e => setSel(s => ({ ...s, [f.key]: e.target.value }))}
                 className="input w-full text-sm py-1.5 mt-1">
                 <option value="">— keep current —</option>
                 <option value="__clear__">— unassign (clear) —</option>
                 {userOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              </ThemedSelect>
             </div>
           ))}
 
           <div>
             <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Company</label>
-            <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input w-full text-sm py-1.5 mt-1">
+            <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="w-full text-sm mt-1">
               <option value="">— keep current —</option>
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </ThemedSelect>
           </div>
 
           <label className="flex items-start gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>

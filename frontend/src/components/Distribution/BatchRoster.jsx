@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import FilterBar from '../UI/FilterBar';
+import ThemedSelect from '../UI/Select';
 import { Lineage } from './BatchInbox';
 
 const PAGE = 100;
@@ -68,14 +69,14 @@ export default function BatchRoster() {
   const from = total ? offset + 1 : 0, to = Math.min(offset + PAGE, total);
   const extras = (
     <>
-      <select value={status} onChange={e => resetting(setStatus)(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Status">
+      <ThemedSelect variant="pill" value={status} onChange={e => resetting(setStatus)(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Status">
         {STATUSES.map(s => <option key={s || 'all'} value={s}>{s ? s[0].toUpperCase() + s.slice(1) : 'All statuses'}</option>)}
-      </select>
+      </ThemedSelect>
       {crossCompany && (
-        <select value={companyId} onChange={e => resetting(setCompanyId)(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Company">
+        <ThemedSelect variant="pill" value={companyId} onChange={e => resetting(setCompanyId)(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Company">
           <option value="">All companies</option>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        </ThemedSelect>
       )}
     </>
   );

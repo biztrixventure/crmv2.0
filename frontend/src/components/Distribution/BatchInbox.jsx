@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import UserPicker from './UserPicker';
 import RulePreview from './RulePreview';
 import FilterBar from '../UI/FilterBar';
+import ThemedSelect from '../UI/Select';
 
 const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
 const EX_REASON = { already_assigned: 'already assigned', transferred_by_you: 'they transferred it', transferred_by_anyone: 'transferred by someone' };
@@ -62,10 +63,10 @@ export default function BatchInbox() {
     </div>
   );
   const extras = isSuper ? (
-    <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Company">
+    <ThemedSelect variant="pill" value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1.5" style={{ borderColor: 'var(--color-border)' }} aria-label="Company">
       <option value="">All companies</option>
       {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-    </select>
+    </ThemedSelect>
   ) : null;
 
   return (

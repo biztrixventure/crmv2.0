@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Shield, RefreshCw, Loader2, X, Search, Building2, Check, Settings2, ChevronDown, ChevronRight, Info, Lock, Headphones, ArrowRightLeft, Shuffle, DollarSign, PhoneOff, Play, Users, User, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department (mig 181 + 186).
@@ -304,14 +305,14 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
               {!person.companies.length && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>No company access right now — the account still exists. Use “+ add to company” to restore it.</span>}
               {notIn.length > 0 && (
                 <span className="inline-flex items-center gap-1 ml-1">
-                  <select value={addCo} onChange={e => setAddCo(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 6px' }}>
+                  <ThemedSelect value={addCo} onChange={e => setAddCo(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 6px' }}>
                     <option value="">+ add to company…</option>
                     {notIn.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  </ThemedSelect>
                   {addCo && <>
-                    <select value={addLvl} onChange={e => setAddLvl(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 6px' }}>
+                    <ThemedSelect value={addLvl} onChange={e => setAddLvl(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 6px' }}>
                       <option value="qa_agent">Agent</option><option value="qa_manager">Manager</option>
-                    </select>
+                    </ThemedSelect>
                     <button onClick={addToCompany} className="p-1 rounded-lg" style={{ background: 'var(--color-primary-600)' }} title="Add"><Plus size={12} color="#fff" /></button>
                   </>}
                 </span>
@@ -411,18 +412,18 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
       {/* where */}
       <div className="grid gap-2" style={{ gridTemplateColumns: '1fr' }}>
         <label className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>COMPANY
-          <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
+          <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} style={{ ...inp, display: 'block', width: '100%', marginTop: 3 }}>
             <option value="">Choose company…</option>
             {companies.map(c => <option key={c.id} value={c.id}>{c.name}{(fixedReviewer.companies || []).some(pc => pc.company_id === c.id) ? ' ✓' : ''}</option>)}
-          </select>
+          </ThemedSelect>
         </label>
       </div>
       {needsAccess && (
         <div className="flex items-center gap-2 text-[11px] p-2 rounded-lg" style={{ background: 'rgba(217,119,6,0.08)', color: 'var(--color-warning-600)' }}>
           <Plus size={12} /> Not in this company yet — they'll be added automatically as
-          <select value={accessLevel} onChange={e => setAccessLevel(e.target.value)} style={{ ...inp, fontSize: 11, padding: '3px 6px' }}>
+          <ThemedSelect value={accessLevel} onChange={e => setAccessLevel(e.target.value)} style={{ ...inp, fontSize: 11, padding: '3px 6px' }}>
             <option value="qa_agent">Agent</option><option value="qa_manager">Manager</option>
-          </select>
+          </ThemedSelect>
         </div>
       )}
 
@@ -642,12 +643,12 @@ function CompanyConfig({ companyId, methods, companyType }) {
         <Row title="Random sample size (RCM)"
           sub="How many raw dialer calls to pull for review, and whose calls the sample listens to."
           tip="'A fixed number' pulls exactly that many calls; 'A percentage' takes that share of the day's calls. Weekly amounts are spread evenly across the days. 'Fronters/Closers' picks whose dialer calls go into the random draw.">
-          <select value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}>
+          <ThemedSelect value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}>
             <option value="fixed">A fixed number</option><option value="percentage">A percentage</option>
-          </select>
+          </ThemedSelect>
           <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
           <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '% of calls' : 'calls'}</span>
-          <select value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="day">per day</option><option value="week">per week</option></select>
+          <ThemedSelect value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="day">per day</option><option value="week">per week</option></ThemedSelect>
           {/* Only the roles this company ACTUALLY has: fronter companies employ
               fronters, the closer company employs closers — never both boxes. */}
           {(() => {

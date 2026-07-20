@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Send, FileText } from 'lucide-react';
 import { Button } from '../UI';
 import ComboInput from '../UI/ComboInput';
+import ThemedSelect from '../UI/Select';
 import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import client from '../../api/client';
 import { normalize as normalizeField, maxLengthFor, inputModeFor, classify as classifyField, isCarMake, isCarModel, isCarYear, isDateField } from '../../utils/formFieldNorm';
@@ -182,10 +183,10 @@ const TransferFormModal = ({
                         // the VehicleSelect typeahead.
                         if (isCarYear(field)) {
                           input = (
-                            <select value={val} onChange={onChange} required={field.is_required} className="input">
+                            <ThemedSelect value={val} onChange={onChange} required={field.is_required} className="input">
                               <option value="">Select year…</option>
                               {vehicleYears.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
+                            </ThemedSelect>
                           );
                         } else if (isDateField(field)) {
                           input = (
@@ -216,10 +217,10 @@ const TransferFormModal = ({
                           );
                         } else if (field.field_type === 'sale_client') {
                           input = (
-                            <select value={val} onChange={onChange} required={field.is_required} className="input">
+                            <ThemedSelect value={val} onChange={onChange} required={field.is_required} className="input">
                               <option value="">Select client…</option>
                               {saleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
-                            </select>
+                            </ThemedSelect>
                           );
                         } else if (field.field_type === 'sale_plan') {
                           const clientField = fields.find(f => f.field_type === 'sale_client');
@@ -230,10 +231,10 @@ const TransferFormModal = ({
                             if (m) opts = salePlans.filter(p => m.plans.includes(p.value));
                           }
                           input = (
-                            <select value={val} onChange={onChange} required={field.is_required} className="input">
+                            <ThemedSelect value={val} onChange={onChange} required={field.is_required} className="input">
                               <option value="">Select plan…</option>
                               {opts.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
-                            </select>
+                            </ThemedSelect>
                           );
                         } else if (classifyField(field) === 'zip') {
                           input = (
@@ -291,7 +292,7 @@ const TransferFormModal = ({
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     Transfer to Closer <span className="text-error-500">*</span>
                   </label>
-                  <select value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required
+                  <ThemedSelect value={selectedCloser} onChange={e => setSelectedCloser(e.target.value)} className="input" required
                     style={{ color: colorFor(selectedCloser, 'var(--color-text)'), fontWeight: colorFor(selectedCloser) ? 600 : undefined }}>
                     <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>— Select a closer —</option>
                     {closers.map(c => (
@@ -300,7 +301,7 @@ const TransferFormModal = ({
                         {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ''}
                       </option>
                     ))}
-                  </select>
+                  </ThemedSelect>
                   {closers.length === 0 && (
                     <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>
                       No closers linked to this company yet.

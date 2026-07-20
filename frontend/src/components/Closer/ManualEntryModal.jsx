@@ -6,6 +6,7 @@ import { useFormFields } from '../../hooks/useFormFields';
 import { useAuth } from '../../contexts/AuthContext';
 import { isCarMake, isCarModel } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
+import ThemedSelect from '../UI/Select';
 
 // ── Field renderer — mirrors the fronter form's field-type switch so a
 // dropdown stays a dropdown, vehicle fields get typeahead, etc.
@@ -53,11 +54,11 @@ function renderManualField(field, value, setValue, ctx = {}) {
   // Plain select.
   if (field.field_type === 'select') {
     return (
-      <select value={v} onChange={(e) => setValue(e.target.value)}
+      <ThemedSelect value={v} onChange={(e) => setValue(e.target.value)}
         required={required} className="input text-xs py-1.5 w-full">
         <option value="">Select {field.label || field.name}…</option>
         {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
-      </select>
+      </ThemedSelect>
     );
   }
 
@@ -263,7 +264,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
               <label htmlFor="me-company" className="text-xs font-bold uppercase tracking-wide text-text-secondary mb-1.5 flex items-center gap-1.5">
                 <Building2 size={12} /> 1. Fronter company
               </label>
-              <select
+              <ThemedSelect
                 id="me-company"
                 value={companyId}
                 onChange={(e) => setCompanyId(e.target.value)}
@@ -273,7 +274,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
               >
                 <option value="">{companyLoading ? 'Loading…' : 'Select company…'}</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              </ThemedSelect>
             </div>
 
             {/* Step 2 — fronter */}
@@ -281,7 +282,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
               <label htmlFor="me-fronter" className="text-xs font-bold uppercase tracking-wide text-text-secondary mb-1.5 flex items-center gap-1.5">
                 <User size={12} /> 2. Fronter user
               </label>
-              <select
+              <ThemedSelect
                 id="me-fronter"
                 value={fronterId}
                 onChange={(e) => setFronterId(e.target.value)}
@@ -295,7 +296,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                    : 'Select fronter…'}
                 </option>
                 {fronters.map(f => <option key={f.user_id} value={f.user_id}>{f.name}</option>)}
-              </select>
+              </ThemedSelect>
               {fronterId && (
                 <p className="text-[11px] text-text-tertiary mt-1.5">
                   Transfer will be attributed to <strong>{fronters.find(f => f.user_id === fronterId)?.name}</strong>. Self-assigned to you ({user?.email}).

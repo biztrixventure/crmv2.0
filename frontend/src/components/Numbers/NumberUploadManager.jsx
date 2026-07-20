@@ -15,6 +15,7 @@ import {
   ArrowRight, Link2, Search, UserCog,
 } from 'lucide-react';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 const STATUS_COLORS = {
   new:       { label: 'New',       bg: '#eff6ff', color: '#2563eb' },
@@ -80,9 +81,9 @@ const ReassignModal = ({ list, fronters, companyId, onClose, onDone }) => {
           {list.total} numbers · currently {list.fronter_name || '—'}{list.assignment_day ? ` · ${list.assignment_day}` : ''}
         </p>
         <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Move to fronter</label>
-        <select value={newF} onChange={e => setNewF(e.target.value)} className="input text-sm w-full mb-3">
+        <ThemedSelect value={newF} onChange={e => setNewF(e.target.value)} className="input text-sm w-full mb-3">
           {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
+        </ThemedSelect>
         <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Change day (optional)</label>
         <input type="date" value={newDay} onChange={e => setNewDay(e.target.value)} className="input text-sm w-full mb-4" />
         {err && <p className="text-xs text-red-600 mb-2">{err}</p>}
@@ -398,18 +399,18 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                   <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                     Phone Number Column <span className="text-red-500">*</span>
                   </label>
-                  <select value={phoneCol} onChange={e => setPhoneCol(+e.target.value)} className="input text-sm">
+                  <ThemedSelect value={phoneCol} onChange={e => setPhoneCol(+e.target.value)} className="input text-sm">
                     {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                  </select>
+                  </ThemedSelect>
                 </div>
                 <div>
                   <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                     Customer Name Column
                   </label>
-                  <select value={nameCol} onChange={e => setNameCol(+e.target.value)} className="input text-sm">
+                  <ThemedSelect value={nameCol} onChange={e => setNameCol(+e.target.value)} className="input text-sm">
                     <option value={-1}>— None —</option>
                     {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                  </select>
+                  </ThemedSelect>
                 </div>
               </div>
             </div>
@@ -448,13 +449,13 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                               → CSV column
                             </span>
                           </label>
-                          <select
+                          <ThemedSelect
                             value={fieldMapping[field.name] ?? -1}
                             onChange={e => setFieldMapping(prev => ({ ...prev, [field.name]: +e.target.value }))}
                             className="input text-sm">
                             <option value={-1}>— None (manual entry) —</option>
                             {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                          </select>
+                          </ThemedSelect>
                         </div>
                       ))}
                     </div>
@@ -542,10 +543,10 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                   <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                     Assign to Fronter <span className="text-red-500">*</span>
                   </label>
-                  <select value={selectedF} onChange={e => setSelectedF(e.target.value)} className="input text-sm">
+                  <ThemedSelect value={selectedF} onChange={e => setSelectedF(e.target.value)} className="input text-sm">
                     <option value="">— Select fronter —</option>
                     {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
+                  </ThemedSelect>
                   {fronters.length === 0 && (
                     <p className="text-xs mt-1" style={{ color: '#d97706' }}>No fronters found in your company.</p>
                   )}
@@ -629,16 +630,16 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
 
         {/* Filters — fronter/day/status (server) + list-name search (client) */}
         <div className="flex flex-wrap items-center gap-2 px-5 py-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <select value={fFronter} onChange={e => setFFronter(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 150 }}>
+          <ThemedSelect value={fFronter} onChange={e => setFFronter(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 150 }}>
             <option value="">All fronters</option>
             {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+          </ThemedSelect>
           <input type="date" value={fDay} onChange={e => setFDay(e.target.value)} className="input text-xs py-1.5" style={{ width: 150 }} />
-          <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 120 }}>
+          <ThemedSelect value={fStatus} onChange={e => setFStatus(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 120 }}>
             <option value="">Any status</option>
             <option value="new">New</option><option value="called">Called</option>
             <option value="callback">Callback</option><option value="completed">Done</option><option value="skip">Skip</option>
-          </select>
+          </ThemedSelect>
           <div className="relative flex-1 min-w-[160px]">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
             <input value={nameSearch} onChange={e => setNameSearch(e.target.value)} placeholder="Search list name…" className="input text-xs py-1.5 pl-7 w-full" />
@@ -777,11 +778,11 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                                     </td>
                                     <td className="px-3 py-2">
                                       <div className="flex items-center justify-end gap-1.5">
-                                        <select defaultValue="" onChange={e => { const v = e.target.value; e.target.value = ''; reassignNumber(list, n.id, v); }}
+                                        <ThemedSelect defaultValue="" onChange={e => { const v = e.target.value; e.target.value = ''; reassignNumber(list, n.id, v); }}
                                           className="input text-[11px] py-0.5" style={{ minWidth: 92 }} title="Reassign to another fronter">
                                           <option value="">Move to…</option>
                                           {fronters.filter(f => f.id !== list.fronter_id).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                                        </select>
+                                        </ThemedSelect>
                                         <button onClick={() => revokeNumber(list, n.id)} title="Revoke number" className="p-1 rounded hover:bg-red-100">
                                           <Trash2 size={12} style={{ color: '#ef4444' }} />
                                         </button>

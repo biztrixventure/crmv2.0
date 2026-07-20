@@ -13,6 +13,7 @@ import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../u
 import { isCarMake, isCarModel, normalize as normalizeField, maxLengthFor } from "../utils/formFieldNorm";
 import VehicleSelect from "../components/Form/VehicleSelect";
 import CopyableNumber from "../components/UI/CopyableNumber";
+import ThemedSelect from '../components/UI/Select';
 import { transferPhone } from "../utils/phone";
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
@@ -971,13 +972,13 @@ const StaffShell = () => {
                 />
               }
               extras={companyAgents.length > 0 && (
-                <select value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
+                <ThemedSelect value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
                   {companyAgents.map(a => (
                     <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
                   ))}
-                </select>
+                </ThemedSelect>
               )}
               onClearAll={() => { setXferSearch(''); setXferStatus(''); setXferAgent(''); setXferPage(1); }}
             />
@@ -1069,13 +1070,13 @@ const StaffShell = () => {
                 />
               }
               extras={companyAgents.length > 0 && (
-                <select value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
+                <ThemedSelect value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
                   <option value="">All agents</option>
                   {companyAgents.map(a => (
                     <option key={a.user_id} value={a.user_id}>{a.first_name} {a.last_name}</option>
                   ))}
-                </select>
+                </ThemedSelect>
               )}
               onClearAll={() => { setSalesSearch(''); setSalesStatus(''); setSalesAgent(''); setSalesPage(1); }}
             />
@@ -1665,17 +1666,17 @@ const StaffShell = () => {
                                   onChange={v => setFormData(prev => ({ ...prev, [field.name]: v }))}
                                   required={field.is_required} placeholder={field.placeholder || `Select or type ${field.label}`} />
                               ) : field.field_type === 'sale_client' ? (
-                                <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
                                   <option value="">Select client…</option>
                                   {saleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
-                                </select>
+                                </ThemedSelect>
                               ) : field.field_type === 'sale_plan' ? (
-                                <select value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                                <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
                                   <option value="">Select plan…</option>
                                   {salePlans.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
-                                </select>
+                                </ThemedSelect>
                               ) : field.field_type === 'zip' ? (
                                 <div className="relative">
                                   {/* No HTML maxLength: a 10-char paste like "90210-1234" would
@@ -1985,9 +1986,9 @@ const StaffShell = () => {
               <MessageSquare size={18} style={{ color: 'var(--color-primary-600)' }} /> Set Disposition
             </h3>
             <p className="text-sm text-text-secondary mb-4">Customer: <strong>{dispoTarget.form_data?.customer_name || 'Unknown'}</strong></p>
-            <select value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
+            <ThemedSelect value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
               {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
-            </select>
+            </ThemedSelect>
             <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
               placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}

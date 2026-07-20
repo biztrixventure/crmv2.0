@@ -7,6 +7,7 @@ import { Card, Badge } from "../components/UI";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
 import client from "../api/client";
+import ThemedSelect from '../components/UI/Select';
 
 const STATUS_BADGE = {
   open:                 'info',
@@ -195,14 +196,14 @@ const ComplianceDashboard = () => {
                 className="input pl-9"
               />
             </div>
-            <select value={status} onChange={e => setStatus(e.target.value)} className="input">
+            <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input">
               <option value="">All statuses</option>
               {COMPLIANCE_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-            </select>
-            <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input">
+            </ThemedSelect>
+            <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input">
               <option value="">All companies</option>
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </ThemedSelect>
             <div className="flex gap-2">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input flex-1" title="From" />
               <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="input flex-1" title="To" />
@@ -325,10 +326,10 @@ const ComplianceDashboard = () => {
           <div className="space-y-4">
             {/* Company filter + sub-tabs */}
             <div className="flex flex-wrap gap-3 items-center">
-              <select value={reviewCompany} onChange={e => setReviewCompany(e.target.value)} className="input w-56">
+              <ThemedSelect value={reviewCompany} onChange={e => setReviewCompany(e.target.value)} className="input w-56">
                 <option value="">All companies</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              </ThemedSelect>
               <div className="flex gap-1 p-1 rounded-xl"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                 {[{ key: 'ratings', label: 'Call Ratings' }, { key: 'dispos', label: 'Dispositions' }].map(t => (
@@ -451,11 +452,11 @@ const ComplianceDashboard = () => {
             </p>
 
             <label className="block text-sm font-medium text-text-secondary mb-1">New Status</label>
-            <select value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input mb-3">
+            <ThemedSelect value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input mb-3">
               {COMPLIANCE_STATUSES.map(s => (
                 <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
               ))}
-            </select>
+            </ThemedSelect>
 
             <label className="block text-sm font-medium text-text-secondary mb-1">
               Reason <span className="text-error-500">*</span>

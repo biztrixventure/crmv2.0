@@ -6,6 +6,7 @@ import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 import SendBatchModal from '../../Distribution/SendBatchModal';
 import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
 import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
+import ThemedSelect from '../../UI/Select';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic

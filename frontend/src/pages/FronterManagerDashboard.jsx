@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Card, Badge } from "../components/UI";
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
+import ThemedSelect from '../components/UI/Select';
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";

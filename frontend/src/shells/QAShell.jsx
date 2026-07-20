@@ -13,6 +13,7 @@ import SheetScoreRow from '../components/QA/SheetScoreRow';
 import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboard';
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
+import ThemedSelect from '../components/UI/Select';
 
 // ============================================================================
 // QA Shell — isolated shell for qa_manager / qa_agent (mirrors ComplianceShell).
@@ -81,10 +82,10 @@ function CompanyPicker({ companies, all, companyId, onChange }) {
   return (
     <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="You only see data for the companies assigned to you">
       <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-      <select value={companyId} onChange={e => onChange(e.target.value)} style={{ ...inp, fontWeight: 700, padding: '5px 8px' }}>
+      <ThemedSelect value={companyId} onChange={e => onChange(e.target.value)} style={{ ...inp, fontWeight: 700, padding: '5px 8px' }}>
         {all && <option value={ALL_CO}>All my companies</option>}
         {companies.map(c => <option key={c.id} value={c.id}>{optLabel(c)}</option>)}
-      </select>
+      </ThemedSelect>
     </label>
   );
 }
@@ -766,15 +767,15 @@ function ReportsTab({ companyId, companyName = '' }) {
     <div className="h-full overflow-auto pb-4">
       {/* filters */}
       <div className="flex items-center gap-2 flex-wrap mb-4">
-        <select value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title="Reviewed agent">
+        <ThemedSelect value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title="Reviewed agent">
           <option value="">All agents</option>
           {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}</option>)}
-        </select>
-        <select value={f.method} onChange={e => set('method', e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
-        <select value={f.reviewer} onChange={e => set('reviewer', e.target.value)} style={inp} title="Scored by">
+        </ThemedSelect>
+        <ThemedSelect value={f.method} onChange={e => set('method', e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></ThemedSelect>
+        <ThemedSelect value={f.reviewer} onChange={e => set('reviewer', e.target.value)} style={inp} title="Scored by">
           <option value="">Any reviewer</option>
           {(data?.reviewers || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
+        </ThemedSelect>
         <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
         <input type="date" value={f.date_from} max={f.date_to} onChange={e => set('date_from', e.target.value)} style={inp} />
         <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
@@ -1014,9 +1015,9 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
         <div className="rounded-xl p-3 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Scoring</span>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Rating scale
-            <select value={`${ratingMin}-${ratingScale}`} onChange={e => { const [mn, mx] = e.target.value.split('-').map(Number); setRange(mn, mx); }} style={{ ...inp, width: 84 }}>
+            <ThemedSelect value={`${ratingMin}-${ratingScale}`} onChange={e => { const [mn, mx] = e.target.value.split('-').map(Number); setRange(mn, mx); }} style={{ ...inp, width: 84 }}>
               <option value="1-5">1 – 5</option><option value="0-4">0 – 4</option><option value="1-10">1 – 10</option><option value="0-10">0 – 10</option>
-            </select>
+            </ThemedSelect>
             <InfoTip side="right" text="The number range for every rating question on this card. The WaveTech sheets use 1–5." />
           </label>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Base divisor
@@ -1024,10 +1025,10 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
             <InfoTip side="right" text="Base Score % = (sum of in-base ratings ÷ this divisor) × 100. The WaveTech sheets divide by 30." />
           </label>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Final score
-            <select value={cfg.final_score_formula || 'none'} onChange={e => patch(n => { n.final_score_formula = e.target.value; })} style={{ ...inp, width: 180 }}>
+            <ThemedSelect value={cfg.final_score_formula || 'none'} onChange={e => patch(n => { n.final_score_formula = e.target.value; })} style={{ ...inp, width: 180 }}>
               <option value="base_plus_penalty_truncated">Base % + penalties → Pass/Fail</option>
               <option value="none">No auto score (quality / manual)</option>
-            </select>
+            </ThemedSelect>
             <InfoTip side="right" text="How the score is computed. 'Base % + penalties' gives a numeric Final Score + Pass/Fail (set a pass threshold above). 'No auto score' suits checklist or manual-verdict cards." />
           </label>
         </div>
@@ -1218,12 +1219,12 @@ function ConfigTab({ companyId, companyName }) {
           <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>New scorecard <InfoTip side="right" text="Creates a blank scorecard for the chosen method and opens the visual builder so you can add questions. No coding or JSON needed." /></div>
           <div className="flex gap-2">
             <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Section
-              <select value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp} title="Which of the 4 QA sections this scorecard grades">
+              <ThemedSelect value={draft.method} onChange={e => setDraft(d => ({ ...d, method: e.target.value }))} style={inp} title="Which of the 4 QA sections this scorecard grades">
                 <option value="tra">TRA · Transfers</option>
                 <option value="closer_sales">Closed Sale</option>
                 <option value="closer_dispo">Unclosed Sale</option>
                 <option value="rcm">RCM · Random</option>
-              </select>
+              </ThemedSelect>
             </label>
             <input placeholder="Name (e.g. WaveTech Fronter)" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ ...inp, flex: 1 }} />
             <label className="flex items-center gap-1 text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>pass ≥ <input type="number" value={draft.pass_threshold} onChange={e => setDraft(d => ({ ...d, pass_threshold: e.target.value }))} style={{ ...inp, width: 56 }} />%
@@ -1247,9 +1248,9 @@ function RcmConfig({ value, covers, onSample, onCovers }) {
   return (
     <div className="space-y-2">
       <div className="flex gap-2 items-center">
-        <select value={v.mode} onChange={e => onSample({ ...v, mode: e.target.value })} style={inp}><option value="percentage">Percentage</option><option value="fixed">Fixed N</option></select>
+        <ThemedSelect value={v.mode} onChange={e => onSample({ ...v, mode: e.target.value })} style={inp}><option value="percentage">Percentage</option><option value="fixed">Fixed N</option></ThemedSelect>
         <input type="number" value={v.value} onChange={e => onSample({ ...v, value: +e.target.value })} style={{ ...inp, width: 70 }} />
-        <select value={v.period} onChange={e => onSample({ ...v, period: e.target.value })} style={inp}><option value="week">per week</option><option value="day">per day</option></select>
+        <ThemedSelect value={v.period} onChange={e => onSample({ ...v, period: e.target.value })} style={inp}><option value="week">per week</option><option value="day">per day</option></ThemedSelect>
       </div>
       <div className="flex gap-3 items-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         <span className="text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Covers</span>
@@ -1367,10 +1368,10 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
         </button>
         {canAssign && (
           <label className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-secondary)' }}>Assign to
-            <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 180 }}>
+            <ThemedSelect value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 180 }}>
               <option value="__equal__">⚖ All QA agents — equal split</option>
               {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.undone ? ` · ${a.undone} to do` : ''}</option>)}
-            </select>
+            </ThemedSelect>
           </label>
         )}
       </div>
@@ -1614,18 +1615,18 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
           </div>
         )}
         {data && (
-          <select value={xfilter} onChange={e => setXfilter(e.target.value)} style={inp} title="Filter by transferred">
+          <ThemedSelect value={xfilter} onChange={e => setXfilter(e.target.value)} style={inp} title="Filter by transferred">
             <option value="all">All calls</option>
             <option value="transferred">Transferred → TRA</option>
             <option value="not">Not transferred → RCM</option>
-          </select>
+          </ThemedSelect>
         )}
         {data && (
-          <select value={dfilter} onChange={e => setDfilter(e.target.value)} style={inp} title="Filter by disposition">
+          <ThemedSelect value={dfilter} onChange={e => setDfilter(e.target.value)} style={inp} title="Filter by disposition">
             <option value="">Any disposition</option>
             <option value="__has">Has a disposition</option>
             {Object.entries(data.dispo_counts || {}).sort((a, b) => b[1] - a[1]).map(([d, n]) => <option key={d} value={d}>{d} ({n})</option>)}
-          </select>
+          </ThemedSelect>
         )}
         <div className="ml-auto flex items-center gap-1.5 px-2 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
           <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -1640,18 +1641,18 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
           <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{selCount} selected</span>
           <button onClick={clearSel} className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>as</span>
-          <select value={assignWt} onChange={e => setAssignWt(e.target.value)} style={inp} title="Which of the 4 QA work types these calls become">
+          <ThemedSelect value={assignWt} onChange={e => setAssignWt(e.target.value)} style={inp} title="Which of the 4 QA work types these calls become">
             <option value="tra">TRA · Transfer (fronter)</option>
             <option value="rcm">RCM · Random (fronter)</option>
             <option value="closer_sales">Closed Sale (closer)</option>
             <option value="closer_dispo">Unclosed Sale (closer)</option>
-          </select>
+          </ThemedSelect>
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>to</span>
-          <select value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 190 }}>
+          <ThemedSelect value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 190 }}>
             <option value="">Select QA agent…</option>
             <option value="__equal__">⚖ All QA agents — equal split</option>
             {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.role === 'qa_manager' ? ' (mgr)' : ''}</option>)}
-          </select>
+          </ThemedSelect>
           <button onClick={assign} disabled={assigning || !assignTo} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
             style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: (assigning || !assignTo) ? 0.5 : 1 }}>
             {assigning ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Assign
@@ -2214,12 +2215,12 @@ function CompletedTab({ managerView, companyId }) {
         <button onClick={() => { if (singleDay) { const t = addDays(from, 6); setTo(t > today ? today : t); } else { setTo(from); } }}
           className="text-[11px] font-bold px-2 py-1 rounded" title={singleDay ? 'Switch to a date range' : 'Collapse to a single day'}
           style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{singleDay ? 'Range' : 'Single day'}</button>
-        <select value={method} onChange={e => setMethod(e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></select>
+        <ThemedSelect value={method} onChange={e => setMethod(e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></ThemedSelect>
         {managerView && (
-          <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={inp}>
+          <ThemedSelect value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={inp}>
             <option value="">All QA agents</option>
             {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          </ThemedSelect>
         )}
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
         <button onClick={exportCsv} disabled={!sorted.length} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
@@ -2258,12 +2259,12 @@ function CompletedTab({ managerView, companyId }) {
               style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--color-text)', fontSize: 12, padding: '6px 2px', width: 210 }} />
             {search && <button onClick={() => setSearch('')}><XCircle size={13} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
           </div>
-          <select value={result} onChange={e => setResult(e.target.value)} style={inp} title="Filter by result">
+          <ThemedSelect value={result} onChange={e => setResult(e.target.value)} style={inp} title="Filter by result">
             <option value="">Any result</option><option value="pass">Passed</option><option value="fail">Failed</option><option value="autofail">Auto-fail</option>
-          </select>
-          <select value={sort} onChange={e => setSort(e.target.value)} style={inp} title="Sort order">
+          </ThemedSelect>
+          <ThemedSelect value={sort} onChange={e => setSort(e.target.value)} style={inp} title="Sort order">
             <option value="newest">Newest first</option><option value="high">Score: high → low</option><option value="low">Score: low → high</option>
-          </select>
+          </ThemedSelect>
           <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}><b style={{ color: 'var(--color-text)' }}>{sorted.length}</b> shown</span>
         </div>
       )}
@@ -2329,9 +2330,9 @@ function CompletedTab({ managerView, companyId }) {
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{managerView ? 'Agent quality — the users these reviews grade' : 'Agent quality — from YOUR reviews only'}</span>
                 <InfoTip text="One row per reviewed fronter/closer: how many of their calls were scored, their average score, pass rate and auto-fails in this range. Sort by lowest score to find who needs coaching. The CSV button exports exactly this report." />
-                <select value={agentSort} onChange={e => setAgentSort(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 8px', marginLeft: 'auto' }}>
+                <ThemedSelect value={agentSort} onChange={e => setAgentSort(e.target.value)} style={{ ...inp, fontSize: 11, padding: '4px 8px', marginLeft: 'auto' }}>
                   <option value="reviews">Most reviewed</option><option value="low">Lowest score first</option><option value="high">Highest score first</option>
-                </select>
+                </ThemedSelect>
               </div>
               {agentBoard.map((g, i) => {
                 const risky = g.avg != null && g.avg < 60;
@@ -2480,13 +2481,13 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
           <span>Applies to the company selected in the header picker. Bind one or both methods.</span>
           {canManage && canClear && agents?.length > 0 && (
             <span className="ml-auto flex items-center gap-1.5">
-              <select value={clearWt} onChange={e => setClearWt(e.target.value)} style={{ ...inp, padding: '3px 6px', fontSize: 11 }} title="Limit clearing to one section, or clear every section">
+              <ThemedSelect value={clearWt} onChange={e => setClearWt(e.target.value)} style={{ ...inp, padding: '3px 6px', fontSize: 11 }} title="Limit clearing to one section, or clear every section">
                 <option value="">Every section</option>
                 <option value="tra">TRA · Transfers</option>
                 <option value="closer_sales">Closed Sale</option>
                 <option value="closer_dispo">Unclosed Sale</option>
                 <option value="rcm">RCM · Random</option>
-              </select>
+              </ThemedSelect>
               <button onClick={() => clearUndone(null)} disabled={clearing !== null || !totalUndone}
                 className="text-[11px] font-bold px-2.5 py-1 rounded inline-flex items-center gap-1"
                 style={{ background: totalUndone ? 'rgba(220,38,38,0.12)' : 'var(--color-surface-hover)', color: totalUndone ? 'var(--color-danger-600, #dc2626)' : 'var(--color-text-tertiary)', border: '1px solid currentColor', opacity: clearing !== null ? 0.6 : 1 }}

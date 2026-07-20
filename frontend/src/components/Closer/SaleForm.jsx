@@ -6,6 +6,7 @@ import { useFormFields } from '../../hooks/useFormFields';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
 import ComboInput from '../UI/ComboInput';
+import ThemedSelect from '../UI/Select';
 import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, classify as classifyField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
@@ -440,11 +441,11 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     // business_config vehicle.year_min / vehicle.year_max.
     if (isCarYear(field)) {
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
+        <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select year…</option>
           {vehicleYears.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
+        </ThemedSelect>
       );
     }
     // Car make/model MUST come before the generic select / textarea branches
@@ -498,12 +499,12 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     }
     if (field.field_type === 'sale_client') {
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
+        <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select client…</option>
           <StaleOption value={val} present={clients.some(c => c.value === val)} />
           {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
-        </select>
+        </ThemedSelect>
       );
     }
     if (field.field_type === 'sale_plan') {
@@ -515,12 +516,12 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         if (mapping) planOptions = plans.filter(p => mapping.plans.includes(p.value));
       }
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
+        <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select plan…</option>
           <StaleOption value={val} present={planOptions.some(p => p.value === val)} />
           {planOptions.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
-        </select>
+        </ThemedSelect>
       );
     }
     if (field.field_type === 'sale_down_payment' || field.field_type === 'sale_monthly_payment') {
@@ -560,7 +561,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Users size={16} style={{ color: 'var(--color-text-tertiary)' }} />
           </div>
-          <select value={val} onChange={onChange} className={`input pl-9 ${errClass}`}
+          <ThemedSelect value={val} onChange={onChange} className={`input pl-9 ${errClass}`}
             style={{ color: colorFor(val, 'var(--color-text)'), fontWeight: colorFor(val) ? 600 : undefined }}>
             <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>Select fronter…</option>
             <StaleOption value={val} present={fronters.some(f => f.user_id === val)}
@@ -571,7 +572,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
                 {f.first_name} {f.last_name}
               </option>
             ))}
-          </select>
+          </ThemedSelect>
         </div>
       );
     }
@@ -600,12 +601,12 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       const DEFAULT_DISPOS = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
       const opts = (field.options && field.options.length > 0) ? field.options : DEFAULT_DISPOS;
       return (
-        <select value={val} onChange={onChange} required={field.is_required}
+        <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select disposition…</option>
           <StaleOption value={val} present={opts.includes(val)} label={String(val).replace(/_/g, ' ')} />
           {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
-        </select>
+        </ThemedSelect>
       );
     }
     // Rate Call — admin-configurable dropdown (comma-separated options in Form Builder)

@@ -24,6 +24,7 @@ import ClientPlanManager from '../ClientPlans/ClientPlanManager';
 import client from '../../../api/client';
 import { toast, toastError } from '../../../utils/toast';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
+import ThemedSelect from '../../UI/Select';
 
 // ── Base fields ───────────────────────────────────────────────────────────────
 const BASE_FIELDS = [
