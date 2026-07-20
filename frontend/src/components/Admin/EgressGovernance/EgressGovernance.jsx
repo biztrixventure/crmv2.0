@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, Trash2, ChevronDown, ChevronRight, Check, User, Building2, X, AlertTriangle, Headphones } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
+import ThemedSelect from '../../UI/Select';
 
 // Searchable "pick a user" control (name → id) backed by the recipients
 // directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
@@ -123,19 +124,19 @@ function AuditTab() {
       </div>
       <div className="flex flex-wrap items-end gap-2 p-3" style={box}>
         <label className="text-xs">Action
-          <select value={f.action_type} onChange={e => setFilter('action_type', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
+          <ThemedSelect value={f.action_type} onChange={e => setFilter('action_type', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
             <option value="">All</option>{(meta.actions.length ? meta.actions : ACTIONS).map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </ThemedSelect>
         </label>
         <label className="text-xs">Dataset
-          <select value={f.dataset} onChange={e => setFilter('dataset', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
+          <ThemedSelect value={f.dataset} onChange={e => setFilter('dataset', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
             <option value="">All</option>{meta.datasets.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
+          </ThemedSelect>
         </label>
         <label className="text-xs">Status
-          <select value={f.status} onChange={e => setFilter('status', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
+          <ThemedSelect value={f.status} onChange={e => setFilter('status', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
             <option value="">All</option><option value="allowed">Allowed</option><option value="denied">Denied</option>
-          </select>
+          </ThemedSelect>
         </label>
         <label className="text-xs">From<input type="date" value={f.date_from} onChange={e => setFilter('date_from', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
         <label className="text-xs">To<input type="date" value={f.date_to} onChange={e => setFilter('date_to', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
@@ -286,19 +287,19 @@ function LimitsTab() {
             ) : draft.scope_type === 'user' ? (
               <UserSearchPicker onPick={u => setPicked({ id: u.id, name: u.name })} />
             ) : (
-              <select value="" onChange={e => { const c = companies.find(x => x.id === e.target.value); if (c) setPicked({ id: c.id, name: c.name }); }}
+              <ThemedSelect value="" onChange={e => { const c = companies.find(x => x.id === e.target.value); if (c) setPicked({ id: c.id, name: c.name }); }}
                 style={{ ...inp, flex: 1, minWidth: 220 }}>
                 <option value="">Choose a company…</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              </ThemedSelect>
             )}
           </div>
           {/* what + how much */}
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-xs">Action
-              <select value={draft.action_type} onChange={e => setDraft(d => ({ ...d, action_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
+              <ThemedSelect value={draft.action_type} onChange={e => setDraft(d => ({ ...d, action_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
                 {ACTIONS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
-              </select>
+              </ThemedSelect>
             </label>
             <label className="text-xs">Max rows / export<input type="number" min="0" value={draft.max_rows_per_export} onChange={e => setDraft(d => ({ ...d, max_rows_per_export: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
             <label className="text-xs">Max exports / day<input type="number" min="0" value={draft.max_exports_per_day} onChange={e => setDraft(d => ({ ...d, max_exports_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
@@ -382,8 +383,8 @@ function FieldsTab() {
       <div className="p-4" style={box}>
         <div className="flex items-center gap-2 mb-3"><Columns size={16} style={{ color: 'var(--color-primary-600)' }} /><span className="text-sm font-bold">Export columns</span></div>
         <div className="flex gap-2 mb-3">
-          <select value={dataset} onChange={e => setDataset(e.target.value)} style={inp}>{Object.entries(EXPORT_DATASETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
-          <select value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</select>
+          <ThemedSelect value={dataset} onChange={e => setDataset(e.target.value)} style={inp}>{Object.entries(EXPORT_DATASETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</ThemedSelect>
+          <ThemedSelect value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</ThemedSelect>
         </div>
         {cat.fields.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>The Data Analyzer has dynamic columns — its export field-selection is label-based and configured directly on the analyzer’s output (not a fixed catalog).</p>
@@ -413,16 +414,16 @@ function FieldsTab() {
       <div className="p-4" style={box}>
         <div className="flex items-center gap-2 mb-3"><Sliders size={16} style={{ color: 'var(--color-primary-600)' }} /><span className="text-sm font-bold">List display</span></div>
         <div className="flex gap-2 mb-3">
-          <select value={shell} onChange={e => setShell(e.target.value)} style={inp}>{SHELLS.map(s => <option key={s} value={s}>{s} shell</option>)}</select>
-          <select value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</select>
+          <ThemedSelect value={shell} onChange={e => setShell(e.target.value)} style={inp}>{SHELLS.map(s => <option key={s} value={s}>{s} shell</option>)}</ThemedSelect>
+          <ThemedSelect value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</ThemedSelect>
         </div>
         <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>Blank page size = the shell’s built-in default. Applies to the list tables in that shell for that role.</p>
         <label className="block text-xs font-semibold mb-1">Rows per page</label>
         <input type="number" min="5" max="500" value={layout.page_size || ''} onChange={e => setLayout(l => ({ ...l, page_size: e.target.value }))} placeholder="default" style={{ ...inp, width: 120, marginBottom: 12 }} />
         <label className="block text-xs font-semibold mb-1">Default row view</label>
-        <select value={layout.default_view || ''} onChange={e => setLayout(l => ({ ...l, default_view: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+        <ThemedSelect value={layout.default_view || ''} onChange={e => setLayout(l => ({ ...l, default_view: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
           <option value="">Default (collapsed)</option><option value="collapsed">Collapsed</option><option value="expanded">Expanded</option>
-        </select>
+        </ThemedSelect>
         <div><button onClick={saveLayout} className="text-sm font-bold px-3 py-1.5 rounded-lg text-white flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)' }}><Check size={13} /> Save display</button></div>
         <p className="text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>Note: column-visibility here (display) is separate from export columns (left) — “what’s on screen” vs “what’s in the file”.</p>
       </div>

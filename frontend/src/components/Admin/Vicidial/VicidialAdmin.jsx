@@ -182,10 +182,10 @@ const IPValidation = () => {
           <Field label="Validation URL" v={adhoc.validation_url} onChange={v => setAdhoc(p => ({ ...p, validation_url: v }))} ph="https://tmcsolinb.i5.tel:81/KyZvls/index.php" />
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Use saved box creds (optional)</label>
-            <select value={adhoc.box} onChange={e => setAdhoc(p => ({ ...p, box: e.target.value }))} className="input text-sm">
+            <ThemedSelect value={adhoc.box} onChange={e => setAdhoc(p => ({ ...p, box: e.target.value }))} className="input text-sm">
               <option value="">— enter creds below —</option>
               {(boxes || []).map(b => <option key={b.id} value={b.name}>{b.name} ({b.prefix})</option>)}
-            </select>
+            </ThemedSelect>
           </div>
           <Field label="API user (if not using a box)" v={adhoc.userid} onChange={v => setAdhoc(p => ({ ...p, userid: v }))} ph="apiuser" />
           <Field label="API pass (if not using a box)" v={adhoc.password} onChange={v => setAdhoc(p => ({ ...p, password: v }))} ph="••••" />
@@ -278,10 +278,10 @@ const Prefixes = () => {
         </div>
         <div className="flex-1 min-w-[200px]">
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Company (fronter)</label>
-          <select value={form.company_id} onChange={e => setForm(f => ({ ...f, company_id: e.target.value }))} className="input">
+          <ThemedSelect value={form.company_id} onChange={e => setForm(f => ({ ...f, company_id: e.target.value }))} className="input">
             <option value="">— Unassigned —</option>
             {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
         <Button variant="primary" onClick={add} disabled={busy} className="flex items-center gap-1.5"><Plus size={15} /> Add</Button>
       </div>
@@ -445,10 +445,10 @@ const Agents = () => {
       {/* dialer-roster loader */}
       <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Dialer roster</span>
-        <select value={box} onChange={e => setBox(e.target.value)} className="input py-1.5 text-sm" style={{ maxWidth: 180 }}>
+        <ThemedSelect value={box} onChange={e => setBox(e.target.value)} className="input py-1.5 text-sm" style={{ maxWidth: 180 }}>
           <option value="">All boxes</option>
           {boxes.map(b => <option key={b.id} value={b.id}>{b.name || b.id}{b.prefix ? ` (${b.prefix})` : ''}</option>)}
-        </select>
+        </ThemedSelect>
         <label className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>last
           <input type="number" min={1} max={60} value={days} onChange={e => setDays(Math.max(1, Math.min(60, +e.target.value || 14)))} className="input py-1 text-sm text-center" style={{ width: 56 }} /> days</label>
         <button onClick={loadRoster} disabled={rosterLoading} className="text-xs font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
@@ -515,11 +515,11 @@ const DispoMap = () => {
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         Map each raw VICIdial closer code (NI, CB, SALE…) to a CRM disposition. Pick <strong>🌐 Global</strong> to map a code once for <strong>every</strong> company (recommended — dialer codes are the same everywhere); a company-specific row overrides the global. Unmapped codes are auto-recorded (with a hit count) for you to resolve — nothing is lost.
       </p>
-      <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input" style={{ maxWidth: 320 }}>
+      <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input" style={{ maxWidth: 320 }}>
         <option value="">Select scope…</option>
         <option value="__global__">🌐 Global (all companies)</option>
         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
+      </ThemedSelect>
 
       {companyId && (
         <>
@@ -533,10 +533,10 @@ const DispoMap = () => {
             <div><label className="block text-[11px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>Dialer code</label>
               <input value={newCode} onChange={e => setNewCode(e.target.value.toUpperCase())} placeholder="NI" className="input" style={{ maxWidth: 130, fontFamily: 'monospace' }} /></div>
             <div className="flex-1 min-w-[180px]"><label className="block text-[11px] font-bold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>CRM disposition</label>
-              <select value={newDisp} onChange={e => setNewDisp(e.target.value)} className="input">
+              <ThemedSelect value={newDisp} onChange={e => setNewDisp(e.target.value)} className="input">
                 <option value="">— leave unmapped —</option>
                 {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
-              </select></div>
+              </ThemedSelect></div>
             <Button variant="primary" onClick={add} disabled={busy} className="flex items-center gap-1.5"><Plus size={15} /> Add</Button>
           </div>
 
@@ -557,11 +557,11 @@ const DispoMap = () => {
                         {!r.company_id && <span className="ml-2 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>🌐 global</span>}
                       </td>
                       <td className="px-4 py-2.5">
-                        <select value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">
+                        <ThemedSelect value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">
                           <option value="">{coveredByGlobal ? `— using 🌐 Global: ${globalByCode[r.vici_code]} —` : '— unmapped —'}</option>
                           {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
                           {r.disposition_name && !dispositions.includes(r.disposition_name) && <option value={r.disposition_name}>{r.disposition_name}</option>}
-                        </select>
+                        </ThemedSelect>
                         {coveredByGlobal && <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Resolves via 🌐 Global — only set here to override for this company.</p>}
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.hits}</td>
@@ -873,22 +873,22 @@ const Backfill = () => {
         <div className="flex items-center gap-4 mt-3 flex-wrap">
           <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
             This export is from:
-            <select value={boxPrefix} onChange={e => setBoxPrefix(e.target.value)} disabled={impBusy}
+            <ThemedSelect value={boxPrefix} onChange={e => setBoxPrefix(e.target.value)} disabled={impBusy}
               className="input ml-2 py-1.5 text-sm" style={{ width: 'auto', display: 'inline-block' }}>
               <option value="WTI">Wavetech (WTI)</option>
               <option value="ETC">EasyTech (ETC)</option>
               <option value="TMC">Mejor / TMC (TMC)</option>
-            </select>
+            </ThemedSelect>
           </label>
           <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
             Date format:
-            <select value={dateFmt} onChange={e => setDateFmt(e.target.value)} disabled={impBusy}
+            <ThemedSelect value={dateFmt} onChange={e => setDateFmt(e.target.value)} disabled={impBusy}
               className="input ml-2 py-1.5 text-sm" style={{ width: 'auto', display: 'inline-block' }}>
               <option value="AUTO">Auto-detect</option>
               <option value="ISO">ISO (YYYY-MM-DD)</option>
               <option value="DMY">DD/MM/YYYY</option>
               <option value="MDY">MM/DD/YYYY</option>
-            </select>
+            </ThemedSelect>
           </label>
         </div>
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BarChart3, AlertTriangle, Info, LayoutDashboard, Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
 import { KPI_METRICS, KPI_CARDS, resolveCardConfig } from '../../../config/kpiCatalog';
 import { clearShellLayoutCache } from '../../../hooks/useShellLayout';
+import ThemedSelect from '../../UI/Select';
 
 const cfg = (config, key, fallback) => (config?.[key] !== undefined ? config[key] : fallback);
 
@@ -150,9 +151,9 @@ const SegmentRow = ({ shell, seg, index, onMetric, onLabel, onRemove, canRemove 
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] font-bold w-4 text-center flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{index + 1}</span>
-      <select value={seg.metric} onChange={(e) => onMetric(index, e.target.value)} className="input text-xs py-1.5 flex-1 min-w-0">
+      <ThemedSelect value={seg.metric} onChange={(e) => onMetric(index, e.target.value)} className="input text-xs py-1.5 flex-1 min-w-0">
         {(KPI_METRICS[shell] || []).map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-      </select>
+      </ThemedSelect>
       <input type="text" value={label} placeholder="Label"
         onChange={(e) => setLabel(e.target.value)}
         onBlur={() => onLabel(index, label.trim())}
@@ -312,10 +313,10 @@ const KpiRules = ({ config, scope, onSave }) => {
 
       <Section accent="warning" title="Today timezone"
         desc="Day cutoff used by 'Today' filters and stat cards. Should match your call center's working day boundary.">
-        <select value={tz} onChange={(e) => onSave('kpi.today_timezone', e.target.value)}
+        <ThemedSelect value={tz} onChange={(e) => onSave('kpi.today_timezone', e.target.value)}
           className="input text-sm py-2 w-full max-w-xs">
           {TIMEZONES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
-        </select>
+        </ThemedSelect>
         <p className="text-xs text-text-tertiary mt-2 flex items-start gap-1.5">
           <Info size={12} className="flex-shrink-0 mt-0.5" />
           Changing this affects when "Today" rolls over for every user, regardless of their browser timezone.

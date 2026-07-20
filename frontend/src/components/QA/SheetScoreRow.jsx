@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Loader2, Send, CheckCircle2, XCircle } from 'lucide-react';
 import { computeSheetReview, truncPct1 } from '../../utils/qaSheetFormula';
+import ThemedSelect from '../UI/Select';
 
 // ============================================================================
 // SheetScoreRow — horizontal, spreadsheet-style scoring strip for sheet_v2
@@ -39,9 +40,9 @@ function YN({ value, onChange, disabled }) {
   return (
     <div className="relative">
       <div className="absolute inset-0 rounded pointer-events-none" style={{ background: y ? 'rgba(22,163,74,0.14)' : n ? 'rgba(220,38,38,0.10)' : 'transparent' }} />
-      <select value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700, color: y ? '#059669' : n ? '#dc2626' : 'var(--color-text)' }}>
+      <ThemedSelect value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700, color: y ? '#059669' : n ? '#dc2626' : 'var(--color-text)' }}>
         <option value="">—</option><option value="Y">Y</option><option value="N">N</option>
-      </select>
+      </ThemedSelect>
     </div>
   );
 }
@@ -57,10 +58,10 @@ function Rating({ value, scale = 4, min = 0, onChange, disabled }) {
   const color = v == null ? 'transparent' : `hsl(${hue},70%,45%)`;
   return (
     <div className="relative rounded" style={{ background: v == null ? 'transparent' : `hsla(${hue},70%,45%,0.14)` }}>
-      <select value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700 }}>
+      <ThemedSelect value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700 }}>
         <option value="">—</option>
         {Array.from({ length: scale - min + 1 }, (_, i) => <option key={i} value={min + i}>{min + i}</option>)}
-      </select>
+      </ThemedSelect>
       <div className="absolute left-0.5 right-0.5 bottom-0.5 h-1 rounded-full" style={{ background: 'var(--color-border)' }}>
         <div className="h-1 rounded-full" style={{ width: `${frac * 100}%`, background: color, transition: 'width .25s ease' }} />
       </div>
@@ -111,9 +112,9 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
       case 'rating': return <Rating value={values[c.key]} scale={c.scale} min={c.min} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'yn': return <YN value={values[c.key]} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'outcome': return (
-        <select value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle}>
+        <ThemedSelect value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle}>
           <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        </ThemedSelect>
       );
       case 'verdict': {
         const val = values[c.key] ?? '';
@@ -122,10 +123,10 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
         return (
           <div className="relative">
             <div className="absolute inset-0 rounded pointer-events-none" style={{ background: pass ? 'rgba(22,163,74,0.16)' : set2 ? 'rgba(220,38,38,0.14)' : 'transparent' }} />
-            <select value={val} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
+            <ThemedSelect value={val} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
               style={{ ...selStyle, position: 'relative', fontWeight: 800, color: pass ? '#059669' : set2 ? '#dc2626' : 'var(--color-text)' }}>
               <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            </ThemedSelect>
           </div>
         );
       }

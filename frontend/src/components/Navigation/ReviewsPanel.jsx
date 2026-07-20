@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, SmartText } from '../UI';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 const PAGE_SIZE = 25;
 const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
@@ -110,7 +111,7 @@ const ReviewsPanel = ({ companyId }) => {
         </div>
 
         {agentsList.length > 0 && (
-          <select value={agentFilter} onChange={e => handleAgentChange(e.target.value)}
+          <ThemedSelect value={agentFilter} onChange={e => handleAgentChange(e.target.value)}
             className={selectCls} style={{ minWidth: 160 }}>
             <option value="">All agents</option>
             {agentsList.map(a => (
@@ -118,23 +119,23 @@ const ReviewsPanel = ({ companyId }) => {
                 {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
               </option>
             ))}
-          </select>
+          </ThemedSelect>
         )}
 
         {subTab === 'ratings' && (
-          <select value={ratingFilter} onChange={e => handleRatingChange(e.target.value)}
+          <ThemedSelect value={ratingFilter} onChange={e => handleRatingChange(e.target.value)}
             className={selectCls} style={{ minWidth: 140 }}>
             <option value="">All ratings</option>
             {RATINGS.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
-          </select>
+          </ThemedSelect>
         )}
 
         {subTab === 'dispos' && (
-          <select value={dispoFilter} onChange={e => handleDispoChange(e.target.value)}
+          <ThemedSelect value={dispoFilter} onChange={e => handleDispoChange(e.target.value)}
             className={selectCls} style={{ minWidth: 160 }}>
             <option value="">All dispositions</option>
             {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
-          </select>
+          </ThemedSelect>
         )}
       </div>
 

@@ -9,6 +9,7 @@ import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { todayET, fmtSaleDate } from '../../utils/timezone';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
+import ThemedSelect from '../UI/Select';
 
 // Map our 5 semantic badge tokens to a hex so the pipeline bar gets a
 // solid background even when Tailwind tree-shakes unused classes.
@@ -715,11 +716,11 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           />
 
           {/* Company */}
-          <select value={filters.companyId} onChange={e => setFilter('companyId', e.target.value)}
+          <ThemedSelect value={filters.companyId} onChange={e => setFilter('companyId', e.target.value)}
             style={{ ...sel, minWidth: 140 }}>
             <option value="">All Companies</option>
             {companies.map(c => <option key={c.id} value={c.id}>{c.name} ({c.company_type})</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Callbacks: Fronter / Closer toggle */}
           {dataTab === 'callbacks' && (
@@ -738,31 +739,31 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           )}
 
           {/* Agent / Closer */}
-          <select value={filters.closerId} onChange={e => setFilter('closerId', e.target.value)}
+          <ThemedSelect value={filters.closerId} onChange={e => setFilter('closerId', e.target.value)}
             style={{ ...sel, minWidth: 140 }}>
             <option value="">{dataTab === 'callbacks' ? 'All Agents' : 'All Closers'}</option>
             {(dataTab === 'callbacks'
               ? (cbType === 'fronter' ? fronters : closers)
               : closers
             ).map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} — {u.company_name||'?'}</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Status */}
-          <select value={filters.status} onChange={e => setFilter('status', e.target.value)}
+          <ThemedSelect value={filters.status} onChange={e => setFilter('status', e.target.value)}
             style={{ ...sel, minWidth: 110 }}>
             {(dataTab==='sales' ? SALE_STATUSES : dataTab==='transfers' ? XFER_STATUSES : CB_STATUSES_OPTS)
               .map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Priority (callbacks only) */}
           {dataTab === 'callbacks' && (
-            <select value={filters.priority} onChange={e => setFilter('priority', e.target.value)}
+            <ThemedSelect value={filters.priority} onChange={e => setFilter('priority', e.target.value)}
               style={{ ...sel, minWidth: 100 }}>
               <option value="">All Priority</option>
               <option value="High">🔴 High</option>
               <option value="Medium">🟡 Medium</option>
               <option value="Low">🔵 Low</option>
-            </select>
+            </ThemedSelect>
           )}
 
           {/* Search (sales + callbacks) */}

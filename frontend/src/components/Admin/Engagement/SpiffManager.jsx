@@ -6,6 +6,7 @@ import RichView from '../../UI/RichView';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import AudienceTargetPicker from './AudienceTargetPicker';
+import ThemedSelect from '../../UI/Select';
 
 // Plain-text preview for compact UI surfaces (table cells, lists). Mirrors
 // RichView's "has tags?" heuristic so legacy plain-text descriptions stay
@@ -84,17 +85,17 @@ const Modal = ({ row, reference, onClose, onSave, viewer }) => {
           </div>
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Source <span style={{ color: '#ef4444' }}>*</span></label>
-            <select value={form.metric_source} onChange={e => {
+            <ThemedSelect value={form.metric_source} onChange={e => {
               const src = e.target.value;
               const preset = METRIC_SOURCES.find(s => s.v === src);
               setForm(f => ({ ...f, metric_source: src, ...(preset?.label ? { metric: preset.label } : {}) }));
               if (preset?.label) { setMetricSel('custom'); setCustomMetric(preset.label); }
-            }} className="input">{METRIC_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}</select>
+            }} className="input">{METRIC_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}</ThemedSelect>
             <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{METRIC_SOURCES.find(s => s.v === form.metric_source)?.hint}</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Label</label>
-              <select value={metricSel} onChange={e => setMetricSel(e.target.value)} className="input" disabled={isAuto(form.metric_source)}>{METRICS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
+              <ThemedSelect value={metricSel} onChange={e => setMetricSel(e.target.value)} className="input" disabled={isAuto(form.metric_source)}>{METRICS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</ThemedSelect>
               {metricSel === 'custom' && <input value={customMetric} onChange={e => setCustomMetric(e.target.value)} className="input mt-1.5" placeholder="custom_metric" disabled={isAuto(form.metric_source)} />}
             </div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Target value <span style={{ color: '#ef4444' }}>*</span></label>
@@ -112,7 +113,7 @@ const Modal = ({ row, reference, onClose, onSave, viewer }) => {
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Ends <span style={{ color: '#ef4444' }}>*</span></label>
               <input type="datetime-local" value={form.ends_at} onChange={e => set('ends_at', e.target.value)} className="input" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Status</label>
-              <select value={form.status} onChange={e => set('status', e.target.value)} className="input"><option value="draft">Draft</option><option value="active">Active</option><option value="ended">Ended</option></select></div>
+              <ThemedSelect value={form.status} onChange={e => set('status', e.target.value)} className="input"><option value="draft">Draft</option><option value="active">Active</option><option value="ended">Ended</option></ThemedSelect></div>
           </div>
           <AudienceTargetPicker
             value={form}
@@ -167,7 +168,7 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
           ) : (
             <form onSubmit={addEntry} className="flex items-end gap-2 rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
               <div className="flex-1"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Participant</label>
-                <select value={uid} onChange={e => setUid(e.target.value)} className="input text-sm"><option value="">Select user…</option>{(reference.users || []).map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.company_name ? ` (${u.company_name})` : ''}</option>)}</select></div>
+                <ThemedSelect value={uid} onChange={e => setUid(e.target.value)} className="input text-sm"><option value="">Select user…</option>{(reference.users || []).map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.company_name ? ` (${u.company_name})` : ''}</option>)}</ThemedSelect></div>
               <div className="w-28"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Score</label>
                 <input type="number" value={val} onChange={e => setVal(e.target.value)} className="input text-sm" /></div>
               <Button type="submit" variant="primary" disabled={saving || !uid || val === ''}>Set</Button>

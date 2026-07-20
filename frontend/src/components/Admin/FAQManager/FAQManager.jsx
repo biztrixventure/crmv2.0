@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import ThemedSelect from '../../UI/Select';
 import {
   HelpCircle, Plus, Search, Edit2, Trash2, X, ChevronDown,
   Tag, Eye, EyeOff, BookOpen, Users, Headphones, PhoneOutgoing, SlidersHorizontal,
@@ -81,11 +82,11 @@ const FAQModal = ({ faq, categories, onClose, onSave }) => {
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Category</label>
-              <select value={form.audience} onChange={e => set('audience', e.target.value)} className="input">
+              <ThemedSelect value={form.audience} onChange={e => set('audience', e.target.value)} className="input">
                 <option value="both">Both (closers &amp; fronters)</option>
                 <option value="closer">Closers only</option>
                 <option value="fronter">Fronters only</option>
-              </select>
+              </ThemedSelect>
             </div>
           </div>
           <div>

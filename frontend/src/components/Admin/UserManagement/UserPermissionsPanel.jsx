@@ -3,6 +3,7 @@ import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X
 import { Button, Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 import client from '../../../api/client';
+import ThemedSelect from '../../UI/Select';
 
 const AREA_LABEL = {
   sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
@@ -340,7 +341,7 @@ const UserPermissionsPanel = ({ user }) => {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search tabs, features, options…" className="input text-sm py-1.5 pl-8 w-full" />
         </div>
         {peers.length > 0 && (
-          <select onChange={e => { copyFrom(e.target.value); e.target.value = ''; }} defaultValue=""
+          <ThemedSelect onChange={e => { copyFrom(e.target.value); e.target.value = ''; }} defaultValue=""
             className="input text-xs py-1.5" style={{ maxWidth: 210 }} title="Copy another user's access into the editor">
             <option value="">Copy access from…</option>
             {peers.map(p => (
@@ -349,7 +350,7 @@ const UserPermissionsPanel = ({ user }) => {
                 {` · ${(p.role_level || p.custom_roles?.level || p.role || '').replace(/_/g, ' ') || '—'}`}
               </option>
             ))}
-          </select>
+          </ThemedSelect>
         )}
         <button onClick={() => bulkAll('on')}  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#bbf7d0', color: '#16a34a' }}><Check size={12} /> Grant all perms</button>
         <button onClick={() => bulkAll('off')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#fecaca', color: '#dc2626' }}><X size={12} /> Revoke all</button>

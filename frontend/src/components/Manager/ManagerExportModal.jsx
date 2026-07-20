@@ -4,6 +4,7 @@ import { X, Download, Loader2, FileSpreadsheet, DollarSign, Send, PhoneCall, Use
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { saleExportColumns, saleToRow } from '../Admin/BulkSaleUploader/saleColumnMapping';
+import ThemedSelect from '../UI/Select';
 
 // CSV download (client-side, no row cap).
 function downloadCSV(rows, headers, filename) {
@@ -154,9 +155,9 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
           {cfg.status && (
             <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
               Status
-              <select value={status} onChange={e => setStatus(e.target.value)} className="input mt-1">
+              <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input mt-1">
                 {cfg.status.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </ThemedSelect>
             </label>
           )}
 
@@ -164,12 +165,12 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
           {cfg.agent && agents.length > 0 && (
             <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
               Agent
-              <select value={agent} onChange={e => setAgent(e.target.value)} className="input mt-1">
+              <ThemedSelect value={agent} onChange={e => setAgent(e.target.value)} className="input mt-1">
                 <option value="">All agents</option>
                 {agents.map(a => (
                   <option key={a.user_id} value={a.user_id}>{`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email}</option>
                 ))}
-              </select>
+              </ThemedSelect>
             </label>
           )}
 

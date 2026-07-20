@@ -6,6 +6,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { CORE_TOKENS, applyTheme, clearTheme } from '../../../utils/themeApply';
 import { THEME_PRESETS, DEFAULT_PRESET_ID, themeFromPreset } from '../../../utils/themePresets';
+import ThemedSelect from '../../UI/Select';
 
 // ============================================================================
 // AppearanceManager — SuperAdmin theme editor.
@@ -206,10 +207,10 @@ export default function AppearanceManager() {
           {scope === 'global'
             ? <Globe size={15} style={{ color: 'var(--color-text-secondary)' }} />
             : <Building2 size={15} style={{ color: 'var(--color-text-secondary)' }} />}
-          <select value={scope} onChange={(e) => setScope(e.target.value)} className="px-2 py-1.5 text-sm rounded-md bg-transparent" style={{ color: 'var(--color-text)' }}>
+          <ThemedSelect value={scope} onChange={(e) => setScope(e.target.value)} className="px-2 py-1.5 text-sm rounded-md bg-transparent" style={{ color: 'var(--color-text)' }}>
             <option value="global">Global (all companies)</option>
             {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
 
         {/* Mode toggle — flips the real app theme so the preview matches. */}

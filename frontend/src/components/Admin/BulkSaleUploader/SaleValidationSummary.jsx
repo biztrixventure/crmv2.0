@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, RefreshCw, XCircle, AlertTriangle, Ban, ChevronDown, Wand2, Plus, ArrowRight, UserX } from 'lucide-react';
 import { Button } from '../../UI';
 import SaleUpdateReviewer from './SaleUpdateReviewer';
+import ThemedSelect from '../../UI/Select';
 
 const Stat = ({ icon: Icon, color, count, label }) => (
   <div className="flex items-center gap-3 rounded-xl px-4 py-3 flex-1 min-w-[130px]" style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${color}` }}>
@@ -118,14 +119,14 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer, excludedNew = {}, onTog
               <div className="flex items-center gap-2 mt-2 text-xs">
                 <ArrowRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                 {(r.candidate_transfers || []).length > 1 ? (
-                  <select
+                  <ThemedSelect
                     value={r.chosen_transfer_id || r.matched_transfer?.id || ''}
                     onChange={e => onChangeTransfer(idx, e.target.value)}
                     className="input"
                     style={{ height: 34, fontSize: 12, maxWidth: '100%' }}
                   >
                     {r.candidate_transfers.map(t => <option key={t.id} value={t.id}>{transferText(t)}</option>)}
-                  </select>
+                  </ThemedSelect>
                 ) : (
                   <span style={{ color: 'var(--color-text-secondary)' }}>{r.matched_transfer ? transferText(r.matched_transfer) : 'matched transfer'}</span>
                 )}

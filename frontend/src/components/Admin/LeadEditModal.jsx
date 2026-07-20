@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { X, Save, AlertTriangle, FileText, Layers, Pencil, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../UI';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 /* LeadEditModal — superadmin-only universal editor for transfer / sale /
    callback records. Surfaces every column on the row + lets the user edit
@@ -32,7 +33,7 @@ const FROZEN = new Set([
 // JSONB columns get a textarea editor with JSON validation on save.
 const JSON_COLS = new Set(['form_data', 'data', 'changes', 'edit_history']);
 
-// Fields rendered as <select> with a fixed list of options. Other fields
+// Fields rendered as <ThemedSelect> with a fixed list of options. Other fields
 // default to <input type=text>.
 const ENUMS = {
   transfers: {
@@ -128,11 +129,11 @@ export default function LeadEditModal({ kind, record, onSaved, onClose }) {
 
     if (enumOpts) {
       return (
-        <select value={draft[k] ?? ''} onChange={(e) => setField(k, e.target.value)}
+        <ThemedSelect value={draft[k] ?? ''} onChange={(e) => setField(k, e.target.value)}
           className="input text-sm py-1.5 w-full">
           <option value="">—</option>
           {enumOpts.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        </ThemedSelect>
       );
     }
     if (dtType === 'datetime-local') {

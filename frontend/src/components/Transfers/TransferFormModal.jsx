@@ -179,7 +179,7 @@ const TransferFormModal = ({
                         // Car make/model first — otherwise an admin who set
                         // CarMake's field_type to "select" (perfectly natural
                         // for a dropdown) would hit the generic select branch
-                        // below and get an empty native <select> instead of
+                        // below and get an empty native <ThemedSelect> instead of
                         // the VehicleSelect typeahead.
                         if (isCarYear(field)) {
                           input = (

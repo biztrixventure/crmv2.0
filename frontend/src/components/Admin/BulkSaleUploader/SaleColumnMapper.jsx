@@ -1,5 +1,6 @@
 import { ArrowRight } from 'lucide-react';
 import { Button, Alert } from '../../UI';
+import ThemedSelect from '../../UI/Select';
 
 const Row = ({ f, mapping, setMap, headers }) => (
   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -11,10 +12,10 @@ const Row = ({ f, mapping, setMap, headers }) => (
       {f.desc && <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{f.desc}</p>}
     </div>
     <ArrowRight size={15} className="hidden sm:block mx-auto" style={{ color: 'var(--color-text-tertiary)' }} />
-    <select value={mapping[f.key] || ''} onChange={e => setMap(f.key, e.target.value)} className="input">
+    <ThemedSelect value={mapping[f.key] || ''} onChange={e => setMap(f.key, e.target.value)} className="input">
       <option value="">— Not in file —</option>
       {headers.map(h => <option key={h} value={h}>{h}</option>)}
-    </select>
+    </ThemedSelect>
   </div>
 );
 

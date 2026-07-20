@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Download } from 'lucide-react';
 import client from '../../api/client';
 import { Overlay, ModalBox, ModalHeader } from './shared';
+import ThemedSelect from '../UI/Select';
 
 const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
   const [dateFrom, setDateFrom]   = useState('');
@@ -94,11 +95,11 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide mb-2"
               style={{ color: 'var(--color-text-secondary)' }}>Company</p>
-            <select value={company} onChange={e => { setCompany(e.target.value); setSelected(new Set()); }}
+            <ThemedSelect value={company} onChange={e => { setCompany(e.target.value); setSelected(new Set()); }}
               className="input text-sm w-full">
               <option value="">All companies</option>
               {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </ThemedSelect>
           </div>
 
           {/* Users */}

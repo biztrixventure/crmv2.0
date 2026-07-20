@@ -3,6 +3,7 @@
  * Features: day filter, search, status quick-actions, Create Transfer button.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Phone, CheckCircle, RefreshCw, Clock, SkipForward, PhoneCall,
   RotateCcw, Filter, Search, X, Calendar, Send, ChevronDown,
@@ -145,10 +146,10 @@ const TransferModal = ({ number, onClose, onSuccess }) => {
                           placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input resize-none text-sm" />;
                       } else if (field.field_type === 'select') {
                         input = (
-                          <select value={val} onChange={onChange} required={field.is_required} className="input text-sm">
+                          <ThemedSelect value={val} onChange={onChange} required={field.is_required} className="input text-sm">
                             <option value="">Select {field.label}</option>
                             {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-                          </select>
+                          </ThemedSelect>
                         );
                       } else {
                         const type = field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' ? 'text' : (field.field_type || 'text');
@@ -177,7 +178,7 @@ const TransferModal = ({ number, onClose, onSuccess }) => {
                 <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   Transfer to Closer <span className="text-red-500">*</span>
                 </label>
-                <select value={closerId} onChange={e => setCloserId(e.target.value)} className="input" required>
+                <ThemedSelect value={closerId} onChange={e => setCloserId(e.target.value)} className="input" required>
                   <option value="">— Select a closer —</option>
                   {closers.map(c => (
                     <option key={c.id} value={c.id}>
@@ -185,7 +186,7 @@ const TransferModal = ({ number, onClose, onSuccess }) => {
                       {c.company_name ? ` — ${c.company_name}` : ''}
                     </option>
                   ))}
-                </select>
+                </ThemedSelect>
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}

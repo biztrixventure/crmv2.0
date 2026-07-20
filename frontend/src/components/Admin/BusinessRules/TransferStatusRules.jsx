@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Workflow, AlertTriangle, Info, Plus, Trash2, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import { clearTransferStatusCache } from '../../../hooks/useTransferStatuses';
+import ThemedSelect from '../../UI/Select';
 
 /*
  * TransferStatusRules
@@ -179,7 +180,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
                 {/* Badge color */}
                 <div className="flex flex-col" style={{ minWidth: 140 }}>
                   <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
-                  <select
+                  <ThemedSelect
                     value={s.badge || 'secondary'}
                     onChange={(e) => updateRow(i, { badge: e.target.value })}
                     className="input text-xs py-1"
@@ -187,7 +188,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
                     {BADGE_OPTIONS.map((o) => (
                       <option key={o.v} value={o.v}>{o.label}</option>
                     ))}
-                  </select>
+                  </ThemedSelect>
                 </div>
 
                 {/* Enabled toggle */}

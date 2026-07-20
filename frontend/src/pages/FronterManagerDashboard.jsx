@@ -767,14 +767,14 @@ const FronterManagerDashboard = () => {
                 )}
               </p>
               <label className="block text-sm font-medium text-text-secondary mb-1">Select new closer</label>
-              <select value={reassignCloser} onChange={e => setReassignCloser(e.target.value)} className="input mb-4">
+              <ThemedSelect value={reassignCloser} onChange={e => setReassignCloser(e.target.value)} className="input mb-4">
                 <option value="">— Choose closer —</option>
                 {closers.map(c => (
                   <option key={c.id} value={c.id}>
                     {c.first_name} {c.last_name} {c.email ? `(${c.email})` : ''}
                   </option>
                 ))}
-              </select>
+              </ThemedSelect>
               <div className="flex gap-3">
                 <button onClick={() => setReassignTarget(null)}
                   className="flex-1 py-2 rounded-lg border text-sm font-semibold"

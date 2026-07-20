@@ -9,6 +9,7 @@ import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { toast } from 'sonner';
 import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
+import ThemedSelect from '../UI/Select';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
   fmtDate, fmtDateTime, downloadCSV,
@@ -785,9 +786,9 @@ const CallbacksTab = ({ companyList }) => {
                   <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                     <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <select value={mgStatus} onChange={e => setMgStatus(e.target.value)} className="input text-sm" style={{ height: 36, maxWidth: 200 }}>
+                      <ThemedSelect value={mgStatus} onChange={e => setMgStatus(e.target.value)} className="input text-sm" style={{ height: 36, maxWidth: 200 }}>
                         {CALLBACK_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-                      </select>
+                      </ThemedSelect>
                       <button onClick={doUpdateCallbackStatus} disabled={mgBusy || mgStatus === detail.status}
                         className="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
                         Save status

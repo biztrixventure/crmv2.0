@@ -4,6 +4,7 @@ import client from '../../api/client';
 import { useUserColors } from '../../hooks/useUserColors';
 import Avatar from './Avatar';
 import PresenceDot from './PresenceDot';
+import ThemedSelect from '../UI/Select';
 
 const timeAgo = (s) => {
   if (!s) return '';
@@ -139,10 +140,10 @@ const ConversationList = ({ conversations = [], onlineIds, meId, activeId, onSel
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search chats or people to message…" className="input" style={{ paddingLeft: 34, height: 38 }} />
           {searching && <Loader2 size={14} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />}
         </div>
-        <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm" style={{ height: 36 }} title="Filter people by company">
+        <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm" style={{ height: 36 }} title="Filter people by company">
           <option value="">All companies</option>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        </ThemedSelect>
       </div>
 
       {/* List */}

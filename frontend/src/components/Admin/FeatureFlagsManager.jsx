@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Zap, ZapOff, Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Building2, AlertTriangle } from 'lucide-react';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 
 const CATEGORIES = ['core', 'operations', 'quality', 'analytics', 'admin', 'general'];
 
@@ -76,11 +77,11 @@ function FlagForm({ initial, onSave, onCancel }) {
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div>
           <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Category</label>
-          <select value={form.category} onChange={e => set('category', e.target.value)}
+          <ThemedSelect value={form.category} onChange={e => set('category', e.target.value)}
             className="w-full px-3 py-2 rounded-xl text-sm"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
             {CATEGORIES.map(c => <option key={c} value={c}>{CAT[c]?.label || c}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
         <div>
           <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Sort Order</label>

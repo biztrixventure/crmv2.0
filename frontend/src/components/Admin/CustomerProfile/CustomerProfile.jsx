@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import ThemedSelect from '../../UI/Select';
 import {
   Search, User, Phone, Mail, MapPin, Car, Shield, ArrowLeftRight,
   FileText, XCircle, ChevronLeft, Building2, UserCheck, Headphones, Briefcase,
@@ -655,11 +656,11 @@ export default function CustomerProfile() {
             </span>
           </Tip>
           <SlidersHorizontal size={13} style={{ color: 'var(--color-text-tertiary)' }} />
-          <select value={sort} onChange={e => setSort(e.target.value)}
+          <ThemedSelect value={sort} onChange={e => setSort(e.target.value)}
             className="text-xs font-semibold rounded-lg border px-2 py-1.5"
             style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
             {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
       </div>
       <div className="flex justify-end -mt-1"><DotsLegend /></div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Phone, Plus, Clock, CheckCircle2, XCircle, PhoneOff,
   PhoneCall, AlertCircle, RefreshCw, Eye, LogIn,
@@ -705,12 +706,12 @@ const ReassignModal = ({ number, onClose, onSave }) => {
           {loading ? (
             <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
           ) : (
-            <select value={selected} onChange={e => setSelected(e.target.value)} className="input">
+            <ThemedSelect value={selected} onChange={e => setSelected(e.target.value)} className="input">
               <option value="">— Select team member —</option>
               {members.map(m => (
                 <option key={m.user_id} value={m.user_id}>{m.name} ({m.role})</option>
               ))}
-            </select>
+            </ThemedSelect>
           )}
           {err && <p className="text-sm text-error-600">{err}</p>}
           <div className="flex gap-3">
@@ -957,18 +958,18 @@ const CallbackNumbers = ({ user }) => {
                   placeholder="Search phone or customer…"
                   className="input w-56"
                 />
-                <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); }} className="input w-auto">
+                <ThemedSelect value={statusFilter} onChange={e => { setStatusFilter(e.target.value); }} className="input w-auto">
                   <option value="all">All statuses</option>
                   <option value="active">Active</option>
                   <option value="claimable">Claimable</option>
                   <option value="released">Released</option>
-                </select>
-                <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} className="input w-auto">
+                </ThemedSelect>
+                <ThemedSelect value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} className="input w-auto">
                   <option value="">All members</option>
                   {ownerOptions.map(([id, name]) => (
                     <option key={id} value={id}>{name}</option>
                   ))}
-                </select>
+                </ThemedSelect>
               </div>
 
               {/* Table */}

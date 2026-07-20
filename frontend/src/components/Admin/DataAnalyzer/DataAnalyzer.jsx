@@ -394,11 +394,11 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     const opts = Array.isArray(field.options) ? field.options : [];
     const cur = Array.isArray(value) && value.length ? value[0] : '';
     return (
-      <select value={cur} onChange={e => set(e.target.value ? [e.target.value] : [])}
+      <ThemedSelect value={cur} onChange={e => set(e.target.value ? [e.target.value] : [])}
         className="input text-sm">
         <option value="">Any {String(field.label || 'agent').toLowerCase()}…</option>
         {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      </ThemedSelect>
     );
   }
   if (kind === 'multi' || kind === 'multi_enum') {
@@ -1030,9 +1030,9 @@ const DataAnalyzer = () => {
             open={open.breakdown} onToggle={() => setOpen(o => ({ ...o, breakdown: !o.breakdown }))}>
             <div className="flex items-center gap-2 mb-2">
               <Label>Group by</Label>
-              <select value={groupBy} onChange={e => setGroupBy(e.target.value)} className="input text-xs h-auto py-1">
+              <ThemedSelect value={groupBy} onChange={e => setGroupBy(e.target.value)} className="input text-xs h-auto py-1">
                 {cfg.groupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              </ThemedSelect>
               <button onClick={runBreakdown}
                 className="text-xs font-bold px-3 py-1 rounded-md text-white"
                 style={{ background: 'var(--gradient-sidebar)' }}>

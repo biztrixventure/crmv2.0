@@ -5,6 +5,7 @@ import {
 import client from '../../api/client';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
+import ThemedSelect from '../UI/Select';
 
 /*
  * BulkStatusUpdate
@@ -465,13 +466,13 @@ export default function BulkStatusUpdate() {
                   <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>
                     Reason (canonical) for all rows
                   </label>
-                  <select value={bulkReasonKey} onChange={e => setBulkReasonKey(e.target.value)}
+                  <ThemedSelect value={bulkReasonKey} onChange={e => setBulkReasonKey(e.target.value)}
                     className="input text-sm">
                     <option value="">— pick a canonical reason —</option>
                     {cancelReasonChoices.map(r => (
                       <option key={r.key} value={r.key}>{r.label}</option>
                     ))}
-                  </select>
+                  </ThemedSelect>
                   <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                     Canonical reason key drives top-reason reports. Free-text note below stays per-row.
                   </p>

@@ -3,6 +3,7 @@
  * Full visibility: all companies, all fronters, all dates, transfer linkage.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Phone, Search, Filter, RefreshCw, X, Calendar, Building2, Users,
   Link2, ChevronDown, Download, BarChart3, TrendingUp, Hash,
@@ -233,23 +234,23 @@ const NumbersIntelligence = () => {
           </div>
 
           {/* Company */}
-          <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm">
+          <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm">
             <option value="">All Companies</option>
             {companies.map(c => <option key={c.id} value={c.id}>{c.name || c.slug}</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Fronter */}
-          <select value={fronterIdF} onChange={e => setFronterIdF(e.target.value)} className="input text-sm"
+          <ThemedSelect value={fronterIdF} onChange={e => setFronterIdF(e.target.value)} className="input text-sm"
             disabled={!companyId}>
             <option value="">All Fronters{!companyId ? ' (select company)' : ''}</option>
             {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Status */}
-          <select value={statusF} onChange={e => setStatusF(e.target.value)} className="input text-sm">
+          <ThemedSelect value={statusF} onChange={e => setStatusF(e.target.value)} className="input text-sm">
             <option value="">All Statuses</option>
             {Object.entries(STATUS_CFG).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-          </select>
+          </ThemedSelect>
 
           {/* Date range */}
           <div className="flex items-center gap-2">
@@ -262,10 +263,10 @@ const NumbersIntelligence = () => {
           </div>
 
           {/* List name */}
-          <select value={listNameF} onChange={e => setListNameF(e.target.value)} className="input text-sm">
+          <ThemedSelect value={listNameF} onChange={e => setListNameF(e.target.value)} className="input text-sm">
             <option value="">All Lists</option>
             {listNames.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
       </div>
 

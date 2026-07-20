@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../../api/client';
 import DncLookupPanel from '../../Shared/DncLookupPanel';
 import BulkDncCheck from './BulkDncCheck';
+import ThemedSelect from '../../UI/Select';
 
 const VERSIONS = [
   ['v1', 'v1 — status only'],
@@ -80,10 +81,10 @@ export default function BlacklistSettings() {
             <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>API version</span>
             <span className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>v3 adds carrier + wireless detail. Use what your plan supports.</span>
           </span>
-          <select value={cfg.version || 'v3'} onChange={e => setCfg({ ...cfg, version: e.target.value })}
+          <ThemedSelect value={cfg.version || 'v3'} onChange={e => setCfg({ ...cfg, version: e.target.value })}
             className="input text-sm py-1" style={{ minWidth: 170 }}>
             {VERSIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
 
         {/* cache window */}

@@ -4,6 +4,7 @@ import { transferPhone } from "../utils/phone";
 import SaleSearch from "../components/Sales/SaleSearch";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
+import ThemedSelect from '../components/UI/Select';
 import {
   Award, Users, DollarSign, TrendingUp, Target, BarChart3,
   Clock, CheckCircle, XCircle, Hash, Car, User, ArrowRight, Search, Phone, PlusCircle,
@@ -550,7 +551,7 @@ const CloserManagerDashboard = () => {
                         {hasPermission('assign_transfer') && (
                           <>
                             <label className="text-xs font-medium text-text-secondary mb-1 block">Assign to Closer:</label>
-                            <select className="input text-sm" defaultValue=""
+                            <ThemedSelect className="input text-sm" defaultValue=""
                               onChange={e => handleAssign(t.id, e.target.value)}
                               disabled={assigning === t.id}>
                               <option value="">Select closer…</option>
@@ -559,7 +560,7 @@ const CloserManagerDashboard = () => {
                                   {c.first_name} {c.last_name} ({c.email})
                                 </option>
                               ))}
-                            </select>
+                            </ThemedSelect>
                           </>
                         )}
                       </div>

@@ -8,6 +8,7 @@ import client from '../../api/client';
 import { uploadChatFile } from '../../utils/chatHtml';
 import Avatar from './Avatar';
 import InvitePicker from './InvitePicker';
+import ThemedSelect from '../UI/Select';
 
 // Group settings: admins edit name/description/logo, toggle the "only admins can
 // post" policy, manage members (promote / remove), invite, and delete the group.
@@ -231,10 +232,10 @@ const GroupSettingsModal = ({ conversation, meId, onClose, onUpdated, onLeft, on
                   {isAdmin && others.length > 0 && (
                     <>
                       <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>You're an admin. Hand the group to:</p>
-                      <select value={successor} onChange={e => setSuccessor(e.target.value)} className="input">
+                      <ThemedSelect value={successor} onChange={e => setSuccessor(e.target.value)} className="input">
                         <option value="">Longest-standing member (auto)</option>
                         {others.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                      </select>
+                      </ThemedSelect>
                     </>
                   )}
                   {isAdmin && others.length === 0 && (

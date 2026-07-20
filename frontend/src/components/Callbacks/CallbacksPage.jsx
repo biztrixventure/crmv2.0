@@ -4,6 +4,7 @@
  * Priority (High / Medium / Low) shown as colored badges.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Phone, Plus, Clock, CheckCircle, XCircle, PhoneOff,
   Trash2, Edit2, Bell, X, Calendar, Voicemail, ChevronRight,
@@ -277,11 +278,11 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Priority</label>
-              <select value={form.priority} onChange={e => setForm(p => ({...p, priority: e.target.value}))} className="input">
+              <ThemedSelect value={form.priority} onChange={e => setForm(p => ({...p, priority: e.target.value}))} className="input">
                 <option value="High">🔴 High</option>
                 <option value="Medium">🟡 Medium</option>
                 <option value="Low">🔵 Low</option>
-              </select>
+              </ThemedSelect>
             </div>
           </div>
 
@@ -389,11 +390,11 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
           {isEdit && (
             <div>
               <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Status</label>
-              <select value={form.status} onChange={e => setForm(p => ({...p, status: e.target.value}))} className="input">
+              <ThemedSelect value={form.status} onChange={e => setForm(p => ({...p, status: e.target.value}))} className="input">
                 {Object.entries(STATUS_CONFIG).map(([k, v]) => (
                   <option key={k} value={k}>{v.label}</option>
                 ))}
-              </select>
+              </ThemedSelect>
             </div>
           )}
 
@@ -795,12 +796,12 @@ const CallbacksPage = ({ user }) => {
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
-            <select value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm py-1.5">
+            <ThemedSelect value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm py-1.5">
               <option value="">Any</option>
               <option value="High">High</option>
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
-            </select>
+            </ThemedSelect>
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"

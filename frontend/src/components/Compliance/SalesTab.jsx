@@ -18,6 +18,7 @@ import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import { salePaidTenure } from '../../utils/saleTenure';
+import ThemedSelect from '../UI/Select';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -570,9 +571,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>New Status</label>
-                <select value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input text-sm w-full">
+                <ThemedSelect value={editStatus} onChange={e => setEditStatus(e.target.value)} className="input text-sm w-full">
                   {COMPLIANCE_EDIT_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
-                </select>
+                </ThemedSelect>
               </div>
               {/* Cancellation date — surfaces only when the picked status is
                   cancel-like (cancelled / compliance_cancelled / closed_lost /
@@ -599,14 +600,14 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
                       Reason (catalog)
                     </label>
-                    <select value={editReasonKey}
+                    <ThemedSelect value={editReasonKey}
                       onChange={e => setEditReasonKey(e.target.value)}
                       className="input text-sm w-full">
                       <option value="">— pick a canonical reason —</option>
                       {cancelReasonChoices.map(r => (
                         <option key={r.key} value={r.key}>{r.label}</option>
                       ))}
-                    </select>
+                    </ThemedSelect>
                     <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                       Optional canonical key for top-reason reports. Free-text reason below still appended to the compliance note.
                     </p>

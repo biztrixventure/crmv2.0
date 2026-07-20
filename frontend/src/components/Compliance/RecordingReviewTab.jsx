@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Clock, Play, Pause, Loader2, CheckCircle2, Circle, X, Search, RefreshCw,
   Phone, User, Calendar, Headphones, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
@@ -543,16 +544,16 @@ function QueueView({ companyList }) {
         <Field label="From"><input type="date" value={filters.date_from} onChange={e => setF('date_from', e.target.value)} style={inp} /></Field>
         <Field label="To"><input type="date" value={filters.date_to} onChange={e => setF('date_to', e.target.value)} style={inp} /></Field>
         <Field label="Company">
-          <select value={filters.company_id} onChange={e => setF('company_id', e.target.value)} style={inp}>
+          <ThemedSelect value={filters.company_id} onChange={e => setF('company_id', e.target.value)} style={inp}>
             <option value="">All companies</option>
             {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </ThemedSelect>
         </Field>
         <Field label="Closer (this page)">
-          <select value={filters.closer_id} onChange={e => setF('closer_id', e.target.value)} style={inp}>
+          <ThemedSelect value={filters.closer_id} onChange={e => setF('closer_id', e.target.value)} style={inp}>
             <option value="">All closers</option>
             {closerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
+          </ThemedSelect>
         </Field>
         {Object.values(filters).some(Boolean) && (
           <button onClick={() => { setOffset(0); setFilters({ date_from: '', date_to: '', company_id: '', closer_id: '', search: '' }); }}

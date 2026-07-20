@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
+import ThemedSelect from '../../UI/Select';
 import {
   LayoutTemplate, AlertTriangle, Eye, EyeOff, ChevronUp, ChevronDown,
   Info, Sparkles, ChevronRight, Layers, Pencil, RotateCcw, GripVertical, MoveRight,
@@ -532,10 +533,10 @@ const DrawerLayoutRules = ({ config, scope, onSave, userId = null, userName = ''
             <label htmlFor="drawer-type" className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1.5 block">
               Drawer type
             </label>
-            <select id="drawer-type" value={drawerType} onChange={(e) => { setDrawerType(e.target.value); setExpanded({}); }}
+            <ThemedSelect id="drawer-type" value={drawerType} onChange={(e) => { setDrawerType(e.target.value); setExpanded({}); }}
               className="input text-sm py-2 w-full">
               {DRAWER_TYPES.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
-            </select>
+            </ThemedSelect>
             <p className="text-[11px] text-text-tertiary mt-1.5 leading-relaxed">
               {DRAWER_TYPES.find(d => d.key === drawerType)?.desc}
             </p>

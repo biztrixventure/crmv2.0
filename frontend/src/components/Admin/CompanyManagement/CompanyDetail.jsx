@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toastError } from '../../../utils/toast';
 import { transferPhone } from '../../../utils/phone';
 import { useAuth } from '../../../contexts/AuthContext';
+import ThemedSelect from '../../UI/Select';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
   Calendar, BarChart3, Search, RefreshCw, Settings, Download, Upload,
@@ -206,25 +207,25 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
             placeholder="Search…" className="input pl-9 text-sm" />
         </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
+        <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
           <option value="">All statuses</option>
           {statuses.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
-        </select>
+        </ThemedSelect>
         {type === 'callbacks' && <>
-          <select value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm w-36">
+          <ThemedSelect value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm w-36">
             <option value="">All priorities</option>
             <option value="High">🔴 High</option>
             <option value="Medium">🟡 Medium</option>
             <option value="Low">🔵 Low</option>
-          </select>
-          <select value={userFilter} onChange={e => setUserFilter(e.target.value)} className="input text-sm w-40">
+          </ThemedSelect>
+          <ThemedSelect value={userFilter} onChange={e => setUserFilter(e.target.value)} className="input text-sm w-40">
             <option value="">All agents</option>
             {companyUsers.map(u => (
               <option key={u.id} value={u.user_id}>
                 {[u.first_name, u.last_name].filter(Boolean).join(' ') || u.email}
               </option>
             ))}
-          </select>
+          </ThemedSelect>
         </>}
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
           Search · {total}
@@ -1064,11 +1065,11 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
               Internal Timezone
               <span className="ml-1.5 text-xs text-text-tertiary">(agent notifications use this time)</span>
             </label>
-            <select className="input" value={internalTz} onChange={e => setInternalTz(e.target.value)}>
+            <ThemedSelect className="input" value={internalTz} onChange={e => setInternalTz(e.target.value)}>
               {WORLD_TIMEZONES.map(tz => (
                 <option key={tz.value} value={tz.value}>{tz.label}</option>
               ))}
-            </select>
+            </ThemedSelect>
           </div>
 
           {saveErr && <p className="text-sm text-error-600">{saveErr}</p>}
@@ -1121,10 +1122,10 @@ const NumbersPanel = ({ companyId }) => {
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
             placeholder="Search phone…" className="input pl-9 text-sm" />
         </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
+        <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
           <option value="">All statuses</option>
           {['active','claimable','released'].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
-        </select>
+        </ThemedSelect>
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
           Search · {total}
         </button>

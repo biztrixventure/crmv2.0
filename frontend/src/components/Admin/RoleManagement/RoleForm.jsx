@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button, FormField } from '../../../components/UI';
 import PermissionMatrix from './PermissionMatrix';
 import { Zap } from 'lucide-react';
+import ThemedSelect from '../../UI/Select';
 
 // ── BLP Sales Model Templates ────────────────────────────────────────────────
 // Pre-built permission sets for the standard sales floor hierarchy.
@@ -270,7 +271,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
 
       {/* Role Level */}
       <FormField label="Role Level" required error={errors.level}>
-        <select
+        <ThemedSelect
           name="level" value={formData.level}
           onChange={handleInputChange}
           disabled={role !== null}
@@ -284,7 +285,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           <option value="fronter_manager">Fronter Manager</option>
           <option value="closer">Closer</option>
           <option value="fronter">Fronter</option>
-        </select>
+        </ThemedSelect>
         {!role && (
           <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
             QA Manager / QA Agent aren&apos;t here — they&apos;re <b>global roles</b> that already apply to every company. Assign them in Compliance → QA Department, or when creating a user.

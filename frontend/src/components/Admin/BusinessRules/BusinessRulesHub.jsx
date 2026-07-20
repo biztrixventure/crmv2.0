@@ -13,6 +13,7 @@ import DrawerLayoutRules from './DrawerLayoutRules';
 import SystemRules from './SystemRules';
 import BatchRules from './BatchRules';
 import SaleHighlightRules from './SaleHighlightRules';
+import ThemedSelect from '../../UI/Select';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -131,7 +132,7 @@ const BusinessRulesHub = () => {
           <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary uppercase tracking-wide">
             <Building2 size={14} /> Scope
           </label>
-          <select
+          <ThemedSelect
             value={scope}
             onChange={(e) => setScope(e.target.value)}
             className="input text-sm py-2 min-w-[260px]"
@@ -146,7 +147,7 @@ const BusinessRulesHub = () => {
                 <option key={c.id} value={`company:${c.id}`}>{c.name}</option>
               ))}
             </optgroup>
-          </select>
+          </ThemedSelect>
           {scope !== 'global' && (
             <div className="flex items-center gap-1">
               <button type="button" onClick={() => handleCloneGlobals(false)}

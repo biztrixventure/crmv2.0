@@ -63,7 +63,7 @@ const Field = ({ label, required, error, hint, children, className = '' }) => (
 );
 
 
-// Guarantees a <select> always shows its stored value as a selected option,
+// Guarantees a <ThemedSelect> always shows its stored value as a selected option,
 // even when the option source (per-company plans / clients / fronters) doesn't
 // contain it — e.g. a compliance manager editing another company's sale, where
 // that company's configs aren't in the editing user's lists. Without this the
@@ -450,7 +450,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
     }
     // Car make/model MUST come before the generic select / textarea branches
     // — admins frequently set CarMake to field_type=select (it IS a dropdown)
-    // and that would otherwise render a plain empty <select> instead of the
+    // and that would otherwise render a plain empty <ThemedSelect> instead of the
     // VehicleSelect typeahead. Same logic as TransferFormModal, kept in sync.
     if (isCarMake(field)) {
       return (

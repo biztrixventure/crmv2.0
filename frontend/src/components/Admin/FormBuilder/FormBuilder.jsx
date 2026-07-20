@@ -629,11 +629,11 @@ const AddCustomModal = ({ onAdd, onClose }) => {
           </div>
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1">Field Type</label>
-            <select value={form.field_type} onChange={e => setForm({...form, field_type: e.target.value})} className="input text-sm">
+            <ThemedSelect value={form.field_type} onChange={e => setForm({...form, field_type: e.target.value})} className="input text-sm">
               {Object.entries(TYPE_LABELS)
                 .filter(([v]) => !v.startsWith('sale_'))
                 .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </ThemedSelect>
           </div>
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1">Placeholder (optional)</label>
@@ -959,11 +959,11 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMappin
                     style={{ backgroundColor: 'var(--color-bg-secondary)', cursor: 'not-allowed' }}
                     title="Sale + closer-deal field types are locked because changing them breaks downstream sale logic." />
                 ) : (
-                  <select value={field.field_type}
+                  <ThemedSelect value={field.field_type}
                     onChange={(e) => commit('field_type', e.target.value)}
                     className="input text-sm py-2 w-full">
                     {TYPE_OPTIONS_FOR_EDIT.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-                  </select>
+                  </ThemedSelect>
                 )}
               </div>
 
@@ -1920,36 +1920,36 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
                   )}
                 </label>
                 {field.field_type === 'sale_client' ? (
-                  <select disabled className="input opacity-70">
+                  <ThemedSelect disabled className="input opacity-70">
                     <option>Select client… ({saleClients.length} options)</option>
                     {saleClients.map(c => <option key={c.id}>{c.value}</option>)}
-                  </select>
+                  </ThemedSelect>
                 ) : field.field_type === 'sale_plan' ? (
-                  <select disabled className="input opacity-70">
+                  <ThemedSelect disabled className="input opacity-70">
                     <option>Select plan… ({salePlans.length} options)</option>
                     {salePlans.map(p => <option key={p.id}>{p.value}</option>)}
-                  </select>
+                  </ThemedSelect>
                 ) : field.field_type === 'textarea' ? (
                   <textarea disabled rows={3} placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`} className="input opacity-70" />
                 ) : field.field_type === 'select' ? (
-                  <select disabled className="input opacity-70">
+                  <ThemedSelect disabled className="input opacity-70">
                     <option>Select {field.label}</option>
                     {(field.options || []).map(o => <option key={o}>{o}</option>)}
-                  </select>
+                  </ThemedSelect>
                 ) : field.field_type === 'sale_down_payment' || field.field_type === 'sale_monthly_payment' ? (
                   <input disabled type="number" placeholder="0.00" className="input opacity-70" />
                 ) : field.field_type === 'sale_reference_no' ? (
                   <input disabled type="text" placeholder="MBH4220SBN" className="input opacity-70 font-mono uppercase" />
                 ) : field.field_type === 'sale_fronter' ? (
-                  <select disabled className="input opacity-70"><option>Select fronter…</option></select>
+                  <ThemedSelect disabled className="input opacity-70"><option>Select fronter…</option></ThemedSelect>
                 ) : (field.field_type === 'sale_disposition' || field.field_type === 'sale_status' || field.field_type === 'sale_call_review') ? (
-                  <select disabled className="input opacity-70">
+                  <ThemedSelect disabled className="input opacity-70">
                     <option>Select disposition…</option>
                     {(field.options && field.options.length > 0
                       ? field.options
                       : ['sale','no_sale','callback','not_interested','hung_up','voicemail','other']
                     ).map(o => <option key={o}>{o.replace(/_/g,' ')}</option>)}
-                  </select>
+                  </ThemedSelect>
                 ) : (
                   <input disabled
                     type={field.field_type === 'tel' || field.field_type === 'phone' ? 'tel' : field.field_type === 'zip' || field.field_type === 'sale_payment_due_note' ? 'text' : field.field_type === 'sale_date' ? 'date' : field.field_type}

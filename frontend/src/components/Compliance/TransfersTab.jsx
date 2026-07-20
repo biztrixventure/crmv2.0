@@ -4,6 +4,7 @@ import { ArrowRight, AlertTriangle, CalendarDays, X, Copy } from 'lucide-react';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { transferPhone } from '../../utils/phone';
 import { todayET } from '../../utils/timezone';
+import ThemedSelect from '../UI/Select';
 
 // Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
 const DUP_REASON_LABEL = {
@@ -516,9 +517,9 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <select value={mgStatus} onChange={e => setMgStatus(e.target.value)} className="input text-sm" style={{ height: 36, maxWidth: 200 }}>
+                    <ThemedSelect value={mgStatus} onChange={e => setMgStatus(e.target.value)} className="input text-sm" style={{ height: 36, maxWidth: 200 }}>
                       {TRANSFER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-                    </select>
+                    </ThemedSelect>
                     <button onClick={doUpdateTransferStatus} disabled={mgBusy || mgStatus === detail.status}
                       className="px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
                       Save status

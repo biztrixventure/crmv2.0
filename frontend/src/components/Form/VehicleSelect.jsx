@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronDown, Check, AlertCircle } from 'lucide-react';
+import ThemedSelect from '../UI/Select';
 
 // VehicleSelect — typeahead with keyboard nav for car make / model. Free-text
 // is allowed (Enter without a highlighted match commits the typed value) so
@@ -142,7 +143,7 @@ const VehicleSelect = ({ value = '', onChange, mode = 'make', makes = [], models
         aria-expanded={open}
       />
       {/* Chevron is now a real click-target so users can toggle the dropdown
-          without typing — matches the affordance of a native <select>. */}
+          without typing — matches the affordance of a native <ThemedSelect>. */}
       <button type="button" tabIndex={-1} disabled={disabled}
         onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); inputRef.current?.focus(); }}
         className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-bg-secondary"

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ShieldCheck, AlertTriangle, Info, Plus, Trash2, Eye, EyeOff, Pencil, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { clearComplianceStatusCache } from '../../../hooks/useComplianceStatuses';
+import ThemedSelect from '../../UI/Select';
 
 const cfg = (config, key, fallback) => (config?.[key] !== undefined ? config[key] : fallback);
 
@@ -242,21 +243,21 @@ const ComplianceRules = ({ config, scope, onSave }) => {
                 {/* Badge color */}
                 <div className="flex flex-col" style={{ minWidth: 130 }}>
                   <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
-                  <select value={s.badge || 'secondary'}
+                  <ThemedSelect value={s.badge || 'secondary'}
                     onChange={(e) => updateRow(i, { badge: e.target.value })}
                     className="input text-xs py-1">
                     {BADGE_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-                  </select>
+                  </ThemedSelect>
                 </div>
 
                 {/* Category */}
                 <div className="flex flex-col" style={{ minWidth: 130 }}>
                   <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Category</label>
-                  <select value={s.category || 'neutral'}
+                  <ThemedSelect value={s.category || 'neutral'}
                     onChange={(e) => updateRow(i, { category: e.target.value })}
                     className="input text-xs py-1">
                     {CATEGORY_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-                  </select>
+                  </ThemedSelect>
                 </div>
 
                 {/* Toggles */}

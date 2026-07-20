@@ -3,6 +3,7 @@ import { Search, X, Check, ArrowLeft, Users } from 'lucide-react';
 import client from '../../api/client';
 import { useUserColors } from '../../hooks/useUserColors';
 import Avatar from './Avatar';
+import ThemedSelect from '../UI/Select';
 
 // Searchable global directory → start a DM (1 user) or a group (many + title).
 // `groupOnly` locks it to group creation (DM starts now live in the conversation-list search).
@@ -110,14 +111,14 @@ const NewChatPicker = ({ onClose, onCreated, groupOnly = false }) => {
         </div>
         {/* Company + role filters — work for everyone, not just superadmins. */}
         <div className="grid grid-cols-2 gap-2">
-          <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-2" title="Filter by company">
+          <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-2" title="Filter by company">
             <option value="">All companies</option>
             {meta.companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select value={role} onChange={e => setRole(e.target.value)} className="input text-sm py-2 capitalize" title="Filter by role">
+          </ThemedSelect>
+          <ThemedSelect value={role} onChange={e => setRole(e.target.value)} className="input text-sm py-2 capitalize" title="Filter by role">
             <option value="">All roles</option>
             {meta.roles.map(r => <option key={r.level} value={r.level}>{(r.label || r.level).replace(/_/g, ' ')}</option>)}
-          </select>
+          </ThemedSelect>
         </div>
       </div>
 

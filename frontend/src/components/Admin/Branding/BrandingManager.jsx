@@ -3,6 +3,7 @@ import { Save, Upload, Loader2, Image as ImageIcon, Globe, RefreshCw, Link2 } fr
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { applyBranding } from '../../../utils/branding';
+import ThemedSelect from '../../UI/Select';
 
 // White-label branding + SEO + social link-preview (Open Graph) editor.
 // Values persist to business_config global `branding`; images upload to the
@@ -137,10 +138,10 @@ export default function BrandingManager() {
             <Field label="Canonical URL" hint="e.g. https://crm.yourdomain.com"><input value={b.og_url || ''} onChange={set('og_url')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Twitter card">
-                <select value={b.twitter_card || 'summary_large_image'} onChange={set('twitter_card')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle}>
+                <ThemedSelect value={b.twitter_card || 'summary_large_image'} onChange={set('twitter_card')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle}>
                   <option value="summary_large_image">Large image</option>
                   <option value="summary">Small</option>
-                </select>
+                </ThemedSelect>
               </Field>
               <Field label="Twitter @handle"><input value={b.twitter_site || ''} onChange={set('twitter_site')} placeholder="@yourbrand" className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
             </div>

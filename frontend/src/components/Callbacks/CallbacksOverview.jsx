@@ -4,6 +4,7 @@
  * Server-side filtering + pagination (PAGE_SIZE=25).
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
   Calendar, User, Filter, RefreshCw, Voicemail, X,
@@ -573,7 +574,7 @@ const CallbacksOverview = ({ user }) => {
           {agentsList.length > 0 && (
             <div className="flex items-center gap-1.5">
               <Filter size={13} style={{ color: 'var(--color-text-tertiary)' }} />
-              <select value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
+              <ThemedSelect value={memberFilter} onChange={e => handleMemberFilter(e.target.value)}
                 className="input py-1.5 text-sm h-auto" style={{ minWidth: 160 }}>
                 <option value="">All team members</option>
                 {agentsList.map(a => (
@@ -581,7 +582,7 @@ const CallbacksOverview = ({ user }) => {
                     {`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email || ''}
                   </option>
                 ))}
-              </select>
+              </ThemedSelect>
             </div>
           )}
         </div>

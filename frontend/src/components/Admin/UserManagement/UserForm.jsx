@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button, FormField } from '../../../components/UI';
 import { useCompanies } from '../../../hooks/useCompanies';
 import { Mail, Lock, ShieldCheck, UserCheck, Headphones } from 'lucide-react';
+import ThemedSelect from '../../UI/Select';
 
 // Roles that require email verification by default (big roles)
 const HIGH_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'closer_manager', 'operations_manager', 'manager'];
@@ -116,7 +117,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
 
       {/* Role */}
       <FormField label="Role" required error={errors.role_id}>
-        <select name="role_id" value={formData.role_id}
+        <ThemedSelect name="role_id" value={formData.role_id}
           onChange={handleInputChange} className="input">
           <option value="">— Select a role —</option>
           {roles.map(role => (
@@ -124,7 +125,7 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
               {role.name}{role.level ? ` (${role.level.replace(/_/g,' ')})` : ''}
             </option>
           ))}
-        </select>
+        </ThemedSelect>
       </FormField>
       {selectedRole && (
         <p className="text-xs -mt-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -156,26 +157,26 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
       {!user && (
         <FormField label="Company" required error={errors.company_id}
           hint="Assign this user to a company">
-          <select name="company_id" value={formData.company_id}
+          <ThemedSelect name="company_id" value={formData.company_id}
             onChange={handleInputChange} disabled={companiesLoading} className="input">
             <option value="">Select a company</option>
             {companies.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-          </select>
+          </ThemedSelect>
         </FormField>
       )}
 
       {/* Company — EDIT MODE */}
       {user && (
         <FormField label="Company" hint="Reassign user to a different company">
-          <select name="company_id" value={formData.company_id}
+          <ThemedSelect name="company_id" value={formData.company_id}
             onChange={handleInputChange} disabled={companiesLoading} className="input">
             <option value="">Keep current company</option>
             {companies.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-          </select>
+          </ThemedSelect>
         </FormField>
       )}
 

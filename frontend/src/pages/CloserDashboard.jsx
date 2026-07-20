@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { transferPhone } from "../utils/phone";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
+import ThemedSelect from '../components/UI/Select';
 import {
   TrendingUp, DollarSign, Target, Clock,
   CheckCircle, XCircle, Plus, Hash, User, Car, Phone, Search,
@@ -553,10 +554,10 @@ const CloserDashboard = () => {
               {cancelTarget.customer_name || 'Sale'}{cancelTarget.reference_no ? ` · #${cancelTarget.reference_no}` : ''} — a reason is required and is recorded in the audit history.
             </p>
             <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
-            <select value={cancelKey} onChange={e => setCancelKey(e.target.value)} className="input text-sm w-full mb-3">
+            <ThemedSelect value={cancelKey} onChange={e => setCancelKey(e.target.value)} className="input text-sm w-full mb-3">
               <option value="">— pick a reason —</option>
               {activeReasons.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
-            </select>
+            </ThemedSelect>
             <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Note (optional)</label>
             <AutoResizeTextarea value={cancelNote} onChange={e => setCancelNote(e.target.value)} rows={2}
               className="input text-sm w-full mb-3" placeholder="Anything compliance should know…" />
@@ -693,11 +694,11 @@ const CloserDashboard = () => {
               </strong>
             </p>
             <label className="block text-sm font-medium text-text-secondary mb-1">Disposition</label>
-            <select value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
+            <ThemedSelect value={dispoVal} onChange={e => setDispoVal(e.target.value)} className="input mb-3">
               {DISPOS.map(d => (
                 <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>
               ))}
-            </select>
+            </ThemedSelect>
             <label className="block text-sm font-medium text-text-secondary mb-1">Notes (optional)</label>
             <AutoResizeTextarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
               placeholder="Any notes about this disposition…" minRows={2} maxRows={6} className="input mb-3" />

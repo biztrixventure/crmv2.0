@@ -88,10 +88,10 @@ const BulkByIdPanel = ({ fields, onDone }) => {
               </span>
             ))}
         </div>
-        <select value={addPick} onChange={e => e.target.value && addCol(e.target.value)} className="input text-sm">
+        <ThemedSelect value={addPick} onChange={e => e.target.value && addCol(e.target.value)} className="input text-sm">
           <option value="">+ Add a column…</option>
           {available.map(f => <option key={f.id || f.name} value={f.name}>{f.label || f.name} ({f.name})</option>)}
-        </select>
+        </ThemedSelect>
       </div>
 
       <div>
@@ -488,10 +488,10 @@ const DataCleanup = () => {
               ))}
           </div>
           <div className="flex items-center gap-2">
-            <select value={addPick} onChange={e => { if (e.target.value) addField(e.target.value); }} className="input text-sm flex-1">
+            <ThemedSelect value={addPick} onChange={e => { if (e.target.value) addField(e.target.value); }} className="input text-sm flex-1">
               <option value="">+ Add a field…</option>
               {available.map(f => <option key={f.id || f.name} value={f.name}>{f.label || f.name} ({f.name})</option>)}
-            </select>
+            </ThemedSelect>
             {available.length > 0 && (
               <button type="button" onClick={() => { setSearchFields((fields || []).map(f => ({ name: f.name, field_type: f.field_type, label: f.label || f.name }))); resetSearch(); }}
                 className="text-xs font-bold px-2.5 py-2 rounded-lg flex items-center gap-1 flex-shrink-0" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }} title="Add all fields">

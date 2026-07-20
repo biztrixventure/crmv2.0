@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ThemedSelect from '../../UI/Select';
 import {
   RefreshCw, Plus, Trash2, Info, AlertTriangle, RotateCcw, X,
   ShieldCheck, ShieldAlert, Eye, EyeOff, Lightbulb, Clock,
@@ -425,14 +426,14 @@ const ResellRules = ({ config, scope, onSave }) => {
                 aria-label={`Intent label for ${intent.key}`}
                 placeholder="Display label"
               />
-              <select
+              <ThemedSelect
                 value={intent.emphasis || 'info'}
                 onChange={(e) => updateIntent(idx, { emphasis: e.target.value })}
                 className="input text-xs py-1.5"
                 style={{ minWidth: 140 }}
                 aria-label={`Emphasis for ${intent.key}`}>
                 {INTENT_EMPHASIS.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
-              </select>
+              </ThemedSelect>
               <button type="button" onClick={() => setRemoveIdx(idx)}
                 className="p-2 rounded-lg hover:bg-error-50 transition-colors flex-shrink-0"
                 aria-label={`Remove intent ${intent.label}`}

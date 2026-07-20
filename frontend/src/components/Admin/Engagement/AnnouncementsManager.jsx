@@ -5,6 +5,7 @@ import RichTextEditor from '../../UI/RichTextEditor';
 import { stripHtml } from '../../../utils/sanitizeHtml';
 import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
+import ThemedSelect from '../../UI/Select';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -49,9 +50,9 @@ const Modal = ({ row, reference, onClose, onSave }) => {
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
-              <select value={form.priority} onChange={e => set('priority', e.target.value)} className="input">
+              <ThemedSelect value={form.priority} onChange={e => set('priority', e.target.value)} className="input">
                 <option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option>
-              </select>
+              </ThemedSelect>
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Re-show (hrs)</label>

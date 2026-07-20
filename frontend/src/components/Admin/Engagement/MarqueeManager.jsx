@@ -4,6 +4,7 @@ import { Button, Alert, Badge } from '../../UI';
 import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import MarqueeStrip from '../../Engagement/MarqueeStrip';
+import ThemedSelect from '../../UI/Select';
 
 const blank = { byline: '📢 NEWS:', content: '', speed: 'normal', bg_color: '#1e40af', text_color: '#ffffff', target_company_ids: [], target_roles: [], target_user_ids: [], starts_at: '', ends_at: '', is_active: true };
 
@@ -41,7 +42,7 @@ const Modal = ({ row, reference, onClose, onSave }) => {
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Byline <span style={{ color: '#ef4444' }}>*</span></label>
               <input value={form.byline} onChange={e => set('byline', e.target.value)} className="input" placeholder="🔥 BREAKING:" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Speed</label>
-              <select value={form.speed} onChange={e => set('speed', e.target.value)} className="input"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></div>
+              <ThemedSelect value={form.speed} onChange={e => set('speed', e.target.value)} className="input"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></ThemedSelect></div>
           </div>
           <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Content <span style={{ color: '#ef4444' }}>*</span></label>
             <input value={form.content} onChange={e => set('content', e.target.value)} className="input" placeholder="The scrolling message…" /></div>

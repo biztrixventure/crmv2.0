@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Copy, Check, SlidersHorizontal, Plus, Trash2, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 import {
   SALE_COPY_FIELDS, FIELD_BY_KEY, COPY_SEPARATORS, DEFAULT_PRESET,
   buildCopyString, readPresets,
@@ -130,9 +131,9 @@ function CopyPresetManager({ initial, onClose, onSaved }) {
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input value={sel.name} onChange={e => patch(p => ({ ...p, name: e.target.value }))} placeholder="Button name (e.g. Silverton)" style={{ ...ctrl, flex: 1 }} />
-                  <select value={sel.sep} onChange={e => patch(p => ({ ...p, sep: e.target.value }))} style={ctrl} title="How values are joined">
+                  <ThemedSelect value={sel.sep} onChange={e => patch(p => ({ ...p, sep: e.target.value }))} style={ctrl} title="How values are joined">
                     {COPY_SEPARATORS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                  </select>
+                  </ThemedSelect>
                 </div>
 
                 <div>
@@ -150,10 +151,10 @@ function CopyPresetManager({ initial, onClose, onSaved }) {
                     ))}
                   </div>
                   <div className="flex gap-2 mt-2">
-                    <select value={addKey} onChange={e => addField(e.target.value)} style={{ ...ctrl, flex: 1 }}>
+                    <ThemedSelect value={addKey} onChange={e => addField(e.target.value)} style={{ ...ctrl, flex: 1 }}>
                       <option value="">+ Add a field…</option>
                       {SALE_COPY_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-                    </select>
+                    </ThemedSelect>
                   </div>
                 </div>
 

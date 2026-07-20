@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { LayoutTemplate, Save, Users, Trash2, Check, X } from 'lucide-react';
 import client from '../../../api/client';
 import { clearDrawerLayoutCache } from '../../../hooks/useDrawerLayout';
+import ThemedSelect from '../../UI/Select';
 
 const RV_TYPES = ['sale', 'transfer', 'callback'];
 
@@ -110,12 +111,12 @@ export default function RecordViewTemplates({ uid, userRole, userName, companyId
 
       {/* Apply row */}
       <div className="flex items-center gap-2 flex-wrap mb-2">
-        <select value={sel} onChange={e => setSel(e.target.value)} className="input text-sm py-1.5" style={{ minWidth: 180 }}>
+        <ThemedSelect value={sel} onChange={e => setSel(e.target.value)} className="input text-sm py-1.5" style={{ minWidth: 180 }}>
           <option value="">{templates.length ? 'Select a template…' : 'No templates yet'}</option>
           {templates.map(t => (
             <option key={t.id} value={t.id}>{t.name} ({Object.keys(t.layouts || {}).join('/') || '—'})</option>
           ))}
-        </select>
+        </ThemedSelect>
         <button type="button" onClick={applyToThisUser} disabled={busy || !sel} className={btn}
           style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-700)' }}>
           <Check size={12} /> Apply to {userName}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import ThemedSelect from '../../UI/Select';
 import {
   MessageSquare, Activity, Users, Lock, Unlock, Trash2, Pencil, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
@@ -276,10 +277,10 @@ const ConversationsTab = ({ openId, setOpenId }) => {
     <div>
       {/* Company / specific-user scope */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <select value={companyId} onChange={e => { setCompanyId(e.target.value); setSelectedUser(null); }} className="input" style={{ maxWidth: 240 }}>
+        <ThemedSelect value={companyId} onChange={e => { setCompanyId(e.target.value); setSelectedUser(null); }} className="input" style={{ maxWidth: 240 }}>
           <option value="">All companies</option>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        </ThemedSelect>
         {selectedUser ? (
           <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-2 rounded-lg" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
             {selectedUser.name}<button onClick={() => setSelectedUser(null)} title="Clear user"><X size={13} /></button>
@@ -489,11 +490,11 @@ const BroadcastTab = () => {
         </div>
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Audience</label>
-          <select value={form.target_type} onChange={e => set('target_type', e.target.value)} className="input">
+          <ThemedSelect value={form.target_type} onChange={e => set('target_type', e.target.value)} className="input">
             <option value="all">Everyone</option>
             <option value="company">Specific companies</option>
             <option value="role">Specific roles</option>
-          </select>
+          </ThemedSelect>
         </div>
         {form.target_type === 'company' && (
           <div className="flex flex-wrap gap-2">
@@ -760,10 +761,10 @@ const GuestsTab = () => {
         <h3 className="font-bold text-sm mb-3 flex items-center gap-2" style={{ color: 'var(--color-text)' }}><UserPlus size={16} /> Create a guest link</h3>
         <div className="flex flex-col sm:flex-row gap-2">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Guest name (e.g. John — Vendor)" className="input flex-1" />
-          <select value={groupId} onChange={e => setGroupId(e.target.value)} className="input sm:w-64">
+          <ThemedSelect value={groupId} onChange={e => setGroupId(e.target.value)} className="input sm:w-64">
             <option value="">Pick a group…</option>
             {groups.map(g => <option key={g.id} value={g.id}>{convName(g)}</option>)}
-          </select>
+          </ThemedSelect>
           <Button onClick={create} disabled={creating} className="whitespace-nowrap">{creating ? 'Creating…' : 'Create link'}</Button>
         </div>
         <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -912,16 +913,16 @@ const ColorsTab = () => {
         <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Apply to entire company</p>
           <div className="flex items-center gap-2 flex-wrap">
-            <select value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1">
+            <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1">
               <option value="">— pick a company —</option>
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="input text-sm py-1">
+            </ThemedSelect>
+            <ThemedSelect value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="input text-sm py-1">
               <option value="">All roles</option>
               {['fronter', 'closer', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin', 'compliance_manager'].map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
-            </select>
+            </ThemedSelect>
             <button onClick={applyCompany} disabled={!companyId}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40"
               style={{ background: 'var(--gradient-sidebar)' }}>

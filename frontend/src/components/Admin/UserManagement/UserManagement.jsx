@@ -5,6 +5,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useUsers } from '../../../hooks/useUsers';
 import UserList from './UserList';
 import UserModal from './UserModal';
+import ThemedSelect from '../../UI/Select';
 
 /**
  * UserManagement Component
@@ -124,7 +125,7 @@ const UserManagement = () => {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="input flex-1 min-w-64"
         />
-        <select
+        <ThemedSelect
           value={filterRole}
           onChange={(e) => setFilterRole(e.target.value)}
           className="input"
@@ -136,7 +137,7 @@ const UserManagement = () => {
           <option value="Operations">Operations</option>
           <option value="Fronter">Fronter</option>
           <option value="Closer">Closer</option>
-        </select>
+        </ThemedSelect>
       </div>
 
       {/* Error message */}

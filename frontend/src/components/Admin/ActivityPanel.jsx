@@ -13,6 +13,7 @@
  * Server aggregates refresh every 60s; the presence layer updates instantly.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import ThemedSelect from '../UI/Select';
 import {
   ChevronLeft, ChevronRight, X, Search, Users, Activity, Clock, RefreshCw,
   Monitor, MapPin, Zap, TrendingUp, TrendingDown,
@@ -285,14 +286,14 @@ const ActivityPanel = () => {
             ))}
           </div>
           <div className="flex gap-1.5">
-            <select value={roleF} onChange={e => setRoleF(e.target.value)} className="input text-xs py-1 flex-1">
+            <ThemedSelect value={roleF} onChange={e => setRoleF(e.target.value)} className="input text-xs py-1 flex-1">
               <option value="">All roles</option>
               {roles.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
-            </select>
-            <select value={coF} onChange={e => setCoF(e.target.value)} className="input text-xs py-1 flex-1">
+            </ThemedSelect>
+            <ThemedSelect value={coF} onChange={e => setCoF(e.target.value)} className="input text-xs py-1 flex-1">
               <option value="">All companies</option>
               {companies.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </ThemedSelect>
           </div>
         </div>
 

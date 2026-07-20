@@ -3,6 +3,7 @@ import { UserPlus, Eye, EyeOff, Shield, Headphones } from 'lucide-react';
 import Modal from '../../UI/Modal';
 import Button from '../../UI/Button';
 import client from '../../../api/client';
+import ThemedSelect from '../../UI/Select';
 
 const LEVEL_COLORS = {
   fronter:            { bg: '#10b981', light: 'rgba(16,185,129,0.1)',  label: 'Fronter' },
@@ -215,10 +216,10 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
               <label className="block text-xs font-semibold text-text-secondary mb-1">
                 Access template <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>(optional)</span>
               </label>
-              <select className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}>
+              <ThemedSelect className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}>
                 <option value="">None — use role defaults</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              </ThemedSelect>
               <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                 Applies a saved permission + feature set on top of the role. Fine-tune later in the user's Permissions tab.
               </p>
