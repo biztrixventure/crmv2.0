@@ -19,6 +19,7 @@ import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import { salePaidTenure } from '../../utils/saleTenure';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName, downloadCSV,
@@ -585,7 +586,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
                       Cancellation Date <span className="text-red-500">*</span>
                     </label>
-                    <input type="date" value={editCancelDate}
+                    <ThemedDate value={editCancelDate}
                       onChange={e => setEditCancelDate(e.target.value)}
                       className="input text-sm w-full"
                       style={{

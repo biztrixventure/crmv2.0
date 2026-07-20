@@ -16,6 +16,7 @@ import VehicleSelect from "../components/Form/VehicleSelect";
 import CopyableNumber from "../components/UI/CopyableNumber";
 import ThemedSelect from '../components/UI/Select';
 import { transferPhone } from "../utils/phone";
+import ThemedDate from '../components/UI/ThemedDate';
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
@@ -2024,8 +2025,8 @@ const StaffShell = () => {
             <label className="block text-sm font-medium text-text-secondary mb-1">
               Date &amp; Time <span className="text-error-500">*</span>
             </label>
-            <input
-              type="datetime-local"
+            <ThemedDate
+              withTime
               value={callbackAt}
               onChange={e => setCallbackAt(e.target.value)}
               min={new Date().toISOString().slice(0, 16)}

@@ -7,6 +7,7 @@ import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
 
 // Plain-text preview for compact UI surfaces (table cells, lists). Mirrors
 // RichView's "has tags?" heuristic so legacy plain-text descriptions stay
@@ -109,9 +110,9 @@ const Modal = ({ row, reference, onClose, onSave, viewer }) => {
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Starts <span style={{ color: '#ef4444' }}>*</span></label>
-              <input type="datetime-local" value={form.starts_at} onChange={e => set('starts_at', e.target.value)} className="input" /></div>
+              <ThemedDate withTime value={form.starts_at} onChange={e => set('starts_at', e.target.value)} className="input" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Ends <span style={{ color: '#ef4444' }}>*</span></label>
-              <input type="datetime-local" value={form.ends_at} onChange={e => set('ends_at', e.target.value)} className="input" /></div>
+              <ThemedDate withTime value={form.ends_at} onChange={e => set('ends_at', e.target.value)} className="input" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Status</label>
               <ThemedSelect value={form.status} onChange={e => set('status', e.target.value)} className="input"><option value="draft">Draft</option><option value="active">Active</option><option value="ended">Ended</option></ThemedSelect></div>
           </div>

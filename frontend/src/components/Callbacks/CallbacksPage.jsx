@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Plus, Clock, CheckCircle, XCircle, PhoneOff,
   Trash2, Edit2, Bell, X, Calendar, Voicemail, ChevronRight,
@@ -327,8 +328,8 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
                 : <span className="ml-1 font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>your time ({getTzAbbr(agentTz)})</span>}
               <span className="text-red-500 ml-1">*</span>
             </label>
-            <input value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
-              className="input" type="datetime-local" required />
+            <ThemedDate value={form.callback_at} onChange={e => setForm(p => ({...p, callback_at: e.target.value}))}
+              className="input" withTime required />
             <div className="flex flex-wrap gap-1.5 mt-2">
               {[
                 { label: '+5 min',   ms: 5  * 60 * 1000 },
@@ -812,25 +813,25 @@ const CallbacksPage = ({ user }) => {
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Scheduled From</label>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Scheduled To</label>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Created From</label>
-            <input type="date" value={createdFrom} onChange={e => setCreatedFrom(e.target.value)}
+            <ThemedDate value={createdFrom} onChange={e => setCreatedFrom(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Created To</label>
-            <input type="date" value={createdTo} onChange={e => setCreatedTo(e.target.value)}
+            <ThemedDate value={createdTo} onChange={e => setCreatedTo(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           {(priority || search || dateFrom || dateTo || createdFrom || createdTo) && (

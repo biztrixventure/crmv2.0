@@ -6,6 +6,7 @@ import client from '../../api/client';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 /*
  * BulkStatusUpdate
@@ -352,7 +353,7 @@ export default function BulkStatusUpdate() {
                           )}
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <input type="date"
+                          <ThemedDate
                             value={rs.date || ''}
                             onChange={e => setRow(s.id, { date: e.target.value })}
                             className="input text-xs py-1"
@@ -453,7 +454,7 @@ export default function BulkStatusUpdate() {
                     <Calendar size={11} className="inline mr-1" />
                     Cancellation date for all rows {!isCancelStatus && '(optional)'}
                   </label>
-                  <input type="date" value={bulkDate}
+                  <ThemedDate value={bulkDate}
                     onChange={e => setBulkDate(e.target.value)}
                     className="input text-sm" />
                   <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>

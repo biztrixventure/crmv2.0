@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Clock, CheckCircle, XCircle, PhoneOff,
   Calendar, User, Filter, RefreshCw, Voicemail, X,
@@ -593,10 +594,10 @@ const CallbacksOverview = ({ user }) => {
           <div className="flex items-center gap-1.5">
             <Calendar size={13} style={{ color: 'var(--color-text-tertiary)' }} />
             <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Scheduled:</span>
-            <input type="date" value={dateFrom} onChange={e => handleDateFrom(e.target.value)}
+            <ThemedDate value={dateFrom} onChange={e => handleDateFrom(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
             <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
-            <input type="date" value={dateTo} onChange={e => handleDateTo(e.target.value)}
+            <ThemedDate value={dateTo} onChange={e => handleDateTo(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
           </div>
 
@@ -614,10 +615,10 @@ const CallbacksOverview = ({ user }) => {
               }}>
               Today
             </button>
-            <input type="date" value={createdFrom} onChange={e => handleCreatedFrom(e.target.value)}
+            <ThemedDate value={createdFrom} onChange={e => handleCreatedFrom(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
             <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>–</span>
-            <input type="date" value={createdTo} onChange={e => handleCreatedTo(e.target.value)}
+            <ThemedDate value={createdTo} onChange={e => handleCreatedTo(e.target.value)}
               className="input py-1.5 text-sm h-auto" style={{ minWidth: 130 }} />
           </div>
         </div>

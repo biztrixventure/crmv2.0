@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, CheckCircle, RefreshCw, Clock, SkipForward, PhoneCall,
   RotateCcw, Filter, Search, X, Calendar, Send, ChevronDown,
@@ -401,7 +402,7 @@ const AssignedNumbersList = ({ user }) => {
         {/* Day filter */}
         <div className="flex items-center gap-2">
           <Calendar size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-          <input type="date" value={dayFilter} onChange={e => setDayFilter(e.target.value)}
+          <ThemedDate value={dayFilter} onChange={e => setDayFilter(e.target.value)}
             className="input text-xs py-1.5" style={{ width: 155 }} />
           {dayFilter && (
             <button onClick={() => setDayFilter('')}

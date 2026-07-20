@@ -5,6 +5,7 @@ import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import MarqueeStrip from '../../Engagement/MarqueeStrip';
 import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
 
 const blank = { byline: '📢 NEWS:', content: '', speed: 'normal', bg_color: '#1e40af', text_color: '#ffffff', target_company_ids: [], target_roles: [], target_user_ids: [], starts_at: '', ends_at: '', is_active: true };
 
@@ -54,9 +55,9 @@ const Modal = ({ row, reference, onClose, onSave }) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Starts</label>
-              <input type="datetime-local" value={form.starts_at} onChange={e => set('starts_at', e.target.value)} className="input" /></div>
+              <ThemedDate withTime value={form.starts_at} onChange={e => set('starts_at', e.target.value)} className="input" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Ends</label>
-              <input type="datetime-local" value={form.ends_at} onChange={e => set('ends_at', e.target.value)} className="input" /></div>
+              <ThemedDate withTime value={form.ends_at} onChange={e => set('ends_at', e.target.value)} className="input" /></div>
           </div>
           <AudienceTargetPicker value={form} onChange={v => setForm(f => ({ ...f, ...v }))} reference={reference} />
           <label className="flex items-center gap-2 cursor-pointer select-none">

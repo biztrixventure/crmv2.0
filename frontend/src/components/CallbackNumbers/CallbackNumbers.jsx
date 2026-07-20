@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Plus, Clock, CheckCircle2, XCircle, PhoneOff,
   PhoneCall, AlertCircle, RefreshCw, Eye, LogIn,
@@ -205,7 +206,7 @@ const AttemptModal = ({ number, onClose, onSave }) => {
               <label className="block text-sm font-semibold text-text-secondary mb-1.5">
                 Schedule Next Call <span className="text-error-500">*</span>
               </label>
-              <input type="datetime-local" value={callbackAt} onChange={e => setCallbackAt(e.target.value)}
+              <ThemedDate withTime value={callbackAt} onChange={e => setCallbackAt(e.target.value)}
                 className="input" min={new Date().toISOString().slice(0, 16)} />
             </div>
           )}

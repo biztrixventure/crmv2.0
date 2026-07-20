@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Gauge, ListTodo, CheckCircle2, TrendingUp, CalendarDays, Users, ArrowRight } from 'lucide-react';
 import client from '../../api/client';
+import ThemedDate from '../UI/ThemedDate';
 
 export const WT_META = {
   tra:          { label: 'TRA',      sub: 'Transfers',      color: '#2563eb' },
@@ -332,7 +333,7 @@ function Welcome({ name, sub, date, setDate, methods, busy }) {
       </div>
       <label className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.16)' }}>
         <CalendarDays size={16} className="text-white" />
-        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-transparent text-white text-sm font-semibold outline-none" style={{ colorScheme: 'dark' }} />
+        <ThemedDate value={date} onChange={e => setDate(e.target.value)} className="bg-transparent text-white text-sm font-semibold outline-none" style={{ colorScheme: 'dark' }} />
         {date && <button onClick={() => setDate('')} className="text-white/80 text-xs font-bold">clear</button>}
       </label>
     </div>

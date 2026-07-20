@@ -3,6 +3,7 @@ import { ET_ZONE } from '../../utils/timezone';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 // Fetch EVERY page of a paginated compliance list for export — no 5,000 cap.
 // Loops 5,000-row pages until the server's `total` is reached (or a short page
@@ -234,21 +235,27 @@ export const Filters = ({ onSubmit, children }) => (
 
 // A filter text input. Pass `search` to get the pill + magnifier treatment
 // used by the modern FilterBar; otherwise a plain labelled field.
-export const FInput = ({ label, search = false, ...props }) => (
-  <div className="flex flex-col gap-1 min-w-[140px]">
-    {label && <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
-    {search ? (
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
-        <input {...props} className="text-sm w-full outline-none"
-          style={{ padding: '8px 12px 8px 34px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-      </div>
-    ) : (
-      <input {...props} className="text-sm outline-none"
-        style={{ padding: '8px 12px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-    )}
-  </div>
-);
+export const FInput = ({ label, search = false, type, ...props }) => {
+  const isDate = type === 'date' || type === 'datetime-local';
+  return (
+    <div className="flex flex-col gap-1 min-w-[140px]">
+      {label && <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>}
+      {isDate ? (
+        <ThemedDate {...props} withTime={type === 'datetime-local'}
+          style={{ borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', ...(props.style || {}) }} />
+      ) : search ? (
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input type={type} {...props} className="text-sm w-full outline-none"
+            style={{ padding: '8px 12px 8px 34px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+        </div>
+      ) : (
+        <input type={type} {...props} className="text-sm outline-none"
+          style={{ padding: '8px 12px', borderRadius: 999, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+      )}
+    </div>
+  );
+};
 
 export const FSelect = ({ label, children, ...props }) => (
   <div className="flex flex-col gap-1 min-w-[150px]">

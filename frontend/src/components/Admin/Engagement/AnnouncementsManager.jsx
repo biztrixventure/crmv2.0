@@ -6,6 +6,7 @@ import { stripHtml } from '../../../utils/sanitizeHtml';
 import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -60,7 +61,7 @@ const Modal = ({ row, reference, onClose, onSave }) => {
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Expires at</label>
-              <input type="datetime-local" value={form.expires_at} onChange={e => set('expires_at', e.target.value)} className="input" />
+              <ThemedDate withTime value={form.expires_at} onChange={e => set('expires_at', e.target.value)} className="input" />
             </div>
           </div>
           <p className="text-[11px] -mt-2" style={{ color: 'var(--color-text-tertiary)' }}>Re-show: pops up again every N hours after an agent dismisses it. Leave blank to show once.</p>

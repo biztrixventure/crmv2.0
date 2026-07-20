@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Clock, Play, Pause, Loader2, CheckCircle2, Circle, X, Search, RefreshCw,
   Phone, User, Calendar, Headphones, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
@@ -253,8 +254,8 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
           {manualMode && (
             <div className="p-2.5 rounded-xl mb-3 flex items-end gap-2 flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex-1 min-w-[130px]"><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>Phone</label><input value={mPhone} onChange={e => setMPhone(e.target.value)} inputMode="tel" onKeyDown={e => e.key === 'Enter' && runManualSearch(mPhone, mFrom, mTo)} style={{ ...inp }} /></div>
-              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>From</label><input type="date" value={mFrom} onChange={e => setMFrom(e.target.value)} style={inp} /></div>
-              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>To</label><input type="date" value={mTo} onChange={e => setMTo(e.target.value)} style={inp} /></div>
+              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>From</label><ThemedDate value={mFrom} onChange={e => setMFrom(e.target.value)} style={inp} /></div>
+              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>To</label><ThemedDate value={mTo} onChange={e => setMTo(e.target.value)} style={inp} /></div>
               <button onClick={() => runManualSearch(mPhone, mFrom, mTo)} disabled={manualBusy} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{manualBusy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Search</button>
               <button onClick={() => { setManualMode(false); setManualCands(null); setChosen((data?.existing || []).map(c => c.recording_id)); }} className="text-xs font-semibold px-2 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Back</button>
             </div>
@@ -340,8 +341,8 @@ function PhoneSearchView() {
           </div>
         </Field>
         {type !== 'recording_id' && <>
-          <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} /></Field>
-          <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} /></Field>
+          <Field label="From"><ThemedDate value={from} onChange={e => setFrom(e.target.value)} style={inp} /></Field>
+          <Field label="To"><ThemedDate value={to} onChange={e => setTo(e.target.value)} style={inp} /></Field>
         </>}
         <button onClick={search} disabled={loading} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Search
@@ -541,8 +542,8 @@ function QueueView({ companyList }) {
             <input value={filters.search} onChange={e => setF('search', e.target.value)} placeholder="Search anything — name, phone, closer, company, product, ref, code, rec id" style={{ ...inp, paddingLeft: 30, minWidth: 340 }} />
           </div>
         </Field>
-        <Field label="From"><input type="date" value={filters.date_from} onChange={e => setF('date_from', e.target.value)} style={inp} /></Field>
-        <Field label="To"><input type="date" value={filters.date_to} onChange={e => setF('date_to', e.target.value)} style={inp} /></Field>
+        <Field label="From"><ThemedDate value={filters.date_from} onChange={e => setF('date_from', e.target.value)} style={inp} /></Field>
+        <Field label="To"><ThemedDate value={filters.date_to} onChange={e => setF('date_to', e.target.value)} style={inp} /></Field>
         <Field label="Company">
           <ThemedSelect value={filters.company_id} onChange={e => setF('company_id', e.target.value)} style={inp}>
             <option value="">All companies</option>

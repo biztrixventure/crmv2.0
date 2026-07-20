@@ -10,6 +10,7 @@ import VehicleSelect from '../Form/VehicleSelect';
 import CalendarDateInput from '../Form/CalendarDateInput';
 import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
 import { useUserColors } from '../../hooks/useUserColors';
+import ThemedDate from '../UI/ThemedDate';
 
 const TransferFormModal = ({
   isOpen, onClose,
@@ -317,7 +318,7 @@ const TransferFormModal = ({
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     Transfer Date
                   </label>
-                  <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+                  <ThemedDate value={transferDate} onChange={e => setTransferDate(e.target.value)}
                     className="input" />
                   {transferDate && transferDate !== origDate && (
                     <p className="text-xs mt-1" style={{ color: 'var(--color-warning-600)' }}>

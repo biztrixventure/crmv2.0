@@ -15,8 +15,9 @@ import CalendarDateInput from '../Form/CalendarDateInput';
 import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
 import { useUserColors } from '../../hooks/useUserColors';
 import { isPostDateDispo } from '../../utils/dispositions';
+import ThemedDate from '../UI/ThemedDate';
 
-// ISO timestamp → <input type="datetime-local"> value (local wall-clock).
+// ISO timestamp → <ThemedDate withTime> value (local wall-clock).
 const isoToLocalInput = (iso) => {
   if (!iso) return '';
   const d = new Date(iso);
@@ -814,7 +815,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
               style={{ color: 'var(--color-warning-800, #92400e)' }}>
               Charging Date &amp; Time <span style={{ color: '#ef4444' }}>*</span>
             </label>
-            <input type="datetime-local" value={chargeAt}
+            <ThemedDate withTime value={chargeAt}
               onChange={e => { setChargeAt(e.target.value); if (errors.__charge_at) setErrors(p => ({ ...p, __charge_at: '' })); }}
               className={`input text-sm ${errors.__charge_at ? 'ring-2 ring-red-400/60 border-red-400' : ''}`} style={{ maxWidth: 280 }} />
             {errors.__charge_at

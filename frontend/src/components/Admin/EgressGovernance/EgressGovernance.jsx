@@ -3,6 +3,7 @@ import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, T
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
 
 // Searchable "pick a user" control (name → id) backed by the recipients
 // directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
@@ -138,8 +139,8 @@ function AuditTab() {
             <option value="">All</option><option value="allowed">Allowed</option><option value="denied">Denied</option>
           </ThemedSelect>
         </label>
-        <label className="text-xs">From<input type="date" value={f.date_from} onChange={e => setFilter('date_from', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
-        <label className="text-xs">To<input type="date" value={f.date_to} onChange={e => setFilter('date_to', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
+        <label className="text-xs">From<ThemedDate value={f.date_from} onChange={e => setFilter('date_from', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
+        <label className="text-xs">To<ThemedDate value={f.date_to} onChange={e => setFilter('date_to', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
         <button onClick={load} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} events</span>
       </div>

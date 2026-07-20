@@ -3,6 +3,7 @@ import { X, Save, AlertTriangle, FileText, Layers, Pencil, Eye, EyeOff } from 'l
 import { Button } from '../UI';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 /* LeadEditModal — superadmin-only universal editor for transfer / sale /
    callback records. Surfaces every column on the row + lets the user edit
@@ -34,7 +35,7 @@ const FROZEN = new Set([
 const JSON_COLS = new Set(['form_data', 'data', 'changes', 'edit_history']);
 
 // Fields rendered as <ThemedSelect> with a fixed list of options. Other fields
-// default to <input type=text>.
+// default to <ThemedDate type=text>.
 const ENUMS = {
   transfers: {
     status: ['pending', 'assigned', 'completed', 'cancelled', 'rejected'],
@@ -138,7 +139,7 @@ export default function LeadEditModal({ kind, record, onSaved, onClose }) {
     }
     if (dtType === 'datetime-local') {
       return (
-        <input type="datetime-local"
+        <input withTime
           value={toLocalDT(draft[k])}
           onChange={(e) => setField(k, e.target.value)}
           className="input text-sm py-1.5 w-full" />
@@ -146,7 +147,7 @@ export default function LeadEditModal({ kind, record, onSaved, onClose }) {
     }
     if (dtType === 'date') {
       return (
-        <input type="date"
+        <ThemedDate
           value={draft[k] ? String(draft[k]).slice(0, 10) : ''}
           onChange={(e) => setField(k, e.target.value)}
           className="input text-sm py-1.5 w-full" />

@@ -8,6 +8,7 @@ import { AppHeader } from "../components/Layout";
 import { useNotifications } from "../hooks/useNotifications";
 import client from "../api/client";
 import ThemedSelect from '../components/UI/Select';
+import ThemedDate from '../components/UI/ThemedDate';
 
 const STATUS_BADGE = {
   open:                 'info',
@@ -205,8 +206,8 @@ const ComplianceDashboard = () => {
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </ThemedSelect>
             <div className="flex gap-2">
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input flex-1" title="From" />
-              <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="input flex-1" title="To" />
+              <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input flex-1" title="From" />
+              <ThemedDate value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="input flex-1" title="To" />
             </div>
             <button type="submit"
               className="lg:col-span-5 py-2 rounded-lg font-semibold text-sm text-white"

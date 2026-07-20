@@ -7,6 +7,7 @@ import SendBatchModal from '../../Distribution/SendBatchModal';
 import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
 import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
 import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic
@@ -461,8 +462,8 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
     const [lo = '', hi = ''] = value || [];
     return (
       <div className="grid grid-cols-2 gap-2">
-        <input type="date" value={lo} onChange={e => set([e.target.value, hi])} className="input text-sm" />
-        <input type="date" value={hi} onChange={e => set([lo, e.target.value])} className="input text-sm" />
+        <ThemedDate value={lo} onChange={e => set([e.target.value, hi])} className="input text-sm" />
+        <ThemedDate value={hi} onChange={e => set([lo, e.target.value])} className="input text-sm" />
       </div>
     );
   }
@@ -901,11 +902,11 @@ const DataAnalyzer = () => {
           </div>
           <div>
             <Label>From</Label>
-            <input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="input text-sm py-1.5" />
+            <ThemedDate value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="input text-sm py-1.5" />
           </div>
           <div>
             <Label>To</Label>
-            <input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="input text-sm py-1.5" />
+            <ThemedDate value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="input text-sm py-1.5" />
           </div>
           <div className="flex flex-wrap gap-1">
             {[['today', 'Today'], ['yest', 'Yesterday'], ['7d', '7d'], ['30d', '30d'], ['month', 'This month'], ['year', 'This year'], ['all', 'All']].map(([k, l]) => (

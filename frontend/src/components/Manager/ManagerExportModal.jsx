@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import { saleExportColumns, saleToRow } from '../Admin/BulkSaleUploader/saleColumnMapping';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 // CSV download (client-side, no row cap).
 function downloadCSV(rows, headers, filename) {
@@ -142,11 +143,11 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
                 From
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input mt-1" />
+                <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input mt-1" />
               </label>
               <label className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
                 To
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input mt-1" />
+                <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)} className="input mt-1" />
               </label>
             </div>
           )}

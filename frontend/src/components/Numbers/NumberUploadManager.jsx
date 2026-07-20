@@ -9,6 +9,7 @@
  *  5. View / delete existing lists
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Upload, Users, ListChecks, Trash2, ChevronDown, ChevronUp,
   Phone, X, CheckCircle, Plus, RefreshCw, Calendar, Map,
@@ -85,7 +86,7 @@ const ReassignModal = ({ list, fronters, companyId, onClose, onDone }) => {
           {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
         </ThemedSelect>
         <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Change day (optional)</label>
-        <input type="date" value={newDay} onChange={e => setNewDay(e.target.value)} className="input text-sm w-full mb-4" />
+        <ThemedDate value={newDay} onChange={e => setNewDay(e.target.value)} className="input text-sm w-full mb-4" />
         {err && <p className="text-xs text-red-600 mb-2">{err}</p>}
         <div className="flex gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>Cancel</button>
@@ -563,7 +564,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                     <Calendar size={12} />
                     Assignment Day
                   </label>
-                  <input type="date" value={assignDay} onChange={e => setAssignDay(e.target.value)}
+                  <ThemedDate value={assignDay} onChange={e => setAssignDay(e.target.value)}
                     className="input text-sm" />
                 </div>
               </div>
@@ -634,7 +635,7 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
             <option value="">All fronters</option>
             {fronters.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
           </ThemedSelect>
-          <input type="date" value={fDay} onChange={e => setFDay(e.target.value)} className="input text-xs py-1.5" style={{ width: 150 }} />
+          <ThemedDate value={fDay} onChange={e => setFDay(e.target.value)} className="input text-xs py-1.5" style={{ width: 150 }} />
           <ThemedSelect value={fStatus} onChange={e => setFStatus(e.target.value)} className="input text-xs py-1.5" style={{ minWidth: 120 }}>
             <option value="">Any status</option>
             <option value="new">New</option><option value="called">Called</option>

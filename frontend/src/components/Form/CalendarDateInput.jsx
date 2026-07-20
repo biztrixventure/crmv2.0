@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Calendar } from 'lucide-react';
+import ThemedDate from '../UI/ThemedDate';
 
 // Calendar-only date field used across the Sale + Transfer forms.
 //
@@ -11,7 +12,7 @@ import { Calendar } from 'lucide-react';
 //   • Manual typing is disabled — the only way to change the value is the
 //     calendar, which kills MM/DD vs DD/MM transposition errors before they
 //     ever reach Compliance.
-//   • Native <input type="date"> renders MM/DD/YYYY in en-US locale, which is
+//   • Native <ThemedDate> renders MM/DD/YYYY in en-US locale, which is
 //     the format we already display everywhere.
 const todayISO = () => new Date().toISOString().split('T')[0];
 
@@ -45,10 +46,9 @@ const CalendarDateInput = ({
       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
         <Calendar size={16} style={{ color: 'var(--color-text-tertiary)' }} />
       </div>
-      <input
+      <ThemedDate
         ref={ref}
         id={id}
-        type="date"
         value={value || (defaultToday ? todayISO() : '')}
         required={required}
         max={max || undefined}

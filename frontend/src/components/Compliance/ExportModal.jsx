@@ -3,6 +3,7 @@ import { Download } from 'lucide-react';
 import client from '../../api/client';
 import { Overlay, ModalBox, ModalHeader } from './shared';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
   const [dateFrom, setDateFrom]   = useState('');
@@ -82,11 +83,11 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="text-xs block mb-1" style={{ color: 'var(--color-text-tertiary)' }}>From</label>
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm w-full" />
+                <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm w-full" />
               </div>
               <div className="flex-1">
                 <label className="text-xs block mb-1" style={{ color: 'var(--color-text-tertiary)' }}>To</label>
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm w-full" />
+                <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm w-full" />
               </div>
             </div>
           </div>

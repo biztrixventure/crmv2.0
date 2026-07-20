@@ -1344,20 +1344,46 @@ select optgroup {
   color: var(--color-text);
 }
 
-/* ── FullCalendar (EventsCalendar) — rounded, theme-driven ────────────────
-   The lib draws a square bordered grid; clip it to a rounded card and round
-   the toolbar buttons so the calendar matches the rest of the rounded UI in
-   both the Compliance and SuperAdmin shells. */
-.biztrix-calendar .fc-scrollgrid {
+/* ── FullCalendar — rounded + theme-driven, EVERYWHERE ────────────────────
+   Targets bare `.fc` (not just one wrapper) so every FullCalendar instance in
+   the CRM matches the theme in light / dark / custom, with the same rounded
+   card + primary buttons as the Compliance calendar. FullCalendar reads its
+   own `--fc-*` custom properties, so we map them to our theme vars. */
+.fc {
+  --fc-border-color: var(--color-border);
+  --fc-page-bg-color: var(--color-surface);
+  --fc-neutral-bg-color: var(--color-bg-secondary);
+  --fc-today-bg-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --fc-now-indicator-color: var(--color-primary-600);
+  --fc-event-bg-color: var(--color-primary-600);
+  --fc-event-border-color: var(--color-primary-600);
+}
+.fc .fc-scrollgrid {
   border-radius: 14px;
   overflow: hidden;
-  border-color: var(--color-border);
 }
-.biztrix-calendar .fc .fc-button,
-.biztrix-calendar .fc .fc-button-primary {
+.fc .fc-button,
+.fc .fc-button-primary {
   border-radius: 10px !important;
+  background: var(--color-primary-600);
+  border-color: var(--color-primary-600);
+  color: #fff;
 }
-.biztrix-calendar .fc .fc-button-group > .fc-button:not(:first-child) {
-  margin-left: 4px;
+.fc .fc-button-primary:not(:disabled):hover {
+  background: var(--color-primary-700);
+  border-color: var(--color-primary-700);
 }
-.biztrix-calendar .fc .fc-toolbar-title { font-weight: 700; }
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background: var(--color-primary-800) !important;
+  border-color: var(--color-primary-800) !important;
+}
+.fc .fc-button-primary:disabled {
+  background: var(--color-primary-400);
+  border-color: var(--color-primary-400);
+}
+.fc .fc-button-group > .fc-button:not(:first-child) { margin-left: 4px; }
+.fc .fc-toolbar-title { font-weight: 700; color: var(--color-text); }
+.fc a,
+.fc .fc-col-header-cell-cushion,
+.fc .fc-daygrid-day-number { color: var(--color-text); }
+.fc .fc-col-header-cell-cushion { color: var(--color-text-secondary); }

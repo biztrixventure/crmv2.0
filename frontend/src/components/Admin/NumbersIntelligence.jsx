@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Search, Filter, RefreshCw, X, Calendar, Building2, Users,
   Link2, ChevronDown, Download, BarChart3, TrendingUp, Hash,
@@ -255,10 +256,10 @@ const NumbersIntelligence = () => {
           {/* Date range */}
           <div className="flex items-center gap-2">
             <Calendar size={13} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="input text-xs flex-1" placeholder="From" />
             <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="input text-xs flex-1" placeholder="To" />
           </div>
 

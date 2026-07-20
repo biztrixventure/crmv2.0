@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import ThemedDate from '../components/UI/ThemedDate';
 import {
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
@@ -778,9 +779,9 @@ function ReportsTab({ companyId, companyName = '' }) {
           {(data?.reviewers || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
         </ThemedSelect>
         <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
-        <input type="date" value={f.date_from} max={f.date_to} onChange={e => set('date_from', e.target.value)} style={inp} />
+        <ThemedDate value={f.date_from} max={f.date_to} onChange={e => set('date_from', e.target.value)} style={inp} />
         <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
-        <input type="date" value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
+        <ThemedDate value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
         <button onClick={() => {
             // THE deliverable: one row per reviewed fronter/closer — the users
@@ -1362,7 +1363,7 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
         <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Score the CRM day</span>
         <InfoTip w={320} text="The three sections that are already in the CRM: TRA (transfer calls), Closed Sales, and Unclosed Sales. Pick a past day, Load, then hand each section to your QA agents (equal split or one agent). Recordings attach automatically. RCM (raw dialer calls, never in the CRM) is the browser below." />
         <label className="flex items-center gap-1 text-xs ml-2" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} /> Day</label>
-        <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
+        <ThemedDate value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
         <button onClick={load} disabled={loading} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
           style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: loading ? 0.5 : 1 }}>
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Load day
@@ -1603,7 +1604,7 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
       </div>
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <label className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={14} />Date</label>
-        <input type="date" value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
+        <ThemedDate value={date} max={yesterday} onChange={e => setDate(e.target.value)} style={inp} />
         <button onClick={() => setDate(yesterday)} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Yesterday</button>
         <button onClick={load} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white"
           style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', opacity: loading ? 0.6 : 1 }}>
@@ -2210,9 +2211,9 @@ function CompletedTab({ managerView, companyId }) {
           ))}
         </div>
         <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />{singleDay ? 'on' : 'from'}</label>
-        <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} style={inp} />
+        <ThemedDate value={from} max={to} onChange={e => setFrom(e.target.value)} style={inp} />
         {!singleDay && <><label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
-        <input type="date" value={to} max={today} onChange={e => setTo(e.target.value)} style={inp} /></>}
+        <ThemedDate value={to} max={today} onChange={e => setTo(e.target.value)} style={inp} /></>}
         <button onClick={() => { if (singleDay) { const t = addDays(from, 6); setTo(t > today ? today : t); } else { setTo(from); } }}
           className="text-[11px] font-bold px-2 py-1 rounded" title={singleDay ? 'Switch to a date range' : 'Collapse to a single day'}
           style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{singleDay ? 'Range' : 'Single day'}</button>
@@ -2718,7 +2719,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
         </div>
         {/* date filter — view only the records whose call is on the chosen day */}
         <label className="flex items-center gap-1 text-xs ml-1" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} /> Date</label>
-        <input type="date" value={day} list="qa-queue-days" onChange={e => { setDay(e.target.value); setOpen(null); }} style={inp} />
+        <ThemedDate value={day} list="qa-queue-days" onChange={e => { setDay(e.target.value); setOpen(null); }} style={inp} />
         <datalist id="qa-queue-days">{availableDays.map(d => <option key={d} value={d} />)}</datalist>
         {day && <button onClick={() => setDay('')} className="text-[11px] font-bold px-2 py-1 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>All dates</button>}
         <button onClick={() => load({ silent: true })} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh">{loading && items.length ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} /> : <RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} />}</button>

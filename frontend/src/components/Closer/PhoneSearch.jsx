@@ -6,6 +6,7 @@ import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '..
 import ResellModal from './ResellModal';
 import ManualEntryModal from './ManualEntryModal';
 import CustomerHistoryBanner from './CustomerHistoryBanner';
+import ThemedDate from '../UI/ThemedDate';
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -240,8 +241,8 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
             </div>
           )}
 
-          <input
-            type="datetime-local"
+          <ThemedDate
+            withTime
             value={callbackAt}
             onChange={e => setCallbackAt(e.target.value)}
             className="input text-xs w-full"
