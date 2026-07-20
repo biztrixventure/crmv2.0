@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
 import ChromeTabs from '../components/UI/ChromeTabs';
+import DotGridBg from '../components/UI/DotGridBg';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
@@ -189,7 +190,8 @@ const ComplianceShell = () => {
   const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title="Compliance"
@@ -214,7 +216,7 @@ const ComplianceShell = () => {
       />
 
       <EngagementBanners />
-      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8">
+      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">
 
         {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
             Clicking a group jumps straight to its first tab (no dead clicks). */}
