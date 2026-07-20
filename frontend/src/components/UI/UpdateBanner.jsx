@@ -6,7 +6,7 @@ export default function UpdateBanner() {
     <div
       className="fixed top-0 left-0 right-0 z-[9999] flex items-center justify-between px-4 py-2.5 gap-3"
       style={{
-        background: "linear-gradient(90deg, #7A4820 0%, #C4894A 100%)",
+        background: "linear-gradient(90deg, var(--color-primary-700), var(--color-primary-500))",
         boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
       }}
     >

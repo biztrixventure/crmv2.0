@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Palette, Save, RotateCcw, Loader2, Check, Sun, Moon, Globe, Building2, Eraser } from 'lucide-react';
+import { Palette, Save, RotateCcw, Loader2, Check, Sun, Moon, Globe, Building2, Eraser, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { CORE_TOKENS, applyTheme, clearTheme } from '../../../utils/themeApply';
+import { CORE_TOKENS, SEMANTIC_TOKENS, ADVANCED_TOKENS, advancedDefaults, applyTheme, clearTheme } from '../../../utils/themeApply';
 import { THEME_PRESETS, DEFAULT_PRESET_ID, themeFromPreset } from '../../../utils/themePresets';
 import ThemedSelect from '../../UI/Select';
 
@@ -86,6 +86,7 @@ export default function AppearanceManager() {
   const [draft, setDraft] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Keep the editor's own company id in a ref for the unmount cleanup (which
   // must restore THAT company's theme, not whatever scope was last previewed).
@@ -139,6 +140,10 @@ export default function AppearanceManager() {
 
   const setField = (key, val) =>
     setDraft((d) => ({ ...d, [mode]: { ...d[mode], [key]: val } }));
+
+  // Remove an optional (semantic/advanced) override so it falls back to derived.
+  const clearField = (key) =>
+    setDraft((d) => { const m = { ...d[mode] }; delete m[key]; return { ...d, [mode]: m }; });
 
   const pickPreset = (id) => setDraft(themeFromPreset(id));
 
@@ -264,18 +269,79 @@ export default function AppearanceManager() {
 
       {/* Editor + preview */}
       <div className="grid md:grid-cols-2 gap-6">
-        <div className="p-4 space-y-4" style={card}>
-          <h3 className="text-sm font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
-            Colours · {mode}
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {CORE_TOKENS.map((t) => (
-              <Swatch key={t.key} label={t.label} value={draft[mode]?.[t.key]} onChange={(v) => setField(t.key, v)} />
-            ))}
+        <div className="p-4 space-y-5" style={card}>
+          {/* Core */}
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+              Core · {mode}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {CORE_TOKENS.map((t) => (
+                <Swatch key={t.key} label={t.label} value={draft[mode]?.[t.key]} onChange={(v) => setField(t.key, v)} />
+              ))}
+            </div>
+            <p className="text-[11px] pt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+              Everything else (button shades, tables, scrollbars, gradients) is derived from these.
+            </p>
           </div>
-          <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-            The rest of the palette (button shades, badges, tables, scrollbars, gradients) is derived from these.
-          </p>
+
+          {/* Semantic status colours — optional */}
+          <div className="pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <h3 className="text-sm font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+              Status colours
+            </h3>
+            <p className="text-[11px] mt-1 mb-3" style={{ color: 'var(--color-text-tertiary)' }}>
+              Optional — leave untouched to keep the standard success / warning / error / info.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {SEMANTIC_TOKENS.map((t) => {
+                const isSet = draft[mode]?.[t.key] !== undefined;
+                return (
+                  <div key={t.key} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <Swatch label={t.label} value={draft[mode]?.[t.key] ?? t.def} onChange={(v) => setField(t.key, v)} />
+                    </div>
+                    {isSet && (
+                      <button type="button" onClick={() => clearField(t.key)} title="Reset to default"
+                        className="text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Advanced — override normally-derived tokens */}
+          <div className="pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <button type="button" onClick={() => setShowAdvanced((s) => !s)}
+              className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+              <ChevronRight size={14} style={{ transform: showAdvanced ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} /> Advanced
+            </button>
+            {showAdvanced && (
+              <>
+                <p className="text-[11px] mt-2 mb-3" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Fine-tune tokens normally derived from Core. Reset returns a token to auto.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {ADVANCED_TOKENS.map((t) => {
+                    const dflt = advancedDefaults(draft[mode] || {}, mode)[t.key];
+                    const isSet = draft[mode]?.[t.key] !== undefined;
+                    return (
+                      <div key={t.key} className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <Swatch label={t.label} value={draft[mode]?.[t.key] ?? dflt} onChange={(v) => setField(t.key, v)} />
+                        </div>
+                        {isSet && (
+                          <button type="button" onClick={() => clearField(t.key)} title="Reset to auto"
+                            className="text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="space-y-3">

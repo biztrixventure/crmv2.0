@@ -298,7 +298,7 @@ const Login = () => {
               style={{
                 background: loading
                   ? "var(--color-disabled-bg)"
-                  : "linear-gradient(135deg, #7A4820 0%, #C4894A 100%)",
+                  : "linear-gradient(135deg, var(--color-primary-700), var(--color-primary-500))",
                 boxShadow: loading ? "none" : "0 4px 14px rgba(196, 137, 74, 0.28)",
                 cursor: loading ? "not-allowed" : "pointer",
                 color: loading ? "var(--color-disabled-text)" : "white",

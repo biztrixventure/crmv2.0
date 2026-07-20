@@ -77,14 +77,56 @@ export const CORE_TOKENS = [
   { key: 'accent',        label: 'Accent' },
 ];
 
+// Advanced tokens are normally DERIVED from the 7 core colours; the editor can
+// override any of them explicitly. This returns the derived defaults so the UI
+// can show them and buildCssVars can fall back to them.
+export function advancedDefaults(core, mode) {
+  const { bg, surface, text, textSecondary, primary, accent } = core;
+  return {
+    bgSecondary:  mix(bg, text, 0.06),
+    surfaceHover: mix(surface, text, 0.05),
+    textTertiary: mix(textSecondary, bg, 0.35),
+    link:         mode === 'dark' ? lighten(primary, 0.2) : darken(primary, 0.2),
+    focusRing:    mode === 'dark' ? accent : darken(primary, 0.2),
+  };
+}
+
+export const ADVANCED_TOKENS = [
+  { key: 'bgSecondary',  label: 'Background · secondary' },
+  { key: 'surfaceHover', label: 'Surface · hover' },
+  { key: 'textTertiary', label: 'Text · tertiary' },
+  { key: 'link',         label: 'Link' },
+  { key: 'focusRing',    label: 'Focus ring' },
+];
+
+// Optional semantic status colours. When set, the full --color-<name>-50..900
+// scale is regenerated; when unset they fall through to global.css so status
+// meaning stays intact by default.
+export const SEMANTIC_TOKENS = [
+  { key: 'success', label: 'Success', def: '#22C55E' },
+  { key: 'warning', label: 'Warning', def: '#F59E0B' },
+  { key: 'error',   label: 'Error',   def: '#EF4444' },
+  { key: 'info',    label: 'Info',    def: '#0EA5E9' },
+];
+
+function semRamp(base) {
+  return {
+    50:  lighten(base, 0.90), 100: lighten(base, 0.80), 200: lighten(base, 0.62),
+    300: lighten(base, 0.42), 400: lighten(base, 0.20), 500: base,
+    600: darken(base, 0.14),  700: darken(base, 0.30),  800: darken(base, 0.46),
+    900: darken(base, 0.60),
+  };
+}
+
 // Derive the full --color-* map (+ gradients) the stylesheet references, from
-// the 7 core tokens. Everything not listed here (success/error/warning/info)
-// intentionally falls through to global.css so status colours stay semantic.
+// the 7 core tokens (+ optional advanced/semantic overrides). Semantic scales
+// only emit when overridden, so they otherwise fall through to global.css.
 export function buildCssVars(core, mode) {
   const { bg, surface, border, text, textSecondary, primary, accent } = core;
   const p = ramp(primary, mode);
-  const bgSecondary = mix(bg, text, 0.06);
-  const surfaceHover = mix(surface, text, 0.05);
+  const d = advancedDefaults(core, mode);
+  const bgSecondary = core.bgSecondary || d.bgSecondary;
+  const surfaceHover = core.surfaceHover || d.surfaceHover;
 
   const vars = {
     '--color-bg': bg,
@@ -95,7 +137,7 @@ export function buildCssVars(core, mode) {
 
     '--color-text': text,
     '--color-text-secondary': textSecondary,
-    '--color-text-tertiary': mix(textSecondary, bg, 0.35),
+    '--color-text-tertiary': core.textTertiary || d.textTertiary,
     '--color-text-disabled': mix(textSecondary, bg, 0.6),
     '--color-text-inverse': bg,
     '--color-placeholder': mix(textSecondary, bg, 0.45),
@@ -113,7 +155,7 @@ export function buildCssVars(core, mode) {
     '--color-cream-400': mode === 'dark' ? mix(border, primary, 0.3) : mix(border, text, 0.15),
     '--color-cream-500': mode === 'dark' ? mix(border, primary, 0.5) : mix(border, text, 0.3),
 
-    '--color-link': mode === 'dark' ? lighten(primary, 0.2) : darken(primary, 0.2),
+    '--color-link': core.link || d.link,
     '--color-link-hover': mode === 'dark' ? lighten(primary, 0.36) : darken(primary, 0.36),
     '--color-link-visited': primary,
 
@@ -121,7 +163,7 @@ export function buildCssVars(core, mode) {
     '--color-disabled-bg': mix(bg, text, 0.08),
     '--color-interactive-hover': surfaceHover,
     '--color-interactive-active': mix(primary, bg, mode === 'dark' ? 0.78 : 0.82),
-    '--color-focus-ring': mode === 'dark' ? accent : darken(primary, 0.2),
+    '--color-focus-ring': core.focusRing || d.focusRing,
 
     '--scrollbar-track': bgSecondary,
     '--scrollbar-thumb': mix(border, text, 0.2),
@@ -135,6 +177,14 @@ export function buildCssVars(core, mode) {
     '--gradient-warm': `linear-gradient(135deg, ${mix(bg, primary, 0.05)} 0%, ${bg} 55%, ${mix(bg, accent, 0.05)} 100%)`,
     '--gradient-sidebar': `linear-gradient(180deg, ${darken(primary, 0.12)} 0%, ${darken(primary, 0.34)} 100%)`,
   };
+
+  // Optional semantic overrides → regenerate the full status scale.
+  SEMANTIC_TOKENS.forEach(({ key }) => {
+    if (!core[key]) return;
+    const s = semRamp(core[key]);
+    Object.entries(s).forEach(([stop, val]) => { vars[`--color-${key}-${stop}`] = val; });
+  });
+
   return vars;
 }
 
