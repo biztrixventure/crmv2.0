@@ -4,6 +4,7 @@ import { useListLayout } from "../hooks/useListLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
+import DotGridBg from "../components/UI/DotGridBg";
 import BatchInbox from "../components/Distribution/BatchInbox";
 import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
@@ -570,7 +571,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
   };
 
   return (
-    <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
+    <div className={`min-h-screen bg-bg relative ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
+      <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={workspaceMode ? 'Custom Access Workspace' : (user?.role_name || 'Manager Dashboard')}
@@ -589,7 +591,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
       <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
 
         {/* Header */}

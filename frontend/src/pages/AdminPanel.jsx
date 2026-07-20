@@ -45,6 +45,7 @@ import BatchInbox from "../components/Distribution/BatchInbox";
 import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import client from "../api/client";
+import DotGridBg from "../components/UI/DotGridBg";
 
 // ============================================================================
 // AdminPanel — main component
@@ -148,7 +149,8 @@ const AdminPanel = () => {
   });
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-bg relative">
+      <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AdminHeader
         theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout}
@@ -166,7 +168,7 @@ const AdminPanel = () => {
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
         {sidebarOpen && <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />}
 
-        <main className="flex-1 overflow-auto bg-bg">
+        <main className="flex-1 overflow-auto relative z-10">
           {activeTab === 'forms' ? (
             <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
               <FormBuilder />

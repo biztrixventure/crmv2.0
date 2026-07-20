@@ -60,7 +60,10 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
       className="rounded-xl border cursor-pointer transition-all group"
       style={{
         borderColor: isSelected ? 'var(--color-primary-500)' : 'var(--color-border)',
-        backgroundColor: isSelected ? 'var(--color-primary-50)' : 'var(--color-surface)',
+        // Tint the surface with primary instead of using the light primary-50
+        // (which is light in dark mode too, making text unreadable). color-mix
+        // keeps it readable in light, dark, and any Appearance theme.
+        backgroundColor: isSelected ? 'color-mix(in srgb, var(--color-primary) 14%, var(--color-surface))' : 'var(--color-surface)',
         boxShadow: isSelected ? '0 0 0 1px var(--color-primary-500)' : 'none',
       }}
     >

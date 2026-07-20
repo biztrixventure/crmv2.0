@@ -5,6 +5,7 @@ import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
+import DotGridBg from "../components/UI/DotGridBg";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -865,7 +866,8 @@ const StaffShell = () => {
   };
 
   return (
-    <div className={`min-h-screen bg-bg ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
+    <div className={`min-h-screen bg-bg relative ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
+      <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Dashboard'}
@@ -884,7 +886,7 @@ const StaffShell = () => {
 
       <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
         <SpiffWidget />
 

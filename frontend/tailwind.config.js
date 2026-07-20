@@ -5,41 +5,50 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary Colors - Warm Amber/Brown (Light) to Black Matte (Dark)
+        // Primary — mapped to the runtime CSS vars so every `bg-primary-*` /
+        // `text-primary-*` / `border-primary-*` utility follows the active theme
+        // (light, dark, and any Appearance preset) instead of a baked-in amber.
+        // Defaults live in global.css :root / html.dark; the Appearance manager
+        // overrides them via <style id="bsx-theme-vars">. NOTE: opacity
+        // modifiers (e.g. bg-primary-600/50) don't work on var() colors — use an
+        // inline color-mix() there instead.
         primary: {
-          50: "#F5EDE4",
-          100: "#E8D9C8",
-          200: "#D4C0A5",
-          300: "#C0A682",
-          400: "#A88A62",
-          500: "#8B7049",
-          600: "#6E5838",
-          700: "#524228",
-          800: "#3A2E1C",
-          900: "#241C11",
-          950: "#000000",
+          50:  "var(--color-primary-50)",
+          100: "var(--color-primary-100)",
+          200: "var(--color-primary-200)",
+          300: "var(--color-primary-300)",
+          400: "var(--color-primary-400)",
+          500: "var(--color-primary-500)",
+          600: "var(--color-primary-600)",
+          700: "var(--color-primary-700)",
+          800: "var(--color-primary-800)",
+          900: "var(--color-primary-900)",
+          950: "var(--color-primary-900)",
+          DEFAULT: "var(--color-primary)",
         },
-        // Accent Colors - Warm Amber
+        // Accent — the theme defines a single --color-accent; map every stop to
+        // it so `*-accent-*` utilities stay theme-driven.
         accent: {
-          50: "#F7ECD8",
-          100: "#EED9B3",
-          200: "#E0C18A",
-          300: "#D2A861",
-          400: "#C49038",
-          500: "#A67720",
-          600: "#865F19",
-          700: "#674812",
-          800: "#4A330C",
-          900: "#2E2007",
+          50:  "var(--color-accent)",
+          100: "var(--color-accent)",
+          200: "var(--color-accent)",
+          300: "var(--color-accent)",
+          400: "var(--color-accent)",
+          500: "var(--color-accent)",
+          600: "var(--color-accent)",
+          700: "var(--color-accent)",
+          800: "var(--color-accent)",
+          900: "var(--color-accent)",
+          DEFAULT: "var(--color-accent)",
         },
-        // Cream/Neutral Colors
+        // Cream/Neutral — theme-driven (only 200/400/500 are defined as vars).
         cream: {
-          50: "#F8F3EB",
-          100: "#F0E6D8",
-          200: "#E4D4BE",
-          300: "#D4BE9E",
-          400: "#C4A77E",
-          500: "#A8885C",
+          50:  "var(--color-cream-200)",
+          100: "var(--color-cream-200)",
+          200: "var(--color-cream-200)",
+          300: "var(--color-cream-400)",
+          400: "var(--color-cream-400)",
+          500: "var(--color-cream-500)",
         },
         // Dark Mode Grays
         dark: {
@@ -108,12 +117,11 @@ export default {
         },
       },
       backgroundImage: {
-        // Light Mode Gradients
-        "gradient-warm": "linear-gradient(135deg, #E4D4BE 0%, #D4BE9E 50%, #C4A77E 100%)",
-        "gradient-sidebar": "linear-gradient(180deg, #A8885C 0%, #C4A77E 100%)",
-        // Dark Mode Gradients
-        "gradient-warm-dark": "linear-gradient(135deg, #171717 0%, #0a0a0a 50%, #000000 100%)",
-        "gradient-sidebar-dark": "linear-gradient(180deg, #262626 0%, #171717 100%)",
+        // Theme-driven gradients — follow --gradient-* from the active theme.
+        "gradient-warm": "var(--gradient-warm)",
+        "gradient-sidebar": "var(--gradient-sidebar)",
+        "gradient-warm-dark": "var(--gradient-warm)",
+        "gradient-sidebar-dark": "var(--gradient-sidebar)",
       },
       backgroundColor: {
         light: "#F5EDE4",

@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
+import DotGridBg from '../components/UI/DotGridBg';
 import SheetScoreRow from '../components/QA/SheetScoreRow';
 import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboard';
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
@@ -2776,8 +2777,9 @@ function QAAgentView({ user, logout }) {
   const tabs = [{ key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-bg)' }}>
-      <header className="flex items-center gap-4 px-5 py-3 border-b" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+    <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
+      <DotGridBg />
+      <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
         <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA</div>
         <nav className="flex items-center gap-1">
           {tabs.map(t => (
@@ -2794,7 +2796,7 @@ function QAAgentView({ user, logout }) {
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
-      <main className="flex-1 p-5 overflow-hidden">
+      <main className="flex-1 p-5 overflow-hidden relative z-10">
         {/* No method-binding gate here: compliance work rules route tasks straight
             to a reviewer, so an agent must always see what's assigned to them —
             AgentTasks shows its own empty state when there's nothing. */}
@@ -2839,8 +2841,9 @@ export default function QAShell() {
   ].filter(t => t.show);
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-bg)' }}>
-      <header className="flex items-center gap-4 px-5 py-3 border-b" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+    <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
+      <DotGridBg />
+      <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
         <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA</div>
         <nav className="flex items-center gap-1">
           {tabs.map(t => (
@@ -2856,7 +2859,7 @@ export default function QAShell() {
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
-      <main className="flex-1 p-5 overflow-hidden">
+      <main className="flex-1 p-5 overflow-hidden relative z-10">
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAManagerDashboard companyId={scoped} onOpenReports={() => canReports && setTab('reports')} /></div>}
         {tab === 'day' && <>
           <CrmDayPanel companyId={companyId} scoped={scoped} canAssign={isSuper || canAssign} />

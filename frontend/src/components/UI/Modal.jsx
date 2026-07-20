@@ -96,7 +96,7 @@ const Modal = ({
 
         {/* Footer with Actions */}
         {actions.length > 0 && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-border bg-bg dark:bg-primary-900/50 flex-shrink-0">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-border bg-bg-secondary flex-shrink-0">
             {actions.map((action, idx) => (
               <Button
                 key={idx}
