@@ -78,6 +78,9 @@ const ROLE_LABELS = {
 export default function TransferDetailDrawer({ transfer, onClose }) {
   const [closing, setClosing] = useState(false);
   const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
+  // The drawer stays mounted, so reset the close-animation flag whenever a new
+  // record opens — otherwise it'd stay slid-out and the next record wouldn't show.
+  useEffect(() => { setClosing(false); }, [transfer]);
   const { hasPermission } = useAuth();
   const { sections } = useDrawerLayout('transfer');
   const [dispoHistory, setDispoHistory] = useState([]);

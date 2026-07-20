@@ -93,6 +93,9 @@ const Section = ({ title, children }) => (
 export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) {
   const [closing, setClosing] = useState(false);
   const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
+  // The drawer stays mounted, so reset the close-animation flag whenever a new
+  // record opens — otherwise it'd stay slid-out and the next record wouldn't show.
+  useEffect(() => { setClosing(false); }, [saleProp]);
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections } = useDrawerLayout('sale');
   // Reason keys → readable labels (same catalog the cancel modals use).
