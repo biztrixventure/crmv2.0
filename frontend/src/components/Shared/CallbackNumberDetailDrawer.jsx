@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, Phone, User, Clock, Calendar, Hash, ArrowRight,
   CheckCircle2, XCircle, PhoneCall, PhoneMissed, PhoneOff,
@@ -337,10 +338,10 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
     ? Math.ceil((new Date(number.release_at) - Date.now()) / 86400000)
     : null;
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-50 flex flex-col shadow-2xl"
+      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
 
         {/* ── Header ── */}
@@ -564,6 +565,7 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

@@ -1,4 +1,5 @@
 import { X, Mail, Shield, Calendar, User, Activity } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Badge } from '../UI';
 import UserPermissionsPanel from '../Admin/UserManagement/UserPermissionsPanel';
 
@@ -42,11 +43,11 @@ export default function UserDetailDrawer({ user, onClose }) {
     ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
       <div
-        className="fixed right-0 top-0 h-full w-full max-w-lg z-50 flex flex-col shadow-2xl overflow-y-auto"
+        className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right overflow-y-auto"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}
       >
         {/* Header */}
@@ -110,6 +111,7 @@ export default function UserDetailDrawer({ user, onClose }) {
           <UserPermissionsPanel user={user} />
         </Section>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

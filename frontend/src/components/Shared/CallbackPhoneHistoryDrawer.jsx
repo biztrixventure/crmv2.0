@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Phone, AlertTriangle, RefreshCw, CheckCircle, Clock, XCircle, PhoneMissed, Star } from 'lucide-react';
 import { Badge } from '../UI';
 import client from '../../api/client';
@@ -50,10 +51,10 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
   const pendingCount  = data?.pending_count ?? 0;
   const hasDuplicates = pendingCount > 1;
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-50 flex flex-col shadow-2xl"
+      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
 
         {/* Header */}
@@ -234,6 +235,7 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

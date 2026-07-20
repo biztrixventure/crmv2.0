@@ -1,4 +1,5 @@
 import { X, Phone, Clock, Globe, StickyNote, Bell, User, AlertCircle } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Badge } from '../UI';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
@@ -115,11 +116,11 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
     ) : null
   );
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
       <div
-        className="fixed right-0 top-0 h-full w-full max-w-md z-50 flex flex-col shadow-2xl overflow-y-auto"
+        className="fixed right-0 top-0 h-full w-full max-w-md z-[61] flex flex-col shadow-2xl animate-slide-in-right overflow-y-auto"
         style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}
       >
         {/* Header */}
@@ -177,6 +178,7 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           return <Section key={s.id} icon={SECTION_ICON[s.id]} title={s.label || s.id}>{rows}</Section>;
         })}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
