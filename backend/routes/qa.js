@@ -683,37 +683,59 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     }
     candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   } else {
-    // CRM / materialized assignment. Resolve robustly the same way the client
-    // portal does: by the dialer LEAD code AND by the record's AGENT(s) + DATE +
-    // PHONE. Most transfers (~77%) carry NO vicidial_vendor_code, so the agent+
-    // date+phone path is what actually finds the clips. We gather BOTH the
-    // fronter and the closer for the lead, so a sale shows the closer's call and
-    // a transfer the fronter's — whoever is dialer-mapped.
+    // CRM / materialized assignment. A transfer has TWO reviewable legs — the
+    // FRONTER's transfer call and the CLOSER's call after the transfer — both to
+    // the same customer phone, on the same dialer day. QA scores each leg (TRA =
+    // fronter; closed/unclosed = closer) but must SEE BOTH. We UNION every source
+    // so neither leg is ever missed, then tag each clip fronter/closer:
+    //   1. lead-code + mapped-agent+date+phone (listCandidatesForSale)
+    //   2. a day-bounded phone search (mapping-free) — ALWAYS merged, so the
+    //      closer's leg still appears even when the closer isn't dialer-mapped
+    //      (previously this only ran when source 1 was EMPTY, so a found fronter
+    //      leg suppressed the closer leg entirely).
+    // Nothing is stored — this resolves live from the dialer on every open.
     let leadCode = null, phone = null, saleDate = null, createdAt = null, transferId = a.transfer_id || null;
-    const userIds = new Set();
+    const fronterUids = new Set(), closerUids = new Set();
     if (a.sale_id) {
       const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone, sale_date, closer_id').eq('id', a.sale_id).maybeSingle();
-      if (s) { transferId = transferId || s.transfer_id || null; phone = s.customer_phone || null; saleDate = s.sale_date || null; if (s.closer_id) userIds.add(s.closer_id); }
+      if (s) { transferId = transferId || s.transfer_id || null; phone = s.customer_phone || null; saleDate = s.sale_date || null; if (s.closer_id) closerUids.add(s.closer_id); }
     }
     if (transferId) {
       const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone, created_at, created_by, assigned_closer_id').eq('id', transferId).maybeSingle();
-      if (t) { leadCode = t.vicidial_vendor_code || null; phone = phone || t.normalized_phone || null; createdAt = t.created_at || null; if (t.created_by) userIds.add(t.created_by); if (t.assigned_closer_id) userIds.add(t.assigned_closer_id); }
+      if (t) { leadCode = t.vicidial_vendor_code || null; phone = phone || t.normalized_phone || null; createdAt = t.created_at || null; if (t.created_by) fronterUids.add(t.created_by); if (t.assigned_closer_id) closerUids.add(t.assigned_closer_id); }
     }
-    // dialer agent ids for the fronter + closer on this lead
-    let agentIds = [];
-    if (userIds.size) {
-      const { data: profs } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', [...userIds]);
-      agentIds = [...new Set((profs || []).flatMap(p => p.vicidial_agent_ids || []).filter(Boolean))];
-    }
+    // dialer agent ids PER LEG (for tagging) + combined (for resolution)
+    const idsFor = async (uids) => {
+      if (!uids.size) return [];
+      const { data } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', [...uids]);
+      return [...new Set((data || []).flatMap(p => p.vicidial_agent_ids || []).filter(Boolean))].map(x => String(x).toUpperCase());
+    };
+    const [fronterIds, closerIds] = await Promise.all([idsFor(fronterUids), idsFor(closerUids)]);
+    const agentIds = [...new Set([...fronterIds, ...closerIds])];
     const date = createdAt ? String(createdAt).slice(0, 10) : (saleDate ? String(saleDate).slice(0, 10) : null);
-    try {
-      candidates = await listCandidatesForSale({ code: leadCode, phone, agentIds, date, dialerAt: createdAt });
-    } catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
-    // Last resort — pure phone search across boxes (covers legs by an unmapped
-    // agent) via the dialer's phone_number_log.
-    if (!candidates.length && phone) {
-      try { candidates = await listCandidatesByPhone({ phone }); } catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
+
+    const byKey = new Map();
+    const merge = (rows) => { for (const r of (rows || [])) { const k = `${r.box_id}|${r.recording_id}`; if (!byKey.has(k)) byKey.set(k, r); } };
+    try { merge(await listCandidatesForSale({ code: leadCode, phone, agentIds, date, dialerAt: createdAt })); }
+    catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
+    // mapping-free phone catch-all, bounded to the call day ±1 so a repeat
+    // customer's calls on other days never bleed in — this is what surfaces the
+    // closer's leg when the closer has no vicidial_agent_ids mapped.
+    if (phone) {
+      const dn = date ? Date.parse(`${date}T00:00:00Z`) : null;
+      const df = dn ? new Date(dn - 86400000).toISOString().slice(0, 10) : null;
+      const dt = dn ? new Date(dn + 86400000).toISOString().slice(0, 10) : null;
+      try { merge(await listCandidatesByPhone({ phone, dateFrom: df, dateTo: dt })); }
+      catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
     }
+    // tag each clip's leg by whose dialer id recorded it (fronter vs closer)
+    candidates = [...byKey.values()]
+      .map(c => {
+        const au = String(c.agent_user || '').toUpperCase();
+        const leg = fronterIds.includes(au) ? 'fronter' : closerIds.includes(au) ? 'closer' : null;
+        return { ...c, leg };
+      })
+      .sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   }
   // first open by the assignee moves it into 'in_review' (progress signal)
   if (a.status === 'pending' && a.assigned_to === req.user.id) {

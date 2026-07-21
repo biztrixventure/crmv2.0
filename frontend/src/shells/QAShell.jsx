@@ -258,6 +258,12 @@ function Candidates({ assignmentId }) {
   if (!rows.length) return <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No recordings found on the dialer for this call.</div>;
   return (
     <div className="space-y-2">
+      {rows.some(c => c.leg) && (
+        <div className="text-[10px] flex items-center gap-3 px-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: 'var(--color-primary-600)' }} />Fronter = the transfer call</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: '#059669' }} />Closer = the call after transfer</span>
+        </div>
+      )}
       {rows.map(c => {
         const tx = txById[c.recording_id];
         const open = !!txOpen[c.recording_id];
@@ -268,7 +274,9 @@ function Candidates({ assignmentId }) {
               {loadingId === c.recording_id ? <Loader2 size={15} className="animate-spin" color="#fff" /> : playingRid === c.recording_id ? <Pause size={15} color="#fff" /> : <Play size={15} color="#fff" />}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{fmtDur(c.duration)} <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>· {c.agent_user || 'agent ?'}</span></div>
+              <div className="text-sm font-bold tabular-nums flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{fmtDur(c.duration)}
+                {c.leg && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={c.leg === 'fronter' ? { background: 'rgba(37,99,235,0.16)', color: 'var(--color-primary-600)' } : { background: 'rgba(5,150,105,0.16)', color: '#059669' }}>{c.leg}</span>}
+                <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>· {c.agent_user || 'agent ?'}</span></div>
               <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
             </div>
             {canTranscribe && (
