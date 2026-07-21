@@ -775,7 +775,7 @@ function liveBeep() {
 // Unclosed) sharing one record_id, so the key must include the work type.
 const liveKey = (it) => `${it.record_kind}:${it.work_type}:${it.record_id}`;
 
-function LiveTab({ scoped, selfId, canOverride, isManager }) {
+function LiveTab({ scoped, selfId, canOverride, isManager, allowedWt }) {
   const [items, setItems]     = useState(null);   // null = loading
   const [open, setOpen]       = useState(null);
   const [opening, setOpening] = useState(null);
@@ -818,6 +818,8 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
   useEffect(() => { if (paused) return undefined; const t = setInterval(() => load({ silent: true }), LIVE_POLL_MS); return () => clearInterval(t); }, [paused, load]);
   // tick relative times
   useEffect(() => { const t = setInterval(() => tick(x => x + 1), 12000); return () => clearInterval(t); }, []);
+  // if the agent's selected filter is a work type their manager unchecked, snap to All
+  useEffect(() => { if (wtGate && kindFilter !== 'all') { const ok = kindFilter === 'incomplete' ? wtGate.has('tra') : wtGate.has(kindFilter); if (!ok) setKindFilter('all'); } }, [allowedWt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build the assignment-shaped object the review panel + scorecard expect.
   const shape = (it, assignmentId, status, review, meta) => ({
@@ -845,7 +847,8 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
     } finally { setOpening(null); }
   };
 
-  const all = items || [];
+  const wtGate = Array.isArray(allowedWt) ? new Set(allowedWt) : null;   // agent: only the work types their manager checked
+  const all = (items || []).filter(it => !wtGate || wtGate.has(it.work_type));
   const shown = all.filter(it => kindFilter === 'all' ? true : kindFilter === 'incomplete' ? it.pending_fronter : it.work_type === kindFilter);
   const nTra  = all.filter(i => i.work_type === 'tra').length;
   const nUncl = all.filter(i => i.work_type === 'closer_dispo').length;
@@ -864,7 +867,9 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
         </span>
         <InfoTip text="Everything punched on the dialer shows here within seconds — no loading a day. Defaults to the whole business day, so the counts match the dialer's totals; switch the range at the right. Includes transfers the fronter hasn't finished yet; you can still hear the call. Click any row to listen and score." />
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-          {[['all', 'All', all.length], ['tra', 'TRA', nTra], ['closer_dispo', 'Unclosed', nUncl], ['closer_sales', 'Sales', nSale], ['incomplete', 'Incomplete', nInc]].map(([k, lbl, n]) => (
+          {[['all', 'All', all.length], ['tra', 'TRA', nTra], ['closer_dispo', 'Unclosed', nUncl], ['closer_sales', 'Sales', nSale], ['incomplete', 'Incomplete', nInc]]
+            .filter(([k]) => !wtGate || k === 'all' || (k === 'incomplete' ? wtGate.has('tra') : wtGate.has(k)))
+            .map(([k, lbl, n]) => (
             <button key={k} onClick={() => setKindFilter(k)}
               className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
               style={{ background: kindFilter === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kindFilter === k ? '#fff' : 'var(--color-text-secondary)' }}>
@@ -3056,7 +3061,7 @@ function ScoreModal({ open, onClose, selfId, canOverride, onScored, onEdited }) 
 // AGENT queue — only the tasks still TO DO (a scored/skipped task has already
 // moved to Completed). Transfers/Sales split + a date filter that narrows to the
 // records whose call happened on a chosen day.
-function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
+function AgentTasks({ selfId, canOverride, companyId, filterCompany, allowedWt }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fields, setFields] = useState(DEFAULT_CARD_FIELDS);
@@ -3091,7 +3096,11 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   const wtOf = a => a.work_type || (a.sale_id ? 'closer_sales' : a.transfer_id ? (a.subject_role === 'closer' ? 'closer_dispo' : 'tra') : 'rcm');
   const byWt = { tra: [], rcm: [], closer_sales: [], closer_dispo: [] };
   for (const a of byDay) (byWt[wtOf(a)] || byWt.tra).push(a);
-  const shown = byWt[wtab] || [];
+  // agent: only the sections their manager checked (bound methods). null = ungated.
+  const wtGate = Array.isArray(allowedWt) ? allowedWt : null;
+  const shown = (wtGate && !wtGate.includes(wtab)) ? [] : (byWt[wtab] || []);
+  // keep the active section on one the manager actually checked for this agent
+  useEffect(() => { if (wtGate && wtGate.length && !wtGate.includes(wtab)) setWtab(wtGate[0]); }, [allowedWt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col h-full">
@@ -3100,7 +3109,8 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
           <InfoTip w={310} text="The calls assigned to you that still need scoring, in four sections: TRA = fronter transfer calls (in the CRM); RCM = fronter random calls (raw dialer, not in the CRM); Closed Sale = closer calls that closed a sale; Unclosed Sale = closer calls that didn't close. Open one, listen, score — it moves to Completed automatically." />
         </span>
         <div className="flex items-center gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-          {[['tra', 'TRA · Transfers', ArrowRightLeft], ['rcm', 'RCM · Random', Shuffle], ['closer_sales', 'Closed Sale', DollarSign], ['closer_dispo', 'Unclosed Sale', PhoneOff]].map(([k, label, Icon]) => (
+          {[['tra', 'TRA · Transfers', ArrowRightLeft], ['rcm', 'RCM · Random', Shuffle], ['closer_sales', 'Closed Sale', DollarSign], ['closer_dispo', 'Unclosed Sale', PhoneOff]]
+            .filter(([k]) => !wtGate || wtGate.includes(k)).map(([k, label, Icon]) => (
             <button key={k} onClick={() => { setWtab(k); setOpen(null); }}
               className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5"
               style={{ background: wtab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: wtab === k ? '#fff' : 'var(--color-text-secondary)', boxShadow: wtab === k ? '0 2px 10px rgba(79,70,229,0.35)' : 'none' }}>
@@ -3167,7 +3177,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
 //                even a transfer the fronter hasn't finished the form on.
 //   • My tasks — the work a QA manager assigned to you (push / assigned worklist).
 // Both open the same scorecard modal.
-function AgentWork({ selfId, companyId, scoped }) {
+function AgentWork({ selfId, companyId, scoped, allowedWt }) {
   const [seg, setSeg] = useState('live');
   return (
     <div className="flex flex-col gap-3 h-full">
@@ -3185,8 +3195,8 @@ function AgentWork({ selfId, companyId, scoped }) {
       </div>
       <div className="flex-1 min-h-0">
         {seg === 'live'
-          ? <LiveTab scoped={scoped} selfId={selfId} canOverride={false} isManager={false} />
-          : <AgentTasks selfId={selfId} canOverride={false} companyId={companyId} filterCompany={scoped} />}
+          ? <LiveTab scoped={scoped} selfId={selfId} canOverride={false} isManager={false} allowedWt={allowedWt} />
+          : <AgentTasks selfId={selfId} canOverride={false} companyId={companyId} filterCompany={scoped} allowedWt={allowedWt} />}
       </div>
     </div>
   );
@@ -3221,10 +3231,10 @@ function QAAgentView({ user, logout }) {
         </div>
       </header>
       <main className="flex-1 p-5 overflow-hidden relative z-10">
-        {/* No method-binding gate here: compliance work rules route tasks straight
-            to a reviewer, so an agent must always see what's assigned to them —
-            AgentTasks shows its own empty state when there's nothing. */}
-        {tab === 'work' && <AgentWork selfId={user?.id} companyId={scoped || user?.company_id} scoped={scoped} />}
+        {/* Agents only see the work-type sections their manager CHECKED for them
+            (their bound methods) — in both Live and My tasks. `methods` = null
+            while loading (treated as no gate); the manager view is ungated. */}
+        {tab === 'work' && <AgentWork selfId={user?.id} companyId={scoped || user?.company_id} scoped={scoped} allowedWt={methods} />}
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
         {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} />}
       </main>
