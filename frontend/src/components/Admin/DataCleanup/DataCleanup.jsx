@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X, ListChecks, MapPin, Hash, Tag } from 'lucide-react';
+import { Eraser, Search, AlertTriangle, CheckCircle2, Loader2, Database, History, Undo2, Plus, X, ListChecks, MapPin, Hash, Tag, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../UI';
 import client from '../../../api/client';
 import { useFormFields } from '../../../hooks/useFormFields';
 import ThemedSelect from '../../UI/Select';
+import CalendarDateInput from '../../Form/CalendarDateInput';
 
 const fmt = (s) => { try { return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } };
 
@@ -122,6 +123,141 @@ const BulkByIdPanel = ({ fields, onDone }) => {
                 <div key={i} className="text-[11px] font-mono flex items-center gap-2">
                   <span style={{ color: STATUS_COLOR[p.status] }}>● {p.status}</span>
                   <span style={{ color: 'var(--color-text-secondary)' }}>{p.id || '(no id)'}{p.message ? ` — ${p.message}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Bulk cancel sales by UUID ────────────────────────────────────────────────
+// Applies a cancel-like status to many sales at once THROUGH the compliance
+// bulk-status endpoint — the exact same path a manual compliance cancel takes.
+// So cancellation_date, reason, compliance note + edit history, reviewed-by,
+// and the revert batch all populate, and Compliance shows the cancel date +
+// the auto paid-days (computed from sale_date → cancellation_date).
+const CANCEL_STATUSES = [
+  { v: 'cancelled',            l: 'Cancelled' },
+  { v: 'compliance_cancelled', l: 'Compliance Cancelled' },
+  { v: 'closed_lost',          l: 'Closed Lost' },
+  { v: 'chargeback',           l: 'Chargeback' },
+  { v: 'dispute',              l: 'Dispute' },
+];
+
+const BulkCancelPanel = ({ onDone }) => {
+  const [text, setText]             = useState('');
+  const [status, setStatus]         = useState('cancelled');
+  const [reason, setReason]         = useState('');
+  const [cancelDate, setCancelDate] = useState(new Date().toISOString().slice(0, 10));
+  const [cbDate, setCbDate]         = useState('');
+  const [cbAmt, setCbAmt]           = useState('');
+  const [ack, setAck]               = useState(false);
+  const [busy, setBusy]             = useState(false);
+  const [res, setRes]               = useState(null);
+
+  // Accept UUIDs pasted one-per-line, or comma / space / semicolon separated.
+  // Dedup so a double-paste doesn't try the same id twice.
+  const ids = useMemo(() => {
+    const seen = new Set();
+    return text.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
+      .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
+  }, [text]);
+
+  const isChargeback = status === 'chargeback';
+  const statusLabel  = CANCEL_STATUSES.find(s => s.v === status)?.l || status;
+  const canRun = ids.length && reason.trim() && ack && !busy;
+
+  const run = async () => {
+    if (!ids.length)    return toast.error('Paste at least one sale UUID.');
+    if (!reason.trim()) return toast.error('A reason is required to cancel.');
+    setBusy(true); setRes(null);
+    try {
+      const payload = { ids, new_status: status, reason: reason.trim(), cancellation_date: cancelDate || undefined };
+      if (isChargeback) {
+        if (cbDate) payload.chargeback_date = cbDate;
+        if (cbAmt !== '') payload.chargeback_amount = Number(cbAmt);
+      }
+      const r = await client.post('compliance/sales/bulk-status', payload);
+      setRes(r.data);
+      toast.success(`${statusLabel}: ${r.data.updated} sale(s) updated.`);
+      onDone?.();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Bulk cancel failed');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Cancel many sales at once by their <strong>UUID</strong>. This runs the same path as a manual compliance cancel, so the
+        cancel <strong>status</strong>, <strong>cancellation date</strong>, note/history and the auto <strong>paid-days</strong> all show
+        correctly in Compliance. Every batch is logged and revertible from Compliance → bulk-status batches.
+      </p>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>New status</label>
+          <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input text-sm">
+            {CANCEL_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+          </ThemedSelect>
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Cancellation date</label>
+          <CalendarDateInput value={cancelDate} onChange={setCancelDate} />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Reason <span style={{ color: 'var(--color-error-600)' }}>*</span>
+        </label>
+        <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Customer requested cancellation" className="input text-sm w-full" />
+      </div>
+
+      {isChargeback && (
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Chargeback date</label>
+            <CalendarDateInput value={cbDate} onChange={setCbDate} defaultToday={false} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Chargeback amount</label>
+            <input type="number" value={cbAmt} onChange={e => setCbAmt(e.target.value)} placeholder="0.00" className="input text-sm w-full" />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Sale UUIDs (one per line)</label>
+        <textarea value={text} onChange={e => { setText(e.target.value); setRes(null); }} rows={7}
+          placeholder={`e2b1c3d4-5678-90ab-cdef-1234567890ab\n7c4a1b2c-...`} className="input font-mono text-xs w-full resize-y" />
+        <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Comma, space or newline separated. <strong>{ids.length}</strong> unique id(s).</p>
+      </div>
+
+      <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text)' }}>
+        <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} className="mt-0.5" />
+        <span>I understand this applies <strong>{statusLabel}</strong> to <strong>{ids.length}</strong> sale(s) — logged and revertible from Compliance.</span>
+      </label>
+
+      <Button variant="primary" onClick={run} disabled={!canRun} className="flex items-center gap-1.5">
+        {busy ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} Cancel {ids.length || ''} sale{ids.length === 1 ? '' : 's'}
+      </Button>
+
+      {res && (
+        <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            Done: {res.updated} updated{res.skipped?.length ? ` · ${res.skipped.length} skipped` : ''}
+            {res.batch_id ? ' · revertible from Compliance' : ''}
+          </p>
+          {res.skipped?.length > 0 && (
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {res.skipped.map((p, i) => (
+                <div key={i} className="text-[11px] font-mono flex items-center gap-2">
+                  <span style={{ color: 'var(--color-warning-600)' }}>● skipped</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{p.id} — {p.reason}</span>
                 </div>
               ))}
             </div>
@@ -440,6 +576,7 @@ const DataCleanup = () => {
   const TABS = [
     { key: 'replace', label: 'Find & Replace', icon: Search },
     { key: 'bulk',    label: 'Bulk update by ID', icon: ListChecks },
+    { key: 'cancel',  label: 'Bulk cancel sales', icon: Ban },
     { key: 'dispo',   label: 'Set Disposition', icon: Tag },
     { key: 'geo',     label: 'Fill City/State', icon: MapPin },
   ];
@@ -469,6 +606,7 @@ const DataCleanup = () => {
       </div>
 
       {tab === 'bulk'  && <BulkByIdPanel fields={fields} onDone={loadHistory} />}
+      {tab === 'cancel' && <BulkCancelPanel onDone={loadHistory} />}
       {tab === 'dispo' && <DispositionPanel onDone={loadHistory} />}
       {tab === 'geo'   && <GeoFillPanel onDone={loadHistory} />}
 
