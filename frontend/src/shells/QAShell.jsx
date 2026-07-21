@@ -2959,13 +2959,44 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany }) {
   );
 }
 
+// Agent "Work" surface — the two ways work arrives, in ONE place with a segmented
+// toggle, so there's no "Live vs Queue, which do I use?" confusion:
+//   • Live     — the real-time floor: grab any call as it lands (pull / self-serve),
+//                even a transfer the fronter hasn't finished the form on.
+//   • My tasks — the work a QA manager assigned to you (push / assigned worklist).
+// Both open the same scorecard modal.
+function AgentWork({ selfId, companyId, scoped }) {
+  const [seg, setSeg] = useState('live');
+  return (
+    <div className="flex flex-col gap-3 h-full">
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[
+            ['live', 'Live', 'Calls as they land from the dialer — grab any to review, even before the fronter finishes the form.'],
+            ['mine', 'My tasks', 'The work a QA manager assigned to you (any age), across your sections.'],
+          ].map(([k, l, tip]) => (
+            <button key={k} onClick={() => setSeg(k)} title={tip} className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: seg === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: seg === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+          ))}
+        </div>
+        <InfoTip text="Two ways work reaches you. LIVE is the real-time floor — grab any call the moment it lands (even an incomplete transfer). MY TASKS is what a manager assigned to you. Both open the same scorecard." />
+      </div>
+      <div className="flex-1 min-h-0">
+        {seg === 'live'
+          ? <LiveTab scoped={scoped} selfId={selfId} canOverride={false} isManager={false} />
+          : <AgentTasks selfId={selfId} canOverride={false} companyId={companyId} filterCompany={scoped} />}
+      </div>
+    </div>
+  );
+}
+
 function QAAgentView({ user, logout }) {
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState('work');
   const [methods, setMethods] = useState(null);
   const { companies, all, companyId, setCompanyId } = useQaCompanies();
   const scoped = companyId === ALL_CO ? '' : companyId;
   useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
-  const tabs = [{ key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'live', label: 'Live', icon: Radio }, { key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
+  const tabs = [{ key: 'work', label: 'Work', icon: Radio }, { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
   return (
     <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
@@ -2991,9 +3022,8 @@ function QAAgentView({ user, logout }) {
         {/* No method-binding gate here: compliance work rules route tasks straight
             to a reviewer, so an agent must always see what's assigned to them —
             AgentTasks shows its own empty state when there's nothing. */}
+        {tab === 'work' && <AgentWork selfId={user?.id} companyId={scoped || user?.company_id} scoped={scoped} />}
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
-        {tab === 'live' && <LiveTab scoped={scoped} selfId={user?.id} canOverride={false} isManager={false} />}
-        {tab === 'tasks' && <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />}
         {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} />}
       </main>
     </div>
