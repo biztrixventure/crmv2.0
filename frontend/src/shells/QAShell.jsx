@@ -914,12 +914,101 @@ const ChartCard = ({ title, children, wide }) => (
   </div>
 );
 
+// ── single-agent deep report — pick one reviewed fronter/closer, see their full
+// scorecard-driven performance: KPIs w/ vs-previous delta, rank among peers, score
+// trend, per-criterion weak spots compared to the team, and outcome mix. ──────────
+function AgentReport({ subjectId, subjectName, companyId, from, to }) {
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!subjectId) return;
+    setLoading(true);
+    const params = { subject_user_id: subjectId, from, to };
+    if (companyId) params.company_id = companyId;
+    client.get('qa/reports/agent', { params }).then(r => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
+  }, [subjectId, companyId, from, to]);
+
+  if (loading) return <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  if (!d || !(d.summary?.reviews)) return <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No scored reviews of {subjectName || 'this agent'} in this range.</div>;
+  const s = d.summary, p = d.prev || {}, r = d.rank || {};
+  const Delta = ({ cur, prev, higherBetter = true, unit = '' }) => {
+    if (cur == null || prev == null) return <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>no prior data</span>;
+    const dv = Math.round((cur - prev) * 10) / 10;
+    if (dv === 0) return <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>= vs prev</span>;
+    const good = higherBetter ? dv > 0 : dv < 0;
+    return <span className="text-[10px] font-bold" style={{ color: good ? '#059669' : '#dc2626' }}>{dv > 0 ? '▲' : '▼'} {Math.abs(dv)}{unit} vs prev</span>;
+  };
+  const KPI = ({ label, value, tint, children }) => (
+    <div className="p-3 rounded-xl flex-1" style={{ minWidth: 118, background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      <div className="text-2xl font-extrabold leading-tight" style={{ color: tint || 'var(--color-text)' }}>{value}</div>
+      {children}
+    </div>
+  );
+  const trendPts = (d.trend || []).map(t => ({ x: t.x, y: t.score }));
+  const worst = (d.criteria || []).filter(c => c.agent_miss_rate > 0).slice(0, 12);
+  const outcomes = (d.outcomes || []).map((o, i) => ({ label: o.label, value: o.n, color: PALETTE[i % PALETTE.length] }));
+
+  return (
+    <div>
+      <div className="flex items-stretch gap-2 flex-wrap mb-3">
+        <KPI label="Reviews" value={s.reviews}><Delta cur={s.reviews} prev={p.reviews} /></KPI>
+        <KPI label="Avg score" value={s.avg_score ?? '—'} tint={s.avg_score == null ? undefined : s.avg_score >= 80 ? '#059669' : s.avg_score >= 60 ? '#d97706' : '#dc2626'}><Delta cur={s.avg_score} prev={p.avg_score} /></KPI>
+        <KPI label="Pass rate" value={s.pass_rate == null ? '—' : `${s.pass_rate}%`} tint="#059669"><Delta cur={s.pass_rate} prev={p.pass_rate} unit="%" /></KPI>
+        <KPI label="Auto-fails" value={s.autofails} tint="#dc2626"><Delta cur={s.autofails} prev={p.autofails} higherBetter={false} /></KPI>
+        <div className="p-3 rounded-xl flex-1" style={{ minWidth: 168, background: 'var(--color-surface)', border: '1px solid var(--color-primary-600)' }}>
+          <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>Rank in team</div>
+          <div className="text-2xl font-extrabold leading-tight" style={{ color: 'var(--color-primary-600)' }}>{r.rank ? `#${r.rank}` : '—'}<span className="text-sm font-bold" style={{ color: 'var(--color-text-tertiary)' }}> of {r.of || 0}</span></div>
+          <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{r.percentile != null ? `top ${r.percentile}% · ` : ''}you {r.agent_avg ?? '—'} vs team {r.team_avg ?? '—'}</div>
+        </div>
+      </div>
+
+      <div className="grid gap-3" style={{ gridTemplateColumns: outcomes.length ? '3fr 2fr' : '1fr' }}>
+        <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Score trend (this window)</div>
+          {trendPts.length >= 2 ? <Lines series={[{ name: 'Avg score', color: PALETTE[0], points: trendPts }]} yMax={100} yUnit="%" /> : <div className="text-xs py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>Not enough days to chart a trend.</div>}
+        </div>
+        {outcomes.length > 0 && (
+          <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Call outcomes</div>
+            <Donut data={outcomes} centerValue={s.reviews} centerLabel="calls" />
+          </div>
+        )}
+        <div className="p-3 rounded-xl col-span-full" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+            Where to improve — vs the team <InfoTip side="right" text="The scorecard questions this agent fails most, and how their miss-rate compares to the team. The bar is the agent's miss-rate; the vertical mark is the team average. Red = worse than the team (coach these first)." />
+          </div>
+          {!worst.length ? <div className="text-xs py-3" style={{ color: 'var(--color-text-tertiary)' }}>No recurring issues — clean reviews in this range. 🎉</div>
+            : <div className="space-y-1.5">
+                {worst.map(c => {
+                  const worse = c.delta != null && c.delta > 0;
+                  return (
+                    <div key={c.key} className="flex items-center gap-2">
+                      <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)', width: 210 }} title={c.label}>{c.label}</span>
+                      <div className="flex-1 h-2.5 rounded-full overflow-hidden relative" style={{ background: 'var(--color-surface-hover)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${c.agent_miss_rate}%`, background: worse ? '#dc2626' : '#d97706' }} />
+                        {c.team_miss_rate != null && <div className="absolute top-0 bottom-0" style={{ left: `${Math.min(100, c.team_miss_rate)}%`, width: 2, background: 'var(--color-text)', opacity: 0.55 }} title={`team ${c.team_miss_rate}%`} />}
+                      </div>
+                      <span className="text-[11px] font-bold tabular-nums whitespace-nowrap" style={{ color: worse ? '#dc2626' : 'var(--color-text-secondary)', width: 128, textAlign: 'right' }}>
+                        {c.agent_miss_rate}%{c.team_miss_rate != null && <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}> · team {c.team_miss_rate}%</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReportsTab({ companyId, companyName = '' }) {
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState('team');   // 'team' overview | 'agent' single-user report
 
   const load = useCallback(() => {
     setLoading(true);
@@ -959,8 +1048,13 @@ function ReportsTab({ companyId, companyName = '' }) {
     <div className="h-full overflow-auto pb-4">
       {/* filters */}
       <div className="flex items-center gap-2 flex-wrap mb-4">
-        <ThemedSelect value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title="Reviewed agent">
-          <option value="">All agents</option>
+        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[['team', 'Team overview'], ['agent', 'Single agent']].map(([k, l]) => (
+            <button key={k} onClick={() => setMode(k)} title={k === 'team' ? 'Charts + tables across the whole team' : 'Pick one reviewed fronter/closer for their full performance report'} className="px-3 py-1 rounded-lg text-xs font-bold" style={{ background: mode === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: mode === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+          ))}
+        </div>
+        <ThemedSelect value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title={mode === 'agent' ? 'Pick the agent to report on' : 'Reviewed agent'}>
+          <option value="">{mode === 'agent' ? 'Pick an agent…' : 'All agents'}</option>
           {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}</option>)}
         </ThemedSelect>
         <ThemedSelect value={f.method} onChange={e => set('method', e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></ThemedSelect>
@@ -1004,7 +1098,11 @@ function ReportsTab({ companyId, companyName = '' }) {
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
       </div>
 
-      {loading && !data ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
+      {mode === 'agent'
+        ? (f.agent && /^[0-9a-f-]{20,}$/i.test(f.agent)
+            ? <AgentReport subjectId={f.agent} subjectName={(data?.agents || []).find(a => a.key === f.agent)?.name} companyId={companyId} from={f.date_from} to={f.date_to} />
+            : <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{f.agent ? 'This agent has no CRM account link — only the Team overview is available for them.' : 'Choose an agent in the dropdown above to open their full performance report.'}</div>)
+        : loading && !data ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
         : !s.reviews ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No scored reviews in this range. Reports build from the calls your QA team has scored.</div>
         : (
           <>

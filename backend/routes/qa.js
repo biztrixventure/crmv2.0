@@ -1897,6 +1897,98 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   res.json({ reviews: rows, scorecards, manager_view: managerView });
 }));
 
+// ── single-agent quality report — the manager "pick a user → full report" view.
+// One reviewed fronter/closer: summary + previous-period delta + score trend +
+// per-scorecard-criterion misses vs the TEAM + rank/position among peers. All
+// from scored qa_reviews; scoped to the caller's companies.
+router.get('/reports/agent', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_reports'))) return res.status(403).json({ error: 'Forbidden' });
+  const subjectId = req.query.subject_user_id;
+  if (!subjectId) return res.status(400).json({ error: 'subject_user_id required' });
+  const allowed = await allowedCompanyIds(req);
+  const oneCo = req.query.company_id || null;
+  if (oneCo && allowed && !allowed.includes(oneCo)) return res.status(403).json({ error: 'Forbidden' });
+  const dayOK = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const to = dayOK(req.query.to) ? req.query.to : new Date().toISOString().slice(0, 10);
+  const from = dayOK(req.query.from) ? req.query.from : new Date(Date.now() - 89 * 86400000).toISOString().slice(0, 10);
+  const span = Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1);
+  const prevFrom = new Date(Date.parse(`${from}T00:00:00Z`) - span * 86400000).toISOString().slice(0, 10);
+  const coScope = (q) => { if (allowed) q = q.in('company_id', allowed); if (oneCo) q = q.eq('company_id', oneCo); return q; };
+  const scoreOf = (r) => r.final_score != null ? +r.final_score : r.quality_score != null ? +r.quality_score : (r.passed != null ? (r.passed ? 100 : 0) : null);
+  const avg1 = (a) => a.length ? Math.round(a.reduce((s, v) => s + v, 0) / a.length * 10) / 10 : null;
+  const bad = { rating: v => Number(v) <= 2, autofail: v => v === 'N', penalty: v => v === 'Y', quality: v => v === 'N' };
+
+  // this agent's reviews across [prevFrom, to] (split into current / previous)
+  const { data: aReviews } = await coScope(supabaseAdmin.from('qa_reviews')
+    .select('id, method, scorecard_id, final_score, quality_score, passed, autofail_result, call_outcome, created_at')
+    .eq('subject_user_id', subjectId).gte('created_at', prevFrom).lte('created_at', `${to}T23:59:59.999Z`)
+    .order('created_at', { ascending: true }).limit(5000));
+  const all = aReviews || [];
+  const cur = all.filter(r => r.created_at.slice(0, 10) >= from);
+  const prev = all.filter(r => r.created_at.slice(0, 10) < from);
+
+  const summarize = (rows) => {
+    const ss = rows.map(scoreOf).filter(v => v != null);
+    const passed = rows.filter(r => r.passed === true).length;
+    const decided = passed + rows.filter(r => r.passed === false).length;
+    return { reviews: rows.length, avg_score: avg1(ss), pass_rate: decided ? Math.round(passed / decided * 100) : null, passed, failed: decided - passed, autofails: rows.filter(r => r.autofail_result === 'Fail').length, tra: rows.filter(r => r.method === 'tra').length, rcm: rows.filter(r => r.method === 'rcm').length };
+  };
+  const summary = summarize(cur), prevSummary = summarize(prev);
+
+  // daily trend
+  const byDay = {}; for (const r of cur) (byDay[r.created_at.slice(0, 10)] ||= []).push(r);
+  const trend = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).map(([d, rows]) => { const ss = rows.map(scoreOf).filter(v => v != null); return { x: d, score: ss.length ? Math.round(avg1(ss)) : 0, reviews: rows.length }; });
+
+  // per-criterion misses for this agent (from qa_review_scores + scorecards)
+  const curIds = cur.map(r => r.id);
+  const scIds = [...new Set(cur.map(r => r.scorecard_id).filter(Boolean))];
+  const [aScore, cardRes] = await Promise.all([
+    curIds.length ? supabaseAdmin.from('qa_review_scores').select('review_id, criterion_key, raw_value').in('review_id', curIds) : Promise.resolve({ data: [] }),
+    scIds.length ? supabaseAdmin.from('qa_scorecards').select('id, criteria').in('id', scIds) : Promise.resolve({ data: [] }),
+  ]);
+  const valsBy = {}; for (const s of aScore.data || []) (valsBy[s.review_id] ||= {})[s.criterion_key] = s.raw_value;
+  const cards = Object.fromEntries((cardRes.data || []).map(c => [c.id, c.criteria]));
+  const agentCrit = {};
+  const bump = (key, label, group, val) => { if (val == null || val === '') return; const g = (agentCrit[key] ||= { label, group, misses: 0, seen: 0 }); g.seen++; if (bad[group](val)) g.misses++; };
+  for (const r of cur) { const c = cards[r.scorecard_id]; if (!c || Array.isArray(c)) continue; const v = valsBy[r.id] || {};
+    for (const f of (c.rating_criteria || [])) bump(f.key, f.label, 'rating', v[f.key]);
+    for (const f of ((c.autofail || {}).fields || [])) bump(f.key, f.label, 'autofail', v[f.key]);
+    for (const f of (c.penalty_flags || [])) bump(f.key, f.label, 'penalty', v[f.key]);
+    for (const f of ((c.quality_score || {}).fields || [])) bump(f.key, f.label, 'quality', v[f.key]);
+  }
+
+  // TEAM (same scope + window) → rank + per-criterion team miss rates
+  const { data: team } = await coScope(supabaseAdmin.from('qa_reviews')
+    .select('id, subject_user_id, final_score, quality_score, passed')
+    .gte('created_at', from).lte('created_at', `${to}T23:59:59.999Z`).not('subject_user_id', 'is', null).limit(20000));
+  const bySub = {}; for (const r of team || []) { const s = scoreOf(r); if (s == null) continue; (bySub[r.subject_user_id] ||= { sum: 0, n: 0 }); bySub[r.subject_user_id].sum += s; bySub[r.subject_user_id].n++; }
+  const ranked = Object.entries(bySub).map(([id, x]) => ({ id, avg: x.sum / x.n })).sort((a, b) => b.avg - a.avg);
+  const idx = ranked.findIndex(x => x.id === subjectId);
+  const teamAvg = ranked.length ? avg1(ranked.map(x => x.avg)) : null;
+  const rank = { rank: idx >= 0 ? idx + 1 : null, of: ranked.length, percentile: (idx >= 0 && ranked.length > 1) ? Math.round((1 - idx / (ranked.length - 1)) * 100) : (idx === 0 ? 100 : null), team_avg: teamAvg, agent_avg: summary.avg_score, top_avg: ranked.length ? Math.round(ranked[0].avg * 10) / 10 : null };
+
+  const teamCrit = {};
+  const wantKeys = new Set(Object.keys(agentCrit));
+  if (wantKeys.size && (team || []).length) {
+    const tIds = team.map(r => r.id);
+    for (let i = 0; i < tIds.length; i += 1000) {
+      const { data: ts } = await supabaseAdmin.from('qa_review_scores').select('criterion_key, raw_value').in('review_id', tIds.slice(i, i + 1000));
+      for (const s of ts || []) { if (!wantKeys.has(s.criterion_key)) continue; if (s.raw_value == null || s.raw_value === '') continue; const g = agentCrit[s.criterion_key].group; const tc = (teamCrit[s.criterion_key] ||= { misses: 0, seen: 0 }); tc.seen++; if (bad[g](s.raw_value)) tc.misses++; }
+    }
+  }
+  const criteria = Object.entries(agentCrit).filter(([, g]) => g.seen > 0).map(([key, g]) => {
+    const am = Math.round(g.misses / g.seen * 100);
+    const t = teamCrit[key]; const tm = (t && t.seen) ? Math.round(t.misses / t.seen * 100) : null;
+    return { key, label: g.label, group: g.group, agent_miss_rate: am, team_miss_rate: tm, delta: tm == null ? null : am - tm, seen: g.seen, misses: g.misses };
+  }).sort((a, b) => (b.delta ?? -999) - (a.delta ?? -999) || b.agent_miss_rate - a.agent_miss_rate);
+
+  const outc = {}; for (const r of cur) { const o = (r.call_outcome || '').trim(); if (o) outc[o] = (outc[o] || 0) + 1; }
+  res.json({
+    summary, prev: prevSummary, window: { from, to }, prev_window: { from: prevFrom, to: new Date(Date.parse(`${from}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) },
+    trend, criteria, rank, outcomes: Object.entries(outc).sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })),
+  });
+}));
+
 // ── edit / override a review (audited) ────────────────────────────────────────
 // qa_agent: own review only, and only while status='submitted'.
 // qa_manager (override_qa_review) / superadmin: ANY review, any status; may also
