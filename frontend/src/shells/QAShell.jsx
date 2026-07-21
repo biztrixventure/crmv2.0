@@ -2717,6 +2717,72 @@ function CompletedTab({ managerView, companyId }) {
   );
 }
 
+// Company review-type setup (mig 208) — MANAGER-owned. Turn the 4 review types
+// on/off for the header-selected company; compliance no longer touches this.
+function CfgToggle({ on, onClick, label, tint, hint }) {
+  return (
+    <button onClick={onClick} className="flex-1 rounded-xl p-2.5 text-left transition-colors" style={{ minWidth: 132, border: '1px solid ' + (on ? tint : 'var(--color-border)'), background: on ? `color-mix(in srgb, ${tint} 10%, transparent)` : 'var(--color-surface)' }}>
+      <div className="flex items-center gap-2">
+        <span style={{ width: 30, height: 17, borderRadius: 999, background: on ? tint : 'var(--color-border)', position: 'relative', flexShrink: 0, transition: 'background .15s' }}>
+          <span style={{ position: 'absolute', top: 2, left: on ? 15 : 2, width: 13, height: 13, borderRadius: 999, background: '#fff', transition: 'left .15s' }} />
+        </span>
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{label}</span>
+      </div>
+      <div className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{hint}</div>
+    </button>
+  );
+}
+function CompanyReviewConfig({ companyId }) {
+  const [cfg, setCfg] = useState(null);
+  const load = useCallback(() => {
+    setCfg(null);
+    client.get('qa/admin/company-config', { params: { company_id: companyId } })
+      .then(r => setCfg(r.data.config || {})).catch(() => setCfg({}));
+  }, [companyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const methods = cfg?.['qa.methods'] || [];
+  const closer = cfg?.['qa.closer'];
+  const closerOn = (k) => (closer == null ? true : !!closer[k]);   // null = both closer legs on
+  const sample = cfg?.['qa.rcm.sample'] || { mode: 'percentage', value: 10, period: 'week' };
+
+  const save = async (key, value) => {
+    setCfg(c => ({ ...c, [key]: value }));
+    try {
+      const r = await client.put('qa/admin/company-config', { company_id: companyId, key, value });
+      if (key === 'qa.methods') { const mm = r.data.materialized; if (mm && (mm.tra || mm.rcm)) toast.success(`Pulled ${mm.tra || 0} TRA + ${mm.rcm || 0} RCM`); }
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); load(); }
+  };
+  const toggleMethod = (m) => save('qa.methods', methods.includes(m) ? methods.filter(x => x !== m) : [...methods, m]);
+  const toggleCloser = (k) => { const base = closer == null ? { closer_sales: true, closer_dispo: true } : { ...closer }; base[k] = !closerOn(k); save('qa.closer', base); };
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="text-sm font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+        Review types for this company
+        <InfoTip text="Turn each review type on/off for the company selected in the header. TRA reviews every CRM transfer; RCM samples raw dialer calls; Closed / Unclosed Sale review the closer's call. This is yours as the manager — compliance only assigns you the company." />
+      </div>
+      {cfg === null ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+        : (
+          <div className="flex items-stretch gap-2 flex-wrap">
+            <CfgToggle on={methods.includes('tra')} onClick={() => toggleMethod('tra')} label="TRA · Transfers" tint="#2563eb" hint="Every CRM transfer reviewed" />
+            <CfgToggle on={methods.includes('rcm')} onClick={() => toggleMethod('rcm')} label="RCM · Random" tint="#d97706" hint="Sampled raw dialer calls" />
+            <CfgToggle on={closerOn('closer_sales')} onClick={() => toggleCloser('closer_sales')} label="Closed Sale" tint="#16a34a" hint="Closer calls that closed" />
+            <CfgToggle on={closerOn('closer_dispo')} onClick={() => toggleCloser('closer_dispo')} label="Unclosed Sale" tint="#dc2626" hint="Closer calls, no sale" />
+            {methods.includes('rcm') && (
+              <div className="rounded-xl p-2.5 flex flex-col justify-center" style={{ border: '1px solid var(--color-border)', minWidth: 118 }}>
+                <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RCM sample %</div>
+                <input type="number" min={1} max={100} defaultValue={sample.value}
+                  onBlur={e => { const v = Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)); save('qa.rcm.sample', { ...sample, mode: 'percentage', value: v }); }}
+                  style={{ ...inp, width: 70, padding: '4px 8px' }} />
+              </div>
+            )}
+          </div>
+        )}
+    </div>
+  );
+}
+
 // ── Agents & Fields tab (qa_manager) — bind each agent to RCM/TRA + choose which
 // customer fields show on the agent's task card. ─────────────────────────────
 const CARD_FIELDS = [
@@ -2801,6 +2867,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
 
   return (
     <div className="grid grid-cols-2 gap-5">
+      {canManage && <div className="col-span-2"><CompanyReviewConfig companyId={companyId} /></div>}
       {/* agent → method binding */}
       <div>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. Manual assigns require the binding; compliance work rules route regardless. Bind one or both." /></div>

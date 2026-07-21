@@ -45,11 +45,30 @@ async function can(req, key) {
 }
 // company scope: superadmin / view_all → every company (null = no filter); else
 // the companies this QA user actually belongs to (getUserCompanies).
+// Companies a MANAGER was assigned (their evaluation scope) — one manager per
+// company (mig 208). Empty until compliance wires them.
+async function managerCompanyIds(managerId) {
+  const { data } = await supabaseAdmin.from('qa_manager_companies').select('company_id').eq('manager_id', managerId);
+  return (data || []).map(r => r.company_id);
+}
+// The manager an AGENT belongs to (one manager per agent, mig 208), or null.
+async function agentManagerId(agentId) {
+  const { data } = await supabaseAdmin.from('qa_team_members').select('manager_id').eq('agent_id', agentId).maybeSingle();
+  return data?.manager_id || null;
+}
+// Strict two-tier scope (mig 208): superadmin / compliance (view_all) → all.
+// A MANAGER sees only the companies compliance assigned them; an AGENT sees
+// their manager's companies. Unwired (no companies / no manager) → nothing.
 async function allowedCompanyIds(req) {
   if (await isSuperAdmin(req.user.id)) return null;
   if (await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews')) return null;
-  const cos = await getUserCompanies(req.user.id);
-  return cos.map(c => c.id);
+  const uid = req.user.id;
+  if (await isManager(req)) return managerCompanyIds(uid);          // manager → own assigned companies
+  // agent → their manager's companies. If the team table is missing (mig 208 not
+  // applied yet) fall back to legacy ucr companies so nothing breaks mid-rollout.
+  const { data, error } = await supabaseAdmin.from('qa_team_members').select('manager_id').eq('agent_id', uid).maybeSingle();
+  if (error) { const cos = await getUserCompanies(uid); return cos.map(c => c.id); }
+  return data?.manager_id ? managerCompanyIds(data.manager_id) : [];
 }
 // Company-scope check for a QA ASSIGNMENT (not a raw company id). QA users are
 // scoped to their FRONTER companies, but a closer-leg row (a sale / an unclosed
@@ -1174,27 +1193,34 @@ router.get('/agents', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
   const allowed = await allowedCompanyIds(req);
   const scopeAll = req.query.company_id === '__all__';
-  let rolesQ = supabaseAdmin.from('user_company_roles')
-    .select('user_id, custom_roles(level)').eq('is_active', true);
-  if (scopeAll) {
-    // every QA agent across the companies this manager may touch (for
-    // "All my companies" cross-company assignment).
-    if (allowed) { if (!allowed.length) return res.json({ agents: [] }); rolesQ = rolesQ.in('company_id', allowed); }
-  } else {
+  if (!scopeAll) {
     const companyId = req.query.company_id || req.user.company_id;
     if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
-    rolesQ = rolesQ.eq('company_id', companyId);
   }
-  const { data: roles, error } = await rolesQ;
-  if (error) { logger.warn('QA', `agents roles: ${error.message}`); return res.status(500).json({ error: error.message }); }
-  // custom_roles may embed as object or array depending on cardinality
-  const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
-  const qaRows = (roles || []).filter(r => ['qa_agent', 'qa_manager'].includes(levelOf(r.custom_roles)));
-  const ids = [...new Set(qaRows.map(r => r.user_id))];
+  // The manager's TEAM is the agent pool (mig 208): a manager assigns only to
+  // their own agents, who may work any of the manager's companies. Superadmin /
+  // compliance (allowed === null) keep the broad ucr-based pool so they can
+  // still assign across companies for oversight.
+  let ids = [];
+  let roleById = {};
+  const { data: team } = await supabaseAdmin.from('qa_team_members').select('agent_id').eq('manager_id', req.user.id);
+  if (team && team.length) {
+    ids = [...new Set(team.map(r => r.agent_id))];
+    roleById = Object.fromEntries(ids.map(id => [id, 'qa_agent']));
+  } else if (allowed === null) {
+    let rolesQ = supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').eq('is_active', true);
+    if (!scopeAll) rolesQ = rolesQ.eq('company_id', req.query.company_id || req.user.company_id);
+    const { data: roles, error } = await rolesQ;
+    if (error) { logger.warn('QA', `agents roles: ${error.message}`); return res.status(500).json({ error: error.message }); }
+    const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+    const qaRows = (roles || []).filter(r => ['qa_agent', 'qa_manager'].includes(levelOf(r.custom_roles)));
+    ids = [...new Set(qaRows.map(r => r.user_id))];
+    roleById = Object.fromEntries(qaRows.map(r => [r.user_id, levelOf(r.custom_roles)]));
+  }
   if (!ids.length) return res.json({ agents: [] });
   const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
   const nameById = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
-  const roleById = Object.fromEntries(qaRows.map(r => [r.user_id, levelOf(r.custom_roles)]));
   // undone (pending + in_review) count per agent IN THIS company — drives the
   // manager's per-agent workload + "clear undone" control.
   const undone = {};
@@ -2451,10 +2477,17 @@ router.get('/agent-methods', asyncHandler(async (req, res) => {
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
 
-  const { data: roles } = await supabaseAdmin.from('user_company_roles')
-    .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
-  const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
-  const agentIds = [...new Set((roles || []).filter(r => levelOf(r.custom_roles) === 'qa_agent').map(r => r.user_id))];
+  // the caller's TEAM (mig 208). superadmin/compliance (allowed === null) with
+  // no personal team fall back to ucr agents in the company for oversight.
+  const { data: team } = await supabaseAdmin.from('qa_team_members').select('agent_id').eq('manager_id', req.user.id);
+  let agentIds = (team || []).map(r => r.agent_id);
+  if (!agentIds.length && allowed === null) {
+    const { data: roles } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
+    const levelOf = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+    agentIds = (roles || []).filter(r => levelOf(r.custom_roles) === 'qa_agent').map(r => r.user_id);
+  }
+  agentIds = [...new Set(agentIds)];
   if (!agentIds.length) return res.json({ agents: [] });
 
   const [{ data: profs }, { data: binds }] = await Promise.all([
@@ -2477,6 +2510,11 @@ router.put('/agent-methods', asyncHandler(async (req, res) => {
   if (!user_id) return res.status(400).json({ error: 'user_id is required' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+  // a real manager (not superadmin/compliance) may only bind their OWN team's agents
+  if (allowed !== null) {
+    const { data: tm } = await supabaseAdmin.from('qa_team_members').select('agent_id').eq('manager_id', req.user.id).eq('agent_id', user_id).maybeSingle();
+    if (!tm) return res.status(403).json({ error: 'That agent is not on your team' });
+  }
 
   await supabaseAdmin.from('qa_agent_methods').delete().eq('company_id', companyId).eq('user_id', user_id);
   if (methods.length) {
@@ -2763,6 +2801,103 @@ router.put('/admin/company-methods', asyncHandler(async (req, res) => {
   let materialized = null;
   if (methods.length) { try { materialized = await materializeCompany(company_id, methods); } catch (e) { logger.warn('QA', `admin materialize: ${e.message}`); } }
   res.json({ ok: true, methods, materialized });
+}));
+
+// ── QA ORG-CHART (mig 208): compliance wires managers ↔ companies ↔ agents ────
+// This is compliance's ONLY QA job now. It never touches methods, task
+// assignment, or per-company work config — those all belong to the manager.
+const lvlOfCr = (cr) => Array.isArray(cr) ? cr[0]?.level : cr?.level;
+async function isQaLevel(userId, level) {
+  const { data } = await supabaseAdmin.from('user_company_roles').select('custom_roles(level)').eq('user_id', userId);
+  return (data || []).some(r => lvlOfCr(r.custom_roles) === level);
+}
+
+// GET /qa/admin/managers — every QA manager with their assigned companies + team,
+// plus the full company list (each tagged with its owning manager) and the full
+// agent list (each tagged with its manager). Drives the compliance org-chart UI.
+router.get('/admin/managers', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('user_id, custom_roles(level)');
+  const levelByUid = {};
+  for (const r of (ucr || [])) {
+    const l = lvlOfCr(r.custom_roles);
+    if (['qa_manager', 'qa_agent'].includes(l)) (levelByUid[r.user_id] ||= new Set()).add(l);
+  }
+  const uids = Object.keys(levelByUid);
+  const managerIds = uids.filter(u => levelByUid[u].has('qa_manager'));
+  const agentIds = uids.filter(u => levelByUid[u].has('qa_agent') && !levelByUid[u].has('qa_manager'));
+  let names = {};
+  if (uids.length) {
+    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    names = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p)]));
+  }
+  const { data: comps } = await supabaseAdmin.from('companies').select('id, name').order('name');
+  const { data: mc } = await supabaseAdmin.from('qa_manager_companies').select('company_id, manager_id');
+  const { data: tm } = await supabaseAdmin.from('qa_team_members').select('agent_id, manager_id');
+  const compMgr = Object.fromEntries((mc || []).map(r => [r.company_id, r.manager_id]));
+  const agentMgr = Object.fromEntries((tm || []).map(r => [r.agent_id, r.manager_id]));
+  const open = await openCounts(agentIds);
+  const managers = managerIds.map(mid => ({
+    manager_id: mid,
+    name: names[mid] || mid,
+    companies: (comps || []).filter(c => compMgr[c.id] === mid).map(c => ({ id: c.id, name: c.name })),
+    agents: agentIds.filter(a => agentMgr[a] === mid).map(a => ({ user_id: a, name: names[a] || a, open_tasks: open[a] || 0 })),
+  }));
+  res.json({
+    managers,
+    companies: (comps || []).map(c => ({ id: c.id, name: c.name, manager_id: compMgr[c.id] || null })),
+    agents: agentIds.map(a => ({ user_id: a, name: names[a] || a, manager_id: agentMgr[a] || null, open_tasks: open[a] || 0 })),
+  });
+}));
+
+// PUT /qa/admin/manager/:managerId/companies { company_ids:[...] } — set exactly
+// which companies this manager evaluates. One manager per company: assigning a
+// company here MOVES it off any other manager (company_id is the PK).
+router.put('/admin/manager/:managerId/companies', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const managerId = req.params.managerId;
+  const ids = Array.isArray(req.body?.company_ids) ? [...new Set(req.body.company_ids.filter(Boolean))] : null;
+  if (!ids) return res.status(400).json({ error: 'company_ids array required' });
+  if (!(await isQaLevel(managerId, 'qa_manager'))) return res.status(400).json({ error: 'Not a QA manager' });
+  let moved = 0;
+  for (const cid of ids) {
+    const { data: cur } = await supabaseAdmin.from('qa_manager_companies').select('manager_id').eq('company_id', cid).maybeSingle();
+    if (cur && cur.manager_id !== managerId) moved++;
+    const { error } = await supabaseAdmin.from('qa_manager_companies')
+      .upsert({ company_id: cid, manager_id: managerId, assigned_by: req.user.id, assigned_at: new Date().toISOString() }, { onConflict: 'company_id' });
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  const { data: existing } = await supabaseAdmin.from('qa_manager_companies').select('company_id').eq('manager_id', managerId);
+  const remove = (existing || []).map(r => r.company_id).filter(c => !ids.includes(c));
+  if (remove.length) await supabaseAdmin.from('qa_manager_companies').delete().eq('manager_id', managerId).in('company_id', remove);
+  res.json({ ok: true, companies: ids.length, moved, removed: remove.length });
+}));
+
+// PUT /qa/admin/manager/:managerId/agents { agent_ids:[...] } — set this manager's
+// team. One manager per agent: assigning an agent MOVES them off any other
+// manager (agent_id is the PK). Agents dropped from the team have their untouched
+// pending tasks returned to the pool.
+router.put('/admin/manager/:managerId/agents', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const managerId = req.params.managerId;
+  const ids = Array.isArray(req.body?.agent_ids) ? [...new Set(req.body.agent_ids.filter(Boolean))] : null;
+  if (!ids) return res.status(400).json({ error: 'agent_ids array required' });
+  if (!(await isQaLevel(managerId, 'qa_manager'))) return res.status(400).json({ error: 'Not a QA manager' });
+  let moved = 0;
+  for (const aid of ids) {
+    const { data: cur } = await supabaseAdmin.from('qa_team_members').select('manager_id').eq('agent_id', aid).maybeSingle();
+    if (cur && cur.manager_id !== managerId) moved++;
+    const { error } = await supabaseAdmin.from('qa_team_members')
+      .upsert({ agent_id: aid, manager_id: managerId, assigned_by: req.user.id, assigned_at: new Date().toISOString() }, { onConflict: 'agent_id' });
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  const { data: existing } = await supabaseAdmin.from('qa_team_members').select('agent_id').eq('manager_id', managerId);
+  const remove = (existing || []).map(r => r.agent_id).filter(a => !ids.includes(a));
+  if (remove.length) {
+    await supabaseAdmin.from('qa_team_members').delete().eq('manager_id', managerId).in('agent_id', remove);
+    try { await supabaseAdmin.from('qa_assignments').update({ assigned_to: null }).in('assigned_to', remove).eq('status', 'pending'); } catch { /* best-effort release */ }
+  }
+  res.json({ ok: true, agents: ids.length, moved, removed: remove.length });
 }));
 
 // NOTE: QA user CREATION was removed from the compliance surface — the Super
@@ -3112,8 +3247,16 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
 // full per-company QA config (compliance controls each company's QA setup —
 // methods, RCM sampling, covers, TRA population, retention, card fields).
 const QA_ADMIN_KEYS = ['qa.methods', 'qa.closer', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear', 'qa.closer_dispo.dispositions'];
+// Company review-type config is MANAGER-owned (mig 208): the manager assigned
+// that company (or superadmin) may read/write it. Compliance no longer configures
+// "what a company is reviewed on" — they only wire managers ↔ companies ↔ agents.
+async function canConfigCompany(req, companyId) {
+  if (await isSuperAdmin(req.user.id)) return true;
+  if (!companyId || !(await isManager(req))) return false;
+  return (await managerCompanyIds(req.user.id)).includes(companyId);
+}
 router.get('/admin/company-config', asyncHandler(async (req, res) => {
-  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await canConfigCompany(req, req.query.company_id))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
   // ONE round-trip (global + company) instead of 11 sequential getConfig calls
@@ -3124,7 +3267,7 @@ router.get('/admin/company-config', asyncHandler(async (req, res) => {
   res.json({ company_id: companyId, config: out });
 }));
 router.put('/admin/company-config', asyncHandler(async (req, res) => {
-  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await canConfigCompany(req, req.body?.company_id))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, key, value } = req.body || {};
   if (!company_id || !QA_ADMIN_KEYS.includes(key)) return res.status(400).json({ error: 'company_id + a valid qa.* key required' });
   await setConfig(`company:${company_id}`, key, value, req.user.id);

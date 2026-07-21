@@ -214,6 +214,115 @@ function ActivityFeed({ coFilter, range, reviewers }) {
   );
 }
 
+// ── QA ORG-CHART (mig 208) — compliance's ONLY QA job: wire each MANAGER to the
+// companies they evaluate + the agents on their team. Methods, tasks and per-
+// company work-config all belong to the manager (in the QA dashboard).
+function ManagersConsole() {
+  const [data, setData] = useState(null);            // { managers, companies, agents }
+  const [edit, setEdit] = useState(null);            // { managerId, kind:'companies'|'agents', name }
+  const [sel, setSel] = useState(() => new Set());
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => client.get('qa/admin/managers')
+    .then(r => setData(r.data)).catch(() => setData({ managers: [], companies: [], agents: [] })), []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!data) return <div className="py-8 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  const { managers, companies, agents } = data;
+  const coOwner = Object.fromEntries(companies.map(c => [c.id, c.manager_id]));
+  const agOwner = Object.fromEntries(agents.map(a => [a.user_id, a.manager_id]));
+  const mgrName = Object.fromEntries(managers.map(m => [m.manager_id, m.name]));
+
+  const openEdit = (m, kind) => {
+    const cur = kind === 'companies' ? m.companies.map(c => c.id) : m.agents.map(a => a.user_id);
+    setSel(new Set(cur));
+    setEdit({ managerId: m.manager_id, kind, name: m.name });
+  };
+  const toggle = (id) => setSel(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const save = async () => {
+    setSaving(true);
+    try {
+      if (edit.kind === 'companies') await client.put(`qa/admin/manager/${edit.managerId}/companies`, { company_ids: [...sel] });
+      else await client.put(`qa/admin/manager/${edit.managerId}/agents`, { agent_ids: [...sel] });
+      toast.success('Saved'); setEdit(null); load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  const pool = edit ? (edit.kind === 'companies' ? companies : agents) : [];
+  const idOf = (item) => (edit.kind === 'companies' ? item.id : item.user_id);
+  const ownerOf = (item) => (edit.kind === 'companies' ? coOwner[item.id] : agOwner[item.user_id]);
+
+  return (
+    <div className="space-y-2">
+      {!managers.length && (
+        <div className="rounded-xl p-6 text-center text-sm" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+          No QA managers yet. The Super Admin creates QA accounts; once a person holds the QA&nbsp;Manager role they appear here to be given companies&nbsp;+ a team.
+        </div>
+      )}
+      {managers.map(m => (
+        <div key={m.manager_id} className="rounded-xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="flex items-center gap-2 mb-2">
+            <User size={15} style={{ color: 'var(--color-primary-600)' }} />
+            <div className="text-sm font-bold flex-1 truncate" style={{ color: 'var(--color-text)' }}>{m.name}</div>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>MANAGER</span>
+          </div>
+          <div className="flex items-start gap-2 mb-1.5">
+            <div className="flex items-center gap-1 text-[11px] font-bold flex-shrink-0 pt-1" style={{ color: 'var(--color-text-tertiary)', width: 82 }}><Building2 size={12} /> Companies</div>
+            <div className="flex-1 flex items-center gap-1 flex-wrap">
+              {m.companies.length ? m.companies.map(c => <span key={c.id} className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)', color: 'var(--color-primary-600)' }}>{c.name}</span>)
+                : <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>None</span>}
+              <button onClick={() => openEdit(m, 'companies')} className="text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}><Plus size={11} /> Edit</button>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <div className="flex items-center gap-1 text-[11px] font-bold flex-shrink-0 pt-1" style={{ color: 'var(--color-text-tertiary)', width: 82 }}><Users size={12} /> Team</div>
+            <div className="flex-1 flex items-center gap-1 flex-wrap">
+              {m.agents.length ? m.agents.map(a => <span key={a.user_id} className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}>{a.name}{a.open_tasks ? ` · ${a.open_tasks}` : ''}</span>)
+                : <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>None</span>}
+              <button onClick={() => openEdit(m, 'agents')} className="text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}><Plus size={11} /> Edit</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {edit && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.45)' }} onClick={() => !saving && setEdit(null)}>
+          <div className="rounded-2xl w-full max-w-md flex flex-col" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2 p-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <div className="text-sm font-bold flex-1" style={{ color: 'var(--color-text)' }}>{edit.kind === 'companies' ? 'Companies for' : 'Team for'} {edit.name}</div>
+              <button onClick={() => !saving && setEdit(null)} className="p-1 rounded-lg" style={{ background: 'var(--color-surface-hover)' }}><X size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+            </div>
+            <div className="text-[11px] px-3 pt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+              {edit.kind === 'companies' ? 'One company = one manager. Picking a company that is with another manager MOVES it here.' : 'One agent = one manager. Picking an agent on another team MOVES them here.'}
+            </div>
+            <div className="flex-1 overflow-auto p-2 space-y-0.5">
+              {!pool.length && <div className="text-[12px] text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>Nothing to assign yet.</div>}
+              {pool.map(item => {
+                const id = idOf(item); const owner = ownerOf(item);
+                const checked = sel.has(id);
+                const otherOwner = owner && owner !== edit.managerId;
+                return (
+                  <button key={id} onClick={() => toggle(id)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left" style={{ background: checked ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : 'transparent' }}>
+                    <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0" style={{ border: '1.5px solid ' + (checked ? 'var(--color-primary)' : 'var(--color-border)'), background: checked ? 'var(--color-primary)' : 'transparent' }}>{checked && <Check size={11} style={{ color: '#fff' }} />}</span>
+                    <span className="text-[13px] flex-1 truncate" style={{ color: 'var(--color-text)' }}>{item.name}</span>
+                    {otherOwner && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-warning-600)' }}>with {mgrName[owner] || 'another'}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 p-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <span className="text-[11px] flex-1" style={{ color: 'var(--color-text-tertiary)' }}>{sel.size} selected</span>
+              <button onClick={() => setEdit(null)} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+              <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1" style={{ background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', color: '#fff' }}>{saving && <Loader2 size={12} className="animate-spin" />} Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function QaAdminTab() {
   const [tab, setTab] = useState('overview');
   const [companies, setCompanies] = useState(null);
@@ -289,15 +398,14 @@ export default function QaAdminTab() {
         <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[
             ['overview', 'Overview', 'Department KPIs + a productivity board: who is reviewing how much, the pass rate they give, and when they were last active.'],
-            ['team', 'Team', 'Manage each QA person — which companies they can review, and which call types (TRA/RCM) their reviews are scored against.'],
+            ['team', 'Teams', 'Wire each QA manager to the companies they evaluate + the agents on their team. That is compliance’s only QA job — methods, tasks and per-company setup belong to the manager.'],
             ['activity', 'Activity', 'A newest-first timeline of who reviewed whose call, for which company, the result, and when.'],
-            ['companies', 'Companies', 'Turn the 4 review types on/off per company and set their scorecards, RCM sampling, and limits.'],
           ].map(([k, l, tip]) => (
             <button key={k} onClick={() => setTab(k)} title={tip} className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
               style={{ background: tab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: tab === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
           ))}
         </div>
-        <InfoTip w={320} text="Overview = who's reviewing how much. Team = manage QA people + their company / call-type access. Activity = the who-did-what-when timeline. Companies = turn review types on/off + settings per company. The company + date filters (top-right) apply to Overview and Activity." />
+        <InfoTip w={320} text="Overview = who's reviewing how much. Teams = wire managers to their companies + agents (compliance's only QA job). Activity = the who-did-what-when timeline. Managers set methods, hand out tasks and configure each company's review types from the QA dashboard. The company + date filters (top-right) apply to Overview and Activity." />
       </div>
 
       {/* OVERVIEW — KPIs + reviewer productivity */}
@@ -312,16 +420,14 @@ export default function QaAdminTab() {
         </section>
       )}
 
-      {/* TEAM — person management (company access + methods) */}
+      {/* TEAMS — org chart: wire managers ↔ companies ↔ agents (mig 208) */}
       {tab === 'team' && (
         <section>
           <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-            QA Team — who reviews, and where
-            <InfoTip w={300} text="Every QA manager & agent. Give a person access to the companies they should review + which call types (TRA/RCM). The QA MANAGER hands out the actual calls from Load Day / Live. The Super Admin creates the accounts." />
+            QA Teams — managers, their companies &amp; agents
+            <InfoTip w={320} text="For each QA manager: assign the companies they evaluate and the agents on their team. One company = one manager; one agent = one manager. The manager then decides methods + hands out tasks from the QA dashboard — compliance never sets those. The Super Admin creates the accounts." />
           </div>
-          <TeamConsole companies={companies || []} users={users} initialUser={jumpUser}
-            reloadUsers={loadUsers} reloadAll={() => { load(); loadTeam(); }}
-            removeAssign={removeAssign} setAgentMethod={setAgentMethod} />
+          <ManagersConsole />
         </section>
       )}
 
@@ -332,45 +438,8 @@ export default function QaAdminTab() {
         </section>
       )}
 
-      {/* COMPANIES — enable + configure per company */}
-      {tab === 'companies' && (
-        <section>
-          <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-            Companies — enable, configure &amp; route
-            <InfoTip text="Turn on the review types per company, open the gear for the settings, and see who reviews that company's calls. If a company shows waiting calls with no reviewer, assign someone in the QA Team." />
-          </div>
-          <div className="text-[11px] mb-2 flex items-center gap-3 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
-            <span><b style={{ color: 'var(--color-primary-600)' }}>TRA</b> = calls entered in the CRM — every transfer gets reviewed</span>
-            <span><b style={{ color: 'var(--color-warning-600)' }}>RCM</b> = random raw dialer calls — sampled daily</span>
-          </div>
-          {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-            : <div className="space-y-2">
-                {companies.map(co => {
-                  return (
-                  <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                    <div className="flex items-center gap-2 p-2.5 cursor-pointer" onClick={() => setExpanded(e => e === co.id ? null : co.id)}>
-                      <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div>
-                        <div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}{co.qa_agents ? ` · ${co.qa_agents} agent${co.qa_agents === 1 ? '' : 's'}` : ''}</div>
-                      </div>
-                      {/* enabled review-type summary */}
-                      <div className="flex items-center gap-1 flex-wrap justify-end" style={{ maxWidth: 280 }}>
-                        {enabledTypes(co).length ? enabledTypes(co).map(k => <WtPill key={k} k={k} />)
-                          : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-warning-600)' }}>QA off</span>}
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); setExpanded(x => x === co.id ? null : co.id); }} title="Configure QA for this company" className="p-1.5 rounded-lg flex-shrink-0" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
-                        <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
-                        <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
-                      </button>
-                    </div>
-                    {expanded === co.id && <CompanyConfig company={co} onToggleMethod={(m) => toggleMethod(co, m)} onCloserChange={(closer) => setCompanies(cs => cs.map(c => c.id === co.id ? { ...c, closer } : c))} />}
-                  </div>
-                  );
-                })}
-              </div>}
-        </section>
-      )}
+      {/* Companies config moved to the QA manager dashboard (mig 208) — compliance
+          no longer configures per-company review types; managers own that. */}
     </div>
   );
 }
