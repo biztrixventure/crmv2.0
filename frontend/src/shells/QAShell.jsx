@@ -5,7 +5,7 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic, LayoutDashboard, Radio,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic, LayoutDashboard, Radio, MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -2096,7 +2096,7 @@ const CellVal = ({ f, v }) => {
   if (f.kind === 'rating') return <span className="font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{v}</span>;
   return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;
 };
-function ReviewsSheet({ scorecard, reviews, managerView }) {
+function ReviewsSheet({ scorecard, reviews, managerView, onOpen }) {
   const cfg = scorecard?.criteria;
   const fields = flattenFields(cfg);
   const hasFinal = cfg?.final_score_formula === 'base_plus_penalty_truncated';
@@ -2119,11 +2119,14 @@ function ReviewsSheet({ scorecard, reviews, managerView }) {
               {managerView && th('Reviewer', 'meta')}
               {fields.map(f => th(f.label, f.group))}
               {th('Base', 'computed')}{th('Auto-Fail', 'computed')}{hasPenalty && th('Penalty', 'computed')}{hasFinal && th('Final', 'computed')}{hasQuality && th('Quality', 'computed')}{th('Status', 'computed')}
+              <th className="px-2 py-1.5" style={{ background: GROUP_TINT2.computed, minWidth: 34 }} />
             </tr>
           </thead>
           <tbody>
             {reviews.map(r => (
-              <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+              <tr key={r.id} onClick={() => onOpen?.(r)}
+                className={onOpen && r.assignment_id ? 'cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]' : ''}
+                style={{ borderTop: '1px solid var(--color-border)' }}>
                 <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(r.reviewed_at)}</td>
                 <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDate(r.call_date)}</td>
                 <td className="px-2 py-1.5 truncate" style={{ color: 'var(--color-text)', maxWidth: 120 }}>{r.customer_name || '—'}</td>
@@ -2139,6 +2142,9 @@ function ReviewsSheet({ scorecard, reviews, managerView }) {
                 <td className="px-2 py-1.5 text-center">
                   {r.passed == null ? <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
                     : <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded" style={r.passed ? { background: 'rgba(16,185,129,0.12)', color: '#059669' } : { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }}>{r.passed ? 'PASS' : 'FAIL'}</span>}
+                </td>
+                <td className="px-2 py-1.5 text-center" title={r.overall_notes ? 'Has comments — click to view / edit' : 'Open to view / edit'}>
+                  {r.overall_notes ? <MessageSquare size={13} style={{ color: 'var(--color-primary-600)' }} /> : <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
                 </td>
               </tr>
             ))}
@@ -2377,7 +2383,7 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
   );
 }
 
-function CompletedTab({ managerView, companyId }) {
+function CompletedTab({ managerView, companyId, selfId, canOverride }) {
   const today = todayISO();
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -2392,6 +2398,7 @@ function CompletedTab({ managerView, companyId }) {
   const [result, setResult] = useState('');        // '' | pass | fail | autofail
   const [sort, setSort] = useState('newest');      // newest | high | low
   const [file, setFile] = useState(null);          // agent quality-file modal
+  const [openRev, setOpenRev] = useState(null);    // a completed review opened to view comments / edit
 
   const load = useCallback(() => {
     setLoading(true);
@@ -2525,9 +2532,19 @@ function CompletedTab({ managerView, companyId }) {
     ...(managerView ? [['reviewers', 'Reviewers', Award]] : []),
   ];
 
+  // Click a scored record → open it to read the comments + edit later. Managers
+  // can edit any; an agent can edit their own while it isn't finalized (locked).
+  // ReviewEditor loads by assignment_id, so a review with no linked call can't open.
+  const openReview = (r) => {
+    if (!r.assignment_id) { toast('This review has no linked call to open.'); return; }
+    setOpenRev({ ...r, id: r.assignment_id, status: 'scored', agent_name: r.agent, subject_date: r.call_date });
+  };
+
   return (
     <div className="flex flex-col h-full">
       {file && <AgentQualityFile subject={file} managerView={managerView} companyId={companyId} onClose={() => setFile(null)} />}
+      <ScoreModal open={openRev} onClose={() => setOpenRev(null)} selfId={selfId} canOverride={canOverride}
+        onScored={() => setOpenRev(null)} onEdited={() => load()} />
       {/* row 1 — range + server filters */}
       <div className="flex items-center gap-2 flex-wrap mb-2.5">
         <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>{managerView ? 'Completed — scoreboard' : 'My scoreboard'}
@@ -2613,7 +2630,7 @@ function CompletedTab({ managerView, companyId }) {
                   <Lines series={[{ name: 'Avg score', color: PALETTE[0], points: trend.map(d => ({ x: d.date, y: d.avg })) }]} yMax={100} yUnit="%" />
                 </div>
               )}
-              {Object.entries(groups).map(([scId, revs]) => <ReviewsSheet key={scId} scorecard={scorecards[scId]} reviews={revs} managerView={managerView} />)}
+              {Object.entries(groups).map(([scId, revs]) => <ReviewsSheet key={scId} scorecard={scorecards[scId]} reviews={revs} managerView={managerView} onOpen={openReview} />)}
             </>
           )
           : view === 'daily' ? (
@@ -2635,7 +2652,9 @@ function CompletedTab({ managerView, companyId }) {
                     <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
                       <tbody>
                         {rows.map(r => (
-                          <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                          <tr key={r.id} onClick={() => openReview(r)}
+                            className="cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
+                            style={{ borderTop: '1px solid var(--color-border)' }}>
                             <td className="px-3 py-1.5 whitespace-nowrap text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)', width: 70 }}>{r.reviewed_at ? new Date(r.reviewed_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''}</td>
                             <td className="px-2 py-1.5"><MethodPill m={r.method} /></td>
                             <td className="px-2 py-1.5">
@@ -2646,6 +2665,7 @@ function CompletedTab({ managerView, companyId }) {
                             {managerView && <td className="px-2 py-1.5 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewer_name || '—'}</td>}
                             <td className="px-2 py-1.5 whitespace-nowrap"><ReviewScore r={r} /></td>
                             <td className="px-2 py-1.5 text-[11px] truncate" style={{ color: 'var(--color-text-tertiary)', maxWidth: 160 }}>{r.call_outcome || ''}</td>
+                            <td className="px-2 py-1.5 text-right" title={r.overall_notes ? 'Has comments — click to view / edit' : 'Open to view / edit'}>{r.overall_notes ? <MessageSquare size={13} style={{ color: 'var(--color-primary-600)' }} /> : <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3236,7 +3256,7 @@ function QAAgentView({ user, logout }) {
             while loading (treated as no gate); the manager view is ungated. */}
         {tab === 'work' && <AgentWork selfId={user?.id} companyId={scoped || user?.company_id} scoped={scoped} allowedWt={methods} />}
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
-        {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} />}
+        {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} selfId={user?.id} canOverride={false} />}
       </main>
     </div>
   );
@@ -3305,7 +3325,7 @@ export default function QAShell() {
           <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />
         </>}
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} isSuper={isSuper} />}
-        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} />}
+        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} selfId={user?.id} canOverride={canOverride} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} companyName={(companies || []).find(c => c.id === (scoped || user?.company_id))?.name} />}
         {tab === 'reports' && canReports && <ReportsTab companyId={scoped} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
       </main>
