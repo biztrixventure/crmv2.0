@@ -1900,17 +1900,31 @@ router.get('/scorecards', asyncHandler(async (req, res) => {
   res.json({ scorecards: data || [] });
 }));
 
+// The sheet_v2 scoring engine reads the pass line from criteria.pass_threshold,
+// but managers set it via the settable pass_threshold COLUMN. Keep them in
+// lockstep on every write so a manager's edit actually changes grading (a
+// blank/legacy divergence made the threshold field silently do nothing before).
+const normThreshold = (pt) => (pt === null || pt === '' || pt === undefined) ? null : (Number.isFinite(+pt) ? +pt : null);
+function syncSheetThreshold(criteria, pt) {
+  if (criteria && !Array.isArray(criteria) && typeof criteria === 'object' && criteria.model === 'sheet_v2') {
+    return { ...criteria, pass_threshold: pt };
+  }
+  return criteria;
+}
+
 router.post('/scorecards', asyncHandler(async (req, res) => {
   if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, method, name, criteria, pass_threshold } = req.body || {};
   // `method` is the work-type slot: tra | rcm | closer_sales | closer_dispo
   if (!WORK_TYPES.includes(method) || !name) return res.status(400).json({ error: 'method (tra|rcm|closer_sales|closer_dispo) and name are required' });
   // criteria may be an ARRAY (legacy weighted) or an OBJECT (sheet_v2). Keep whichever.
-  const criteriaVal = (Array.isArray(criteria) || (criteria && typeof criteria === 'object')) ? criteria : [];
+  let criteriaVal = (Array.isArray(criteria) || (criteria && typeof criteria === 'object')) ? criteria : [];
+  const pt = normThreshold(pass_threshold);
+  criteriaVal = syncSheetThreshold(criteriaVal, pt);   // sheet_v2 → mirror the column into criteria
   const row = {
     company_id: company_id || null, method, name: String(name).slice(0, 200),
     criteria: criteriaVal,
-    pass_threshold: (pass_threshold === null || pass_threshold === '') ? null : (Number.isFinite(+pass_threshold) ? +pass_threshold : 80),
+    pass_threshold: pt,
     created_by: req.user.id,
   };
   const { data, error } = await supabaseAdmin.from('qa_scorecards').insert(row).select().single();
@@ -1921,7 +1935,14 @@ router.post('/scorecards', asyncHandler(async (req, res) => {
 router.put('/scorecards/:id', asyncHandler(async (req, res) => {
   if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
   const patch = { updated_at: new Date().toISOString() };
-  for (const k of ['name', 'pass_threshold', 'is_active', 'criteria']) if (req.body?.[k] !== undefined) patch[k] = req.body[k];
+  for (const k of ['name', 'is_active']) if (req.body?.[k] !== undefined) patch[k] = req.body[k];
+  const hasPt = req.body?.pass_threshold !== undefined;
+  const pt = hasPt ? normThreshold(req.body.pass_threshold) : undefined;
+  if (hasPt) patch.pass_threshold = pt;
+  if (req.body?.criteria !== undefined) {
+    // when the threshold is part of the same save, write it INTO the criteria too
+    patch.criteria = hasPt ? syncSheetThreshold(req.body.criteria, pt) : req.body.criteria;
+  }
   const { data, error } = await supabaseAdmin.from('qa_scorecards').update(patch).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ scorecard: data });

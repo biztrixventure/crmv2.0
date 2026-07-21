@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Loader2, Send, CheckCircle2, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { computeSheetReview, truncPct1 } from '../../utils/qaSheetFormula';
 import ThemedSelect from '../UI/Select';
 
@@ -72,7 +73,11 @@ function Rating({ value, scale = 4, min = 0, onChange, disabled }) {
 export default function SheetScoreRow({ config, initialValues = {}, initialNotes = '', readOnly = false, busy = false, submitLabel = 'Submit review', onSubmit, headerRight = null }) {
   const [values, setValues] = useState(() => ({ ...initialValues }));
   const [notes, setNotes] = useState(initialNotes || '');
-  const set = (k, val) => setValues(m => ({ ...m, [k]: val }));
+  const [afMissing, setAfMissing] = useState(() => new Set());   // required Auto-Fail fields left blank on a submit attempt
+  const set = (k, val) => {
+    setValues(m => ({ ...m, [k]: val }));
+    setAfMissing(s => { if (!s.has(k)) return s; const n = new Set(s); n.delete(k); return n; });   // clear the flag once answered
+  };
 
   const out = useMemo(() => computeSheetReview(config, values), [config, values]);
   const divisor = config.base_score_divisor || 30;
@@ -148,7 +153,17 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   };
 
   const metaKeys = (config.meta_fields || []).map(f => f.key);
+  const afKeys = ((config.autofail || {}).fields || []).map(f => f.key);
   const submit = () => {
+    // Auto-Fail (compliance) fields must be answered Y/N before submitting — a
+    // blank one is ambiguous and drives the whole call's pass/fail, so require an
+    // explicit answer rather than silently auto-failing (or auto-passing) it.
+    const miss = afKeys.filter(k => String(values[k] ?? '').trim() === '');
+    if (miss.length) {
+      setAfMissing(new Set(miss));
+      toast.error(`Answer all Auto-Fail compliance fields (Y or N) before submitting — ${miss.length} left blank.`);
+      return;
+    }
     const meta = {}; for (const k of metaKeys) if (values[k] !== undefined) meta[k] = values[k];
     const scoring = { ...values }; for (const k of metaKeys) delete scoring[k];
     onSubmit?.({ values: scoring, meta, overall_notes: notes });
@@ -187,7 +202,8 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
           </div>
           {/* values */}
           <div className="flex">
-            {columns.map(c => cell(c, <div className="px-1.5 py-1.5 flex items-center" style={{ minHeight: 46 }}>{renderCell(c)}</div>))}
+            {columns.map(c => cell(c, <div className="px-1.5 py-1.5 flex items-center" style={{ minHeight: 46 }}>{renderCell(c)}</div>,
+              c.group === 'autofail' && afMissing.has(c.key) ? { boxShadow: 'inset 0 0 0 2px var(--color-error-600)' } : {}))}
           </div>
         </div>
       </div>
