@@ -82,7 +82,7 @@ function useQaCompanies() {
 function CompanyPicker({ companies, all, companyId, onChange }) {
   if (companies === null) return <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />;
   if (!companies.length && !all) return <span className="text-xs font-semibold" style={{ color: 'var(--color-warning-600)' }}><Building2 size={12} className="inline mr-1" />No company assigned</span>;
-  const optLabel = (c) => `${c.name}${c.pending ? ` · ${c.pending} pending` : ''}${c.qa_enabled === false ? ' · QA off' : ''}`;
+  const optLabel = (c) => `${c.name}${c.pending ? ` · ${c.pending} to do` : ''}${c.qa_enabled === false ? ' · no review types on' : ''}`;
   if (companies.length === 1 && !all) return <span className="text-xs font-bold inline-flex items-center gap-1" style={{ color: 'var(--color-text)' }} title={optLabel(companies[0])}><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{companies[0].name}{companies[0].pending ? <span className="text-[10px] font-bold px-1.5 rounded-full" style={{ background: 'rgba(217,119,6,0.14)', color: 'var(--color-warning-600)' }}>{companies[0].pending}</span> : null}</span>;
   return (
     <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="You only see data for the companies assigned to you">
@@ -2776,6 +2776,7 @@ function CompanyReviewConfig({ companyId, onChange }) {
     try {
       const r = await client.put('qa/admin/company-config', { company_id: companyId, key, value });
       if (key === 'qa.methods') { const mm = r.data.materialized; if (mm && (mm.tra || mm.rcm)) toast.success(`Pulled ${mm.tra || 0} TRA + ${mm.rcm || 0} RCM`); }
+      if (r.data.purged) toast.success(`Cleared ${r.data.purged} unassigned task${r.data.purged === 1 ? '' : 's'} for the turned-off review type.`);
       onChange?.();   // let the parent re-read the enabled set so the agent method checkboxes update
     } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); load(); }
   };

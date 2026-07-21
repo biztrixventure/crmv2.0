@@ -2568,11 +2568,18 @@ router.get('/my-companies', asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   // annotate each with QA-on (has methods) + how many calls still await review, so
   // the picker can default to a live company and badge where work is waiting.
+  // An AGENT's badge counts only THEIR unfinished tasks (assigned to them). A
+  // MANAGER / superadmin sees the whole company backlog they oversee. Counting
+  // company-wide for an agent was the "321 pending that won't clear" bug — the
+  // unassigned pool + other agents' tasks are not this agent's work.
+  const mgr = await isManager(req);
   const out = [];
   for (const c of (data || [])) {
     const methods = await getConfig(c.id, 'qa.methods', []);
-    const { count } = await supabaseAdmin.from('qa_assignments')
-      .select('*', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'pending');
+    let cq = supabaseAdmin.from('qa_assignments')
+      .select('*', { count: 'exact', head: true }).eq('company_id', c.id).in('status', ['pending', 'in_review']);
+    if (!mgr) cq = cq.eq('assigned_to', req.user.id);
+    const { count } = await cq;
     out.push({ id: c.id, name: c.name, company_type: c.company_type, qa_enabled: Array.isArray(methods) && methods.length > 0, pending: count || 0 });
   }
   res.json({ companies: out, all: allowed === null });
@@ -3247,6 +3254,20 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
 // full per-company QA config (compliance controls each company's QA setup —
 // methods, RCM sampling, covers, TRA population, retention, card fields).
 const QA_ADMIN_KEYS = ['qa.methods', 'qa.closer', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear', 'qa.closer_dispo.dispositions'];
+// Delete a company's still-UNASSIGNED, unscored pool tasks for one work type —
+// used when a review type is turned OFF so its auto-generated pool (e.g. the RCM
+// sample) doesn't linger as phantom "pending". Assigned tasks are left alone.
+async function purgeUnassignedPool(companyId, wt) {
+  let q = supabaseAdmin.from('qa_assignments').delete()
+    .eq('company_id', companyId).is('assigned_to', null).in('status', ['pending', 'in_review']);
+  q = (wt === 'tra' || wt === 'rcm')
+    ? q.or(`work_type.eq.${wt},and(work_type.is.null,method.eq.${wt})`)
+    : q.eq('work_type', wt);
+  const { data, error } = await q.select('id');
+  if (error) { logger.warn('QA', `purge pool ${wt}: ${error.message}`); return 0; }
+  return (data || []).length;
+}
+
 // Company review-type config is MANAGER-owned (mig 208): the manager assigned
 // that company (or superadmin) may read/write it. Compliance no longer configures
 // "what a company is reviewed on" — they only wire managers ↔ companies ↔ agents.
@@ -3270,13 +3291,24 @@ router.put('/admin/company-config', asyncHandler(async (req, res) => {
   if (!(await canConfigCompany(req, req.body?.company_id))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, key, value } = req.body || {};
   if (!company_id || !QA_ADMIN_KEYS.includes(key)) return res.status(400).json({ error: 'company_id + a valid qa.* key required' });
+  // capture the BEFORE value so we can purge the pool of any review type turned OFF
+  const before = (key === 'qa.methods' || key === 'qa.closer') ? await getConfig(company_id, key, key === 'qa.closer' ? null : []) : null;
   await setConfig(`company:${company_id}`, key, value, req.user.id);
   let materialized = null;
+  let purged = 0;
   if (key === 'qa.methods' && Array.isArray(value)) {
     const auto = value.filter(m => ['tra', 'rcm'].includes(m));   // only tra/rcm auto-run
     if (auto.length) { try { materialized = await materializeCompany(company_id, auto); } catch (e) { logger.warn('QA', `admin cfg materialize: ${e.message}`); } }
+    // any tra/rcm turned OFF → drop its still-unassigned auto-pool (never worked)
+    const removed = (Array.isArray(before) ? before : []).filter(m => ['tra', 'rcm'].includes(m) && !value.includes(m));
+    for (const m of removed) purged += await purgeUnassignedPool(company_id, m);
   }
-  res.json({ ok: true, key, value, materialized });
+  if (key === 'qa.closer') {
+    const wasOn = (k) => (before == null ? true : !!before[k]);   // null = both legs were on
+    const nowOn = (k) => (value == null ? true : !!value[k]);
+    for (const leg of ['closer_sales', 'closer_dispo']) if (wasOn(leg) && !nowOn(leg)) purged += await purgeUnassignedPool(company_id, leg);
+  }
+  res.json({ ok: true, key, value, materialized, purged });
 }));
 
 module.exports = router;
