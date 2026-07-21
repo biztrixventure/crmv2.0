@@ -253,13 +253,17 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
         date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
       'sales');
+    // Cancel date + paid-days belong ONLY to cancelled sales — otherwise leave
+    // the cells blank (a non-cancel sale may carry a stale cancellation_date).
+    const CANCELLED = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
     const rows = allSales.map(s => {
-      const t = salePaidTenure(s);   // { days, label } for cancelled sales, else null
+      const isCancel = CANCELLED.has(s.status);
+      const t = isCancel ? salePaidTenure(s) : null;
       return [
         s.customer_name || '', s.customer_phone || '', s.customer_email || '',
         s.reference_no || '', labelOf(s.status) || '',
         s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
-        s.cancellation_date ? fmtSaleDate(s.cancellation_date) : '',
+        (isCancel && s.cancellation_date) ? fmtSaleDate(s.cancellation_date) : '',
         t ? t.days : '',
         t ? t.label : '',
       ];

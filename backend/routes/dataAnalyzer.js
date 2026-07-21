@@ -473,7 +473,11 @@ router.post('/export', asyncHandler(async (req, res) => {
       const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00') : new Date(s);
       return Number.isNaN(d.getTime()) ? null : d;
     };
+    const CANCELLED = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
     for (const r of enriched) {
+      // Only cancelled sales carry a cancel date + paid-days; blank the rest so a
+      // stale cancellation_date on a non-cancel sale doesn't leak into the export.
+      if (!CANCELLED.has(r.status)) { r.cancellation_date = ''; r.paid_days = ''; continue; }
       const from = toD(r.sale_date), to = toD(r.cancellation_date);
       const days = (from && to) ? Math.round((to - from) / 86400000) : null;
       r.paid_days = (days != null && days >= 0) ? days : '';
