@@ -22,7 +22,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
-const { getConfig, setConfig } = require('../utils/businessConfig');
+const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
@@ -2956,10 +2956,14 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  // Recent closer-dispositioned transfers only — bounding the window lets the
+  // created_at index range-scan instead of walking the whole table (this was slow
+  // when opening a company's config).
+  const since = new Date(Date.now() - 120 * 86400000).toISOString();
   const { data } = await supabaseAdmin.from('transfers')
-    .select('latest_disposition').eq('company_id', companyId)
+    .select('latest_disposition').eq('company_id', companyId).gte('created_at', since)
     .not('latest_disposition', 'is', null).not('assigned_closer_id', 'is', null)
-    .order('created_at', { ascending: false }).limit(2000);
+    .order('created_at', { ascending: false }).limit(1000);
   const counts = {};
   for (const r of (data || [])) { const d = String(r.latest_disposition || '').trim().toUpperCase(); if (d) counts[d] = (counts[d] || 0) + 1; }
   res.json({ dispositions: Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([code, n]) => ({ code, count: n })) });
@@ -2972,8 +2976,11 @@ router.get('/admin/company-config', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
+  // ONE round-trip (global + company) instead of 11 sequential getConfig calls
+  // (each up to 2 reads) — that per-key loop was the slow company-config load.
+  const all = await getAllConfig(companyId);
   const out = {};
-  for (const k of QA_ADMIN_KEYS) out[k] = await getConfig(companyId, k, null);
+  for (const k of QA_ADMIN_KEYS) out[k] = (k in all) ? all[k] : null;
   res.json({ company_id: companyId, config: out });
 }));
 router.put('/admin/company-config', asyncHandler(async (req, res) => {

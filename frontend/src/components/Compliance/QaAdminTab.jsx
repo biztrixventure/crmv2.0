@@ -67,16 +67,16 @@ const enabledTypes = (co) => ['tra', 'rcm', 'closer_sales', 'closer_dispo']
 
 function KpiStrip({ kpis }) {
   const tiles = [
-    ['QA people', kpis ? kpis.qa_people : '—', kpis ? `${kpis.managers} mgr · ${kpis.agents} agent` : ''],
-    ['Reviews (window)', kpis ? kpis.reviews : '—', kpis ? `${kpis.active_reviewers} active reviewer${kpis.active_reviewers === 1 ? '' : 's'}` : ''],
-    ['Open backlog', kpis ? kpis.backlog : '—', 'unscored on plates'],
-    ['Pass rate', kpis ? (kpis.pass_rate == null ? '—' : `${kpis.pass_rate}%`) : '—', 'of scored w/ a verdict'],
+    ['QA people', kpis ? kpis.qa_people : '—', kpis ? `${kpis.managers} mgr · ${kpis.agents} agent` : '', 'Everyone holding a QA manager or agent role, across all companies.'],
+    ['Reviews (window)', kpis ? kpis.reviews : '—', kpis ? `${kpis.active_reviewers} active reviewer${kpis.active_reviewers === 1 ? '' : 's'}` : '', 'Completed reviews in the selected date window, and how many different people did them.'],
+    ['Open backlog', kpis ? kpis.backlog : '—', 'unscored on plates', 'Calls assigned to QA people but not yet scored (pending + in-progress), across everyone.'],
+    ['Pass rate', kpis ? (kpis.pass_rate == null ? '—' : `${kpis.pass_rate}%`) : '—', 'of scored w/ a verdict', 'Share of scored reviews that PASSED — only reviews that produce a pass/fail verdict are counted.'],
   ];
   return (
     <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))' }}>
-      {tiles.map(([label, val, sub]) => (
+      {tiles.map(([label, val, sub, tip]) => (
         <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{label} <InfoTip text={tip} /></div>
           <div className="text-2xl font-extrabold tabular-nums leading-tight" style={{ color: 'var(--color-text)' }}>{val}</div>
           <div className="text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>
         </div>
@@ -94,18 +94,19 @@ function TeamReport({ team, onPick }) {
   rows.sort((a, b) => { const va = cell(a, sort.k), vb = cell(b, sort.k); if (va < vb) return -sort.dir; if (va > vb) return sort.dir; return 0; });
   const setS = (k) => setSort(s => s.k === k ? { k, dir: -s.dir } : { k, dir: k === 'name' ? 1 : -1 });
   const cols = [['name', 'Person'], ['open', 'Open'], ['reviews', 'Reviews'], ['per_day', '/day'], ['avg', 'Avg given'], ['pass', 'Pass %'], ['last', 'Last active']];
+  const COL_TIP = { name: 'The QA person, their role(s) and the companies they cover.', open: 'Unscored calls on their plate right now (pending + in-progress).', reviews: 'Reviews they completed in the selected date window.', per_day: 'Reviews per ACTIVE day — only days they actually reviewed.', avg: 'The average score they GIVE — final score on TRA, quality % on closer/RCM.', pass: 'Share of their scored reviews that PASSED (only verdict-producing reviews).', last: 'When they last submitted a review.' };
   const exportCsv = () => {
     const head = ['Person', 'Roles', 'Companies', 'Open', 'Reviews', 'Per day', 'Active days', 'Avg final', 'Avg quality', 'Pass %', 'Avg turnaround (min)', 'Last active'];
     const lines = [head.join(',')].concat(rows.map(r => [r.name, r.levels.map(lvlLabel).join('+'), r.companies.map(c => c.company_name).join(' | '), r.open_tasks, r.reviews, r.per_day, r.active_days, r.avg_final ?? '', r.avg_quality ?? '', r.pass_rate ?? '', r.avg_turnaround_min ?? '', r.last_at || ''].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' }); const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `qa-team-report.csv`; a.click(); URL.revokeObjectURL(url);
   };
-  const Th = ({ k, label }) => <th onClick={() => setS(k)} className="text-left px-3 py-2 text-[11px] font-bold uppercase cursor-pointer select-none whitespace-nowrap" style={{ color: sort.k === k ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{label}{sort.k === k ? (sort.dir < 0 ? ' ↓' : ' ↑') : ''}</th>;
+  const Th = ({ k, label }) => <th onClick={() => setS(k)} title={COL_TIP[k] ? `${COL_TIP[k]} · click to sort` : 'click to sort'} className="text-left px-3 py-2 text-[11px] font-bold uppercase cursor-pointer select-none whitespace-nowrap" style={{ color: sort.k === k ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{label}{sort.k === k ? (sort.dir < 0 ? ' ↓' : ' ↑') : ''}</th>;
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} QA people</span>
-        <button onClick={exportCsv} className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
+        <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} QA people <InfoTip text="Every QA manager & agent with their productivity over the selected window. Click a column header to sort, or a row to open that person in Team." /></span>
+        <button onClick={exportCsv} title="Download this roster (with turnaround + active-days) as a CSV for the selected window" className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
       </div>
       <div className="rounded-xl overflow-auto" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
@@ -171,7 +172,7 @@ function ActivityFeed({ coFilter, range, reviewers }) {
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>Activity</span>
         <InfoTip text="Every completed QA review, newest first: who reviewed whose call, for which company, the result, and when. Filter by reviewer or company; the date range is set above." />
-        <ThemedSelect value={reviewer} onChange={e => setReviewer(e.target.value)} style={{ ...inp, fontSize: 12, padding: '5px 10px' }}>
+        <ThemedSelect value={reviewer} onChange={e => setReviewer(e.target.value)} title="Show only the reviews done by one QA reviewer" style={{ ...inp, fontSize: 12, padding: '5px 10px' }}>
           <option value="">All reviewers</option>
           {(reviewers || []).map(r => <option key={r.user_id} value={r.user_id}>{r.name}</option>)}
         </ThemedSelect>
@@ -281,11 +282,19 @@ export default function QaAdminTab() {
       </div>
 
       {/* sub-tabs */}
-      <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-        {[['overview', 'Overview'], ['team', 'Team'], ['activity', 'Activity'], ['companies', 'Companies']].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-            style={{ background: tab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: tab === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
-        ))}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[
+            ['overview', 'Overview', 'Department KPIs + a productivity board: who is reviewing how much, the pass rate they give, and when they were last active.'],
+            ['team', 'Team', 'Manage each QA person — which companies they can review, and which call types (TRA/RCM) their reviews are scored against.'],
+            ['activity', 'Activity', 'A newest-first timeline of who reviewed whose call, for which company, the result, and when.'],
+            ['companies', 'Companies', 'Turn the 4 review types on/off per company and set their scorecards, RCM sampling, and limits.'],
+          ].map(([k, l, tip]) => (
+            <button key={k} onClick={() => setTab(k)} title={tip} className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: tab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: tab === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+          ))}
+        </div>
+        <InfoTip w={320} text="Overview = who's reviewing how much. Team = manage QA people + their company / call-type access. Activity = the who-did-what-when timeline. Companies = turn review types on/off + settings per company. The company + date filters (top-right) apply to Overview and Activity." />
       </div>
 
       {/* OVERVIEW — KPIs + reviewer productivity */}
@@ -493,7 +502,7 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
                       <span className="inline-flex items-center gap-0.5">
                         {METHODS.map(([k, l]) => {
                           const on = (c.methods || []).includes(k);
-                          return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} className="font-bold px-1 rounded uppercase text-[10px]"
+                          return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} title={`${l} — bind this agent to the ${l} section for ${coName}: their reviews here use the ${l} scorecard, and Distribute can hand them ${l} calls. Click to ${on ? 'unbind' : 'bind'}.`} className="font-bold px-1 rounded uppercase text-[10px]"
                             style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.18)' : 'rgba(217,119,6,0.18)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' } : { color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>{on ? '✓' : ''}{l}</button>;
                         })}
                       </span>
@@ -825,8 +834,13 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
   useEffect(() => {
     client.get('qa/admin/company-config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({}));
     client.get('qa/scorecards', { params: { company_id: companyId } }).then(r => { const by = {}; for (const c of (r.data.scorecards || [])) if (c.is_active) by[c.method] = true; setCards(by); }).catch(() => setCards({}));
-    client.get('qa/admin/dispositions', { params: { company_id: companyId } }).then(r => setDispos(r.data.dispositions || [])).catch(() => setDispos([]));
   }, [companyId]);
+  // Dispositions power ONLY the Unclosed-Sale picker and are the heavy scan, so
+  // fetch them lazily — only the first time that section is actually shown.
+  const wantDispos = closerOn.includes('closer_dispo');
+  useEffect(() => {
+    if (wantDispos && dispos === null) client.get('qa/admin/dispositions', { params: { company_id: companyId } }).then(r => setDispos(r.data.dispositions || [])).catch(() => setDispos([]));
+  }, [wantDispos, dispos, companyId]);
   const setKey = async (key, value) => {
     setCfg(c => ({ ...c, [key]: value }));
     try { await client.put('qa/admin/company-config', { company_id: companyId, key, value }); }
