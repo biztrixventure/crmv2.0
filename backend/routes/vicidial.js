@@ -50,24 +50,35 @@ async function resolveAgent(agentId) {
   // (CRM ids are stored uppercase by migration 121 + the save endpoint). Falls
   // back to the legacy single column if the array isn't migrated (111).
   const variants = [...new Set([a, a.toUpperCase()])];
-  let prof = null;
+  // Gather EVERY profile carrying this dialer id — the same id can (wrongly) sit on
+  // several profiles (duplicate/split people, or two people sharing a dialer login).
+  // Picking one at random (the old `.limit(1)` with no ORDER) made a transfer land
+  // in a different company run-to-run — the source of the small day-to-day count
+  // drift between companies. Resolve it DETERMINISTICALLY below.
+  const userIds = new Set();
   for (const v of variants) {
-    const arr = await supabaseAdmin
-      .from('user_profiles').select('user_id').contains('vicidial_agent_ids', [v]).limit(1).maybeSingle();
-    if (arr.data?.user_id) { prof = arr.data; break; }
+    const { data } = await supabaseAdmin.from('user_profiles').select('user_id').contains('vicidial_agent_ids', [v]);
+    for (const p of (data || [])) userIds.add(p.user_id);
   }
-  if (!prof) {
+  if (!userIds.size) {   // legacy single-column fallback (pre-migration 111)
     for (const v of variants) {
-      const one = await supabaseAdmin
-        .from('user_profiles').select('user_id').eq('vicidial_agent_id', v).maybeSingle();
-      if (one.data) { prof = one.data; break; }
+      const { data } = await supabaseAdmin.from('user_profiles').select('user_id').eq('vicidial_agent_id', v);
+      for (const p of (data || [])) userIds.add(p.user_id);
     }
   }
-  if (!prof?.user_id) return { userId: null, companyId: null };
-  const { data: ucr } = await supabaseAdmin
-    .from('user_company_roles').select('company_id').eq('user_id', prof.user_id).eq('is_active', true)
-    .order('created_at', { ascending: true }).limit(1).maybeSingle();
-  return { userId: prof.user_id, companyId: ucr?.company_id || null };
+  const ids = [...userIds];
+  if (!ids.length) return { userId: null, companyId: null };
+  // Among all matching profiles, keep only those with an ACTIVE company role and
+  // pick the one whose active role is OLDEST (stable) — so a no-company duplicate
+  // never wins (which would drop the transfer to company=null) and the choice is
+  // the same every time. A genuinely shared id still needs the duplicate profiles
+  // cleaned up in the CRM, but attribution no longer flip-flops.
+  const { data: roles } = await supabaseAdmin
+    .from('user_company_roles').select('user_id, company_id, created_at')
+    .in('user_id', ids).eq('is_active', true)
+    .order('created_at', { ascending: true });
+  if (roles && roles.length) return { userId: roles[0].user_id, companyId: roles[0].company_id };
+  return { userId: ids.sort()[0], companyId: null };   // matched a person but no active company
 }
 
 // A GLOBAL dispo-map row (company_id IS NULL) applies to every company — map a
