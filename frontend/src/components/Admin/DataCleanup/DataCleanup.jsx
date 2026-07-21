@@ -175,38 +175,55 @@ const BulkCancelPanel = ({ onDone }) => {
 
   const isChargeback = status === 'chargeback';
   const statusLabel  = CANCEL_STATUSES.find(s => s.v === status)?.l || status;
-  const canRun = rows.length && reason.trim() && ack && !busy;
+  const canRun = rows.length && reason.trim() && reasonKey && ack && !busy;
 
   const run = async () => {
     if (!rows.length)   return toast.error('Paste at least one sale UUID.');
     if (!reason.trim()) return toast.error('A reason is required to cancel.');
+    if (!reasonKey)     return toast.error('Pick a canonical Reason (catalog).');
     setBusy(true); setRes(null);
-    try {
-      const payload = {
-        updates: rows.map(r => ({ id: r.id, cancellation_date: r.cancellation_date })),
-        new_status: status, reason: reason.trim(),
-        cancellation_reason_key: reasonKey || undefined,
-        cancellation_date: cancelDate || undefined,   // fallback for rows without their own date
-      };
-      if (isChargeback) {
-        if (cbDate) payload.chargeback_date = cbDate;
-        if (cbAmt !== '') payload.chargeback_amount = Number(cbAmt);
-      }
-      const r = await client.post('compliance/sales/bulk-status', payload);
-      setRes(r.data);
-      toast.success(`${statusLabel}: ${r.data.updated} sale(s) updated.`);
-      onDone?.();
-    } catch (e) {
-      toast.error(e.response?.data?.error || 'Bulk cancel failed');
-    } finally { setBusy(false); }
+    // Run each id through the SAME per-sale endpoint the manual cancel modal
+    // uses (POST sales/:id/compliance), so every sale comes out identical:
+    // status + cancellation_date (its own, else the default) + paid-days +
+    // canonical/free-text reason + audit history. 5 at a time.
+    const out = [];
+    const CONC = 5;
+    for (let i = 0; i < rows.length; i += CONC) {
+      const batch = rows.slice(i, i + CONC);
+      const done = await Promise.all(batch.map(async (r) => {
+        try {
+          await client.post(`sales/${r.id}/compliance`, {
+            status,
+            reason: reason.trim(),
+            cancellation_reason_key: reasonKey,
+            cancellation_date: r.cancellation_date || cancelDate || undefined,
+            ...(isChargeback ? {
+              chargeback_date: cbDate || r.cancellation_date || cancelDate || undefined,
+              chargeback_amount: cbAmt !== '' ? Number(cbAmt) : undefined,
+            } : {}),
+          });
+          return { id: r.id, ok: true };
+        } catch (e) {
+          return { id: r.id, ok: false, reason: e.response?.data?.error || e.response?.data?.errors?.[0]?.msg || 'Failed' };
+        }
+      }));
+      out.push(...done);
+    }
+    const updated = out.filter(x => x.ok).length;
+    const skipped = out.filter(x => !x.ok).map(x => ({ id: x.id, reason: x.reason }));
+    setRes({ updated, skipped });
+    if (updated) toast.success(`${statusLabel}: ${updated} sale(s) updated.`);
+    else toast.error(`No sales updated — ${skipped.length} failed.`);
+    onDone?.();
+    setBusy(false);
   };
 
   return (
     <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        Cancel many sales at once by their <strong>UUID</strong>. This runs the same path as a manual compliance cancel, so the
-        cancel <strong>status</strong>, <strong>cancellation date</strong>, note/history and the auto <strong>paid-days</strong> all show
-        correctly in Compliance. Every batch is logged and revertible from Compliance → bulk-status batches.
+        Cancel many sales at once by their <strong>UUID</strong>. Each id runs through the <strong>same per-sale endpoint the manual
+        cancel uses</strong>, so every sale comes out identical — cancel <strong>status</strong>, its <strong>cancellation date</strong>,
+        the auto <strong>paid-days</strong>, canonical + free-text reason, and audit history. Each stays individually editable in Compliance.
       </p>
 
       <div className="grid sm:grid-cols-2 gap-3">
@@ -224,12 +241,12 @@ const BulkCancelPanel = ({ onDone }) => {
       </div>
 
       <div>
-        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Reason (catalog)</label>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Reason (catalog) <span style={{ color: 'var(--color-error-600)' }}>*</span></label>
         <ThemedSelect value={reasonKey} onChange={e => setReasonKey(e.target.value)} className="input text-sm">
-          <option value="">— pick a canonical reason (optional) —</option>
+          <option value="">— pick a canonical reason —</option>
           {(activeReasons || []).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </ThemedSelect>
-        <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Canonical key for top-reason reports — applied to the whole batch.</p>
+        <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Required for a cancellation — canonical key for top-reason reports.</p>
       </div>
 
       <div>
@@ -261,7 +278,7 @@ const BulkCancelPanel = ({ onDone }) => {
 
       <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text)' }}>
         <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} className="mt-0.5" />
-        <span>I understand this applies <strong>{statusLabel}</strong> to <strong>{rows.length}</strong> sale(s) — logged and revertible from Compliance.</span>
+        <span>I understand this applies <strong>{statusLabel}</strong> to <strong>{rows.length}</strong> sale(s), exactly like a manual compliance cancel.</span>
       </label>
 
       <Button variant="primary" onClick={run} disabled={!canRun} className="flex items-center gap-1.5">
@@ -271,14 +288,13 @@ const BulkCancelPanel = ({ onDone }) => {
       {res && (
         <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
-            Done: {res.updated} updated{res.skipped?.length ? ` · ${res.skipped.length} skipped` : ''}
-            {res.batch_id ? ' · revertible from Compliance' : ''}
+            Done: {res.updated} updated{res.skipped?.length ? ` · ${res.skipped.length} failed` : ''}
           </p>
           {res.skipped?.length > 0 && (
             <div className="max-h-40 overflow-y-auto space-y-1">
               {res.skipped.map((p, i) => (
                 <div key={i} className="text-[11px] font-mono flex items-center gap-2">
-                  <span style={{ color: 'var(--color-warning-600)' }}>● skipped</span>
+                  <span style={{ color: 'var(--color-error-600)' }}>● failed</span>
                   <span style={{ color: 'var(--color-text-secondary)' }}>{p.id} — {p.reason}</span>
                 </div>
               ))}
