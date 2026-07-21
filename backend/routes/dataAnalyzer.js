@@ -461,6 +461,25 @@ router.post('/export', asyncHandler(async (req, res) => {
   // Friendly header for the derived count column.
   fieldLabel.set('sales_on_phone', 'Sales on Phone');
 
+  // Cancellation date + paid-days (how long the customer kept paying before the
+  // sale was cancelled) — same as the compliance list / drawer. Only meaningful
+  // for the sales dataset; computed onto each row so it flows through as a column.
+  if (dataset === 'sales') {
+    fieldLabel.set('cancellation_date', 'Cancellation Date');
+    fieldLabel.set('paid_days', 'Paid Days');
+    const toD = (v) => {
+      if (!v) return null;
+      const s = String(v);
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00') : new Date(s);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    for (const r of enriched) {
+      const from = toD(r.sale_date), to = toD(r.cancellation_date);
+      const days = (from && to) ? Math.round((to - from) / 86400000) : null;
+      r.paid_days = (days != null && days >= 0) ? days : '';
+    }
+  }
+
   const esc = (v) => {
     // Always quote so embedded commas / newlines / quotes survive Excel + Sheets.
     // Re-serialize booleans/numbers as plain strings; objects (rare leaf in form_data)
@@ -472,7 +491,7 @@ router.post('/export', asyncHandler(async (req, res) => {
 
   // Base typed columns per dataset. Same as before — these stay first in the
   // CSV so existing reports keep their column positions.
-  const TYPED_SALES = ['id', 'sale_date', 'status', 'closer_disposition', 'customer_name', 'customer_phone', 'customer_email',
+  const TYPED_SALES = ['id', 'sale_date', 'status', 'cancellation_date', 'paid_days', 'closer_disposition', 'customer_name', 'customer_phone', 'customer_email',
     'sales_on_phone',
     'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
     'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',

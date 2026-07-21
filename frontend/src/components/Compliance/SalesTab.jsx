@@ -253,12 +253,19 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
         date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
       'sales');
-    const rows = allSales.map(s => [
-      s.customer_name || '', s.customer_phone || '', s.customer_email || '',
-      s.reference_no || '', labelOf(s.status) || '',
-      s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
-    ]);
-    downloadCSV(rows, ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Sale Date'],
+    const rows = allSales.map(s => {
+      const t = salePaidTenure(s);   // { days, label } for cancelled sales, else null
+      return [
+        s.customer_name || '', s.customer_phone || '', s.customer_email || '',
+        s.reference_no || '', labelOf(s.status) || '',
+        s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
+        s.cancellation_date ? fmtSaleDate(s.cancellation_date) : '',
+        t ? t.days : '',
+        t ? t.label : '',
+      ];
+    });
+    downloadCSV(rows,
+      ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Sale Date','Cancellation Date','Paid Days','Paid Tenure'],
       `sales_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
