@@ -2575,6 +2575,180 @@ router.put('/admin/company-methods', asyncHandler(async (req, res) => {
 // holds a QA role automatically appears in GET /admin/users above for
 // compliance to assign, bind and route.
 
+// ── QA COMMAND CENTER reporting: who is doing what, when, how much ────────────
+const coNameOf = (c) => Array.isArray(c) ? c[0]?.name : c?.name;
+const avgOf = (arr) => arr.length ? Math.round((arr.reduce((s, x) => s + x, 0) / arr.length) * 10) / 10 : null;
+// window helper: ?from=/?to= (YYYY-MM-DD) → ISO bounds; default last `days` days.
+function reportWindow(req, days = 30) {
+  const to = req.query.to && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+    ? new Date(`${req.query.to}T23:59:59.999Z`).toISOString() : new Date().toISOString();
+  const from = req.query.from && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
+    ? new Date(`${req.query.from}T00:00:00.000Z`).toISOString() : new Date(Date.now() - days * 86400000).toISOString();
+  return { from, to };
+}
+// page through every matching qa_reviews row (chunked) so the numbers reflect
+// the whole window, not just the first page.
+async function allReviews(build) {
+  const rows = [];
+  for (let off = 0; off < 500000; off += 1000) {
+    const { data, error } = await build().order('created_at', { ascending: false }).range(off, off + 999);
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) break;
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  return rows;
+}
+
+// GET /qa/admin/team — the reviewer scoreboard: every QA person with their
+// company access + roles + methods AND their productivity over the window
+// (reviews done, per-day rate, avg score given, pass rate, turnaround, last
+// active). This is the "who is doing what / how much" oversight surface.
+router.get('/admin/team', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const oneCo = req.query.company_id || null;
+  const { from, to } = reportWindow(req, 30);
+
+  // roster (same shape as /admin/users) — QA people, active company access, methods
+  const { data: ucrRows } = await supabaseAdmin.from('user_company_roles')
+    .select('id, user_id, company_id, is_active, custom_roles(level), companies(name)');
+  const qaUcr = (ucrRows || []).filter(r => ['qa_manager', 'qa_agent'].includes(lvlOf(r.custom_roles)));
+  const uids = [...new Set(qaUcr.map(r => r.user_id))];
+  if (!uids.length) return res.json({ kpis: { qa_people: 0, managers: 0, agents: 0, reviews: 0, active_reviewers: 0, backlog: 0, pass_rate: null }, reviewers: [], window: { from, to } });
+
+  const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+  const nameBy = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p)]));
+  const { data: am } = await supabaseAdmin.from('qa_agent_methods').select('user_id, company_id, method').in('user_id', uids);
+  const methodsBy = {};
+  for (const m of (am || [])) (methodsBy[`${m.user_id}|${m.company_id}`] ||= []).push(m.method);
+
+  const person = {};
+  for (const r of qaUcr) {
+    const lvl = lvlOf(r.custom_roles);
+    (person[r.user_id] ||= { user_id: r.user_id, name: nameBy[r.user_id] || r.user_id, levels: new Set(), companies: [] });
+    person[r.user_id].levels.add(lvl);
+    if (r.is_active) person[r.user_id].companies.push({ ucr_id: r.id, company_id: r.company_id, company_name: coNameOf(r.companies), level: lvl, methods: lvl === 'qa_agent' ? (methodsBy[`${r.user_id}|${r.company_id}`] || []) : null });
+  }
+
+  // reviews done in the window by these reviewers (optionally one company)
+  const reviews = await allReviews(() => {
+    let q = supabaseAdmin.from('qa_reviews')
+      .select('reviewer_id, company_id, method, assignment_id, final_score, quality_score, passed, created_at')
+      .in('reviewer_id', uids).gte('created_at', from).lte('created_at', to);
+    if (oneCo) q = q.eq('company_id', oneCo);
+    return q;
+  });
+
+  // work_type + task-created time per reviewed assignment (for breakdown + turnaround)
+  const aids = [...new Set(reviews.map(r => r.assignment_id).filter(Boolean))];
+  const wtBy = {}, createdBy = {};
+  for (let i = 0; i < aids.length; i += 150) {
+    const { data: asg } = await supabaseAdmin.from('qa_assignments')
+      .select('id, work_type, method, subject_role, transfer_id, sale_id, created_at').in('id', aids.slice(i, i + 150));
+    for (const a of (asg || [])) { wtBy[a.id] = workTypeOf(a); createdBy[a.id] = a.created_at; }
+  }
+
+  const dayKey = (ts) => String(ts).slice(0, 10);
+  const agg = {};
+  for (const rv of reviews) {
+    const a = (agg[rv.reviewer_id] ||= { n: 0, by_wt: {}, finals: [], qualities: [], passT: 0, passN: 0, days: new Set(), first: null, last: null, turn: [] });
+    a.n++;
+    const wt = wtBy[rv.assignment_id] || rv.method;
+    a.by_wt[wt] = (a.by_wt[wt] || 0) + 1;
+    if (rv.final_score != null) a.finals.push(+rv.final_score);
+    if (rv.quality_score != null) a.qualities.push(+rv.quality_score);
+    if (rv.passed === true) { a.passT++; a.passN++; } else if (rv.passed === false) a.passN++;
+    a.days.add(dayKey(rv.created_at));
+    if (!a.first || rv.created_at < a.first) a.first = rv.created_at;
+    if (!a.last || rv.created_at > a.last) a.last = rv.created_at;
+    const ac = createdBy[rv.assignment_id];
+    if (ac) { const mins = (new Date(rv.created_at) - new Date(ac)) / 60000; if (mins >= 0 && mins < 60 * 24 * 60) a.turn.push(mins); }
+  }
+
+  const open = await openCounts(uids);
+  const reviewers = Object.values(person).map(p => {
+    const a = agg[p.user_id] || {};
+    const n = a.n || 0, activeDays = a.days ? a.days.size : 0;
+    return {
+      user_id: p.user_id, name: p.name, levels: [...p.levels], companies: p.companies,
+      open_tasks: open[p.user_id] || 0,
+      reviews: n, by_work_type: a.by_wt || {},
+      avg_final: avgOf(a.finals || []), avg_quality: avgOf(a.qualities || []),
+      pass_rate: a.passN ? Math.round((a.passT / a.passN) * 100) : null,
+      active_days: activeDays, per_day: activeDays ? Math.round((n / activeDays) * 10) / 10 : 0,
+      avg_turnaround_min: (a.turn && a.turn.length) ? Math.round(avgOf(a.turn)) : null,
+      first_at: a.first || null, last_at: a.last || null,
+    };
+  }).sort((x, y) => y.reviews - x.reviews);
+
+  const passVals = reviews.filter(r => r.passed != null);
+  const kpis = {
+    qa_people: reviewers.length,
+    managers: reviewers.filter(r => r.levels.includes('qa_manager')).length,
+    agents: reviewers.filter(r => r.levels.includes('qa_agent')).length,
+    reviews: reviews.length,
+    active_reviewers: new Set(reviews.map(r => r.reviewer_id)).size,
+    backlog: Object.values(open).reduce((s, x) => s + x, 0),
+    pass_rate: passVals.length ? Math.round((passVals.filter(r => r.passed).length / passVals.length) * 100) : null,
+  };
+  res.json({ kpis, reviewers, window: { from, to } });
+}));
+
+// GET /qa/admin/activity — the "who did what, when" timeline. Every completed
+// review newest-first, enriched with reviewer + reviewed-agent + company +
+// work-type + result. Filter by company / reviewer / window; paginated.
+router.get('/admin/activity', asyncHandler(async (req, res) => {
+  if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
+  const oneCo = req.query.company_id || null;
+  const reviewerId = req.query.reviewer_id || null;
+  const { from, to } = reportWindow(req, 14);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 60, 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const offset = (page - 1) * limit;
+
+  let q = supabaseAdmin.from('qa_reviews')
+    .select('id, reviewer_id, subject_user_id, company_id, method, assignment_id, final_score, quality_score, passed, autofail_result, created_at', { count: offset === 0 ? 'exact' : undefined })
+    .gte('created_at', from).lte('created_at', to)
+    .order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+  if (oneCo) q = q.eq('company_id', oneCo);
+  if (reviewerId) q = q.eq('reviewer_id', reviewerId);
+  const { data: rows, count, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+
+  const uids = [...new Set([...(rows || []).map(r => r.reviewer_id), ...(rows || []).map(r => r.subject_user_id)].filter(Boolean))];
+  const { data: profs } = uids.length ? await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids) : { data: [] };
+  const nameBy = Object.fromEntries((profs || []).map(p => [p.user_id, profName(p)]));
+  const coIds = [...new Set((rows || []).map(r => r.company_id).filter(Boolean))];
+  const { data: cos } = coIds.length ? await supabaseAdmin.from('companies').select('id, name').in('id', coIds) : { data: [] };
+  const coBy = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+  const aids = [...new Set((rows || []).map(r => r.assignment_id).filter(Boolean))];
+  const asgBy = {};
+  if (aids.length) {
+    const { data: asg } = await supabaseAdmin.from('qa_assignments')
+      .select('id, work_type, method, subject_role, transfer_id, sale_id, subject_agent').in('id', aids);
+    for (const a of (asg || [])) asgBy[a.id] = a;
+  }
+  const items = (rows || []).map(r => {
+    const a = asgBy[r.assignment_id] || {};
+    return {
+      id: r.id, created_at: r.created_at,
+      reviewer_id: r.reviewer_id, reviewer_name: nameBy[r.reviewer_id] || null,
+      subject_user_id: r.subject_user_id,
+      subject_name: (r.subject_user_id && nameBy[r.subject_user_id]) || a.subject_agent || null,
+      company_id: r.company_id, company_name: coBy[r.company_id] || null,
+      work_type: a.work_type || workTypeOf(a) || r.method,
+      final_score: r.final_score, quality_score: r.quality_score, passed: r.passed, autofail_result: r.autofail_result,
+    };
+  });
+  // any subject still a raw dialer id → resolve to a real name
+  const unresolved = items.filter(i => i.subject_name && !nameBy[i.subject_user_id] && /[A-Za-z]*\d{3,}/.test(i.subject_name)).map(i => i.subject_name);
+  if (unresolved.length) {
+    const nm = await dialerAgentNameMap(unresolved);
+    for (const i of items) if (nm[String(i.subject_name).toUpperCase()]) i.subject_name = nm[String(i.subject_name).toUpperCase()];
+  }
+  res.json({ items, total: offset === 0 ? (count || 0) : null, page, limit, window: { from, to } });
+}));
+
 // ── WORK RULES — who listens to what (mig 186) ────────────────────────────────
 // A rule = one reviewer × any mix of work types × everyone-or-specific subject
 // users × (for closer_dispo) a disposition set. The engine materializes the

@@ -51,20 +51,186 @@ const WORK_TYPE_DEFS = [
   { key: 'closer_dispo', label: 'Unclosed Sale calls (Closer)', icon: PhoneOff, tint: '#dc2626', desc: 'The closers\' calls that did NOT close — a TRA that landed on the closer but ended with a non-sale disposition. Pick which codes count (none = any non-sale). With "Closed Sale" this covers EVERY closer call.' },
 ];
 const wtDef = (k) => WORK_TYPE_DEFS.find(w => w.key === k) || { label: k, tint: 'var(--color-text-tertiary)', icon: Headphones };
+const WT_SHORT = { tra: 'TRA', rcm: 'RCM', closer_sales: 'SALE', closer_dispo: 'UNCL' };
+
+// ── small shared bits for the reporting surfaces ─────────────────────────────
+const isoDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const todayISO = () => isoDay(new Date());
+const daysAgoISO = (n) => isoDay(new Date(Date.now() - n * 86400000));
+const fmtWhen = (ts) => { try { return ts ? new Date(String(ts).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return ''; } };
+const agoOf = (ts) => { if (!ts) return '—'; const s = Math.floor((Date.now() - new Date(String(ts).replace(' ', 'T')).getTime()) / 1000); if (s < 60) return `${s}s ago`; const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; };
+const WtPill = ({ k, n }) => { const d = wtDef(k); return <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: `${d.tint}1f`, color: d.tint }}>{WT_SHORT[k] || k}{n != null ? ` ${n}` : ''}</span>; };
+
+function KpiStrip({ kpis }) {
+  const tiles = [
+    ['QA people', kpis ? kpis.qa_people : '—', kpis ? `${kpis.managers} mgr · ${kpis.agents} agent` : ''],
+    ['Reviews (window)', kpis ? kpis.reviews : '—', kpis ? `${kpis.active_reviewers} active reviewer${kpis.active_reviewers === 1 ? '' : 's'}` : ''],
+    ['Open backlog', kpis ? kpis.backlog : '—', 'unscored on plates'],
+    ['Pass rate', kpis ? (kpis.pass_rate == null ? '—' : `${kpis.pass_rate}%`) : '—', 'of scored w/ a verdict'],
+  ];
+  return (
+    <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))' }}>
+      {tiles.map(([label, val, sub]) => (
+        <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+          <div className="text-2xl font-extrabold tabular-nums leading-tight" style={{ color: 'var(--color-text)' }}>{val}</div>
+          <div className="text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Productivity roster — every QA person + how much they're doing over the window.
+function TeamReport({ team, onPick }) {
+  const [sort, setSort] = useState({ k: 'reviews', dir: -1 });
+  if (!team) return <div className="py-8 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  const rows = [...(team.reviewers || [])];
+  const cell = (r, k) => ({ name: (r.name || '').toLowerCase(), reviews: r.reviews, per_day: r.per_day, open: r.open_tasks, avg: r.avg_final ?? r.avg_quality ?? -1, pass: r.pass_rate ?? -1, last: r.last_at || '' }[k]);
+  rows.sort((a, b) => { const va = cell(a, sort.k), vb = cell(b, sort.k); if (va < vb) return -sort.dir; if (va > vb) return sort.dir; return 0; });
+  const setS = (k) => setSort(s => s.k === k ? { k, dir: -s.dir } : { k, dir: k === 'name' ? 1 : -1 });
+  const cols = [['name', 'Person'], ['open', 'Open'], ['reviews', 'Reviews'], ['per_day', '/day'], ['avg', 'Avg given'], ['pass', 'Pass %'], ['last', 'Last active']];
+  const exportCsv = () => {
+    const head = ['Person', 'Roles', 'Companies', 'Open', 'Reviews', 'Per day', 'Active days', 'Avg final', 'Avg quality', 'Pass %', 'Avg turnaround (min)', 'Last active'];
+    const lines = [head.join(',')].concat(rows.map(r => [r.name, r.levels.map(lvlLabel).join('+'), r.companies.map(c => c.company_name).join(' | '), r.open_tasks, r.reviews, r.per_day, r.active_days, r.avg_final ?? '', r.avg_quality ?? '', r.pass_rate ?? '', r.avg_turnaround_min ?? '', r.last_at || ''].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' }); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `qa-team-report.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+  const Th = ({ k, label }) => <th onClick={() => setS(k)} className="text-left px-3 py-2 text-[11px] font-bold uppercase cursor-pointer select-none whitespace-nowrap" style={{ color: sort.k === k ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{label}{sort.k === k ? (sort.dir < 0 ? ' ↓' : ' ↑') : ''}</th>;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} QA people</span>
+        <button onClick={exportCsv} className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
+      </div>
+      <div className="rounded-xl overflow-auto" style={{ border: '1px solid var(--color-border)' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead className="sticky top-0" style={{ background: 'var(--color-surface-hover)' }}><tr>{cols.map(([k, l]) => <Th key={k} k={k} label={l} />)}</tr></thead>
+          <tbody>
+            {rows.map(r => {
+              const avgLbl = r.avg_final != null ? `${r.avg_final}` : r.avg_quality != null ? `${r.avg_quality}%` : '—';
+              return (
+                <tr key={r.user_id} onClick={() => onPick?.(r.user_id)} className="cursor-pointer" style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-2">
+                    <div className="font-semibold truncate inline-flex items-center gap-1.5" style={{ color: 'var(--color-text)', maxWidth: 240 }}>{r.name}
+                      {r.levels.map(l => <span key={l} className="text-[8px] font-bold px-1 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}
+                    </div>
+                    <div className="text-[10px] mt-0.5 flex items-center gap-1 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {r.companies.length ? r.companies.slice(0, 3).map(c => c.company_name).filter(Boolean).join(' · ') : <span style={{ color: 'var(--color-warning-600)' }}>no company access</span>}
+                      {r.companies.length > 3 && <span>+{r.companies.length - 3}</span>}
+                      {Object.keys(r.by_work_type || {}).length > 0 && <span className="inline-flex gap-0.5 ml-1">{Object.entries(r.by_work_type).map(([k, n]) => <WtPill key={k} k={k} n={n} />)}</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums"><span style={{ color: r.open_tasks >= 25 ? '#dc2626' : r.open_tasks >= 15 ? '#d97706' : 'var(--color-text-secondary)', fontWeight: 700 }}>{r.open_tasks}</span></td>
+                  <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: 'var(--color-text)' }}>{r.reviews}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{r.per_day || '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{avgLbl}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: r.pass_rate == null ? 'var(--color-text-tertiary)' : r.pass_rate >= 60 ? 'var(--color-success-600)' : 'var(--color-error-600)', fontWeight: 700 }}>{r.pass_rate == null ? '—' : `${r.pass_rate}%`}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap text-[11px]" style={{ color: 'var(--color-text-tertiary)' }} title={fmtWhen(r.last_at)}>{r.last_at ? agoOf(r.last_at) : '—'}</td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No QA people yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// The "who did what, when" timeline — every completed review, newest first.
+function resultOf(i) {
+  if (i.final_score != null) return { text: `${i.passed ? 'Pass' : 'Fail'} · ${i.final_score}`, ok: i.passed };
+  if (i.quality_score != null) return { text: `Quality ${i.quality_score}%`, ok: null };
+  if (i.passed != null) return { text: i.passed ? 'Pass' : 'Fail', ok: i.passed };
+  if (i.autofail_result) return { text: i.autofail_result, ok: i.autofail_result === 'Pass' };
+  return { text: 'scored', ok: null };
+}
+function ActivityFeed({ coFilter, range, reviewers }) {
+  const [items, setItems] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [reviewer, setReviewer] = useState('');
+  const LIMIT = 60;
+  const load = useCallback(() => {
+    const params = { from: daysAgoISO(+range), to: todayISO(), limit: LIMIT, page };
+    if (coFilter) params.company_id = coFilter;
+    if (reviewer) params.reviewer_id = reviewer;
+    setItems(null);
+    client.get('qa/admin/activity', { params }).then(r => { setItems(r.data.items || []); if (r.data.total != null) setTotal(r.data.total); }).catch(() => setItems([]));
+  }, [coFilter, range, page, reviewer]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [coFilter, range, reviewer]);
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>Activity</span>
+        <InfoTip text="Every completed QA review, newest first: who reviewed whose call, for which company, the result, and when. Filter by reviewer or company; the date range is set above." />
+        <ThemedSelect value={reviewer} onChange={e => setReviewer(e.target.value)} style={{ ...inp, fontSize: 12, padding: '5px 10px' }}>
+          <option value="">All reviewers</option>
+          {(reviewers || []).map(r => <option key={r.user_id} value={r.user_id}>{r.name}</option>)}
+        </ThemedSelect>
+        {total > 0 && <span className="text-[11px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} reviews</span>}
+      </div>
+      {items === null ? <div className="py-8 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        : !items.length ? <div className="py-10 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No reviews in this window.</div>
+        : <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+            {items.map((i, idx) => {
+              const res = resultOf(i);
+              return (
+                <div key={i.id} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: idx ? '1px solid var(--color-border)' : 'none', background: 'var(--color-surface)' }}>
+                  <WtPill k={i.work_type} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] truncate" style={{ color: 'var(--color-text)' }}>
+                      <b>{i.reviewer_name || 'A reviewer'}</b> <span style={{ color: 'var(--color-text-tertiary)' }}>reviewed</span> <b>{i.subject_name || 'a call'}</b>
+                      {i.company_name && <span style={{ color: 'var(--color-text-tertiary)' }}> · {i.company_name}</span>}
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap" style={{ background: res.ok == null ? 'var(--color-surface-hover)' : res.ok ? 'rgba(5,150,105,0.14)' : 'rgba(220,38,38,0.12)', color: res.ok == null ? 'var(--color-text-secondary)' : res.ok ? '#059669' : '#dc2626' }}>{res.text}</span>
+                  <span className="text-[11px] whitespace-nowrap tabular-nums" style={{ color: 'var(--color-text-tertiary)', width: 92, textAlign: 'right' }} title={fmtWhen(i.created_at)}>{agoOf(i.created_at)}</span>
+                </div>
+              );
+            })}
+          </div>}
+      {total > LIMIT && (
+        <div className="flex items-center justify-between mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <span>Page {page} of {totalPages}</span>
+          <div className="flex gap-1.5">
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1 rounded-lg font-bold disabled:opacity-40" style={{ background: 'var(--color-surface-hover)' }}>Prev</button>
+            <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1 rounded-lg font-bold disabled:opacity-40" style={{ background: 'var(--color-surface-hover)' }}>Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function QaAdminTab() {
+  const [tab, setTab] = useState('overview');
   const [companies, setCompanies] = useState(null);
   const [users, setUsers] = useState(null);
-  const [rules, setRules] = useState(null);
+  const [rules, setRules] = useState(null);   // eslint-disable-line no-unused-vars — kept for loadRules side-effect (mig-186 toast)
   const [expanded, setExpanded] = useState(null);   // company id whose config is open
+  const [team, setTeam] = useState(null);     // { kpis, reviewers, window }
+  const [range, setRange] = useState('30');   // report window in days
+  const [coFilter, setCoFilter] = useState('');   // '' = all companies (Overview + Activity)
+  const [jumpUser, setJumpUser] = useState(null); // person to open when jumping Overview → Team
 
   const loadUsers = useCallback(() => client.get('qa/admin/users').then(r => setUsers(r.data.users || [])).catch(() => setUsers([])), []);
   const loadRules = useCallback(() => client.get('qa/admin/rules').then(r => setRules(r.data.rules || [])).catch(e => { setRules([]); const m = e.response?.data?.error; if (m && /migration 186/.test(m)) toast.error(m); }), []);
+  const loadTeam = useCallback(() => {
+    setTeam(null);
+    const params = { from: daysAgoISO(+range), to: todayISO() };
+    if (coFilter) params.company_id = coFilter;
+    client.get('qa/admin/team', { params }).then(r => setTeam(r.data)).catch(() => setTeam({ kpis: null, reviewers: [] }));
+  }, [range, coFilter]);
   const load = useCallback(() => {
     client.get('qa/admin/overview').then(r => setCompanies(r.data.companies || [])).catch(() => setCompanies([]));
     loadUsers(); loadRules();
   }, [loadUsers, loadRules]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadTeam(); }, [loadTeam]);   // re-fetch productivity when window / company changes
 
   const toggleMethod = async (co, m) => {
     const methods = co.methods.includes(m) ? co.methods.filter(x => x !== m) : [...co.methods, m];
@@ -92,83 +258,120 @@ export default function QaAdminTab() {
     catch { toast.error('Method update failed'); loadUsers(); }
   };
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-4 pb-6">
+      {/* header + shared report filters (company + window apply to Overview & Activity) */}
       <div className="flex items-center gap-2 flex-wrap">
         <Shield size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>QA Department</h2>
-        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-          Enable QA per company, then pick a QA person and assign <b>any combination</b> of work. QA accounts are created by the Super Admin and appear here automatically.
+        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Managers, agents, tasks &amp; reporting — one place. QA accounts are created by the Super Admin and appear here automatically.</span>
+        <span className="ml-auto flex items-center gap-1.5">
+          <ThemedSelect value={coFilter} onChange={e => setCoFilter(e.target.value)} style={{ ...inp, fontSize: 12, padding: '5px 10px' }} title="Filter the reports to one company">
+            <option value="">All companies</option>
+            {(companies || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </ThemedSelect>
+          <ThemedSelect value={range} onChange={e => setRange(e.target.value)} style={{ ...inp, fontSize: 12, padding: '5px 10px' }} title="Reporting window">
+            <option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option>
+          </ThemedSelect>
+          <button onClick={() => { load(); loadTeam(); }} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
         </span>
-        <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
       </div>
 
-      {/* STEP 1 — QA per company: enable + configure + route */}
-      <section>
-        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={1} /> Companies — enable, configure &amp; route
-          <InfoTip text="Turn on the review types per company, open the gear for the settings, and see who reviews that company's calls. If a company shows waiting calls with no reviewer, assign someone in the QA Team below." />
-        </div>
-        {/* one-line legend so the toggles are never a mystery */}
-        <div className="text-[11px] mb-2 flex items-center gap-3 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
-          <span><b style={{ color: 'var(--color-primary-600)' }}>TRA</b> = calls entered in the CRM — every transfer gets reviewed</span>
-          <span><b style={{ color: 'var(--color-warning-600)' }}>RCM</b> = random raw dialer calls — sampled daily</span>
-        </div>
-        {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-          : <div className="space-y-2">
-              {companies.map(co => {
-                return (
-                <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                  <div className="flex items-center gap-2 p-2.5">
-                    <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                    <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
-                    {METHODS.map(([k, l]) => {
-                      const on = co.methods.includes(k);
-                      return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
-                        title={k === 'tra'
-                          ? (on ? 'TRA is ON — every CRM transfer of this company gets a review task. Click to turn off.' : 'Turn ON TRA — review every transfer entered in the CRM for this company.')
-                          : (on ? 'RCM is ON — a daily random sample of this company\'s raw dialer calls gets review tasks. Click to turn off.' : 'Turn ON RCM — sample random raw dialer calls of this company daily.')}
-                        style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
-                    })}
-                    <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Settings: sample size, task expiry, workload cap" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
-                      <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
-                      <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
-                    </button>
-                  </div>
-                  {/* who's a QA reviewer here — assignment happens in the QA
-                      manager's Load Day (fetch a dialer day → distribute). */}
-                  {co.methods.length > 0 && (
-                    <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
-                      <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {co.qa_agents ? `${co.qa_agents} QA agent${co.qa_agents === 1 ? '' : 's'} assigned here` : 'No QA agents assigned yet'} · calls are distributed by the QA manager from Load Day
-                      </span>
-                    </div>
-                  )}
-                  {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} companyType={co.company_type} />}
-                </div>
-                );
-              })}
-            </div>}
-      </section>
+      {/* sub-tabs */}
+      <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+        {[['overview', 'Overview'], ['team', 'Team'], ['activity', 'Activity'], ['companies', 'Companies']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+            style={{ background: tab === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: tab === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+        ))}
+      </div>
 
-      {/* STEP 2 — QA TEAM: who is a QA reviewer, and in which companies */}
-      <section>
-        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-          <StepBadge n={2} /> QA Team — who reviews, and where
-          <InfoTip w={300} text="Every QA manager & agent (the Super Admin creates the accounts). Give a person access to the companies they should review. The actual call assignment is done by the QA MANAGER from Load Day — fetch a dialer day, then distribute the calls (equally or to one agent)." />
-        </div>
-        <TeamConsole companies={companies || []} users={users}
-          reloadUsers={loadUsers} reloadAll={load}
-          removeAssign={removeAssign} setAgentMethod={setAgentMethod} />
-      </section>
+      {/* OVERVIEW — KPIs + reviewer productivity */}
+      {tab === 'overview' && (
+        <section>
+          <KpiStrip kpis={team?.kpis} />
+          <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+            Reviewer productivity
+            <InfoTip w={300} text="Each QA person and how much they're doing over the selected window: open plate, reviews completed, per active day, the average score they GIVE, the pass rate they give, and when they were last active. Click a row to manage that person in Team." />
+          </div>
+          <TeamReport team={team} onPick={(uid) => { setJumpUser(uid); setTab('team'); }} />
+        </section>
+      )}
+
+      {/* TEAM — person management (company access + methods) */}
+      {tab === 'team' && (
+        <section>
+          <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+            QA Team — who reviews, and where
+            <InfoTip w={300} text="Every QA manager & agent. Give a person access to the companies they should review + which call types (TRA/RCM). The QA MANAGER hands out the actual calls from Load Day / Live. The Super Admin creates the accounts." />
+          </div>
+          <TeamConsole companies={companies || []} users={users} initialUser={jumpUser}
+            reloadUsers={loadUsers} reloadAll={() => { load(); loadTeam(); }}
+            removeAssign={removeAssign} setAgentMethod={setAgentMethod} />
+        </section>
+      )}
+
+      {/* ACTIVITY — who did what, when */}
+      {tab === 'activity' && (
+        <section>
+          <ActivityFeed coFilter={coFilter} range={range} reviewers={team?.reviewers} />
+        </section>
+      )}
+
+      {/* COMPANIES — enable + configure per company */}
+      {tab === 'companies' && (
+        <section>
+          <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+            Companies — enable, configure &amp; route
+            <InfoTip text="Turn on the review types per company, open the gear for the settings, and see who reviews that company's calls. If a company shows waiting calls with no reviewer, assign someone in the QA Team." />
+          </div>
+          <div className="text-[11px] mb-2 flex items-center gap-3 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+            <span><b style={{ color: 'var(--color-primary-600)' }}>TRA</b> = calls entered in the CRM — every transfer gets reviewed</span>
+            <span><b style={{ color: 'var(--color-warning-600)' }}>RCM</b> = random raw dialer calls — sampled daily</span>
+          </div>
+          {companies === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+            : <div className="space-y-2">
+                {companies.map(co => {
+                  return (
+                  <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                    <div className="flex items-center gap-2 p-2.5">
+                      <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                      <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
+                      {METHODS.map(([k, l]) => {
+                        const on = co.methods.includes(k);
+                        return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
+                          title={k === 'tra'
+                            ? (on ? 'TRA is ON — every CRM transfer of this company gets a review task. Click to turn off.' : 'Turn ON TRA — review every transfer entered in the CRM for this company.')
+                            : (on ? 'RCM is ON — a daily random sample of this company\'s raw dialer calls gets review tasks. Click to turn off.' : 'Turn ON RCM — sample random raw dialer calls of this company daily.')}
+                          style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
+                      })}
+                      <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Settings: sample size, task expiry, workload cap" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                        <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
+                        <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
+                      </button>
+                    </div>
+                    {co.methods.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
+                        <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                          {co.qa_agents ? `${co.qa_agents} QA agent${co.qa_agents === 1 ? '' : 's'} assigned here` : 'No QA agents assigned yet'} · calls are distributed by the QA manager from Load Day / Live
+                        </span>
+                      </div>
+                    )}
+                    {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} companyType={co.company_type} />}
+                  </div>
+                  );
+                })}
+              </div>}
+        </section>
+      )}
     </div>
   );
 }
 
 // ── STEP 2 — the person-centric console ──────────────────────────────────────
-function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, setAgentMethod }) {
+function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, setAgentMethod, initialUser }) {
   const [q, setQ] = useState('');
   const [lvl, setLvl] = useState('');
   const [sel, setSel] = useState(null);          // selected user_id
+  useEffect(() => { if (initialUser) setSel(initialUser); }, [initialUser]);   // jump from the Overview roster
   const [addCo, setAddCo] = useState('');        // add-to-company picker
   const [addLvl, setAddLvl] = useState('qa_agent');
   const [confirmRemove, setConfirmRemove] = useState(null);   // ucr_id awaiting confirmation
