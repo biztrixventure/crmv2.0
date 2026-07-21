@@ -2757,7 +2757,7 @@ function CfgToggle({ on, onClick, label, tint, hint }) {
     </button>
   );
 }
-function CompanyReviewConfig({ companyId }) {
+function CompanyReviewConfig({ companyId, onChange }) {
   const [cfg, setCfg] = useState(null);
   const load = useCallback(() => {
     setCfg(null);
@@ -2776,6 +2776,7 @@ function CompanyReviewConfig({ companyId }) {
     try {
       const r = await client.put('qa/admin/company-config', { company_id: companyId, key, value });
       if (key === 'qa.methods') { const mm = r.data.materialized; if (mm && (mm.tra || mm.rcm)) toast.success(`Pulled ${mm.tra || 0} TRA + ${mm.rcm || 0} RCM`); }
+      onChange?.();   // let the parent re-read the enabled set so the agent method checkboxes update
     } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); load(); }
   };
   const toggleMethod = (m) => save('qa.methods', methods.includes(m) ? methods.filter(x => x !== m) : [...methods, m]);
@@ -2783,9 +2784,12 @@ function CompanyReviewConfig({ companyId }) {
 
   return (
     <div className="rounded-xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-      <div className="text-sm font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+      <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
         Review types for this company
-        <InfoTip text="Turn each review type on/off for the company selected in the header. TRA reviews every CRM transfer; RCM samples raw dialer calls; Closed / Unclosed Sale review the closer's call. This is yours as the manager — compliance only assigns you the company." />
+        <InfoTip text="Decide WHAT this company is reviewed on. TRA = every CRM transfer (the fronter's call). RCM = a random sample of raw dialer calls never entered in the CRM. Closed Sale / Unclosed Sale = the closer's call when it did / didn't close. Turning one ON makes that work exist and lets you assign agents to it below; OFF means it's not reviewed and can't be assigned. This is yours as the manager — compliance only gives you the company." />
+      </div>
+      <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+        These switches control what work exists for this company. <b>Agents below can only be given the types you turn on here.</b>
       </div>
       {cfg === null ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
         : (
@@ -2796,7 +2800,7 @@ function CompanyReviewConfig({ companyId }) {
             <CfgToggle on={closerOn('closer_dispo')} onClick={() => toggleCloser('closer_dispo')} label="Unclosed Sale" tint="#dc2626" hint="Closer calls, no sale" />
             {methods.includes('rcm') && (
               <div className="rounded-xl p-2.5 flex flex-col justify-center" style={{ border: '1px solid var(--color-border)', minWidth: 118 }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RCM sample %</div>
+                <div className="text-[10px] font-bold mb-1 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>RCM sample % <InfoTip w={240} text="RCM never reviews every call — it checks only a random slice of each day's raw dialer calls (the ones not entered in the CRM). This sets how big that slice is, e.g. 10% of the day's calls are pulled for review. Only applies while RCM is on." /></div>
                 <input type="number" min={1} max={100} defaultValue={sample.value}
                   onBlur={e => { const v = Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)); save('qa.rcm.sample', { ...sample, mode: 'percentage', value: v }); }}
                   style={{ ...inp, width: 70, padding: '4px 8px' }} />
@@ -2817,6 +2821,22 @@ const CARD_FIELDS = [
 ];
 const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true]));
 
+// The review types a company is turned ON for (mig 208 company config). TRA/RCM
+// come from qa.methods; the closer legs from qa.closer (null = both on). This is
+// the universe an agent can be bound to — you can't assign a method the company
+// doesn't review.
+const enabledWtFromCfg = (cfg) => {
+  const methods = cfg?.['qa.methods'] || [];
+  const closer = cfg?.['qa.closer'];
+  const cOn = (k) => (closer == null ? true : !!closer[k]);
+  const s = new Set();
+  if (methods.includes('tra')) s.add('tra');
+  if (methods.includes('rcm')) s.add('rcm');
+  if (cOn('closer_sales')) s.add('closer_sales');
+  if (cOn('closer_dispo')) s.add('closer_dispo');
+  return s;
+};
+
 function AgentsTab({ companyId, canManage, isSuper = false }) {
   const [agents, setAgents] = useState(null);
   const [fields, setFields] = useState(null);
@@ -2826,6 +2846,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
   const [canClear, setCanClear] = useState(false); // compliance-granted clear-tasks right
   const [clearing, setClearing] = useState(null);  // agentId | '__all__' while a clear runs
   const [clearWt, setClearWt] = useState('');       // '' = every section, else one work type
+  const [enabledWt, setEnabledWt] = useState(null); // Set of review types this company is ON for — gates the method checkboxes
 
   const load = useCallback(() => {
     client.get('qa/agent-methods', { params: { company_id: companyId } }).then(r => setAgents(r.data.agents || [])).catch(() => setAgents([]));
@@ -2835,11 +2856,17 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
       // compliance to have granted it per-company.
       setCanClear(isSuper || !!r.data.config?.['qa.manager_can_clear']);
     }).catch(() => setFields(DEFAULT_CARD_FIELDS));
+    // the company's enabled review types — the universe an agent may be bound to
+    client.get('qa/admin/company-config', { params: { company_id: companyId } })
+      .then(r => setEnabledWt(enabledWtFromCfg(r.data.config || {})))
+      .catch(() => setEnabledWt(new Set(['tra', 'rcm', 'closer_sales', 'closer_dispo'])));   // fail-open: never over-restrict
     client.get('qa/agents', { params: { company_id: companyId } })
       .then(r => setUndone(Object.fromEntries((r.data.agents || []).map(a => [a.id, a.undone || 0]))))
       .catch(() => setUndone({}));
   }, [companyId, isSuper]);
   useEffect(() => { load(); }, [load]);
+  // the review types the company is on for → the only methods an agent can be given
+  const enabledMethods = AGENT_METHODS.filter(([m]) => !enabledWt || enabledWt.has(m)).map(([m]) => m);
 
   const totalUndone = Object.values(undone).reduce((s, n) => s + n, 0);
   const clearUndone = async (agentId) => {
@@ -2876,7 +2903,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
     });
   };
   const setAllMethods = (agent, on) => {
-    const methods = on ? AGENT_METHODS.map(([m]) => m) : [];
+    const methods = on ? enabledMethods : [];   // "All" = all ENABLED types, not every type
     setAgents(list => list.map(a => a.id === agent.id ? { ...a, methods } : a));
     setSavingId(s => ({ ...s, [agent.id]: 'saving' }));
     client.put('qa/agent-methods', { company_id: companyId, user_id: agent.id, methods })
@@ -2892,12 +2919,12 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
 
   return (
     <div className="grid grid-cols-2 gap-5">
-      {canManage && <div className="col-span-2"><CompanyReviewConfig companyId={companyId} /></div>}
+      {canManage && <div className="col-span-2"><CompanyReviewConfig companyId={companyId} onChange={load} /></div>}
       {/* agent → method binding */}
       <div>
-        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Bind each QA agent to TRA and/or RCM. Manual assigns require the binding; compliance work rules route regardless. Bind one or both." /></div>
+        <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>QA agents &amp; methods <InfoTip text="Give each agent the review types they'll score. You can only check the types enabled in Review types above — a locked 🔒 method means the company isn't reviewing that type. An agent then sees and can be assigned only the types checked here (Live + My tasks hide the rest)." /></div>
         <div className="text-[11px] mb-3 flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
-          <span>Applies to the company selected in the header picker. Bind one or both methods.</span>
+          <span>Applies to the company in the header. You can only check the types enabled above — <b>🔒 = off for this company</b>.</span>
           {canManage && canClear && agents?.length > 0 && (
             <span className="ml-auto flex items-center gap-1.5">
               <ThemedSelect value={clearWt} onChange={e => setClearWt(e.target.value)} style={{ ...inp, padding: '3px 6px', fontSize: 11 }} title="Limit clearing to one section, or clear every section">
@@ -2919,6 +2946,11 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
         {agents === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : !agents.length ? <div className="text-sm p-4 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>No QA agents in this company yet. Create users with the <b>QA Agent</b> role first.</div>
           : <>
+            {enabledWt && enabledWt.size === 0 && (
+              <div className="text-[11px] p-2.5 rounded-lg mb-2 flex items-center gap-1.5" style={{ background: 'rgba(217,119,6,0.1)', color: 'var(--color-warning-600, #d97706)', border: '1px solid rgba(217,119,6,0.3)' }}>
+                <Info size={13} /> No review types are on for this company. Turn one on in <b>Review types</b> above before assigning methods.
+              </div>
+            )}
             {agents.length > 4 && (
               <div className="relative mb-2">
                 <Search size={13} className="absolute left-2.5 top-2.5" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -2927,7 +2959,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
             )}
             <div className="space-y-2">
               {agents.filter(a => !q.trim() || (a.name || '').toLowerCase().includes(q.trim().toLowerCase())).map(a => {
-                const allOn = AGENT_METHODS.every(([m]) => a.methods.includes(m));
+                const allOn = enabledMethods.length > 0 && enabledMethods.every(m => a.methods.includes(m));
                 return (
                 <div key={a.id} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                   <User size={15} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -2938,13 +2970,22 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
                   </div>
                   {AGENT_METHODS.map(([m, label, tint]) => {
                     const on = a.methods.includes(m);
+                    const typeOn = !enabledWt || enabledWt.has(m);   // does the company review this type?
+                    const clickable = typeOn || on;                  // a stale binding can always be UNbound
+                    const title = typeOn ? SLOT_LABEL[m]
+                      : (on ? `${label}: this review type is OFF for the company — click to unbind`
+                            : `${label}: turn it on in "Review types" above before assigning`);
                     return (
-                      <button key={m} onClick={() => toggleMethod(a, m)} title={SLOT_LABEL[m]}
+                      <button key={m} disabled={!clickable} onClick={() => clickable && toggleMethod(a, m)} title={title}
                         className="text-[10px] font-bold px-2 py-1 rounded uppercase whitespace-nowrap transition-colors"
                         style={on
-                          ? { background: `${tint}26`, color: tint, border: '1px solid currentColor' }
-                          : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>
-                        {on ? '✓ ' : ''}{label}
+                          ? (typeOn
+                              ? { background: `${tint}26`, color: tint, border: '1px solid currentColor' }
+                              : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px dashed var(--color-border)', textDecoration: 'line-through' })
+                          : (typeOn
+                              ? { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }
+                              : { background: 'transparent', color: 'var(--color-text-tertiary)', border: '1px dashed var(--color-border)', opacity: 0.45, cursor: 'not-allowed' })}>
+                        {on ? '✓ ' : (typeOn ? '' : '🔒 ')}{label}
                       </button>
                     );
                   })}
@@ -2968,7 +3009,7 @@ function AgentsTab({ companyId, canManage, isSuper = false }) {
       {/* card field visibility */}
       <div>
         <div className="text-sm font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>Task card fields <InfoTip text="Pick which customer details (name, phone, ZIP, state, agent, call date, plan) appear on the agent's task row and scorecard header. Turn off anything they shouldn't see or don't need." /></div>
-        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Choose which customer details show on the agent's task card / scorecard header.</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>Display only — these set which customer details appear on the agent's task row + scorecard header. They don't change what's scored or which calls come in.</div>
         {fields === null ? <Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
           : <div className="p-3 rounded-xl grid grid-cols-2 gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: canManage ? 1 : 0.6 }}>
               {CARD_FIELDS.map(([key, label]) => (
