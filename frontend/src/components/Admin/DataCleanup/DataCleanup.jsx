@@ -158,24 +158,32 @@ const BulkCancelPanel = ({ onDone }) => {
   const [busy, setBusy]             = useState(false);
   const [res, setRes]               = useState(null);
 
-  // Accept UUIDs pasted one-per-line, or comma / space / semicolon separated.
-  // Dedup so a double-paste doesn't try the same id twice.
-  const ids = useMemo(() => {
+  // Each line is a UUID, optionally followed by THAT sale's own cancellation
+  // date: "uuid" or "uuid, 2026-07-15" (comma or tab). Per-row dates override
+  // the default below; the backend normalizes YYYY-MM-DD or MM/DD/YYYY. Deduped.
+  const rows = useMemo(() => {
     const seen = new Set();
-    return text.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
-      .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
+    return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+      const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(s => s.trim());
+      return { id: parts[0], cancellation_date: parts[1] || undefined };
+    }).filter(r => r.id && (seen.has(r.id) ? false : (seen.add(r.id), true)));
   }, [text]);
+  const datedCount = rows.filter(r => r.cancellation_date).length;
 
   const isChargeback = status === 'chargeback';
   const statusLabel  = CANCEL_STATUSES.find(s => s.v === status)?.l || status;
-  const canRun = ids.length && reason.trim() && ack && !busy;
+  const canRun = rows.length && reason.trim() && ack && !busy;
 
   const run = async () => {
-    if (!ids.length)    return toast.error('Paste at least one sale UUID.');
+    if (!rows.length)   return toast.error('Paste at least one sale UUID.');
     if (!reason.trim()) return toast.error('A reason is required to cancel.');
     setBusy(true); setRes(null);
     try {
-      const payload = { ids, new_status: status, reason: reason.trim(), cancellation_date: cancelDate || undefined };
+      const payload = {
+        updates: rows.map(r => ({ id: r.id, cancellation_date: r.cancellation_date })),
+        new_status: status, reason: reason.trim(),
+        cancellation_date: cancelDate || undefined,   // fallback for rows without their own date
+      };
       if (isChargeback) {
         if (cbDate) payload.chargeback_date = cbDate;
         if (cbAmt !== '') payload.chargeback_amount = Number(cbAmt);
@@ -205,8 +213,9 @@ const BulkCancelPanel = ({ onDone }) => {
           </ThemedSelect>
         </div>
         <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Cancellation date</label>
+          <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Default cancellation date</label>
           <CalendarDateInput value={cancelDate} onChange={setCancelDate} />
+          <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Used only for lines that don't include their own date.</p>
         </div>
       </div>
 
@@ -231,19 +240,19 @@ const BulkCancelPanel = ({ onDone }) => {
       )}
 
       <div>
-        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Sale UUIDs (one per line)</label>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Sale UUID per line — add each sale's own date after a comma (optional)</label>
         <textarea value={text} onChange={e => { setText(e.target.value); setRes(null); }} rows={7}
-          placeholder={`e2b1c3d4-5678-90ab-cdef-1234567890ab\n7c4a1b2c-...`} className="input font-mono text-xs w-full resize-y" />
-        <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Comma, space or newline separated. <strong>{ids.length}</strong> unique id(s).</p>
+          placeholder={`e2b1c3d4-5678-90ab-cdef-1234567890ab, 2026-07-15\n7c4a1b2c-90de-....   ← no date = uses the default above`} className="input font-mono text-xs w-full resize-y" />
+        <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}><strong>{rows.length}</strong> unique id(s){datedCount ? ` · ${datedCount} with their own date` : ''}. Format per line: <code>uuid, date</code> (date optional; YYYY-MM-DD or MM/DD/YYYY).</p>
       </div>
 
       <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text)' }}>
         <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} className="mt-0.5" />
-        <span>I understand this applies <strong>{statusLabel}</strong> to <strong>{ids.length}</strong> sale(s) — logged and revertible from Compliance.</span>
+        <span>I understand this applies <strong>{statusLabel}</strong> to <strong>{rows.length}</strong> sale(s) — logged and revertible from Compliance.</span>
       </label>
 
       <Button variant="primary" onClick={run} disabled={!canRun} className="flex items-center gap-1.5">
-        {busy ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} Cancel {ids.length || ''} sale{ids.length === 1 ? '' : 's'}
+        {busy ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} Cancel {rows.length || ''} sale{rows.length === 1 ? '' : 's'}
       </Button>
 
       {res && (
