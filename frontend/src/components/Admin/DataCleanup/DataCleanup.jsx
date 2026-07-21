@@ -6,6 +6,7 @@ import client from '../../../api/client';
 import { useFormFields } from '../../../hooks/useFormFields';
 import ThemedSelect from '../../UI/Select';
 import CalendarDateInput from '../../Form/CalendarDateInput';
+import { useCancellationReasons } from '../../../hooks/useCancellationReasons';
 
 const fmt = (s) => { try { return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } };
 
@@ -151,7 +152,9 @@ const BulkCancelPanel = ({ onDone }) => {
   const [text, setText]             = useState('');
   const [status, setStatus]         = useState('cancelled');
   const [reason, setReason]         = useState('');
+  const [reasonKey, setReasonKey]   = useState('');   // canonical cancellation reason (catalog)
   const [cancelDate, setCancelDate] = useState(new Date().toISOString().slice(0, 10));
+  const { activeReasons } = useCancellationReasons();
   const [cbDate, setCbDate]         = useState('');
   const [cbAmt, setCbAmt]           = useState('');
   const [ack, setAck]               = useState(false);
@@ -182,6 +185,7 @@ const BulkCancelPanel = ({ onDone }) => {
       const payload = {
         updates: rows.map(r => ({ id: r.id, cancellation_date: r.cancellation_date })),
         new_status: status, reason: reason.trim(),
+        cancellation_reason_key: reasonKey || undefined,
         cancellation_date: cancelDate || undefined,   // fallback for rows without their own date
       };
       if (isChargeback) {
@@ -217,6 +221,15 @@ const BulkCancelPanel = ({ onDone }) => {
           <CalendarDateInput value={cancelDate} onChange={setCancelDate} />
           <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Used only for lines that don't include their own date.</p>
         </div>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Reason (catalog)</label>
+        <ThemedSelect value={reasonKey} onChange={e => setReasonKey(e.target.value)} className="input text-sm">
+          <option value="">— pick a canonical reason (optional) —</option>
+          {(activeReasons || []).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </ThemedSelect>
+        <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Canonical key for top-reason reports — applied to the whole batch.</p>
       </div>
 
       <div>
