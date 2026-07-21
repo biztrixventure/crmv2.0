@@ -14,7 +14,10 @@ import ThemedSelect from '../UI/Select';
 // QA accounts are created by the Super Admin and appear here automatically.
 // ============================================================================
 
-const inp = { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 999, padding: '8px 12px', fontSize: 13, outline: 'none' };
+// width:'auto' so ThemedSelect filters size to their content and flow several per
+// row instead of each taking a full line. Any control that needs a set width
+// still wins by passing width explicitly (e.g. {...inp, width: 58} / width:'100%').
+const inp = { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 999, padding: '8px 12px', fontSize: 13, outline: 'none', width: 'auto' };
 const METHODS = [['tra', 'TRA'], ['rcm', 'RCM']];
 const lvlLabel = (l) => (l === 'qa_manager' ? 'Manager' : 'Agent');
 

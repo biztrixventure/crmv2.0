@@ -2182,10 +2182,18 @@ router.get('/reports', asyncHandler(async (req, res) => {
   }
   const agentName = (r) => { const a = asgById[r.assignment_id] || {}; return (a.recording_ref && a.recording_ref.agent_name) || uname[a.subject_user_id] || uname[r.subject_user_id] || (agentKey(r) === 'unknown' ? 'Unknown' : agentKey(r)); };
 
-  // full reviewed-agent list for the selector (BEFORE applying the agent filter)
+  // full reviewed-agent list for the selector (BEFORE applying the agent filter).
+  // Carry subject_user_id per agent so the single-agent deep report (which keys on
+  // the CRM user id) works even when the selector key is a dialer label.
   const agentsMap = {};
-  for (const r of rows) { const k = agentKey(r); if (!agentsMap[k]) agentsMap[k] = agentName(r); }
-  const agents = Object.entries(agentsMap).map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
+  for (const r of rows) {
+    const k = agentKey(r);
+    const a = asgById[r.assignment_id] || {};
+    const sid = a.subject_user_id || r.subject_user_id || null;
+    if (!agentsMap[k]) agentsMap[k] = { name: agentName(r), subject_user_id: sid };
+    else if (!agentsMap[k].subject_user_id && sid) agentsMap[k].subject_user_id = sid;
+  }
+  const agents = Object.entries(agentsMap).map(([key, v]) => ({ key, name: v.name, subject_user_id: v.subject_user_id })).sort((a, b) => a.name.localeCompare(b.name));
   const reviewersMap = {};
   for (const r of rows) if (r.reviewer_id) reviewersMap[r.reviewer_id] = uname[r.reviewer_id] || 'Unknown';
   const reviewers = Object.entries(reviewersMap).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));

@@ -30,7 +30,10 @@ const dayOfDate = (v) => (v ? String(v).slice(0, 10) : '');   // any date/ts →
 const fmtDur = (s) => { if (s == null) return '—'; const m = Math.floor(s / 60), r = Math.floor(s % 60); return m ? `${m}m ${String(r).padStart(2, '0')}s` : `${r}s`; };
 const fmtDate = (d) => { try { return d ? new Date(String(d).length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''; } catch { return d || ''; } };
 const fmtTime = (s) => { try { return s ? new Date(String(s).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return s || ''; } };
-const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
+// width:'auto' so filter ThemedSelects size to their content and flow several per
+// row (not one dropdown per line). Controls needing a set width still pass it
+// explicitly (e.g. {...inp, width: 70} / width:'100%'), which overrides this.
+const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13, width: 'auto' };
 // Renders a method OR a work-type slot (tra | rcm | closer_sales | closer_dispo).
 const SLOT_PILL = {
   tra:          { label: 'TRA',  tint: '#2563eb' },
@@ -1099,9 +1102,12 @@ function ReportsTab({ companyId, companyName = '' }) {
       </div>
 
       {mode === 'agent'
-        ? (f.agent && /^[0-9a-f-]{20,}$/i.test(f.agent)
-            ? <AgentReport subjectId={f.agent} subjectName={(data?.agents || []).find(a => a.key === f.agent)?.name} companyId={companyId} from={f.date_from} to={f.date_to} />
-            : <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{f.agent ? 'This agent has no CRM account link — only the Team overview is available for them.' : 'Choose an agent in the dropdown above to open their full performance report.'}</div>)
+        ? (() => {
+            const sel = (data?.agents || []).find(a => a.key === f.agent);
+            return (f.agent && sel?.subject_user_id)
+              ? <AgentReport subjectId={sel.subject_user_id} subjectName={sel.name} companyId={companyId} from={f.date_from} to={f.date_to} />
+              : <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{f.agent ? 'This agent has raw dialer reviews only (no CRM account link), so the deep report isn’t available — use Team overview for them.' : 'Choose an agent in the dropdown above to open their full performance report.'}</div>;
+          })()
         : loading && !data ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
         : !s.reviews ? <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No scored reviews in this range. Reports build from the calls your QA team has scored.</div>
         : (
