@@ -31,3 +31,10 @@ yarn-debug.log*
 supabase/.temp/
 supabase/.branches/
 supabase/.env
+
+# MCP config holds live secrets (Supabase service key, GitHub PAT) — never commit
+.mcp.json
+.claude/settings.local.json
+
+# stray WhatsApp/reset backup dumps — never commit
+backend/reset_w@a_backup_*.json
