@@ -323,8 +323,9 @@ router.get('/crm-records', asyncHandler(async (req, res) => {
       .neq('vicidial_pending', true)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    if (allowed && req.query.company_id && !allowed.includes(req.query.company_id)) return res.status(403).json({ error: 'Forbidden' });
+    if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
     if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
-    else if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
     if (req.query.status) q = q.eq('status', req.query.status);
     if (phoneQ) q = q.ilike('normalized_phone', `%${phoneQ}`);
     const { data, count, error } = await q;
@@ -342,8 +343,9 @@ router.get('/crm-records', asyncHandler(async (req, res) => {
       .select('id, company_id, customer_name, customer_phone, sale_date, transfer_id, status, closer_disposition, client_name, plan', { count: wantCount })
       .order('sale_date', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
+    if (allowed && req.query.company_id && !allowed.includes(req.query.company_id)) return res.status(403).json({ error: 'Forbidden' });
+    if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
     if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
-    else if (allowed) { if (!allowed.length) return res.json({ items: [], total: 0, page, limit }); q = q.in('company_id', allowed); }
     if (req.query.status) q = q.eq('status', req.query.status);
     if (phoneQ) q = q.ilike('customer_phone', `%${phoneQ}`);
     const { data, count, error } = await q;
@@ -796,8 +798,35 @@ function allowedRecordingUrl(u) {
   return suf.some(s => h === s.replace(/^\./, '') || h.endsWith(s.startsWith('.') ? s : '.' + s));
 }
 
+// Access guard for a recording request. The client MUST reference the
+// qa_assignment the clip belongs to, and we enforce the SAME scope + ownership
+// the candidates endpoint does — company-in-scope AND (manager OR assigned to
+// them). Without this, /recordings/stream resolved any client-supplied
+// box/lead/recording id with no ownership check, so a QA agent could stream any
+// company's call audio by enumerating lead_id (cross-tenant IDOR). Returns true
+// if allowed; otherwise sends the error response and returns false.
+async function recordingAccessOK(req, res) {
+  const assignmentId = req.query.assignment_id || req.body?.assignment_id;
+  if (assignmentId) {
+    const { data: a } = await supabaseAdmin.from('qa_assignments')
+      .select('id, company_id, transfer_id, sale_id, assigned_to').eq('id', assignmentId).maybeSingle();
+    if (!a) { res.status(404).json({ error: 'Assignment not found' }); return false; }
+    const allowed = await allowedCompanyIds(req);
+    if (!(await assignmentInScope(a, allowed))) { res.status(403).json({ error: 'Forbidden' }); return false; }
+    if (!(await isManager(req)) && a.assigned_to !== req.user.id) { res.status(403).json({ error: 'This call is not assigned to you.' }); return false; }
+    return true;
+  }
+  // No assignment context = the MANAGER Day-Recordings dialer browser (raw clips
+  // not yet turned into assignments). Restrict to managers — an agent must always
+  // reference an owned assignment, which is what closes the agent cross-tenant
+  // IDOR (an agent can no longer enumerate arbitrary box/lead/recording ids).
+  if (!(await isManager(req))) { res.status(400).json({ error: 'assignment_id required' }); return false; }
+  return true;
+}
+
 router.get('/recordings/stream', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await recordingAccessOK(req, res))) return;
   const ref = { box_id: req.query.box_id, lead_id: req.query.lead_id, recording_id: req.query.recording_id };
   // Server re-resolve returns the URL straight from the authenticated dialer API
   // — trusted, so we register its host and skip the client-facing allowlist.
@@ -851,6 +880,7 @@ async function transcribeAllowed(userId) {
 // GET cached transcript for a recording (drives "show if already transcribed").
 router.get('/recordings/transcript', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await recordingAccessOK(req, res))) return;
   const { data } = await supabaseAdmin.from('qa_transcripts')
     .select('*').eq('recording_key', recKey(req.query)).maybeSingle();
   res.json({ transcript: data || null });
@@ -859,6 +889,7 @@ router.get('/recordings/transcript', asyncHandler(async (req, res) => {
 // POST transcribe ONE recording leg (cache-first).
 router.post('/recordings/transcribe', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await recordingAccessOK(req, res))) return;
 
   // Per-user access (default OFF). Superadmin / compliance enables it per user
   // in QA config → Transcription access. Superadmin is always allowed.
@@ -2960,12 +2991,15 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
   // created_at index range-scan instead of walking the whole table (this was slow
   // when opening a company's config).
   const since = new Date(Date.now() - 120 * 86400000).toISOString();
+  // Offer the SAME value /qa/live matches an Unclosed leg against — the closer's
+  // vicidial_dispo, falling back to latest_disposition (qa.js live filter). Scan
+  // both fields so the picker never offers a code the filter can't match.
   const { data } = await supabaseAdmin.from('transfers')
-    .select('latest_disposition').eq('company_id', companyId).gte('created_at', since)
-    .not('latest_disposition', 'is', null).not('assigned_closer_id', 'is', null)
+    .select('latest_disposition, vicidial_dispo').eq('company_id', companyId).gte('created_at', since)
+    .not('assigned_closer_id', 'is', null)
     .order('created_at', { ascending: false }).limit(1000);
   const counts = {};
-  for (const r of (data || [])) { const d = String(r.latest_disposition || '').trim().toUpperCase(); if (d) counts[d] = (counts[d] || 0) + 1; }
+  for (const r of (data || [])) { const d = String(r.vicidial_dispo || r.latest_disposition || '').trim().toUpperCase(); if (d) counts[d] = (counts[d] || 0) + 1; }
   res.json({ dispositions: Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([code, n]) => ({ code, count: n })) });
 }));
 

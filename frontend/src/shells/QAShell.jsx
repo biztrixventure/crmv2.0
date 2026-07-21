@@ -227,7 +227,7 @@ function Candidates({ assignmentId }) {
     if (txById[c.recording_id]) { setTxOpen(o => ({ ...o, [c.recording_id]: !o[c.recording_id] })); return; }
     setTxBusy(c.recording_id);
     try {
-      const r = await client.post('qa/recordings/transcribe', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location });
+      const r = await client.post('qa/recordings/transcribe', { assignment_id: assignmentId, box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location });
       setTxById(m => ({ ...m, [c.recording_id]: r.data?.transcript || { text: '' } }));
       setTxOpen(o => ({ ...o, [c.recording_id]: true }));
     } catch (e) { toast.error(e.response?.data?.error || 'Transcription failed'); }
@@ -244,7 +244,7 @@ function Candidates({ assignmentId }) {
     }
     setLoadingId(c.recording_id);
     try {
-      const res = await client.get('qa/recordings/stream', { params: { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
+      const res = await client.get('qa/recordings/stream', { params: { assignment_id: assignmentId, box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       const url = URL.createObjectURL(res.data); urlRef.current = url;
       a.src = url; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0); a.load();
@@ -3038,8 +3038,11 @@ export default function QAShell() {
   const canReports = isSuper || hasPermission('view_qa_reports');
   const canAssign = isSuper || hasPermission('assign_qa_tasks');
   const canOverride = isSuper || hasPermission('override_qa_review');
-  // Manager lands on the Dashboard (team overview + per-agent cards).
-  const [tab, setTab] = useState('dashboard');
+  const canQueue = isSuper || hasPermission('view_qa_queue');   // Dashboard/Live/Completed all call view_qa_queue-gated endpoints
+  // Land on the first tab the user can actually load: a reports-only or config-only
+  // role has no view_qa_queue, so its Dashboard/Live/Completed would 403 — start it
+  // on Reports (or Config / Day) instead of a blank 403 landing.
+  const [tab, setTab] = useState(() => canQueue ? 'dashboard' : canReports ? 'reports' : canManage ? 'config' : canAssign ? 'day' : 'dashboard');
 
   // A QA AGENT (no manager-side permission at all) gets the focused agent
   // console. ANY manager-side permission — assign, config, or reports — opens
@@ -3053,12 +3056,12 @@ export default function QAShell() {
   // concrete company, so they fall back to the primary company.
   const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
-    { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
-    { key: 'live', label: 'Live', icon: Radio, show: true },
+    { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: canQueue },
+    { key: 'live', label: 'Live', icon: Radio, show: canQueue },
     // { key: 'queue', ... }  ← CRM Transfers/Sales browser: DISABLED for now.
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: isSuper || canAssign },
     { key: 'agents', label: 'Agents', icon: UserPlus, show: isSuper || canAssign },
-    { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: true },
+    { key: 'completed', label: canReports ? 'Completed' : 'My Reviews', icon: ClipboardCheck, show: canQueue },
     { key: 'config', label: 'Scorecards & Config', icon: Settings2, show: canManage },
     { key: 'reports', label: 'Reports', icon: BarChart3, show: canReports },
   ].filter(t => t.show);
