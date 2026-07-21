@@ -734,7 +734,25 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
 // the fronter hasn't completed yet — QA can still hear the call. Click a row to
 // listen + score; an agent self-claims it. Company-scoped via the header picker.
 const LIVE_POLL_MS = 25000;
-const LIVE_WINDOW_MIN = 240;
+const LIVE_WINDOWS = [
+  { key: 'today', label: 'Today' },
+  { key: '4h',    label: 'Last 4h' },
+  { key: '48h',   label: '48h' },
+];
+// Start of the current business day (US Eastern — the dialer reports by Eastern
+// calendar day) as a UTC ISO. Live defaults to this so its TRA/Sales totals match
+// the dialer's XFER/SALE counts (and the CRM Day report), not a rolling 4h slice.
+function tzOffsetMinutes(tz, at) {
+  const s = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+    .formatToParts(at).find(p => p.type === 'timeZoneName')?.value || 'GMT+00:00';
+  const m = /GMT([+-])(\d{2}):?(\d{2})?/.exec(s);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0)) : 0;
+}
+function businessDayStartISO(tz = 'America/New_York') {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const off = tzOffsetMinutes(tz, new Date(ymd + 'T12:00:00Z'));
+  return new Date(new Date(ymd + 'T00:00:00Z').getTime() - off * 60000).toISOString();
+}
 function liveTimeAgo(ts) {
   if (!ts) return '';
   const then = new Date(String(ts).replace(' ', 'T')).getTime();
@@ -765,6 +783,7 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
   const [lastSync, setLastSync] = useState(null);
   const [freshIds, setFreshIds] = useState(() => new Set());
   const [kindFilter, setKindFilter] = useState('all');   // all | transfer | sale | live
+  const [win, setWin] = useState('today');               // today | 4h | 48h — 'today' matches the dialer's day
   const seenRef  = useRef(new Set());
   const firstRef = useRef(true);
   const scopedRef = useRef(scoped);   // latest selected company — to drop stale responses
@@ -774,7 +793,9 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
   const load = useCallback(async ({ silent } = {}) => {
     const reqScope = scoped;   // capture at call time
     try {
-      const params = { window_min: LIVE_WINDOW_MIN };
+      const params = { limit: 500 };
+      if (win === 'today') params.since = businessDayStartISO();     // full business day (matches dialer)
+      else params.window_min = win === '4h' ? 240 : 2880;            // rolling 4h / 48h
       if (scoped) params.company_id = scoped;   // '' = All my companies → server uses full allowed set
       const r = await client.get('qa/live', { params });
       if (reqScope !== scopedRef.current) return;   // company switched mid-request → drop this stale response
@@ -789,10 +810,10 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
       setItems(next);
       setLastSync(new Date());
     } catch { if (!silent) setItems([]); }
-  }, [scoped]);
+  }, [scoped, win]);
 
-  // reset + reload when the company switches
-  useEffect(() => { firstRef.current = true; seenRef.current = new Set(); setItems(null); setFreshIds(new Set()); load(); }, [scoped]); // eslint-disable-line react-hooks/exhaustive-deps
+  // reset + reload when the company or the time-range switches
+  useEffect(() => { firstRef.current = true; seenRef.current = new Set(); setItems(null); setFreshIds(new Set()); load(); }, [scoped, win]); // eslint-disable-line react-hooks/exhaustive-deps
   // poll while not paused
   useEffect(() => { if (paused) return undefined; const t = setInterval(() => load({ silent: true }), LIVE_POLL_MS); return () => clearInterval(t); }, [paused, load]);
   // tick relative times
@@ -841,7 +862,7 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
           </span>
           Live
         </span>
-        <InfoTip text="Transfers and sales appear here within seconds of being punched on the dialer — no need to load a day. Includes transfers the fronter hasn't finished yet; you can still hear the call. Click any row to listen and score it." />
+        <InfoTip text="Everything punched on the dialer shows here within seconds — no loading a day. Defaults to the whole business day, so the counts match the dialer's totals; switch the range at the right. Includes transfers the fronter hasn't finished yet; you can still hear the call. Click any row to listen and score." />
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
           {[['all', 'All', all.length], ['tra', 'TRA', nTra], ['closer_dispo', 'Unclosed', nUncl], ['closer_sales', 'Sales', nSale], ['incomplete', 'Incomplete', nInc]].map(([k, lbl, n]) => (
             <button key={k} onClick={() => setKindFilter(k)}
@@ -852,6 +873,16 @@ function LiveTab({ scoped, selfId, canOverride, isManager }) {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+            {LIVE_WINDOWS.map(w => (
+              <button key={w.key} onClick={() => setWin(w.key)}
+                title={w.key === 'today' ? 'Full business day — matches the dialer totals' : `Rolling ${w.label}`}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors"
+                style={{ background: win === w.key ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: win === w.key ? '#fff' : 'var(--color-text-secondary)' }}>
+                {w.label}
+              </button>
+            ))}
+          </div>
           {lastSync && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>updated {liveTimeAgo(lastSync)}</span>}
           <button onClick={() => setPaused(p => !p)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title={paused ? 'Resume live updates' : 'Pause live updates'}>
             {paused ? <><Play size={13} /> Resume</> : <><Pause size={13} /> Pause</>}
