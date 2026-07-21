@@ -439,7 +439,13 @@ router.get('/live', asyncHandler(async (req, res) => {
   if (allowed && !allowed.length) return res.json({ items: [], server_time: new Date().toISOString() });
   const companyIds = one ? [one] : allowed;               // null → every company (superadmin/view_all)
 
-  const limit = Math.min(parseInt(req.query.limit, 10) || 80, 200);
+  // `limit` caps how many transfers/sales we PULL from the window. Each transfer
+  // can yield TWO feed legs (TRA + Unclosed) and there are sales too, so the final
+  // item cap is a MULTIPLE — otherwise a busy day is truncated mid-work-type (a
+  // 62-transfer day showed only ~39 TRA under the old 80-item cap). The rolling
+  // window already bounds the data, so these can be generous.
+  const limit = Math.min(parseInt(req.query.limit, 10) || 300, 600);
+  const itemCap = limit * 3;
   const windowMin = Math.min(Math.max(parseInt(req.query.window_min, 10) || 240, 5), 1440);
   const since = (req.query.since && !Number.isNaN(Date.parse(req.query.since)))
     ? new Date(req.query.since).toISOString()
@@ -542,7 +548,7 @@ router.get('/live', asyncHandler(async (req, res) => {
   });
   items = items
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-    .slice(0, limit);
+    .slice(0, itemCap);
 
   // Attach any existing QA assignment + review + who holds it, so the feed shows
   // reviewed / claimed state live. A transfer carries TWO legs: tra (method 'tra')
