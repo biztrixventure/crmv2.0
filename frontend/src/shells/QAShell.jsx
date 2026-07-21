@@ -5,7 +5,7 @@ import {
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
   UserPlus, CheckSquare, Square, ArrowRightLeft, Plus, DollarSign, Info, Building2,
-  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic, LayoutDashboard,
+  Download, Award, TrendingUp, Table2, CalendarDays, Shuffle, PhoneOff, Trash2, Mic, LayoutDashboard, Radio,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -708,6 +708,188 @@ function QueueTab({ canOverride, canManage, selfId, companyId }) {
             )}
           </>}
       </div>
+
+      <ScoreModal open={open} onClose={() => setOpen(null)} selfId={selfId} canOverride={canOverride}
+        onScored={() => { setOpen(null); toast.success('Scored'); load({ silent: true }); }}
+        onEdited={() => load({ silent: true })} />
+    </div>
+  );
+}
+
+// ── Live tab ──────────────────────────────────────────────────────────────────
+// Near-real-time feed of transfers + sales the moment they land from the dialer
+// (the VICIdial webhooks write them; we just read the CRM rows on a short rolling
+// window — NO "load day", NO dialer re-fetch, NO materialize). INCLUDES transfers
+// the fronter hasn't completed yet — QA can still hear the call. Click a row to
+// listen + score; an agent self-claims it. Company-scoped via the header picker.
+const LIVE_POLL_MS = 25000;
+const LIVE_WINDOW_MIN = 240;
+function liveTimeAgo(ts) {
+  if (!ts) return '';
+  const then = new Date(String(ts).replace(' ', 'T')).getTime();
+  if (Number.isNaN(then)) return '';
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+function liveBeep() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ctx = new AC(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.04;
+    o.start(); setTimeout(() => { try { o.stop(); ctx.close(); } catch { /* ignore */ } }, 130);
+  } catch { /* ignore */ }
+}
+// Composite identity for a feed row — a transfer appears as up to TWO legs (TRA +
+// Unclosed) sharing one record_id, so the key must include the work type.
+const liveKey = (it) => `${it.record_kind}:${it.work_type}:${it.record_id}`;
+
+function LiveTab({ scoped, selfId, canOverride, isManager }) {
+  const [items, setItems]     = useState(null);   // null = loading
+  const [open, setOpen]       = useState(null);
+  const [opening, setOpening] = useState(null);
+  const [paused, setPaused]   = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [freshIds, setFreshIds] = useState(() => new Set());
+  const [kindFilter, setKindFilter] = useState('all');   // all | transfer | sale | live
+  const seenRef  = useRef(new Set());
+  const firstRef = useRef(true);
+  const scopedRef = useRef(scoped);   // latest selected company — to drop stale responses
+  scopedRef.current = scoped;
+  const [, tick] = useState(0);   // re-render so "Xs ago" stays fresh
+
+  const load = useCallback(async ({ silent } = {}) => {
+    const reqScope = scoped;   // capture at call time
+    try {
+      const params = { window_min: LIVE_WINDOW_MIN };
+      if (scoped) params.company_id = scoped;   // '' = All my companies → server uses full allowed set
+      const r = await client.get('qa/live', { params });
+      if (reqScope !== scopedRef.current) return;   // company switched mid-request → drop this stale response
+      const next = r.data.items || [];
+      if (!firstRef.current) {   // don't flag everything as "new" on the first paint
+        const fresh = new Set();
+        for (const it of next) { const k = liveKey(it); if (!seenRef.current.has(k)) fresh.add(k); }
+        if (fresh.size) { setFreshIds(fresh); liveBeep(); setTimeout(() => setFreshIds(new Set()), 12000); }
+      }
+      for (const it of next) seenRef.current.add(liveKey(it));
+      firstRef.current = false;
+      setItems(next);
+      setLastSync(new Date());
+    } catch { if (!silent) setItems([]); }
+  }, [scoped]);
+
+  // reset + reload when the company switches
+  useEffect(() => { firstRef.current = true; seenRef.current = new Set(); setItems(null); setFreshIds(new Set()); load(); }, [scoped]); // eslint-disable-line react-hooks/exhaustive-deps
+  // poll while not paused
+  useEffect(() => { if (paused) return undefined; const t = setInterval(() => load({ silent: true }), LIVE_POLL_MS); return () => clearInterval(t); }, [paused, load]);
+  // tick relative times
+  useEffect(() => { const t = setInterval(() => tick(x => x + 1), 12000); return () => clearInterval(t); }, []);
+
+  // Build the assignment-shaped object the review panel + scorecard expect.
+  const shape = (it, assignmentId, status, review, meta) => ({
+    ...it, id: assignmentId,
+    method: meta?.method || (it.work_type === 'tra' ? 'tra' : 'rcm'),
+    subject_role: meta?.subject_role || (it.work_type === 'tra' ? 'fronter' : 'closer'),
+    company_id: meta?.company_id || it.company_id,
+    status: status || 'pending', review: review || null,
+  });
+
+  const openRow = async (it) => {
+    // already reviewed → open in read/edit mode (managers or the owner only)
+    if (it.assignment_id && it.qa_status === 'scored') {
+      if (isManager || it.mine) setOpen(shape(it, it.assignment_id, 'scored', it.review));
+      else toast.info(`Already reviewed${it.assignee_name ? ` by ${it.assignee_name}` : ''}`);
+      return;
+    }
+    setOpening(it.record_id);
+    try {
+      const r = await client.post('qa/live/open', { kind: it.record_kind, id: it.record_id, work_type: it.work_type });
+      setOpen(shape(it, r.data.assignment_id, it.qa_status || 'pending', it.review, r.data));
+    } catch (e) {
+      if (e.response?.status === 409) toast.error(`Being reviewed by ${e.response.data?.reviewer_name || 'another reviewer'}`);
+      else toast.error(e.response?.data?.error || 'Could not open this record');
+    } finally { setOpening(null); }
+  };
+
+  const all = items || [];
+  const shown = all.filter(it => kindFilter === 'all' ? true : kindFilter === 'incomplete' ? it.pending_fronter : it.work_type === kindFilter);
+  const nTra  = all.filter(i => i.work_type === 'tra').length;
+  const nUncl = all.filter(i => i.work_type === 'closer_dispo').length;
+  const nSale = all.filter(i => i.work_type === 'closer_sales').length;
+  const nInc  = all.filter(i => i.pending_fronter).length;
+
+  return (
+    <div className="flex flex-col gap-3 h-full">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="inline-flex items-center gap-2 text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+          <span style={{ position: 'relative', display: 'inline-flex', width: 10, height: 10 }}>
+            {!paused && <span className="animate-ping" style={{ position: 'absolute', inset: 0, borderRadius: 999, background: '#10b981', opacity: 0.7 }} />}
+            <span style={{ position: 'relative', width: 10, height: 10, borderRadius: 999, background: paused ? 'var(--color-text-tertiary)' : '#10b981' }} />
+          </span>
+          Live
+        </span>
+        <InfoTip text="Transfers and sales appear here within seconds of being punched on the dialer — no need to load a day. Includes transfers the fronter hasn't finished yet; you can still hear the call. Click any row to listen and score it." />
+        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+          {[['all', 'All', all.length], ['tra', 'TRA', nTra], ['closer_dispo', 'Unclosed', nUncl], ['closer_sales', 'Sales', nSale], ['incomplete', 'Incomplete', nInc]].map(([k, lbl, n]) => (
+            <button key={k} onClick={() => setKindFilter(k)}
+              className="px-3 py-1 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5"
+              style={{ background: kindFilter === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: kindFilter === k ? '#fff' : 'var(--color-text-secondary)' }}>
+              {lbl}<span className="text-[10px] px-1.5 rounded-full" style={{ background: kindFilter === k ? 'rgba(255,255,255,0.25)' : 'var(--color-surface)', color: kindFilter === k ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {lastSync && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>updated {liveTimeAgo(lastSync)}</span>}
+          <button onClick={() => setPaused(p => !p)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title={paused ? 'Resume live updates' : 'Pause live updates'}>
+            {paused ? <><Play size={13} /> Resume</> : <><Pause size={13} /> Pause</>}
+          </button>
+          <button onClick={() => load()} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh now"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        </div>
+      </div>
+
+      {items === null ? <div className="text-center py-10"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        : shown.length === 0 ? (
+          <div className="text-center py-14 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+            <Headphones size={22} className="inline mb-2" style={{ opacity: 0.5 }} /><br />
+            Nothing here yet. New transfers and sales appear the moment they come off the dialer.
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
+            <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+              <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
+                <tr>{['', 'Customer / Phone', 'When', 'Disposition', 'QA', 'Score', ''].map((h, idx) => <th key={idx} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {shown.map(it => {
+                  const fresh = freshIds.has(liveKey(it));
+                  const active = open?.record_id === it.record_id && open?.work_type === it.work_type;
+                  return (
+                  <tr key={liveKey(it)} onClick={() => openRow(it)} className="cursor-pointer"
+                    style={{ borderTop: '1px solid var(--color-border)', background: fresh ? 'color-mix(in srgb, #10b981 12%, var(--color-surface))' : (active ? 'var(--color-surface-hover)' : 'transparent'), transition: 'background .4s' }}>
+                    <td className="px-3 py-2"><div className="inline-flex items-center gap-1.5"><MethodPill m={it.work_type} />{fresh && <span className="text-[9px] font-black px-1 py-0.5 rounded" style={{ background: '#10b981', color: '#fff' }}>NEW</span>}</div></td>
+                    <td className="px-3 py-2">
+                      <div className="font-semibold truncate inline-flex items-center gap-1.5" style={{ color: 'var(--color-text)', maxWidth: 240 }}>
+                        {it.customer_name || <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                        {it.pending_fronter && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.16)', color: 'var(--color-warning-600)' }} title="The fronter hasn't completed this transfer yet — you can still hear the call">INCOMPLETE</span>}
+                      </div>
+                      {it.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{it.customer_phone}</div>}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap" title={fmtTime(it.created_at)}><span className="font-semibold" style={{ color: fresh ? '#059669' : 'var(--color-text-secondary)' }}>{liveTimeAgo(it.created_at)}</span></td>
+                    <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{it.disposition || '—'}</td>
+                    <td className="px-3 py-2">{it.qa_status
+                      ? <span className="inline-flex items-center gap-1"><StatusPill s={it.qa_status} />{it.assignee_name && !it.mine && <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{it.assignee_name}</span>}</span>
+                      : <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>new</span>}</td>
+                    <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={{ status: it.qa_status, review: it.review }} /></td>
+                    <td className="px-2 py-2">{opening === it.record_id ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
       <ScoreModal open={open} onClose={() => setOpen(null)} selfId={selfId} canOverride={canOverride}
         onScored={() => { setOpen(null); toast.success('Scored'); load({ silent: true }); }}
@@ -2775,7 +2957,7 @@ function QAAgentView({ user, logout }) {
   const { companies, all, companyId, setCompanyId } = useQaCompanies();
   const scoped = companyId === ALL_CO ? '' : companyId;
   useEffect(() => { client.get('qa/my-methods').then(r => setMethods(r.data.methods || [])).catch(() => setMethods([])); }, []);
-  const tabs = [{ key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
+  const tabs = [{ key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'live', label: 'Live', icon: Radio }, { key: 'tasks', label: 'Queue', icon: ListChecks }, { key: 'reviews', label: 'Completed', icon: ClipboardCheck }];
 
   return (
     <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
@@ -2802,6 +2984,7 @@ function QAAgentView({ user, logout }) {
             to a reviewer, so an agent must always see what's assigned to them —
             AgentTasks shows its own empty state when there's nothing. */}
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
+        {tab === 'live' && <LiveTab scoped={scoped} selfId={user?.id} canOverride={false} isManager={false} />}
         {tab === 'tasks' && <AgentTasks selfId={user?.id} canOverride={false} companyId={scoped || user?.company_id} filterCompany={scoped} />}
         {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} />}
       </main>
@@ -2833,6 +3016,7 @@ export default function QAShell() {
   const scoped = companyId === ALL_CO ? '' : companyId;
   const tabs = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { key: 'live', label: 'Live', icon: Radio, show: true },
     // { key: 'queue', ... }  ← CRM Transfers/Sales browser: DISABLED for now.
     { key: 'day', label: 'Day Recordings', icon: Headphones, show: isSuper || canAssign },
     { key: 'agents', label: 'Agents', icon: UserPlus, show: isSuper || canAssign },
@@ -2862,6 +3046,7 @@ export default function QAShell() {
       </header>
       <main className="flex-1 p-5 overflow-hidden relative z-10">
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAManagerDashboard companyId={scoped} onOpenReports={() => canReports && setTab('reports')} /></div>}
+        {tab === 'live' && <LiveTab scoped={scoped} selfId={user?.id} canOverride={canOverride} isManager={isSuper || canAssign} />}
         {tab === 'day' && <>
           <CrmDayPanel companyId={companyId} scoped={scoped} canAssign={isSuper || canAssign} />
           <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />

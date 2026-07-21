@@ -51,6 +51,26 @@ async function allowedCompanyIds(req) {
   const cos = await getUserCompanies(req.user.id);
   return cos.map(c => c.id);
 }
+// Company-scope check for a QA ASSIGNMENT (not a raw company id). QA users are
+// scoped to their FRONTER companies, but a closer-leg row (a sale / an unclosed
+// transfer) may be STORED under the CLOSER company (the materializer / crm-records
+// browser create it there). QA reviews those legs under the fronter company (via
+// the transfer link), and the Live feed anchors them there — so accept EITHER the
+// stored company OR the linked transfer's (fronter) company. This only ever WIDENS
+// access in the intended direction; a tra row (company_id = its transfer's company)
+// still passes on the fast path. `allowed === null` = superadmin/view_all → any.
+async function assignmentInScope(a, allowed) {
+  if (!allowed) return true;
+  if (a.company_id && allowed.includes(a.company_id)) return true;
+  let transferId = a.transfer_id || null;
+  if (!transferId && a.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
+    transferId = s?.transfer_id || null;
+  }
+  if (!transferId) return false;
+  const { data: t } = await supabaseAdmin.from('transfers').select('company_id').eq('id', transferId).maybeSingle();
+  return !!(t?.company_id && allowed.includes(t.company_id));
+}
 const leadDigits = (code) => { const m = String(code || '').match(/(\d+)\s*$/); return m ? m[1] : null; };
 
 // dialer agent id(s) → the CRM user's real NAME (vicidial_agent_ids mapping).
@@ -401,6 +421,209 @@ router.post('/crm-records/:kind/:id/open', asyncHandler(async (req, res) => {
   res.json({ assignment_id: created.id, method: created.method, subject_role: created.subject_role, company_id: created.company_id });
 }));
 
+// ── LIVE feed: near-real-time transfers + sales as they land from the dialer ───
+// The VICIdial webhooks (routes/vicidial.js) write the transfer / sale rows the
+// instant XFER / SALE is punched. This reads those rows back on a short rolling
+// window so QA can listen + score right away — NO "load day", NO dialer re-fetch,
+// NO materialize. It DELIBERATELY includes vicidial_pending transfers (the fronter
+// hasn't completed the form yet): the recording still resolves by vendor_code /
+// agent / phone, so QA can hear the call the moment it lands — which is the point.
+// Company-scoped to the caller's allowed companies (an agent can't widen scope).
+router.get('/live', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const allowed = await allowedCompanyIds(req);            // null = all companies
+  const one = req.query.company_id || null;
+  if (one && allowed && !allowed.includes(one)) return res.status(403).json({ error: 'Forbidden' });
+  if (allowed && !allowed.length) return res.json({ items: [], server_time: new Date().toISOString() });
+  const companyIds = one ? [one] : allowed;               // null → every company (superadmin/view_all)
+
+  const limit = Math.min(parseInt(req.query.limit, 10) || 80, 200);
+  const windowMin = Math.min(Math.max(parseInt(req.query.window_min, 10) || 240, 5), 1440);
+  const since = (req.query.since && !Number.isNaN(Date.parse(req.query.since)))
+    ? new Date(req.query.since).toISOString()
+    : new Date(Date.now() - windowMin * 60000).toISOString();
+
+  // Transfers — carry BOTH legs: the fronter/TRA leg (always) and, when the call
+  // reached a closer without a sale, the closer/Unclosed leg. vicidial_pending
+  // stubs are INCLUDED on purpose (QA can still hear the fronter call).
+  let tq = supabaseAdmin.from('transfers')
+    .select('id, company_id, normalized_phone, form_data, vicidial_vendor_code, created_at, status, latest_disposition, vicidial_pending, assigned_closer_id, vicidial_dispo, vicidial_dispo_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (companyIds) tq = tq.in('company_id', companyIds);
+
+  // Sales (closer leg) anchored to the FRONTER company via the transfer link — a
+  // sale's own company_id is the closer company (1-Vertex). Ordered by insert time
+  // ("just punched"), not sale_date. !inner drops standalone (no-transfer) sales.
+  let sq = supabaseAdmin.from('sales')
+    .select('id, company_id, customer_name, customer_phone, created_at, sale_date, status, closer_disposition, plan, client_name, transfer_id, transfers!inner(company_id)')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (companyIds) sq = sq.in('transfers.company_id', companyIds);
+
+  const [tRes, sRes] = await Promise.all([tq, sq]);
+  if (tRes.error) { logger.warn('QA', `live transfers: ${tRes.error.message}`); return res.status(500).json({ error: tRes.error.message }); }
+  if (sRes.error) logger.warn('QA', `live sales: ${sRes.error.message}`);
+  const transfers = tRes.data || [];
+  const sales = sRes.data || [];
+
+  // Which of these transfers already have a SOLD sale? Their closer leg is a Closed
+  // Sale (shown as the sale row); the rest that reached a closer are Unclosed.
+  const txIds = transfers.map(t => t.id);
+  let soldSet = new Set();
+  if (txIds.length) {
+    const { data: sold } = await supabaseAdmin.from('sales')
+      .select('transfer_id').in('transfer_id', txIds).in('status', SOLD_SALE_STATUSES).not('transfer_id', 'is', null);
+    soldSet = new Set((sold || []).map(s => s.transfer_id));
+  }
+
+  const tBase = (t, work_type, when) => ({
+    record_kind: 'transfer', record_id: t.id, company_id: t.company_id, work_type,
+    customer_name: scanName(t.form_data), customer_phone: t.normalized_phone,
+    customer_zip: scanFormData(t.form_data, 'zip'), customer_state: scanFormData(t.form_data, 'state'),
+    subject_date: when, created_at: when,
+    record_status: t.status, vendor_code: t.vicidial_vendor_code,
+  });
+  // TRA — fronter leg, one per transfer (always).
+  const tItems = transfers.map(t => ({
+    ...tBase(t, 'tra', t.created_at),
+    disposition: t.latest_disposition, pending_fronter: !!t.vicidial_pending, has_closer: !!t.assigned_closer_id,
+  }));
+  // UNCLOSED SALE — the closer leg of a transfer that reached a closer but did NOT
+  // sell. Ordered by when the closer dispositioned it (falls back to created_at).
+  const uItems = transfers.filter(t => t.assigned_closer_id && !soldSet.has(t.id)).map(t => ({
+    ...tBase(t, 'closer_dispo', t.vicidial_dispo_at || t.created_at),
+    disposition: t.vicidial_dispo || t.latest_disposition, pending_fronter: false, has_closer: true,
+  }));
+  // CLOSED SALE — the sale row (closer leg, sold). Anchored to the FRONTER company.
+  const sItems = sales.map(s => ({
+    record_kind: 'sale', record_id: s.id, work_type: 'closer_sales',
+    company_id: (s.transfers && s.transfers.company_id) || s.company_id,
+    customer_name: s.customer_name, customer_phone: s.customer_phone,
+    subject_date: s.created_at, created_at: s.created_at,
+    record_status: s.status, disposition: s.closer_disposition,
+    plan: s.plan, client_name: s.client_name, transfer_id: s.transfer_id,
+  }));
+
+  let items = [...tItems, ...uItems, ...sItems]
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, limit);
+
+  // Attach any existing QA assignment + review + who holds it, so the feed shows
+  // reviewed / claimed state live. A transfer carries TWO legs: tra (method 'tra')
+  // and closer_dispo (method 'rcm'); a sale is closer_sales (method 'rcm').
+  const uniqTxIds   = [...new Set(items.filter(i => i.record_kind === 'transfer').map(i => i.record_id))];
+  const uniqSaleIds = [...new Set(items.filter(i => i.record_kind === 'sale').map(i => i.record_id))];
+  const [txA, saleA] = await Promise.all([
+    uniqTxIds.length ? supabaseAdmin.from('qa_assignments').select('id, transfer_id, method, status, assigned_to').in('transfer_id', uniqTxIds).in('method', ['tra', 'rcm']) : Promise.resolve({ data: [] }),
+    uniqSaleIds.length ? supabaseAdmin.from('qa_assignments').select('id, sale_id, status, assigned_to').eq('method', 'rcm').in('sale_id', uniqSaleIds) : Promise.resolve({ data: [] }),
+  ]);
+  const asgTx = {};   // `${transfer_id}:${method}` → assignment (tra leg vs closer_dispo leg)
+  for (const a of (txA.data || [])) asgTx[`${a.transfer_id}:${a.method}`] = a;
+  const asgSale = Object.fromEntries((saleA.data || []).map(a => [a.sale_id, a]));
+
+  const allAsg = [...(txA.data || []), ...(saleA.data || [])];
+  const aIds = allAsg.map(a => a.id);
+  const assigneeUids = [...new Set(allAsg.map(a => a.assigned_to).filter(Boolean))];
+  const [revRes, nameRes] = await Promise.all([
+    aIds.length ? supabaseAdmin.from('qa_reviews').select('assignment_id, final_score, quality_score, passed, status, total_score, max_score, autofail_result').in('assignment_id', aIds) : Promise.resolve({ data: [] }),
+    assigneeUids.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', assigneeUids) : Promise.resolve({ data: [] }),
+  ]);
+  const revBy = Object.fromEntries((revRes.data || []).map(r => [r.assignment_id, r]));
+  const nameBy = Object.fromEntries((nameRes.data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || null]));
+  const asgFor = (i) => {
+    if (i.record_kind === 'sale') return asgSale[i.record_id] || null;
+    return asgTx[`${i.record_id}:${i.work_type === 'closer_dispo' ? 'rcm' : 'tra'}`] || null;
+  };
+  items = items.map(i => {
+    const a = asgFor(i);
+    return {
+      ...i,
+      assignment_id: a?.id || null,
+      qa_status: a?.status || null,
+      assigned_to: a?.assigned_to || null,
+      assignee_name: a?.assigned_to ? (nameBy[a.assigned_to] || null) : null,
+      mine: a ? a.assigned_to === req.user.id : null,
+      review: a ? (revBy[a.id] || null) : null,
+    };
+  });
+  res.json({ items, server_time: new Date().toISOString() });
+}));
+
+// Open (find-or-create + CLAIM) a live record for scoring. Unlike the manager-only
+// /crm-records/*/open, this is available to any QA user (view_qa_queue): an agent
+// SELF-CLAIMS the task (assigned_to = them) so they can listen + score straight
+// from the Live feed. If another agent already holds it → 409 (shared pool, first-
+// come). A manager opens WITHOUT claiming (so they can still hand it out).
+router.post('/live/open', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const kind = req.body?.kind === 'sale' ? 'sale' : 'transfer';
+  const id = req.body?.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  // A transfer has TWO reviewable legs: 'tra' (fronter, method tra) and
+  // 'closer_dispo' (closer/unclosed, method rcm). A sale is always closer_sales.
+  const wt = kind === 'sale' ? 'closer_sales' : (req.body?.work_type === 'closer_dispo' ? 'closer_dispo' : 'tra');
+  const method = wt === 'tra' ? 'tra' : 'rcm';
+  const subject_role = wt === 'tra' ? 'fronter' : 'closer';
+  const col = kind === 'transfer' ? 'transfer_id' : 'sale_id';
+  const mgr = await isManager(req);
+
+  // company scope: transfer → its company; sale → the FRONTER company via transfer.
+  let companyId = null;
+  if (kind === 'transfer') {
+    const { data: rec } = await supabaseAdmin.from('transfers').select('company_id').eq('id', id).maybeSingle();
+    companyId = rec?.company_id || null;
+  } else {
+    const { data: rec } = await supabaseAdmin.from('sales').select('company_id, transfers(company_id)').eq('id', id).maybeSingle();
+    companyId = (rec?.transfers && rec.transfers.company_id) || rec?.company_id || null;
+  }
+  if (!companyId) return res.status(404).json({ error: 'Record not found' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(companyId)) return res.status(403).json({ error: 'Forbidden' });
+
+  const reselect = () => supabaseAdmin.from('qa_assignments')
+    .select('id, company_id, method, subject_role, assigned_to, status').eq(col, id).eq('method', method).maybeSingle();
+
+  let { data: a } = await reselect();
+  if (!a) {
+    const cust = await resolveCustomer({ companyId, transferId: kind === 'transfer' ? id : null, saleId: kind === 'sale' ? id : null });
+    const row = {
+      company_id: companyId, method, subject_role,
+      [col]: id, sampled: false, status: 'pending',
+      customer_name: cust.customer_name, customer_phone: cust.customer_phone,
+      customer_zip: cust.customer_zip, customer_state: cust.customer_state, customer_address: cust.customer_address,
+      sale_meta: cust.sale_meta,
+    };
+    if (!mgr) row.assigned_to = req.user.id;   // agent self-claims on create
+    const { data: created, error } = await supabaseAdmin.from('qa_assignments').insert(row).select('id, company_id, method, subject_role, assigned_to, status').single();
+    if (error) {
+      const { data: a2 } = await reselect();   // race on the unique (record, method) index
+      if (!a2) { logger.warn('QA', `live-open ${kind}/${wt} ${id}: ${error.message}`); return res.status(500).json({ error: error.message }); }
+      a = a2;
+    } else a = created;
+  }
+
+  // Existing assignment: an agent claims it if free (atomic guard), else it's taken.
+  if (!mgr) {
+    if (!a.assigned_to) {
+      const { data: claimed } = await supabaseAdmin.from('qa_assignments')
+        .update({ assigned_to: req.user.id }).eq('id', a.id).is('assigned_to', null)
+        .select('id, company_id, method, subject_role, assigned_to, status').maybeSingle();
+      if (claimed) a = claimed;
+      else { const { data: a3 } = await reselect(); if (a3) a = a3; }   // lost the claim race
+    }
+    if (a.assigned_to && a.assigned_to !== req.user.id) {
+      const { data: p } = await supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', a.assigned_to).maybeSingle();
+      const nm = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : null;
+      return res.status(409).json({ error: 'claimed', assigned_to: a.assigned_to, reviewer_name: nm || 'another reviewer' });
+    }
+  }
+
+  res.json({ assignment_id: a.id, method: a.method, subject_role: a.subject_role, company_id: a.company_id, work_type: wt, assigned_to: a.assigned_to || null });
+}));
+
 // ── assign an item to a qa_agent ──────────────────────────────────────────────
 router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
@@ -440,7 +663,7 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref').eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
-  if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await assignmentInScope(a, allowed))) return res.status(403).json({ error: 'Forbidden' });
   // an AGENT hears only their own tasks' recordings; managers anything in scope
   if (!(await isManager(req)) && a.assigned_to !== req.user.id) {
     return res.status(403).json({ error: 'This call is not assigned to you.' });
@@ -1403,7 +1626,7 @@ router.post('/reviews', asyncHandler(async (req, res) => {
     .select('id, company_id, method, work_type, subject_role, transfer_id, sale_id, subject_agent, recording_ref, assigned_to').eq('id', assignment_id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
-  if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await assignmentInScope(a, allowed))) return res.status(403).json({ error: 'Forbidden' });
   // an AGENT scores only their own task; managers score anything in scope
   if (!(await isManager(req)) && a.assigned_to !== req.user.id) {
     return res.status(403).json({ error: 'This call is not assigned to you.' });

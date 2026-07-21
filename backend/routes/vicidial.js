@@ -27,6 +27,7 @@ const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
 const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
+const { getConfig } = require('../utils/businessConfig');
 
 const ingest = express.Router();
 const api = express.Router();
@@ -365,6 +366,27 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     data: { transfer_id: data.id, phone, kind: 'vicidial_xfer' },
     dedupBase: `pendingxfer_${data.id}`,   // one notification per transfer (guards create-race)
   }).catch(() => {});
+
+  // Optionally mirror the ping to the company's QA team so Quality can start
+  // listening the moment a transfer lands. Default OFF — flip qa.live_notify per
+  // company; the QA "Live" tab already surfaces it via polling regardless, so this
+  // is only for teams that want an OS/bell alert too. Fire-and-forget, never blocks.
+  (async () => {
+    try {
+      if (!(await getConfig(companyId, 'qa.live_notify', false))) return;
+      const qaIds = await notifications.getUserIdsByLevel(companyId, ['qa_manager', 'qa_agent']);
+      if (!qaIds.length) return;
+      notifications.notifyUsers(qaIds, {
+        type: 'qa_new_transfer',
+        title: 'New transfer to review',
+        message: `A transfer just landed from the dialer (${phone}). Open QA · Live to score it.`,
+        companyId,
+        data: { transfer_id: data.id, phone, kind: 'qa_live' },
+        dedupBase: `qalive_${data.id}`,   // one QA ping per transfer
+      }).catch(() => {});
+    } catch { /* non-critical */ }
+  })();
+
   res.json({ ok: true, transfer_id: data.id });
 }));
 
