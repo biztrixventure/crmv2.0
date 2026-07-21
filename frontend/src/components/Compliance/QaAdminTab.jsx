@@ -60,6 +60,10 @@ const daysAgoISO = (n) => isoDay(new Date(Date.now() - n * 86400000));
 const fmtWhen = (ts) => { try { return ts ? new Date(String(ts).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return ''; } };
 const agoOf = (ts) => { if (!ts) return '—'; const s = Math.floor((Date.now() - new Date(String(ts).replace(' ', 'T')).getTime()) / 1000); if (s < 60) return `${s}s ago`; const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; };
 const WtPill = ({ k, n }) => { const d = wtDef(k); return <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: `${d.tint}1f`, color: d.tint }}>{WT_SHORT[k] || k}{n != null ? ` ${n}` : ''}</span>; };
+// a company's currently-enabled review types, in a fixed order (tra/rcm from
+// qa.methods, closer legs from qa.closer — default both on).
+const enabledTypes = (co) => ['tra', 'rcm', 'closer_sales', 'closer_dispo']
+  .filter(k => (k === 'tra' || k === 'rcm') ? (co.methods || []).includes(k) : (co.closer || []).includes(k));
 
 function KpiStrip({ kpis }) {
   const tiles = [
@@ -332,30 +336,23 @@ export default function QaAdminTab() {
                 {companies.map(co => {
                   return (
                   <div key={co.id} className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                    <div className="flex items-center gap-2 p-2.5">
+                    <div className="flex items-center gap-2 p-2.5 cursor-pointer" onClick={() => setExpanded(e => e === co.id ? null : co.id)}>
                       <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                      <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div><div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}</div></div>
-                      {METHODS.map(([k, l]) => {
-                        const on = co.methods.includes(k);
-                        return <button key={k} onClick={() => toggleMethod(co, k)} className="text-[11px] font-bold px-2 py-1 rounded uppercase"
-                          title={k === 'tra'
-                            ? (on ? 'TRA is ON — every CRM transfer of this company gets a review task. Click to turn off.' : 'Turn ON TRA — review every transfer entered in the CRM for this company.')
-                            : (on ? 'RCM is ON — a daily random sample of this company\'s raw dialer calls gets review tasks. Click to turn off.' : 'Turn ON RCM — sample random raw dialer calls of this company daily.')}
-                          style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)', border: '1px solid currentColor' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ ' : ''}{l}</button>;
-                      })}
-                      <button onClick={() => setExpanded(e => e === co.id ? null : co.id)} title="Settings: sample size, task expiry, workload cap" className="p-1.5 rounded-lg" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{co.name}</div>
+                        <div className="text-[10px] uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{co.company_type || ''}{co.qa_agents ? ` · ${co.qa_agents} agent${co.qa_agents === 1 ? '' : 's'}` : ''}</div>
+                      </div>
+                      {/* enabled review-type summary */}
+                      <div className="flex items-center gap-1 flex-wrap justify-end" style={{ maxWidth: 280 }}>
+                        {enabledTypes(co).length ? enabledTypes(co).map(k => <WtPill key={k} k={k} />)
+                          : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-warning-600)' }}>QA off</span>}
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); setExpanded(x => x === co.id ? null : co.id); }} title="Configure QA for this company" className="p-1.5 rounded-lg flex-shrink-0" style={{ background: expanded === co.id ? 'var(--color-surface-hover)' : 'transparent' }}>
                         <Settings2 size={14} style={{ color: 'var(--color-text-secondary)' }} />
                         <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', transition: 'transform .15s', transform: expanded === co.id ? 'rotate(180deg)' : 'none' }} />
                       </button>
                     </div>
-                    {co.methods.length > 0 && (
-                      <div className="flex items-center gap-2 flex-wrap px-2.5 pb-2.5 -mt-0.5">
-                        <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                          {co.qa_agents ? `${co.qa_agents} QA agent${co.qa_agents === 1 ? '' : 's'} assigned here` : 'No QA agents assigned yet'} · calls are distributed by the QA manager from Load Day / Live
-                        </span>
-                      </div>
-                    )}
-                    {expanded === co.id && <CompanyConfig companyId={co.id} methods={co.methods} companyType={co.company_type} />}
+                    {expanded === co.id && <CompanyConfig company={co} onToggleMethod={(m) => toggleMethod(co, m)} onCloserChange={(closer) => setCompanies(cs => cs.map(c => c.id === co.id ? { ...c, closer } : c))} />}
                   </div>
                   );
                 })}
@@ -817,19 +814,56 @@ function RulesSection({ rules, reload }) {
 }
 
 // ── per-company QA config (RCM sampling, covers, retention) ──────────────────
-function CompanyConfig({ companyId, methods, companyType }) {
+function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
+  const companyId = company.id;
+  const companyType = company.company_type;
+  const methods = company.methods || [];
+  const closerOn = company.closer || [];
   const [cfg, setCfg] = useState(null);
-  useEffect(() => { client.get('qa/admin/company-config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({})); }, [companyId]);
+  const [cards, setCards] = useState(null);     // active scorecard present per slot
+  const [dispos, setDispos] = useState(null);   // this company's closer dispositions
+  useEffect(() => {
+    client.get('qa/admin/company-config', { params: { company_id: companyId } }).then(r => setCfg(r.data.config || {})).catch(() => setCfg({}));
+    client.get('qa/scorecards', { params: { company_id: companyId } }).then(r => { const by = {}; for (const c of (r.data.scorecards || [])) if (c.is_active) by[c.method] = true; setCards(by); }).catch(() => setCards({}));
+    client.get('qa/admin/dispositions', { params: { company_id: companyId } }).then(r => setDispos(r.data.dispositions || [])).catch(() => setDispos([]));
+  }, [companyId]);
   const setKey = async (key, value) => {
     setCfg(c => ({ ...c, [key]: value }));
     try { await client.put('qa/admin/company-config', { company_id: companyId, key, value }); }
     catch { toast.error('Save failed'); }
   };
+  const toggleCloser = (k) => {
+    const next = closerOn.includes(k) ? closerOn.filter(x => x !== k) : [...new Set([...closerOn, k])];
+    onCloserChange(next);   // optimistic — keeps the header summary live
+    client.put('qa/admin/company-config', { company_id: companyId, key: 'qa.closer', value: next }).catch(() => toast.error('Save failed'));
+  };
   if (!cfg) return <div className="p-3" style={{ borderTop: '1px solid var(--color-border)' }}><Loader2 className="animate-spin" size={14} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   const rcm = (cfg['qa.rcm.sample'] && typeof cfg['qa.rcm.sample'] === 'object') ? cfg['qa.rcm.sample'] : { mode: 'percentage', value: 10, period: 'week' };
   const covers = Array.isArray(cfg['qa.rcm.covers']) ? cfg['qa.rcm.covers'] : ['fronter'];
   const retention = cfg['qa.retention_days'] ?? 2;
-  // one settings row: bold title + plain-language sentence + the controls
+  const unclDispos = Array.isArray(cfg['qa.closer_dispo.dispositions']) ? cfg['qa.closer_dispo.dispositions'] : [];
+  const unclSet = new Set(unclDispos.map(x => String(x).toUpperCase()));
+  const toggleUncl = (code) => { const c = String(code).toUpperCase(); const next = unclSet.has(c) ? unclDispos.filter(x => String(x).toUpperCase() !== c) : [...unclDispos, c]; setKey('qa.closer_dispo.dispositions', next); };
+
+  const ScoreStatus = ({ slot }) => {
+    const has = cards && cards[slot];
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={has ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'rgba(217,119,6,0.14)', color: 'var(--color-warning-600)' }} title={has ? 'An active scorecard exists for this type.' : 'No active scorecard yet — set one in the QA app → Scorecards & Config, otherwise this type can’t be scored.'}>{has ? '✓ scorecard' : '⚠ no scorecard'}</span>;
+  };
+  const TypeCard = ({ k, label, desc, on, onToggle, children }) => {
+    const d = wtDef(k);
+    return (
+      <div className="p-2.5 rounded-xl" style={{ background: on ? `${d.tint}0e` : 'var(--color-bg)', border: `1px solid ${on ? d.tint + '66' : 'var(--color-border)'}` }}>
+        <div className="flex items-start gap-2">
+          <button onClick={onToggle} className="text-[10px] font-bold px-2 py-1 rounded uppercase flex-shrink-0" style={on ? { background: `${d.tint}22`, color: d.tint, border: `1px solid ${d.tint}` } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ On' : 'Off'}</button>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold inline-flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>{label} <ScoreStatus slot={k} /></div>
+            <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</div>
+          </div>
+        </div>
+        {on && children && <div className="mt-2 pt-2" style={{ borderTop: '1px dashed var(--color-border)' }}>{children}</div>}
+      </div>
+    );
+  };
   const Row = ({ title, tip, children, sub }) => (
     <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px dashed var(--color-border)' }}>
       <div style={{ width: 210 }} className="flex-shrink-0">
@@ -841,41 +875,42 @@ function CompanyConfig({ companyId, methods, companyType }) {
   );
 
   return (
-    <div className="px-3 pb-2" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-      {methods.includes('rcm') ? (
-        <Row title="Random sample size (RCM)"
-          sub="How many raw dialer calls to pull for review, and whose calls the sample listens to."
-          tip="'A fixed number' pulls exactly that many calls; 'A percentage' takes that share of the day's calls. Weekly amounts are spread evenly across the days. 'Fronters/Closers' picks whose dialer calls go into the random draw.">
-          <ThemedSelect value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={inp}>
-            <option value="fixed">A fixed number</option><option value="percentage">A percentage</option>
-          </ThemedSelect>
-          <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 70 }} />
-          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '% of calls' : 'calls'}</span>
-          <ThemedSelect value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={inp}><option value="day">per day</option><option value="week">per week</option></ThemedSelect>
-          {/* Only the roles this company ACTUALLY has: fronter companies employ
-              fronters, the closer company employs closers — never both boxes. */}
-          {(() => {
-            const opts = companyType === 'fronter' ? [['fronter', 'fronters']]
-              : companyType === 'closer' ? [['closer', 'closers']]
-              : [['fronter', 'fronters'], ['closer', 'closers']];
-            return (
-              <>
-                <span className="text-[11px] ml-2" style={{ color: 'var(--color-text-tertiary)' }}>listen to:</span>
-                {opts.map(([r, label]) => (
-                  <label key={r} className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    <input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}
-                  </label>
-                ))}
-                {companyType === 'fronter' && <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>(this company has fronters only — the closers' calls are reviewed via "Closer" work types on the closer company)</span>}
-              </>
-            );
-          })()}
-        </Row>
-      ) : (
-        <div className="text-[11px] py-2" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px dashed var(--color-border)' }}>
-          Turn on <b>RCM</b> above to set the random-sample size. TRA needs no settings — it always reviews every CRM transfer.
-        </div>
-      )}
+    <div className="px-3 pb-3 pt-1" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+      <div className="text-[10px] font-bold uppercase tracking-wide mt-1 mb-1.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+        Review types <InfoTip w={320} text="The 4 QA review types for this company. FRONTER: TRA (every CRM transfer) + RCM (random raw dialer calls). CLOSER: Closed Sale + Unclosed Sale — the closer's leg of each transfer. Each type has its OWN scorecard, set in the QA app → Scorecards & Config; the badge shows whether one exists." />
+      </div>
+      <div className="mb-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-primary-600)' }}>Fronter calls</div>
+      <div className="grid gap-2 mb-2.5" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <TypeCard k="tra" label="TRA · Transfers" desc="Reviews every transfer entered in the CRM — full coverage of the fronter leg." on={methods.includes('tra')} onToggle={() => onToggleMethod('tra')} />
+        <TypeCard k="rcm" label="RCM · Random" desc="A daily random sample of the fronters' raw dialer calls (numbers NOT in the CRM)." on={methods.includes('rcm')} onToggle={() => onToggleMethod('rcm')}>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <ThemedSelect value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={{ ...inp, fontSize: 11, padding: '4px 8px' }}><option value="fixed">A fixed number</option><option value="percentage">A percentage</option></ThemedSelect>
+            <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 58, fontSize: 11, padding: '4px 8px' }} />
+            <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '%' : 'calls'}</span>
+            <ThemedSelect value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={{ ...inp, fontSize: 11, padding: '4px 8px' }}><option value="day">/day</option><option value="week">/week</option></ThemedSelect>
+            {(() => {
+              const opts = companyType === 'fronter' ? [['fronter', 'fronters']] : companyType === 'closer' ? [['closer', 'closers']] : [['fronter', 'fronters'], ['closer', 'closers']];
+              return <><span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>of:</span>{opts.map(([r, label]) => <label key={r} className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}</label>)}</>;
+            })()}
+          </div>
+        </TypeCard>
+      </div>
+      <div className="mb-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: '#059669' }}>Closer calls <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>— the closer's leg of each transfer</span></div>
+      <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <TypeCard k="closer_sales" label="Closed Sale" desc="The closer's call on a transfer that SOLD. Reviewed live from the CRM (Live / Load Day)." on={closerOn.includes('closer_sales')} onToggle={() => toggleCloser('closer_sales')} />
+        <TypeCard k="closer_dispo" label="Unclosed Sale" desc="The closer's call on a transfer that did NOT sell (a non-sale disposition)." on={closerOn.includes('closer_dispo')} onToggle={() => toggleCloser('closer_dispo')}>
+          <div>
+            <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Which dispositions count as Unclosed <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>— none picked = any non-sale</span></div>
+            <div className="flex flex-wrap gap-1">
+              {dispos === null ? <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
+                : !dispos.length ? <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>No closer dispositions seen yet for this company.</span>
+                : dispos.slice(0, 24).map(d => { const on = unclSet.has(d.code); return <button key={d.code} onClick={() => toggleUncl(d.code)} className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={on ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626', border: '1px solid #dc262666' } : { background: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{d.code} <span className="opacity-60">{d.count}</span></button>; })}
+            </div>
+          </div>
+        </TypeCard>
+      </div>
+
+      <div className="text-[10px] font-bold uppercase tracking-wide mt-3 mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>General settings</div>
       <Row title="Unclaimed calls expire after"
         sub="A waiting call nobody picks up is removed automatically — old calls never pile into an endless backlog."
         tip="Only applies to calls still sitting in the pool with no reviewer. Anything assigned, in progress, or scored is kept forever.">

@@ -507,7 +507,38 @@ router.get('/live', asyncHandler(async (req, res) => {
     plan: s.plan, client_name: s.client_name, transfer_id: s.transfer_id,
   }));
 
-  let items = [...tItems, ...uItems, ...sItems]
+  let items = [...tItems, ...uItems, ...sItems];
+
+  // Respect each company's enabled QA review types + its "counts as Unclosed"
+  // disposition set. TRA is gated by qa.methods (permissive when a company hasn't
+  // configured methods). The CLOSER legs are gated by qa.closer, which DEFAULTS
+  // to both-on (unset = show both) so nothing is hidden until compliance opts a
+  // company out — no migration, no regression.
+  const cfgCoIds = [...new Set(items.map(i => i.company_id).filter(Boolean))];
+  const coCfg = {};
+  await Promise.all(cfgCoIds.map(async cid => {
+    coCfg[cid] = {
+      methods: await getConfig(cid, 'qa.methods', []),
+      closer: await getConfig(cid, 'qa.closer', null),                     // null = both closer legs on
+      unclDispos: await getConfig(cid, 'qa.closer_dispo.dispositions', []),
+    };
+  }));
+  const isCloserWt = (w) => w === 'closer_sales' || w === 'closer_dispo';
+  items = items.filter(i => {
+    const c = coCfg[i.company_id] || {};
+    const m = Array.isArray(c.methods) ? c.methods : [];
+    if (i.work_type === 'tra' && m.length && !m.includes('tra')) return false;   // TRA explicitly off
+    if (isCloserWt(i.work_type)) {
+      const closer = Array.isArray(c.closer) ? c.closer : null;                  // null → both on
+      if (closer && !closer.includes(i.work_type)) return false;                 // this closer leg explicitly off
+    }
+    if (i.work_type === 'closer_dispo') {
+      const set = (Array.isArray(c.unclDispos) ? c.unclDispos : []).map(x => String(x).toUpperCase());
+      if (set.length && !set.includes(String(i.disposition || '').trim().toUpperCase())) return false;
+    }
+    return true;
+  });
+  items = items
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
     .slice(0, limit);
 
@@ -2431,9 +2462,11 @@ router.get('/admin/overview', asyncHandler(async (req, res) => {
   const out = [];
   for (const c of (companies || [])) {
     const methods = await getConfig(c.id, 'qa.methods', []);
+    const closer = await getConfig(c.id, 'qa.closer', null);   // null = both closer legs on (default)
     out.push({
       id: c.id, name: c.name, company_type: c.company_type,
       methods: Array.isArray(methods) ? methods : [],
+      closer: Array.isArray(closer) ? closer : ['closer_sales', 'closer_dispo'],   // resolve default for the UI
       qa_agents: agentsByCo[c.id] || 0,
     });
   }
@@ -2584,6 +2617,9 @@ router.delete('/admin/assign/:ucrId', asyncHandler(async (req, res) => {
 router.put('/admin/company-methods', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id } = req.body || {};
+  // qa.methods = the FRONTER/auto types: tra (materializes CRM transfers) + rcm
+  // (samples the dialer). The CLOSER legs (closer_sales / closer_dispo) are
+  // enabled separately via qa.closer (they're CRM/Live-driven, not auto-run).
   const methods = Array.isArray(req.body?.methods) ? req.body.methods.filter(m => ['tra', 'rcm'].includes(m)) : [];
   if (!company_id) return res.status(400).json({ error: 'company_id required' });
   await setConfig(`company:${company_id}`, 'qa.methods', methods, req.user.id);
@@ -2931,7 +2967,7 @@ router.get('/admin/dispositions', asyncHandler(async (req, res) => {
 
 // full per-company QA config (compliance controls each company's QA setup —
 // methods, RCM sampling, covers, TRA population, retention, card fields).
-const QA_ADMIN_KEYS = ['qa.methods', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear'];
+const QA_ADMIN_KEYS = ['qa.methods', 'qa.closer', 'qa.rcm.sample', 'qa.rcm.covers', 'qa.tra.population', 'qa.retention_days', 'qa.card_fields', 'qa.reviewer_cap', 'qa.day_cache_days', 'qa.manager_can_clear', 'qa.closer_dispo.dispositions'];
 router.get('/admin/company-config', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
   const companyId = req.query.company_id;
@@ -2946,7 +2982,10 @@ router.put('/admin/company-config', asyncHandler(async (req, res) => {
   if (!company_id || !QA_ADMIN_KEYS.includes(key)) return res.status(400).json({ error: 'company_id + a valid qa.* key required' });
   await setConfig(`company:${company_id}`, key, value, req.user.id);
   let materialized = null;
-  if (key === 'qa.methods' && Array.isArray(value) && value.length) { try { materialized = await materializeCompany(company_id, value); } catch (e) { logger.warn('QA', `admin cfg materialize: ${e.message}`); } }
+  if (key === 'qa.methods' && Array.isArray(value)) {
+    const auto = value.filter(m => ['tra', 'rcm'].includes(m));   // only tra/rcm auto-run
+    if (auto.length) { try { materialized = await materializeCompany(company_id, auto); } catch (e) { logger.warn('QA', `admin cfg materialize: ${e.message}`); } }
+  }
   res.json({ ok: true, key, value, materialized });
 }));
 
