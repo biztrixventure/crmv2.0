@@ -140,15 +140,27 @@ router.put('/limits', superOnly, asyncHandler(async (req, res) => {
   if (!['role', 'company', 'user'].includes(scope_type) || !scope_id || !action_type) {
     return res.status(400).json({ error: 'scope_type, scope_id, action_type are required' });
   }
-  const row = {
-    scope_type, scope_id: String(scope_id), action_type: String(action_type),
+  const ds = req.body.dataset && req.body.dataset !== '__all' ? String(req.body.dataset) : null;
+  const caps = {
     max_rows_per_export:           intOrNull(req.body.max_rows_per_export),
     max_exports_per_day:           intOrNull(req.body.max_exports_per_day),
     max_recording_minutes_per_day: intOrNull(req.body.max_recording_minutes_per_day),
     updated_by: req.user.id, updated_at: new Date().toISOString(),
   };
-  const { data, error } = await supabaseAdmin.from('egress_limits')
-    .upsert(row, { onConflict: 'scope_type,scope_id,action_type' }).select().single();
+  // Manual upsert keyed by (scope_type, scope_id, action_type, dataset): mig 209
+  // replaced the 3-col UNIQUE with a FUNCTIONAL unique index (COALESCE(dataset,
+  // '*')), which PostgREST onConflict cannot target — so find-then-update/insert.
+  let sel = supabaseAdmin.from('egress_limits').select('id')
+    .eq('scope_type', scope_type).eq('scope_id', String(scope_id)).eq('action_type', String(action_type));
+  sel = ds == null ? sel.is('dataset', null) : sel.eq('dataset', ds);
+  const { data: existing } = await sel.maybeSingle();
+  let data, error;
+  if (existing) {
+    ({ data, error } = await supabaseAdmin.from('egress_limits').update(caps).eq('id', existing.id).select().single());
+  } else {
+    ({ data, error } = await supabaseAdmin.from('egress_limits')
+      .insert({ scope_type, scope_id: String(scope_id), action_type: String(action_type), dataset: ds, ...caps }).select().single());
+  }
   if (error) return res.status(500).json({ error: error.message });
   res.json({ limit: data });
 }));

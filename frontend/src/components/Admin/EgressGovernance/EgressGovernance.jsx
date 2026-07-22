@@ -222,12 +222,23 @@ function AuditTab() {
 }
 
 // ── Limits tab ────────────────────────────────────────────────────────────────
+// Full flexibility: numeric export/recording caps per ROLE, per USER, per
+// COMPANY — and per DATA AREA. Every value is a "max" cap; blank = unlimited (∞).
+const LIMIT_ROLES = ['closer', 'fronter', 'closer_manager', 'fronter_manager', 'operations_manager', 'company_admin', 'compliance_manager', 'qa_manager', 'qa_agent', 'readonly_admin'];
+const LIMIT_AREA_OPTS = [
+  ['__all', 'All areas (global)'], ['sales', 'Sales'], ['transfers', 'Transfers'], ['callbacks', 'Callbacks'],
+  ['reviews', 'Reviews'], ['numbers', 'Numbers'], ['customer_profile', 'Customer Profiles'],
+  ['data_analyzer', 'Data Analyzer'], ['company_data', 'Company Data'], ['reports', 'Reports'], ['qa', 'QA'],
+];
+const areaName = (a) => (LIMIT_AREA_OPTS.find(o => o[0] === a) || [, a])[1];
 function LimitsTab() {
   const [limits, setLimits] = useState([]);
   const [loading, setLoading] = useState(false);
   const [companies, setCompanies] = useState([]);
-  const [picked, setPicked] = useState(null);   // { id, name } chosen scope target
-  const [draft, setDraft] = useState({ scope_type: 'user', scope_id: '', action_type: 'csv_export', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' });
+  const [area, setArea] = useState('__all');          // dataset scope of the caps being edited
+  const [picked, setPicked] = useState(null);          // { id, name } chosen override target
+  const [scopeMode, setScopeMode] = useState('user');  // user | company for the override builder
+  const [draft, setDraft] = useState({ action_type: 'csv_export', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -235,84 +246,106 @@ function LimitsTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { client.get('compliance/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
-  // reset the picked target when switching User↔Company mode
-  const setScopeType = (t) => { setPicked(null); setDraft(d => ({ ...d, scope_type: t, scope_id: '' })); };
+
+  const areaDs = area === '__all' ? null : area;
+  const recDisabled = area !== '__all';   // recording caps are global — only at "All areas"
+  const rowFor = (st, sid, action) => limits.find(l => l.scope_type === st && String(l.scope_id) === String(sid) && l.action_type === action && (l.dataset || null) === areaDs);
 
   const save = async (row) => {
-    try {
-      await client.put('egress/limits', row);
-      toast.success('Limit saved'); load();
-    } catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
+    try { await client.put('egress/limits', row); toast.success('Limit saved'); load(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
   const del = async (id) => { try { await client.delete(`egress/limits/${id}`); load(); } catch { /* ignore */ } };
 
-  const roleRows = limits.filter(l => l.scope_type === 'role');
-  const overrideRows = limits.filter(l => l.scope_type !== 'role');
+  // Edit one cap; preserves the sibling caps of that (scope, action, area) row and
+  // materializes the row on first edit (PUT upserts by scope+action+dataset).
+  const saveCap = (st, sid, action, field, nv) => {
+    const cur = rowFor(st, sid, action) || {};
+    save({ scope_type: st, scope_id: sid, action_type: action, dataset: action === 'recording_listen' ? null : areaDs,
+      max_rows_per_export: cur.max_rows_per_export ?? null,
+      max_exports_per_day: cur.max_exports_per_day ?? null,
+      max_recording_minutes_per_day: cur.max_recording_minutes_per_day ?? null,
+      [field]: nv });
+  };
+  const capInput = (st, sid, action, field, disabled) => {
+    if (disabled) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
+    const cur = rowFor(st, sid, action);
+    const val = cur ? cur[field] : null;
+    return (
+      <div className="relative" style={{ width: 96 }} key={`${st}:${sid}:${action}:${field}:${val ?? 'x'}`}>
+        <input type="number" min="0" defaultValue={numOrBlank(val)} placeholder="∞"
+          onBlur={e => { const v = e.target.value; const nv = v === '' ? null : Math.max(0, Math.floor(+v)); if (nv !== (val ?? null)) saveCap(st, sid, action, field, nv); }}
+          title={val == null ? 'Unlimited' : String(val)} style={{ ...inp, width: 96, textAlign: 'right' }} />
+        {val == null && <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>∞</span>}
+      </div>
+    );
+  };
 
-  const cell = (row, field) => (
-    <div className="relative" style={{ width: 96 }}>
-      <input type="number" min="0" defaultValue={numOrBlank(row[field])} placeholder="∞"
-        onBlur={e => { const v = e.target.value; if (v !== numOrBlank(row[field])) save({ ...row, [field]: v === '' ? null : +v }); }}
-        title={row[field] == null ? 'Unlimited' : `${row[field].toLocaleString()}`}
-        style={{ ...inp, width: 96, textAlign: 'right' }} />
-      {row[field] == null && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>∞ unlimited</span>}
-    </div>
-  );
+  const overrideRows = limits.filter(l => l.scope_type !== 'role' && (l.dataset || null) === areaDs);
 
   const addOverride = () => {
-    if (!picked?.id) return toast.error(`Pick a ${draft.scope_type} first`);
-    save({ ...draft, scope_id: picked.id,
+    if (!picked?.id) return toast.error(`Pick a ${scopeMode} first`);
+    save({ scope_type: scopeMode, scope_id: picked.id, action_type: draft.action_type,
+      dataset: draft.action_type === 'recording_listen' ? null : areaDs,
       max_rows_per_export: draft.max_rows_per_export || null,
       max_exports_per_day: draft.max_exports_per_day || null,
       max_recording_minutes_per_day: draft.max_recording_minutes_per_day || null });
-    setPicked(null); setDraft(d => ({ ...d, scope_id: '', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' }));
+    setPicked(null); setDraft({ action_type: 'csv_export', max_rows_per_export: '', max_exports_per_day: '', max_recording_minutes_per_day: '' });
   };
 
   return (
     <div className="space-y-5">
+      {/* which data area these caps apply to */}
+      <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl" style={box}>
+        <span className="text-xs font-bold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>Data area</span>
+        <ThemedSelect value={area} onChange={e => setArea(e.target.value)} style={{ ...inp, minWidth: 200 }}>
+          {LIMIT_AREA_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </ThemedSelect>
+        <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{area === '__all' ? 'Caps below apply to every export area, unless a per-area cap overrides them.' : `Editing caps that apply ONLY to ${areaName(area)} exports — these beat the “All areas” cap.`}</span>
+      </div>
+
       <div>
-        <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Role defaults</p>
-        <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Blank = unlimited. Applies to every user of that role unless a company/user override exists. Edits save on blur.</p>
+        <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Role defaults <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {areaName(area)}</span></p>
+        <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Max caps per role. Blank = <b>unlimited (∞)</b>; set to <b>0</b> to block entirely. Applies to every user of that role unless a company/user override exists. Edits save on blur.</p>
         <div className="rounded-xl overflow-x-auto" style={box}>
           <table className="w-full text-sm">
             <thead><tr style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}>
-              {['Role', 'Action', 'Max rows / export', 'Max exports / day', 'Max rec. min / day'].map(h => <th key={h} className="text-left px-3 py-2 text-xs font-semibold">{h}</th>)}
+              {['Role', 'Max rows / export', 'Max exports / day', 'Max rec. min / day'].map(h => <th key={h} className="text-left px-3 py-2 text-xs font-semibold whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>
-              {loading ? <tr><td colSpan={5} className="text-center py-8"><Loader2 className="animate-spin inline" /></td></tr>
-                : roleRows.map(r => (
-                  <tr key={r.id} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <td className="px-3 py-2 font-semibold capitalize">{r.scope_id.replace(/_/g, ' ')}</td>
-                    <td className="px-3 py-2">{r.action_type}</td>
-                    <td className="px-3 py-2">{cell(r, 'max_rows_per_export')}</td>
-                    <td className="px-3 py-2">{cell(r, 'max_exports_per_day')}</td>
-                    <td className="px-3 py-2">{r.action_type === 'recording_listen' ? cell(r, 'max_recording_minutes_per_day') : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</td>
+              {loading ? <tr><td colSpan={4} className="text-center py-8"><Loader2 className="animate-spin inline" /></td></tr>
+                : LIMIT_ROLES.map(role => (
+                  <tr key={role} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    <td className="px-3 py-2 font-semibold capitalize whitespace-nowrap">{role.replace(/_/g, ' ')}</td>
+                    <td className="px-3 py-2">{capInput('role', role, 'csv_export', 'max_rows_per_export')}</td>
+                    <td className="px-3 py-2">{capInput('role', role, 'csv_export', 'max_exports_per_day')}</td>
+                    <td className="px-3 py-2">{capInput('role', role, 'recording_listen', 'max_recording_minutes_per_day', recDisabled)}</td>
                   </tr>
                 ))}
             </tbody>
           </table>
         </div>
+        {recDisabled && <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Recording-minute caps aren’t area-specific — switch to “All areas” to set them.</p>}
       </div>
 
       <div>
-        <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Per-user / per-company overrides <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>(rare — beats the role default wholesale)</span></p>
+        <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Per-user / per-company overrides <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· beats the role default for {areaName(area)}</span></p>
         <div className="p-3 mb-2 space-y-3" style={box}>
-          {/* who: user↔company toggle + a real picker (no raw UUIDs) */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
               {[['user', 'User', User], ['company', 'Company', Building2]].map(([t, label, Icon]) => (
-                <button key={t} onClick={() => setScopeType(t)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-                  style={{ background: draft.scope_type === t ? 'var(--gradient-sidebar)' : 'transparent', color: draft.scope_type === t ? '#fff' : 'var(--color-text-secondary)' }}>
+                <button key={t} onClick={() => { setScopeMode(t); setPicked(null); }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
+                  style={{ background: scopeMode === t ? 'var(--gradient-sidebar)' : 'transparent', color: scopeMode === t ? '#fff' : 'var(--color-text-secondary)' }}>
                   <Icon size={13} /> {label}
                 </button>
               ))}
             </div>
             {picked ? (
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--color-primary-100,#e0e7ff)', color: 'var(--color-primary-700,#4338ca)' }}>
-                {draft.scope_type === 'user' ? <User size={13} /> : <Building2 size={13} />} {picked.name}
+                {scopeMode === 'user' ? <User size={13} /> : <Building2 size={13} />} {picked.name}
                 <button onClick={() => setPicked(null)} className="hover:opacity-70"><X size={13} /></button>
               </span>
-            ) : draft.scope_type === 'user' ? (
+            ) : scopeMode === 'user' ? (
               <UserSearchPicker onPick={u => setPicked({ id: u.id, name: u.name })} />
             ) : (
               <ThemedSelect value="" onChange={e => { const c = companies.find(x => x.id === e.target.value); if (c) setPicked({ id: c.id, name: c.name }); }}
@@ -322,22 +355,23 @@ function LimitsTab() {
               </ThemedSelect>
             )}
           </div>
-          {/* what + how much */}
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-xs">Action
               <ThemedSelect value={draft.action_type} onChange={e => setDraft(d => ({ ...d, action_type: e.target.value }))} style={{ ...inp, display: 'block', marginTop: 4 }}>
                 {ACTIONS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
               </ThemedSelect>
             </label>
-            <label className="text-xs">Max rows / export<input type="number" min="0" value={draft.max_rows_per_export} onChange={e => setDraft(d => ({ ...d, max_rows_per_export: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
-            <label className="text-xs">Max exports / day<input type="number" min="0" value={draft.max_exports_per_day} onChange={e => setDraft(d => ({ ...d, max_exports_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+            {draft.action_type === 'csv_export' && <>
+              <label className="text-xs">Max rows / export<input type="number" min="0" value={draft.max_rows_per_export} onChange={e => setDraft(d => ({ ...d, max_rows_per_export: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+              <label className="text-xs">Max exports / day<input type="number" min="0" value={draft.max_exports_per_day} onChange={e => setDraft(d => ({ ...d, max_exports_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
+            </>}
             {draft.action_type === 'recording_listen' && (
               <label className="text-xs">Max rec. min / day<input type="number" min="0" value={draft.max_recording_minutes_per_day} onChange={e => setDraft(d => ({ ...d, max_recording_minutes_per_day: e.target.value }))} placeholder="∞ unlimited" style={{ ...inp, display: 'block', marginTop: 4, width: 120 }} /></label>
             )}
             <button onClick={addOverride} disabled={!picked}
               className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}><Plus size={14} /> Add override</button>
           </div>
-          <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Blank = unlimited for that field. A user/company override beats the role default wholesale for that action.</p>
+          <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Blank = unlimited, 0 = blocked. A user/company override beats the role default for that action{area === '__all' ? '' : ` in ${areaName(area)}`}. (recording caps are always global.)</p>
         </div>
         <div className="rounded-xl overflow-x-auto" style={box}>
           <table className="w-full text-sm">
@@ -345,20 +379,15 @@ function LimitsTab() {
               {['Scope', 'Name', 'Action', 'Rows', 'Exports/day', 'Rec min/day', ''].map(h => <th key={h} className="text-left px-3 py-2 text-xs font-semibold">{h}</th>)}
             </tr></thead>
             <tbody>
-              {overrideRows.length === 0 ? <tr><td colSpan={7} className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No overrides. Role defaults apply to everyone.</td></tr>
+              {overrideRows.length === 0 ? <tr><td colSpan={7} className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No overrides for {areaName(area)}. Role defaults apply.</td></tr>
                 : overrideRows.map(r => (
                   <tr key={r.id} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1.5 capitalize">
-                        {r.scope_type === 'user' ? <User size={13} style={{ color: 'var(--color-text-tertiary)' }} /> : <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
-                        {r.scope_type}
-                      </span>
-                    </td>
+                    <td className="px-3 py-2"><span className="inline-flex items-center gap-1.5 capitalize">{r.scope_type === 'user' ? <User size={13} style={{ color: 'var(--color-text-tertiary)' }} /> : <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />}{r.scope_type}</span></td>
                     <td className="px-3 py-2 text-xs font-semibold">{r.scope_name || r.scope_id}</td>
                     <td className="px-3 py-2">{r.action_type}</td>
-                    <td className="px-3 py-2">{cell(r, 'max_rows_per_export')}</td>
-                    <td className="px-3 py-2">{cell(r, 'max_exports_per_day')}</td>
-                    <td className="px-3 py-2">{cell(r, 'max_recording_minutes_per_day')}</td>
+                    <td className="px-3 py-2">{r.action_type === 'csv_export' ? capInput(r.scope_type, r.scope_id, 'csv_export', 'max_rows_per_export') : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</td>
+                    <td className="px-3 py-2">{r.action_type === 'csv_export' ? capInput(r.scope_type, r.scope_id, 'csv_export', 'max_exports_per_day') : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</td>
+                    <td className="px-3 py-2">{r.action_type === 'recording_listen' ? capInput(r.scope_type, r.scope_id, 'recording_listen', 'max_recording_minutes_per_day') : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}</td>
                     <td className="px-3 py-2"><button onClick={() => del(r.id)} style={{ color: '#ef4444' }}><Trash2 size={14} /></button></td>
                   </tr>
                 ))}
