@@ -1,224 +1,190 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Shield, Plus, Trash2, Save, Check, X, RotateCcw, AlertTriangle, Mail, User as UserIcon, Eye, EyeOff, Info, Lock, Send, Skull, ToggleLeft, ToggleRight,
+  Shield, Plus, Trash2, Save, RotateCcw, AlertTriangle, Mail, User as UserIcon,
+  Eye, EyeOff, Info, Lock, Send, Skull, Building2, Download, Activity, ChevronDown, Sliders,
 } from 'lucide-react';
 import client from '../../../api/client';
+import {
+  RO_ELIGIBLE_TABS, RO_PARITY_TAB_IDS, RO_DEFAULT_TAB_IDS, ADMIN_TAB_GROUPS, groupedRoTabs,
+} from '../../../config/adminTabs';
 
 /*
- * ReadonlyAdminManager
+ * ReadonlyAdminManager — SuperAdmin control center for every readonly_admin.
  *
- * SuperAdmin-only screen for managing readonly_admin users. Shows the
- * count, lists every recognized RO user with their grant source
- * (env / metadata / role assignment), and lets the operator:
- *   - create a new readonly_admin (auth user + role + initial nav)
- *   - toggle which sidebar tabs each RO user sees
- *   - revoke the role (env-stamped users need an env change too)
+ * One place to decide, per read-only admin (or as a role-wide default):
+ *   • which sidebar tabs they see            (nav allowlist, from the shared
+ *                                              adminTabs catalog — no drift)
+ *   • which companies' data they can see      (server-enforced isolation)
+ *   • what they can see vs. masked            (PII / financial / audit history)
+ *   • whether they can copy anything          (no_copy → hard copy-lock)
+ *   • which areas they can download           (per-area export toggles)
+ *   • what they actually did                  (merged activity timeline)
  *
- * Tab catalog mirrors the AdminPanel nav so the toggle matrix matches
- * what the user actually sees. Keep this list in sync with the navItems
- * array in pages/AdminPanel.jsx.
+ * Posture is FULL PARITY, OPT-OUT: an unconfigured RO sees everything a
+ * superadmin would (minus superadmin-only tabs); the operator removes access.
  */
 
-// Catalog of sidebar tab IDs available to a readonly_admin. Mirrors the
-// SA superset from AdminPanel.jsx. Each entry: { id, label, group, default }.
-// `default: true` is preselected when creating a new RO.
-const TAB_CATALOG = [
-  { id: 'dashboard',      label: 'Dashboard',             group: 'overview', default: true },
-  { id: 'calendar',       label: 'Calendar',              group: 'overview', default: true },
-  { id: 'cc-sales',       label: 'All Sales',             group: 'cross_company', default: true },
-  { id: 'cc-transfers',   label: 'All Transfers',         group: 'cross_company', default: true },
-  { id: 'cc-callbacks',   label: 'All Callbacks',         group: 'cross_company', default: true },
-  { id: 'companies',      label: 'Companies',             group: 'admin',    default: true },
-  { id: 'forms',          label: 'Form Builder',          group: 'admin',    default: false },
-  { id: 'sale-search',    label: 'Lead Search',           group: 'tools',    default: true },
-  { id: 'numbers',        label: 'Numbers Intelligence',  group: 'tools',    default: false },
-  { id: 'data-analyzer',  label: 'Data Analyzer',         group: 'tools',    default: true },
-  { id: 'faqs',           label: 'FAQs',                  group: 'content',  default: false },
-  { id: 'scripts',        label: 'Scripts',               group: 'content',  default: false },
-  { id: 'bulk-upload',    label: 'Bulk Upload',           group: 'admin',    default: false },
-  { id: 'announcements',  label: 'Announcements',         group: 'content',  default: false },
-  { id: 'marquee',        label: 'Marquee',               group: 'content',  default: false },
-  { id: 'spiff',          label: 'SPIFF',                 group: 'admin',    default: false },
-  { id: 'chat',           label: 'Chat Control',          group: 'admin',    default: false },
-  { id: 'features',       label: 'Features',              group: 'admin',    default: false },
-  { id: 'business-rules', label: 'Business Rules',        group: 'admin',    default: false },
-];
-const GROUP_LABEL = {
-  overview:       'Overview',
-  cross_company:  'Cross-Company',
-  admin:          'Admin',
-  tools:          'Tools',
-  content:        'Content',
-};
-const DEFAULT_ALLOWED = TAB_CATALOG.filter(t => t.default).map(t => t.id);
-
-// Granular permission flags. Kept in sync with the backend DEFAULT_FLAGS
-// constant in routes/readonlyAdmins.js so the matrix mirrors what the
-// server stores. AuthContext.roFlag(key) is the runtime check.
+// Capability flags. no_copy defaults FALSE (copy allowed) so a fresh RO is
+// never locked out; the rest default TRUE (parity).
 const FLAG_CATALOG = [
-  { key: 'view_financial_data', label: 'See financial data',  desc: 'Monthly + down payment amounts, revenue rollups' },
-  { key: 'view_pii',            label: 'See customer PII',    desc: 'Customer phone / email / full address columns'   },
-  { key: 'can_export',          label: 'Use Export buttons',  desc: 'Download CSV / Excel from any list view'         },
-  { key: 'view_audit_history',  label: 'See audit history',   desc: 'Expand edit_history audit trail in drawers'      },
+  { key: 'view_financial_data', label: 'See financial data', desc: 'Monthly + down payment amounts, revenue rollups', def: true },
+  { key: 'view_pii',            label: 'See customer PII',   desc: 'Phone / email / address / name / VIN columns',  def: true },
+  { key: 'view_audit_history',  label: 'See audit history',  desc: 'Expand edit_history audit trail in drawers',     def: true },
+  { key: 'can_export',          label: 'Allow exports',      desc: 'Master switch for every CSV / Excel download',   def: true },
+  { key: 'no_copy',             label: 'Block copying',      desc: 'Disable select / copy / cut / right-click / drag', def: false },
 ];
-const DEFAULT_FLAGS = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, true]));
+const DEFAULT_FLAGS = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, f.def]));
+
+const EXPORT_AREA_LABEL = {
+  sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
+  customer_profile: 'Customer Profiles', numbers: 'Numbers', data_analyzer: 'Data Analyzer',
+  company_data: 'Company Data', chat: 'Chat Transcripts', reviews: 'QA Reviews',
+};
+
+const eq = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 export default function ReadonlyAdminManager() {
-  const [list, setList]       = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr]         = useState('');
+  const [list, setList]         = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [exportAreas, setExportAreas] = useState([]);
+  const [roleDefaults, setRoleDefaults] = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState('');
   const [savingId, setSavingId] = useState(null);
-  const [openId, setOpenId]   = useState(null);
+  const [openId, setOpenId]     = useState(null);
 
   // Create-new form
   const [showCreate, setShowCreate] = useState(false);
-  const [newEmail, setNewEmail]     = useState('');
-  const [newPass,  setNewPass]      = useState('');
-  const [newFirst, setNewFirst]     = useState('');
-  const [newLast,  setNewLast]      = useState('');
-  const [newAllowed, setNewAllowed] = useState(DEFAULT_ALLOWED);
-  const [newFlags, setNewFlags]     = useState(DEFAULT_FLAGS);
-  const [sendInvite, setSendInvite] = useState(false);
-  const [creating, setCreating]     = useState(false);
+  const [nf, setNf] = useState({ email: '', pass: '', first: '', last: '', invite: false });
+  const [newAllowed, setNewAllowed]   = useState(RO_DEFAULT_TAB_IDS);
+  const [newFlags, setNewFlags]       = useState(DEFAULT_FLAGS);
+  const [newCompanies, setNewCompanies] = useState(null);  // null = all
+  const [creating, setCreating]       = useState(false);
+
+  // Per-row edit state, keyed by user id.
+  const [edit, setEdit] = useState({});   // { [id]: { allowed, flags, companies, export } }
+  const [activity, setActivity] = useState({});  // { [id]: rows[] }
+  const [showDefaults, setShowDefaults] = useState(false);
 
   const load = async () => {
     setLoading(true); setErr('');
     try {
-      const { data } = await client.get('readonly-admins');
+      const [{ data }, cos] = await Promise.all([
+        client.get('readonly-admins'),
+        client.get('companies').catch(() => ({ data: [] })),
+      ]);
       setList(data?.readonly_admins || []);
+      setExportAreas(data?.export_areas || Object.keys(EXPORT_AREA_LABEL));
+      setRoleDefaults(data?.role_defaults || null);
+      const rawCos = Array.isArray(cos.data) ? cos.data : (cos.data?.companies || []);
+      setCompanies(rawCos.map(c => ({ id: c.id, name: c.name })).filter(c => c.id));
     } catch (e) {
       setErr(e.response?.data?.error || 'Failed to load readonly admins.');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  // Mutable per-row state the operator is editing. Keyed by user id.
-  const [editAllowed, setEditAllowed] = useState({});
-  const [editFlags,   setEditFlags]   = useState({});
-  const setRowAllowed = (id, list)  => setEditAllowed(s => ({ ...s, [id]: list }));
-  const setRowFlag    = (id, k, v)  => setEditFlags(s => ({ ...s, [id]: { ...(s[id] || {}), [k]: v } }));
-  // When the server data changes, copy nav_allowed → editAllowed for any
-  // row we don't already have a pending edit for. Lets the UI render the
-  // catalog matrix immediately.
+  // Seed per-row edit state when server data arrives (don't clobber pending edits).
   useEffect(() => {
-    setEditAllowed(prev => {
+    setEdit(prev => {
       const next = { ...prev };
       list.forEach(u => {
-        if (next[u.id] === undefined) next[u.id] = u.nav_allowed || null;
-      });
-      return next;
-    });
-    setEditFlags(prev => {
-      const next = { ...prev };
-      list.forEach(u => {
-        if (next[u.id] === undefined) next[u.id] = { ...DEFAULT_FLAGS, ...(u.flags || {}) };
+        if (next[u.id] === undefined) next[u.id] = {
+          allowed:   u.nav_allowed || null,
+          flags:     { ...DEFAULT_FLAGS, ...(u.flags || {}) },
+          companies: u.companies || null,
+          export:    { ...(u.export || {}) },
+        };
       });
       return next;
     });
   }, [list]);
 
-  const isAllowed = (id, allowed) => {
-    // null = full SA parity (current behavior). When the operator clicks
-    // a checkbox we materialize the full set first so untoggles persist.
-    if (allowed === null) return true;
-    return Array.isArray(allowed) && allowed.includes(id);
-  };
-  const toggleTab = (userId, tabId) => {
-    const current = editAllowed[userId];
-    // Materialize null → full SA superset before the first edit so any
-    // checkbox click produces a concrete persistable list.
-    const base = current === null ? TAB_CATALOG.map(t => t.id) : (current || []);
+  const setRow = (id, patch) => setEdit(s => ({ ...s, [id]: { ...(s[id] || {}), ...patch } }));
+
+  // ── tab helpers ────────────────────────────────────────────────────────────
+  const toggleTab = (id, tabId) => {
+    const cur = edit[id]?.allowed;
+    const base = cur === null ? RO_PARITY_TAB_IDS.slice() : (cur || []);
     const next = base.includes(tabId) ? base.filter(x => x !== tabId) : [...base, tabId];
-    setRowAllowed(userId, next);
+    setRow(id, { allowed: next });
   };
-  const resetToDefaults = (userId) => setRowAllowed(userId, DEFAULT_ALLOWED);
-  const fullAccess     = (userId) => setRowAllowed(userId, TAB_CATALOG.map(t => t.id));
-  const noAccess       = (userId) => setRowAllowed(userId, ['dashboard']); // never strip the landing
 
-  const saveRow = async (userId) => {
-    setSavingId(userId);
+  // ── company helpers ──────────────────────────────────────────────────────
+  const toggleCompany = (id, cid) => {
+    const cur = edit[id]?.companies;
+    const base = cur === null ? companies.map(c => c.id) : (cur || []);
+    const next = base.includes(cid) ? base.filter(x => x !== cid) : [...base, cid];
+    setRow(id, { companies: next });
+  };
+
+  // ── save one RO ─────────────────────────────────────────────────────────
+  const saveRow = async (id) => {
+    setSavingId(id); setErr('');
+    const e = edit[id] || {};
+    const u = list.find(x => x.id === id) || {};
+    const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) } };
+    // Only persist facets the operator actually changed. This is critical: an
+    // unconditional write would (a) stamp a full per-user flags/export override
+    // that clobbers the role-default template, and (b) coerce a parity null nav
+    // to [] → Dashboard-only lockout. We also never write a null nav (parity is
+    // represented by the key being absent); the companies PUT handles null itself.
+    const puts = [];
+    if (!eq(e.allowed, server.allowed) && Array.isArray(e.allowed)) puts.push(client.put(`readonly-admins/${id}/nav`, { allowed: e.allowed }));
+    if (!eq(e.flags, server.flags))         puts.push(client.put(`readonly-admins/${id}/flags`,     { flags: e.flags }));
+    if (!eq(e.companies, server.companies)) puts.push(client.put(`readonly-admins/${id}/companies`, { companies: e.companies }));
+    if (!eq(e.export, server.export))       puts.push(client.put(`readonly-admins/${id}/export`,    { export: e.export }));
     try {
-      // Persist both nav allowlist and flags in parallel — the manager UI
-      // mixes the two on one row, so saving them together keeps the dirty
-      // indicator honest.
-      const allowed = editAllowed[userId] || [];
-      const flags = editFlags[userId] || DEFAULT_FLAGS;
-      await Promise.all([
-        client.put(`readonly-admins/${userId}/nav`,   { allowed }),
-        client.put(`readonly-admins/${userId}/flags`, { flags }),
-      ]);
+      await Promise.all(puts);
       await load();
-    } catch (e) {
-      setErr(e.response?.data?.error || 'Save failed.');
-    } finally {
-      setSavingId(null);
-    }
+    } catch (er) {
+      setErr(er.response?.data?.error || 'Save failed.');
+    } finally { setSavingId(null); }
   };
 
-  const revoke = async (userId, email) => {
-    if (!window.confirm(`Revoke readonly_admin from ${email}?\n\nTheir role is removed. The auth user is preserved — you can re-grant later without re-inviting. If they were stamped via READONLY_ADMIN_EMAIL, also remove their email from that env var or they'll be re-stamped on next restart.`)) return;
-    setSavingId(userId);
+  const loadActivity = async (id) => {
     try {
-      await client.delete(`readonly-admins/${userId}`);
-      await load();
-    } catch (e) {
-      setErr(e.response?.data?.error || 'Revoke failed.');
-    } finally {
-      setSavingId(null);
-    }
+      const { data } = await client.get(`readonly-admins/${id}/activity`, { params: { limit: 100 } });
+      setActivity(s => ({ ...s, [id]: data?.activity || [] }));
+    } catch { setActivity(s => ({ ...s, [id]: [] })); }
   };
 
-  // Two-confirm permanent delete — wipes the auth user. Cannot be undone;
-  // operator has to recreate from scratch (new email or re-invite).
-  const permanentDelete = async (userId, email) => {
-    if (!window.confirm(`PERMANENTLY delete ${email}?\n\nThis removes the auth user entirely. They will lose all access immediately and cannot be re-granted without a fresh invite. This is irreversible.`)) return;
-    const phrase = window.prompt(`To confirm, type the email exactly:\n${email}`);
-    if (phrase !== email) { setErr('Email confirmation did not match. Delete cancelled.'); return; }
-    setSavingId(userId);
-    try {
-      await client.delete(`readonly-admins/${userId}?permanent=true`);
-      await load();
-    } catch (e) {
-      setErr(e.response?.data?.error || 'Permanent delete failed.');
-    } finally {
-      setSavingId(null);
-    }
+  const revoke = async (id, email) => {
+    if (!window.confirm(`Revoke readonly_admin from ${email}?\n\nRole removed; auth user preserved (re-grant later without re-inviting). If stamped via READONLY_ADMIN_EMAIL, also remove them from that env var.`)) return;
+    setSavingId(id);
+    try { await client.delete(`readonly-admins/${id}`); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Revoke failed.'); }
+    finally { setSavingId(null); }
+  };
+  const permanentDelete = async (id, email) => {
+    if (!window.confirm(`PERMANENTLY delete ${email}?\n\nRemoves the auth user entirely. Irreversible.`)) return;
+    if (window.prompt(`Type the email exactly to confirm:\n${email}`) !== email) { setErr('Email did not match. Cancelled.'); return; }
+    setSavingId(id);
+    try { await client.delete(`readonly-admins/${id}?permanent=true`); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Permanent delete failed.'); }
+    finally { setSavingId(null); }
   };
 
-  const doCreate = async (e) => {
-    e?.preventDefault?.();
-    if (!newEmail) { setErr('Email required.'); return; }
-    if (!sendInvite && !newPass) { setErr('Password required (or check "Send invite email").'); return; }
+  const doCreate = async (ev) => {
+    ev?.preventDefault?.();
+    if (!nf.email) { setErr('Email required.'); return; }
+    if (!nf.invite && !nf.pass) { setErr('Password required (or check "Send invite email").'); return; }
     setCreating(true); setErr('');
     try {
       await client.post('readonly-admins', {
-        email: newEmail,
-        password: sendInvite ? undefined : newPass,
-        send_invite: sendInvite,
-        first_name: newFirst, last_name: newLast,
-        allowed: newAllowed,
-        flags:   newFlags,
+        email: nf.email, password: nf.invite ? undefined : nf.pass, send_invite: nf.invite,
+        first_name: nf.first, last_name: nf.last,
+        allowed: newAllowed, flags: newFlags, companies: newCompanies,
       });
-      setNewEmail(''); setNewPass(''); setNewFirst(''); setNewLast('');
-      setNewAllowed(DEFAULT_ALLOWED);
-      setNewFlags(DEFAULT_FLAGS);
-      setSendInvite(false);
+      setNf({ email: '', pass: '', first: '', last: '', invite: false });
+      setNewAllowed(RO_DEFAULT_TAB_IDS); setNewFlags(DEFAULT_FLAGS); setNewCompanies(null);
       setShowCreate(false);
       await load();
-    } catch (e) {
-      setErr(e.response?.data?.error || 'Create failed.');
-    } finally {
-      setCreating(false);
-    }
+    } catch (e) { setErr(e.response?.data?.error || 'Create failed.'); }
+    finally { setCreating(false); }
   };
 
-  const groupedCatalog = useMemo(() => {
-    const m = new Map();
-    TAB_CATALOG.forEach(t => { (m.get(t.group) || m.set(t.group, []).get(t.group)).push(t); });
-    return [...m.entries()];
-  }, []);
+  const groupedTabs = useMemo(() => groupedRoTabs(), []);
 
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
@@ -230,107 +196,68 @@ export default function ReadonlyAdminManager() {
             <div>
               <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Readonly Admins</h2>
               <p className="text-sm text-white/80">
-                Audit accounts with SuperAdmin visibility but zero write access. Backend blocks every POST/PUT/DELETE for this role.
+                Full SuperAdmin visibility, zero writes — governed per person: tabs, companies, masked fields, exports, copy-lock, and an activity log.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5"
-              style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: 'white' }}>
-              {list.length} active
-            </span>
-            <button onClick={() => setShowCreate(s => !s)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border"
-              style={{ borderColor: 'rgba(255,255,255,0.4)', color: 'white', background: 'rgba(255,255,255,0.12)' }}>
+            <span className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: 'white' }}>{list.length} active</span>
+            <button onClick={() => setShowDefaults(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border" style={{ borderColor: 'rgba(255,255,255,0.4)', color: 'white', background: 'rgba(255,255,255,0.12)' }}>
+              <Sliders size={14} /> Role defaults
+            </button>
+            <button onClick={() => setShowCreate(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border" style={{ borderColor: 'rgba(255,255,255,0.4)', color: 'white', background: 'rgba(255,255,255,0.12)' }}>
               <Plus size={14} /> {showCreate ? 'Close' : 'Add'}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Env env-stamp helper note */}
-      <div className="rounded-xl p-3 text-xs flex items-start gap-2"
-        style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+      <div className="rounded-xl p-3 text-xs flex items-start gap-2" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
         <Info size={13} className="flex-shrink-0 mt-0.5" />
-        <span>
-          Two ways to grant readonly_admin: <strong>env</strong> (add to <code>READONLY_ADMIN_EMAIL</code>, comma-separated, then restart backend — auto-stamps on boot) or <strong>create</strong> on this page (auth user + role + initial sidebar set). Either way, <code>readonlyGuard</code> middleware enforces no-writes.
-        </span>
+        <span>Every control here is <strong>server-enforced</strong> (company scope + PII/financial masking + export gates) and takes effect on the RO's next load. Frontend hiding is only the polish — a hidden tab or button can't be re-enabled via devtools. Missing config = full parity.</span>
       </div>
 
       {err && <div className="rounded-xl p-3 text-xs flex items-start gap-2" style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)', border: '1px solid var(--color-error-200, #fecaca)' }}><AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />{err}</div>}
+
+      {showDefaults && <RoleDefaultsPanel initial={roleDefaults} companies={companies} exportAreas={exportAreas} groupedTabs={groupedTabs} onSaved={() => { setShowDefaults(false); load(); }} onError={setErr} />}
 
       {/* Create form */}
       {showCreate && (
         <form onSubmit={doCreate} className="rounded-2xl p-5 space-y-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Create readonly admin</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>Email</label>
-              <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
-                className="input text-sm w-full" placeholder="readonly@yourco.com" required />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                {sendInvite ? 'Password (not used — invite link will be emailed)' : 'Temp password'}
-              </label>
-              <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)}
-                className="input text-sm w-full" placeholder={sendInvite ? '— skipped —' : '≥8 chars'}
-                minLength={sendInvite ? 0 : 8} disabled={sendInvite} required={!sendInvite} />
+            <Field label="Email"><input type="email" value={nf.email} onChange={e => setNf(s => ({ ...s, email: e.target.value }))} className="input text-sm w-full" placeholder="readonly@yourco.com" required /></Field>
+            <Field label={nf.invite ? 'Password (invite link emailed)' : 'Temp password'}>
+              <input type="password" value={nf.pass} onChange={e => setNf(s => ({ ...s, pass: e.target.value }))} className="input text-sm w-full" placeholder={nf.invite ? '— skipped —' : '≥8 chars'} minLength={nf.invite ? 0 : 8} disabled={nf.invite} required={!nf.invite} />
               <label className="flex items-center gap-1.5 mt-2 cursor-pointer text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                <input type="checkbox" checked={sendInvite} onChange={e => setSendInvite(e.target.checked)} />
-                <Send size={11} /> Send invite email (magic link to set their own password)
+                <input type="checkbox" checked={nf.invite} onChange={e => setNf(s => ({ ...s, invite: e.target.checked }))} /><Send size={11} /> Send invite email
               </label>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>First name</label>
-              <input value={newFirst} onChange={e => setNewFirst(e.target.value)} className="input text-sm w-full" />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>Last name</label>
-              <input value={newLast} onChange={e => setNewLast(e.target.value)} className="input text-sm w-full" />
-            </div>
+            </Field>
+            <Field label="First name"><input value={nf.first} onChange={e => setNf(s => ({ ...s, first: e.target.value }))} className="input text-sm w-full" /></Field>
+            <Field label="Last name"><input value={nf.last} onChange={e => setNf(s => ({ ...s, last: e.target.value }))} className="input text-sm w-full" /></Field>
           </div>
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>Initial sidebar tabs</label>
-            <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              {TAB_CATALOG.map(t => {
-                const checked = newAllowed.includes(t.id);
-                return (
-                  <label key={t.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
-                    <input type="checkbox" checked={checked}
-                      onChange={() => setNewAllowed(s => checked ? s.filter(x => x !== t.id) : [...s, t.id])} />
-                    {t.label}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>Permission flags</label>
+          <Field label="Initial sidebar tabs">
+            <TabMatrix grouped={groupedTabs} allowed={newAllowed} onToggle={(tid) => setNewAllowed(s => s.includes(tid) ? s.filter(x => x !== tid) : [...s, tid])} />
+          </Field>
+          <Field label="Permission flags">
             <div className="rounded-lg p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               {FLAG_CATALOG.map(f => (
                 <label key={f.key} className="flex items-start gap-2 cursor-pointer text-xs">
-                  <input type="checkbox" className="mt-0.5" checked={newFlags[f.key] !== false}
-                    onChange={() => setNewFlags(s => ({ ...s, [f.key]: !s[f.key] }))} />
-                  <span>
-                    <strong>{f.label}</strong>
-                    <span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span>
-                  </span>
+                  <input type="checkbox" className="mt-0.5" checked={newFlags[f.key] === true} onChange={() => setNewFlags(s => ({ ...s, [f.key]: !s[f.key] }))} />
+                  <span><strong>{f.label}</strong><span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span></span>
                 </label>
               ))}
             </div>
-          </div>
+          </Field>
+          <Field label="Company scope (unchecked all = every company)">
+            <CompanyMatrix companies={companies} selected={newCompanies} onToggle={(cid) => setNewCompanies(s => {
+              const base = s === null ? companies.map(c => c.id) : s;
+              return base.includes(cid) ? base.filter(x => x !== cid) : [...base, cid];
+            })} onAll={() => setNewCompanies(null)} onNone={() => setNewCompanies([])} />
+          </Field>
           <div className="flex items-center gap-2">
-            <button type="submit" disabled={creating}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              {creating ? '…' : <><Plus size={14} /> Create</>}
-            </button>
-            <button type="button" onClick={() => setShowCreate(false)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border"
-              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-              Cancel
-            </button>
+            <button type="submit" disabled={creating} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}>{creating ? '…' : <><Plus size={14} /> Create</>}</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
           </div>
         </form>
       )}
@@ -339,153 +266,256 @@ export default function ReadonlyAdminManager() {
       <div className="space-y-3">
         {loading && <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>}
         {!loading && list.length === 0 && (
-          <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>
-            No readonly admins yet. Use Add above or set the <code>READONLY_ADMIN_EMAIL</code> env var.
-          </p>
+          <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>No readonly admins yet. Use Add above or set the <code>READONLY_ADMIN_EMAIL</code> env var.</p>
         )}
         {list.map(u => {
+          const e = edit[u.id] || {};
           const expanded = openId === u.id;
-          const allowed = editAllowed[u.id] === undefined ? u.nav_allowed : editAllowed[u.id];
-          const flagsNow = editFlags[u.id] || { ...DEFAULT_FLAGS, ...(u.flags || {}) };
-          const navDirty   = JSON.stringify(allowed || []) !== JSON.stringify(u.nav_allowed || []);
-          const flagsDirty = JSON.stringify(flagsNow) !== JSON.stringify({ ...DEFAULT_FLAGS, ...(u.flags || {}) });
-          const dirty = navDirty || flagsDirty;
+          const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) } };
+          const dirty = !eq(e.allowed, server.allowed) || !eq(e.flags, server.flags) || !eq(e.companies, server.companies) || !eq(e.export, server.export);
           return (
-            <div key={u.id} className="rounded-2xl overflow-hidden"
-              style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <button onClick={() => setOpenId(expanded ? null : u.id)}
+            <div key={u.id} className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <button onClick={() => { const willOpen = !expanded; setOpenId(willOpen ? u.id : null); if (willOpen && !activity[u.id]) loadActivity(u.id); }}
                 className="w-full p-4 flex items-center justify-between gap-3 text-left hover:bg-bg-secondary transition-colors flex-wrap">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: 'var(--color-bg-secondary)' }}>
-                    <UserIcon size={16} style={{ color: 'var(--color-primary-600)' }} />
-                  </div>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-bg-secondary)' }}><UserIcon size={16} style={{ color: 'var(--color-primary-600)' }} /></div>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>
-                      {u.name || u.email}
-                    </p>
-                    <p className="text-[11px] flex items-center gap-1.5 truncate" style={{ color: 'var(--color-text-tertiary)' }}>
-                      <Mail size={10} /> {u.email}
-                      {u.last_sign_in && <> · last login {new Date(u.last_sign_in).toLocaleDateString()}</>}
-                    </p>
+                    <p className="text-sm font-bold truncate" style={{ color: 'var(--color-text)' }}>{u.name || u.email}</p>
+                    <p className="text-[11px] flex items-center gap-1.5 truncate" style={{ color: 'var(--color-text-tertiary)' }}><Mail size={10} /> {u.email}{u.last_sign_in && <> · last login {new Date(u.last_sign_in).toLocaleDateString()}</>}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                  {u.via_env && (
-                    <span title="Stamped via READONLY_ADMIN_EMAIL env var" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
-                      style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>ENV</span>
-                  )}
-                  {u.via_metadata && (
-                    <span title="app_metadata.role = readonly_admin" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
-                      style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>JWT</span>
-                  )}
-                  {u.via_role && (
-                    <span title="Active custom_roles assignment" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
-                      style={{ backgroundColor: '#dcfce7', color: '#166534' }}>ROLE</span>
-                  )}
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-                    {allowed === null ? 'All tabs' : `${(allowed || []).length} tabs`}
-                  </span>
+                  {u.via_env && <Badge color="#fef3c7" text="#92400e" title="READONLY_ADMIN_EMAIL env">ENV</Badge>}
+                  {u.via_role && <Badge color="#dcfce7" text="#166534" title="custom_roles assignment">ROLE</Badge>}
+                  <Badge color="var(--color-bg-secondary)" text="var(--color-text-secondary)">{(e.allowed ?? server.allowed) === null ? 'All tabs' : `${(e.allowed || []).length} tabs`}</Badge>
+                  <Badge color="var(--color-bg-secondary)" text="var(--color-text-secondary)">{(e.companies ?? server.companies) === null ? 'All cos' : `${(e.companies || []).length} cos`}</Badge>
+                  {dirty && <Badge color="#fef9c3" text="#854d0e">unsaved</Badge>}
+                  <ChevronDown size={16} style={{ color: 'var(--color-text-tertiary)', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
                 </div>
               </button>
 
               {expanded && (
-                <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2 pt-3 flex-wrap">
-                    <button onClick={() => resetToDefaults(u.id)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                      <RotateCcw size={11} /> Defaults
-                    </button>
-                    <button onClick={() => fullAccess(u.id)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                      <Eye size={11} /> Full SA parity
-                    </button>
-                    <button onClick={() => noAccess(u.id)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                      <EyeOff size={11} /> Dashboard only
-                    </button>
-                  </div>
+                <div className="px-4 pb-4 space-y-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  {/* Tabs */}
+                  <Section icon={<Eye size={12} />} title="Sidebar tabs">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <QuickBtn onClick={() => setRow(u.id, { allowed: RO_DEFAULT_TAB_IDS })} icon={<RotateCcw size={11} />}>Defaults</QuickBtn>
+                      <QuickBtn onClick={() => setRow(u.id, { allowed: RO_PARITY_TAB_IDS.slice() })} icon={<Eye size={11} />}>All tabs</QuickBtn>
+                      <QuickBtn onClick={() => setRow(u.id, { allowed: ['dashboard'] })} icon={<EyeOff size={11} />}>Dashboard only</QuickBtn>
+                    </div>
+                    <TabMatrix grouped={groupedTabs} allowed={e.allowed ?? server.allowed} onToggle={(tid) => toggleTab(u.id, tid)} />
+                  </Section>
 
-                  <div className="space-y-2">
-                    {groupedCatalog.map(([g, items]) => (
-                      <div key={g}>
-                        <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{GROUP_LABEL[g] || g}</p>
-                        <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5"
-                          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                          {items.map(t => {
-                            const checked = isAllowed(t.id, allowed);
-                            return (
-                              <label key={t.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
-                                <input type="checkbox" checked={checked} onChange={() => toggleTab(u.id, t.id)} />
-                                {t.label}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  {/* Companies */}
+                  <Section icon={<Building2 size={12} />} title="Company scope (server-enforced)">
+                    <CompanyMatrix companies={companies} selected={e.companies ?? server.companies}
+                      onToggle={(cid) => toggleCompany(u.id, cid)} onAll={() => setRow(u.id, { companies: null })} onNone={() => setRow(u.id, { companies: [] })} />
+                  </Section>
 
-                  {/* Permission flags */}
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Permission flags</p>
+                  {/* Flags */}
+                  <Section icon={<Lock size={12} />} title="Data & capability flags">
                     <div className="rounded-lg p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                       {FLAG_CATALOG.map(f => {
-                        const flagState = editFlags[u.id] || { ...DEFAULT_FLAGS, ...(u.flags || {}) };
-                        const on = flagState[f.key] !== false;
+                        const on = (e.flags || server.flags)[f.key] === true;
                         return (
                           <label key={f.key} className="flex items-start gap-2 cursor-pointer text-xs">
-                            <input type="checkbox" className="mt-0.5" checked={on}
-                              onChange={() => setRowFlag(u.id, f.key, !on)} />
-                            <span>
-                              <strong>{f.label}</strong>
-                              <span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span>
-                            </span>
+                            <input type="checkbox" className="mt-0.5" checked={on} onChange={() => setRow(u.id, { flags: { ...(e.flags || server.flags), [f.key]: !on } })} />
+                            <span><strong>{f.label}</strong><span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span></span>
                           </label>
                         );
                       })}
                     </div>
-                  </div>
+                  </Section>
 
-                  <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button onClick={() => revoke(u.id, u.email)}
-                        disabled={savingId === u.id}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border disabled:opacity-40"
-                        style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)' }}>
-                        <Trash2 size={12} /> Revoke
-                      </button>
-                      <button onClick={() => permanentDelete(u.id, u.email)}
-                        disabled={savingId === u.id}
-                        title="Permanently deletes the auth user. Cannot be undone."
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                        style={{ backgroundColor: '#dc2626' }}>
-                        <Skull size={12} /> Permanent delete
-                      </button>
+                  {/* Export areas */}
+                  <Section icon={<Download size={12} />} title="Downloads by area">
+                    <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                      {exportAreas.map(a => {
+                        const cfg = e.export || server.export;
+                        const on = cfg[a] !== false;
+                        return (
+                          <label key={a} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
+                            <input type="checkbox" checked={on} onChange={() => setRow(u.id, { export: { ...cfg, [a]: !on } })} />{EXPORT_AREA_LABEL[a] || a}
+                          </label>
+                        );
+                      })}
                     </div>
-                    <button onClick={() => saveRow(u.id)}
-                      disabled={savingId === u.id || !dirty}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
-                      style={{ background: 'var(--gradient-sidebar)' }}>
-                      <Save size={13} /> {savingId === u.id ? 'Saving…' : (dirty ? 'Save changes' : 'Saved')}
-                    </button>
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>The “Allow exports” flag above is the master switch; these refine it per area. Enforced at the egress guard.</p>
+                  </Section>
+
+                  {/* Activity */}
+                  <Section icon={<Activity size={12} />} title="Activity">
+                    <ActivityTimeline rows={activity[u.id]} onRefresh={() => loadActivity(u.id)} />
+                  </Section>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={() => revoke(u.id, u.email)} disabled={savingId === u.id} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border disabled:opacity-40" style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)' }}><Trash2 size={12} /> Revoke</button>
+                      <button onClick={() => permanentDelete(u.id, u.email)} disabled={savingId === u.id} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ backgroundColor: '#dc2626' }}><Skull size={12} /> Permanent delete</button>
+                    </div>
+                    <button onClick={() => saveRow(u.id)} disabled={savingId === u.id || !dirty} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}><Save size={13} /> {savingId === u.id ? 'Saving…' : (dirty ? 'Save changes' : 'Saved')}</button>
                   </div>
 
-                  {u.via_env && (
-                    <p className="text-[11px] flex items-start gap-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}>
-                      <Lock size={11} className="flex-shrink-0 mt-0.5" />
-                      Revoking won't be permanent: this email is in <code>READONLY_ADMIN_EMAIL</code> and will be re-stamped at next restart. Remove it from the env var too.
-                    </p>
-                  )}
+                  {u.via_env && <p className="text-[11px] flex items-start gap-1.5" style={{ color: 'var(--color-warning-700, #b45309)' }}><Lock size={11} className="flex-shrink-0 mt-0.5" />Revoke isn't permanent while this email is in <code>READONLY_ADMIN_EMAIL</code> — remove it from the env var too.</p>}
                 </div>
               )}
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── small presentational helpers ────────────────────────────────────────────
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="text-[11px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+function Section({ icon, title, children }) {
+  return (
+    <div className="pt-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{title}</p>
+      {children}
+    </div>
+  );
+}
+function Badge({ color, text, title, children }) {
+  return <span title={title} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: color, color: text }}>{children}</span>;
+}
+function QuickBtn({ onClick, icon, children }) {
+  return <button onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>{icon}{children}</button>;
+}
+function TabMatrix({ grouped, allowed, onToggle }) {
+  const isOn = (id) => allowed === null ? true : (Array.isArray(allowed) && allowed.includes(id));
+  return (
+    <div className="space-y-2">
+      {grouped.map(([g, items]) => (
+        <div key={g}>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{ADMIN_TAB_GROUPS[g] || g}</p>
+          <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {items.map(t => (
+              <label key={t.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
+                <input type="checkbox" checked={isOn(t.id)} disabled={t.id === 'dashboard'} onChange={() => onToggle(t.id)} />{t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function CompanyMatrix({ companies, selected, onToggle, onAll, onNone }) {
+  const all = selected === null;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <QuickBtn onClick={onAll} icon={<Eye size={11} />}>All companies</QuickBtn>
+        <QuickBtn onClick={onNone} icon={<EyeOff size={11} />}>None</QuickBtn>
+        <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{all ? 'Every company (parity)' : `${(selected || []).length} of ${companies.length}`}</span>
+      </div>
+      {companies.length === 0 ? (
+        <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No companies loaded.</p>
+      ) : (
+        <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5 max-h-48 overflow-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {companies.map(c => (
+            <label key={c.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
+              <input type="checkbox" checked={all || (selected || []).includes(c.id)} onChange={() => onToggle(c.id)} /><span className="truncate">{c.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function ActivityTimeline({ rows, onRefresh }) {
+  if (rows === undefined) return <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Loading activity…</p>;
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center justify-between px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} recent events</span>
+        <QuickBtn onClick={onRefresh} icon={<RotateCcw size={11} />}>Refresh</QuickBtn>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs italic px-2 py-3" style={{ color: 'var(--color-text-tertiary)' }}>No activity recorded yet.</p>
+      ) : (
+        <div className="max-h-64 overflow-auto divide-y" style={{ borderColor: 'var(--color-border)' }}>
+          {rows.map((r, i) => (
+            <div key={i} className="px-2 py-1.5 text-xs flex items-center gap-2 flex-wrap" style={{ borderColor: 'var(--color-border)' }}>
+              <span style={{ color: 'var(--color-text-tertiary)', minWidth: 128 }}>{new Date(r.created_at).toLocaleString()}</span>
+              <span className="font-bold" style={{ color: r.status === 'denied' || r.status === 'blocked' ? 'var(--color-error-700, #b91c1c)' : 'var(--color-text)' }}>{r.action_type}</span>
+              {r.dataset && <span style={{ color: 'var(--color-text-secondary)' }}>{r.dataset}</span>}
+              {r.surface && <span style={{ color: 'var(--color-text-tertiary)' }}>{r.surface}</span>}
+              {r.path && <span style={{ color: 'var(--color-text-tertiary)' }}>{r.http_method} {r.path}</span>}
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: r.verified ? '#dcfce7' : '#f1f5f9', color: r.verified ? '#166534' : '#64748b' }}>{r.verified ? 'verified' : 'reported'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── role-wide default template editor ───────────────────────────────────────
+function RoleDefaultsPanel({ initial, companies, exportAreas, groupedTabs, onSaved, onError }) {
+  const [tabs, setTabs] = useState(initial?.tabs ?? null);           // null = parity
+  const [flags, setFlags] = useState({ ...DEFAULT_FLAGS, ...(initial?.flags || {}) });
+  const [comp, setComp] = useState(initial?.companies ?? null);      // null = parity
+  const [exp, setExp] = useState(initial?.export || {});
+  const [saving, setSaving] = useState(false);
+  const toggleTab = (tid) => setTabs(s => {
+    const base = s === null ? RO_PARITY_TAB_IDS.slice() : s;
+    return base.includes(tid) ? base.filter(x => x !== tid) : [...base, tid];
+  });
+  const save = async () => {
+    setSaving(true);
+    try { await client.put('readonly-admins/defaults', { tabs, flags, companies: comp, export: exp }); onSaved(); }
+    catch (e) { onError(e.response?.data?.error || 'Save defaults failed.'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="rounded-2xl p-5 space-y-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-primary-300, var(--color-border))' }}>
+      <p className="text-xs font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}><Sliders size={13} /> Role-wide default template</p>
+      <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Applies to EVERY readonly admin under their own per-user overrides. Leave a section at parity (All) to not force it.</p>
+      <Section icon={<Eye size={12} />} title="Default tabs">
+        <div className="flex items-center gap-2 mb-2">
+          <QuickBtn onClick={() => setTabs(null)} icon={<Eye size={11} />}>All (parity)</QuickBtn>
+          <QuickBtn onClick={() => setTabs(RO_DEFAULT_TAB_IDS)} icon={<RotateCcw size={11} />}>Suggested</QuickBtn>
+        </div>
+        <TabMatrix grouped={groupedTabs} allowed={tabs} onToggle={toggleTab} />
+      </Section>
+      <Section icon={<Lock size={12} />} title="Default flags">
+        <div className="rounded-lg p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {FLAG_CATALOG.map(f => (
+            <label key={f.key} className="flex items-start gap-2 cursor-pointer text-xs">
+              <input type="checkbox" className="mt-0.5" checked={flags[f.key] === true} onChange={() => setFlags(s => ({ ...s, [f.key]: !s[f.key] }))} />
+              <span><strong>{f.label}</strong><span style={{ color: 'var(--color-text-tertiary)' }}> · {f.desc}</span></span>
+            </label>
+          ))}
+        </div>
+      </Section>
+      <Section icon={<Download size={12} />} title="Default downloads by area">
+        <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          {exportAreas.map(a => (
+            <label key={a} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
+              <input type="checkbox" checked={exp[a] !== false} onChange={() => setExp(s => ({ ...s, [a]: !(s[a] !== false) }))} />{EXPORT_AREA_LABEL[a] || a}
+            </label>
+          ))}
+        </div>
+      </Section>
+      <Section icon={<Building2 size={12} />} title="Default company scope">
+        <CompanyMatrix companies={companies} selected={comp} onToggle={(cid) => setComp(s => {
+          const base = s === null ? companies.map(c => c.id) : s;
+          return base.includes(cid) ? base.filter(x => x !== cid) : [...base, cid];
+        })} onAll={() => setComp(null)} onNone={() => setComp([])} />
+      </Section>
+      <div className="flex justify-end">
+        <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}><Save size={13} /> {saving ? 'Saving…' : 'Save template'}</button>
       </div>
     </div>
   );

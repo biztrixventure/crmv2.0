@@ -1,6 +1,8 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useAuth } from "../contexts/AuthContext";
+import { useCopyGuard } from "../hooks/useCopyGuard";
+import { roBeacon } from "../utils/roActivityBeacon";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
 import { useTheme } from "../contexts/ThemeContext";
@@ -51,7 +53,8 @@ import DotGridBg from "../components/UI/DotGridBg";
 // AdminPanel — main component
 // ============================================================================
 const AdminPanel = () => {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, roTabAllowed, roNoCopy } = useAuth();
+  const rootRef = useRef(null);
   const { isEnabled } = useFeatureFlags();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -64,24 +67,22 @@ const AdminPanel = () => {
 
   const isReadOnly = user?.role === 'readonly_admin';
 
-  // Per-user nav allowlist for readonly_admin. SuperAdmin sees everything;
-  // a readonly_admin's sidebar is narrowed to the IDs listed in
-  // business_config.readonly_admin.nav.<their_uid>. Empty / missing config
-  // = full SA parity (matches the no-config default the manager UI
-  // documents). We fetch directly so this doesn't compete with the
-  // useShellLayout cache used for the per-shell layouts.
-  const [roNavAllow, setRoNavAllow] = useState(null);
+  // Copy-protection: when the SuperAdmin turns on `no_copy` for this RO, the
+  // shell root carries the `copy-locked` class (CSS user-select:none) from the
+  // FIRST paint — governance rides on the user object synchronously, so there
+  // is no flash. useCopyGuard adds the JS block layer + reports blocked copies.
+  useCopyGuard(roNoCopy, rootRef, (kind) => roBeacon.copyBlocked(kind));
+
+  // Navigation telemetry for readonly_admin (soft, best-effort) — the SuperAdmin
+  // sees which tabs the RO opened on the Readonly Admins → Activity timeline.
+  useEffect(() => { if (isReadOnly) roBeacon.install(); }, [isReadOnly]);
+  useEffect(() => { if (isReadOnly && activeTab) roBeacon.tabOpen(activeTab); }, [isReadOnly, activeTab]);
+  // A persisted/deep-linked activeTab must never render a tab the SuperAdmin
+  // removed — the render switch below isn't nav-gated, so bounce a disallowed
+  // tab back to the dashboard (the backend still enforces the data separately).
   useEffect(() => {
-    if (!isReadOnly || !user?.id) { setRoNavAllow(null); return; }
-    let cancelled = false;
-    client.get('business-config').then(r => {
-      if (cancelled) return;
-      const cfg = r.data?.config || {};
-      const list = cfg[`readonly_admin.nav.${user.id}`];
-      setRoNavAllow(Array.isArray(list) ? list : null);
-    }).catch(() => setRoNavAllow(null));
-    return () => { cancelled = true; };
-  }, [isReadOnly, user?.id]);
+    if (isReadOnly && activeTab && !roTabAllowed(activeTab)) setActiveTab('dashboard');
+  }, [isReadOnly, activeTab, roTabAllowed, setActiveTab]);
 
   // Allow AdminAnalyticsDashboard quick-action buttons to navigate
   useEffect(() => {
@@ -140,16 +141,10 @@ const AdminPanel = () => {
     ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
-  ].filter(item => {
-    // readonly_admin: when a personal allowlist exists, narrow nav to its IDs.
-    // No allowlist (null) = full SA parity (already filtered above). Keep
-    // 'dashboard' always so the user lands somewhere even on a misconfig.
-    if (!isReadOnly || !Array.isArray(roNavAllow)) return true;
-    return item.id === 'dashboard' || roNavAllow.includes(item.id);
-  });
+  ].filter(item => roTabAllowed(item.id));   // RO: governance.nav allowlist (null = parity); non-RO = always true
 
   return (
-    <div className="min-h-screen bg-bg relative">
+    <div ref={rootRef} className={`min-h-screen bg-bg relative${roNoCopy ? ' copy-locked' : ''}`}>
       <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AdminHeader

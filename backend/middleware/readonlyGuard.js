@@ -7,17 +7,20 @@
 //
 // Mount AFTER authMiddleware (req.user must already be populated).
 // ============================================================================
+const { logReadonlyActivity } = require('../utils/readonlyGovernance');
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Endpoints that must still accept POST/PUT from a readonly_admin to keep them
-// usable — session housekeeping + their own profile bits. Match by suffix
+// usable — session housekeeping + their own profile bits + the activity beacon
+// (navigation telemetry the RO reports about themselves). Match by suffix
 // against the path the route saw (NOT including the /api/X mount prefix), and
 // also by absolute path for things mounted outside a per-resource prefix.
 const ALLOWLIST_SUFFIX = [
   '/logout',
   '/refresh',
   '/me',
+  '/activity/beacon',   // RO self-reported tab/view/copy telemetry (POST)
 ];
 
 function readonlyGuard(req, res, next) {
@@ -26,6 +29,15 @@ function readonlyGuard(req, res, next) {
 
   const path = req.originalUrl.split('?')[0];
   if (ALLOWLIST_SUFFIX.some(suf => path.endsWith(suf))) return next();
+
+  // Log the blocked write attempt — the highest-value audit signal (exactly
+  // what the RO TRIED to change). Fire-and-forget: never await into the 403,
+  // never throw. Only runs on the rare mutation path (reads short-circuit
+  // above), so it adds zero cost to normal reads.
+  logReadonlyActivity({
+    userId: req.user.id, role: req.user.role, companyId: req.user.company_id || null,
+    actionType: 'blocked_write', httpMethod: req.method, path, source: 'server',
+  });
 
   return res.status(403).json({ error: 'Read-only account: writes are disabled for this role.' });
 }

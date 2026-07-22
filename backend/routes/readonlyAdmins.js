@@ -23,6 +23,11 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { setConfig } = require('../utils/businessConfig');
+const {
+  DEFAULT_FLAGS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport,
+  invalidateGovernance,
+} = require('../utils/readonlyGovernance');
 
 const router = express.Router();
 
@@ -35,28 +40,23 @@ router.use((req, res, next) => {
   next();
 });
 
-const NAV_KEY   = (uid) => `readonly_admin.nav.${uid}`;
-const FLAGS_KEY = (uid) => `readonly_admin.flags.${uid}`;
+// business_config keys for each governance facet (scope 'global').
+const NAV_KEY       = (uid) => `readonly_admin.nav.${uid}`;
+const FLAGS_KEY     = (uid) => `readonly_admin.flags.${uid}`;
+const COMPANIES_KEY = (uid) => `readonly_admin.companies.${uid}`;
+const EXPORT_KEY    = (uid) => `readonly_admin.export.${uid}`;
+const DEFAULTS_KEY  = 'readonly_admin.defaults';
 
-// Defaults — every flag visible to the operator in the manager UI, all
-// permissive so a freshly-created RO sees what the SuperAdmin would.
-// The flag keys are checked from the frontend AuthContext + helpers.
-const DEFAULT_FLAGS = {
-  view_financial_data: true,   // monthly_payment / down_payment columns
-  view_pii:            true,   // customer phone / email / full address
-  can_export:          true,   // Export buttons (CSV / Excel)
-  view_audit_history:  true,   // edit_history reveal on drawers
-};
-const VALID_FLAG_KEYS = new Set(Object.keys(DEFAULT_FLAGS));
-function sanitizeFlags(input) {
-  const out = { ...DEFAULT_FLAGS };
-  if (input && typeof input === 'object') {
-    for (const [k, v] of Object.entries(input)) {
-      if (VALID_FLAG_KEYS.has(k)) out[k] = !!v;
-    }
-  }
-  return out;
+// Persist one governance facet + bust BOTH caches (businessConfig getConfig +
+// the merged ro_gov cache) so /auth/me reflects the change on the RO's next load.
+async function writeGov(key, value, updatedBy, uid) {
+  await setConfig('global', key, value, updatedBy);   // clears businessConfig cache for key
+  invalidateGovernance(uid || null);                  // clears merged governance cache
 }
+
+const cleanIdList = (v) => Array.isArray(v)
+  ? [...new Set(v.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))].slice(0, 200)
+  : null;
 
 // Resolve the env list of readonly admin emails so the list endpoint can
 // distinguish env-stamped from DB-assigned. Env users can't be revoked from
@@ -88,15 +88,21 @@ router.get('/', asyncHandler(async (req, res) => {
     (ucr || []).forEach(r => assignedUserIds.add(r.user_id));
   }
 
-  // Pull every nav-allowlist + flags row in one shot.
+  // Pull every governance facet row in one shot.
   const { data: cfgRows } = await supabaseAdmin
     .from('business_config').select('key, value')
-    .or('key.like.readonly_admin.nav.%,key.like.readonly_admin.flags.%');
+    .like('key', 'readonly_admin.%');
   const navByUserId = new Map();
   const flagsByUserId = new Map();
+  const compByUserId = new Map();
+  const expByUserId = new Map();
+  let roleDefaults = null;
   (cfgRows || []).forEach(r => {
-    if (r.key.startsWith('readonly_admin.nav.'))   navByUserId.set(r.key.slice('readonly_admin.nav.'.length), r.value);
-    if (r.key.startsWith('readonly_admin.flags.')) flagsByUserId.set(r.key.slice('readonly_admin.flags.'.length), r.value);
+    if (r.key === 'readonly_admin.defaults') { roleDefaults = r.value; return; }
+    if (r.key.startsWith('readonly_admin.nav.'))       navByUserId.set(r.key.slice('readonly_admin.nav.'.length), r.value);
+    else if (r.key.startsWith('readonly_admin.flags.'))     flagsByUserId.set(r.key.slice('readonly_admin.flags.'.length), r.value);
+    else if (r.key.startsWith('readonly_admin.companies.')) compByUserId.set(r.key.slice('readonly_admin.companies.'.length), r.value);
+    else if (r.key.startsWith('readonly_admin.export.'))    expByUserId.set(r.key.slice('readonly_admin.export.'.length), r.value);
   });
 
   const users = (authData?.users || []).filter(u => {
@@ -126,12 +132,23 @@ router.get('/', asyncHandler(async (req, res) => {
       via_env:      envSet.has(e),
       via_metadata: u.app_metadata?.role === 'readonly_admin',
       via_role:     assignedUserIds.has(u.id),
-      nav_allowed:  navByUserId.get(u.id) || null,           // null = full SA parity
-      flags:        sanitizeFlags(flagsByUserId.get(u.id)),  // merged with defaults
+      // EFFECTIVE values = per-user override ← role-default template ← hardcoded
+      // default (mirrors resolveGovernance), so the manager displays exactly what
+      // the server enforces — never a misleading "parity" for a restricted RO.
+      nav_allowed:  navByUserId.get(u.id) ?? (Array.isArray(roleDefaults?.tabs) ? roleDefaults.tabs : null),
+      flags:        sanitizeFlags(flagsByUserId.get(u.id), sanitizeFlags(roleDefaults?.flags, DEFAULT_FLAGS)),
+      companies:    compByUserId.get(u.id) ?? (Array.isArray(roleDefaults?.companies) ? roleDefaults.companies : null),
+      export:       sanitizeExport(expByUserId.get(u.id), sanitizeExport(roleDefaults?.export, allExportOn())),
     };
   });
 
-  res.json({ readonly_admins: enriched, count: enriched.length });
+  res.json({
+    readonly_admins: enriched,
+    count: enriched.length,
+    role_defaults: roleDefaults || null,   // the role-wide template (may be null)
+    export_areas: EXPORT_AREAS,            // catalog for the manager UI
+    flag_keys: Object.keys(DEFAULT_FLAGS),
+  });
 }));
 
 router.put('/:userId/nav', asyncHandler(async (req, res) => {
@@ -141,13 +158,7 @@ router.put('/:userId/nav', asyncHandler(async (req, res) => {
 
   // Clean: keep strings only, dedup, cap at 64 entries.
   const clean = [...new Set(allowed.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))].slice(0, 64);
-
-  const { error } = await supabaseAdmin.from('business_config').upsert({
-    scope: 'global', key: NAV_KEY(userId), value: clean,
-    updated_by: req.user.id, updated_at: new Date().toISOString(),
-  }, { onConflict: 'scope,key' });
-  if (error) return res.status(500).json({ error: error.message });
-
+  await writeGov(NAV_KEY(userId), clean, req.user.id, userId);
   logger.success('READONLY_ADMIN_NAV', `Updated nav allowlist for ${userId}: ${clean.length} tabs`);
   res.json({ user_id: userId, nav_allowed: clean });
 }));
@@ -155,13 +166,90 @@ router.put('/:userId/nav', asyncHandler(async (req, res) => {
 router.put('/:userId/flags', asyncHandler(async (req, res) => {
   const userId = req.params.userId;
   const clean = sanitizeFlags(req.body?.flags || req.body);
-  const { error } = await supabaseAdmin.from('business_config').upsert({
-    scope: 'global', key: FLAGS_KEY(userId), value: clean,
-    updated_by: req.user.id, updated_at: new Date().toISOString(),
-  }, { onConflict: 'scope,key' });
-  if (error) return res.status(500).json({ error: error.message });
+  await writeGov(FLAGS_KEY(userId), clean, req.user.id, userId);
   logger.success('READONLY_ADMIN_FLAGS', `Updated flags for ${userId}`);
   res.json({ user_id: userId, flags: clean });
+}));
+
+// Company scope — the ids this RO may see (server-enforced everywhere). An
+// array = strictly those companies; an empty array = none; omit/null = clear
+// the override → full parity (all companies).
+router.put('/:userId/companies', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const raw = req.body?.companies;
+  if (raw === null || raw === undefined) {
+    // clear → parity: delete the key so resolveGovernance falls back to null(all)
+    await supabaseAdmin.from('business_config').delete().eq('scope', 'global').eq('key', COMPANIES_KEY(userId));
+    invalidateGovernance(userId);
+    logger.success('READONLY_ADMIN_COMPANIES', `Cleared company scope for ${userId} (parity)`);
+    return res.json({ user_id: userId, companies: null });
+  }
+  const clean = cleanIdList(raw) || [];
+  await writeGov(COMPANIES_KEY(userId), clean, req.user.id, userId);
+  logger.success('READONLY_ADMIN_COMPANIES', `Set company scope for ${userId}: ${clean.length} companies`);
+  res.json({ user_id: userId, companies: clean });
+}));
+
+// Per-area export toggles ({ sales:true, transfers:false, ... }).
+router.put('/:userId/export', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const clean = sanitizeExport(req.body?.export || req.body);
+  await writeGov(EXPORT_KEY(userId), clean, req.user.id, userId);
+  logger.success('READONLY_ADMIN_EXPORT', `Updated export areas for ${userId}`);
+  res.json({ user_id: userId, export: clean });
+}));
+
+// Role-wide default TEMPLATE applied to every RO under their per-user overrides.
+router.get('/defaults', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('business_config')
+    .select('value').eq('scope', 'global').eq('key', DEFAULTS_KEY).maybeSingle();
+  res.json({ defaults: data?.value || null, export_areas: EXPORT_AREAS, flag_keys: Object.keys(DEFAULT_FLAGS) });
+}));
+
+router.put('/defaults', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const value = {
+    tabs:      cleanIdList(body.tabs),                        // null = parity (all)
+    flags:     body.flags ? sanitizeFlags(body.flags) : undefined,
+    companies: cleanIdList(body.companies),                   // null = parity (all)
+    export:    body.export ? sanitizeExport(body.export) : undefined,
+  };
+  // Drop undefined so the template only carries what the operator set.
+  Object.keys(value).forEach(k => value[k] === undefined && delete value[k]);
+  await setConfig('global', DEFAULTS_KEY, value, req.user.id);
+  invalidateGovernance(null);   // every RO's merged config depends on the template
+  logger.success('READONLY_ADMIN_DEFAULTS', 'Updated role-wide default template');
+  res.json({ defaults: value });
+}));
+
+// Merged activity timeline for one RO: readonly_activity_log (tab/view/copy/
+// blocked-write) UNION export_audit_log (exports/recordings), newest first.
+router.get('/:userId/activity', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const [{ data: acts }, { data: exps }] = await Promise.all([
+    supabaseAdmin.from('readonly_activity_log')
+      .select('created_at, action_type, surface, dataset, record_id, http_method, path, detail, source')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit),
+    supabaseAdmin.from('export_audit_log')
+      .select('created_at, action_type, dataset, surface, status, deny_reason, row_count, filters_applied')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit),
+  ]);
+  const norm = [];
+  (acts || []).forEach(a => norm.push({
+    created_at: a.created_at, action_type: a.action_type, surface: a.surface,
+    dataset: a.dataset, record_id: a.record_id, http_method: a.http_method,
+    path: a.path, detail: a.detail, status: a.action_type === 'blocked_write' ? 'blocked' : 'ok',
+    source: a.source, verified: a.source === 'server',
+  }));
+  (exps || []).forEach(e => norm.push({
+    created_at: e.created_at, action_type: e.action_type, surface: e.surface,
+    dataset: e.dataset, record_id: null, http_method: null, path: null,
+    detail: { row_count: e.row_count, filters: e.filters_applied }, status: e.status,
+    deny_reason: e.deny_reason, source: 'server', verified: true,
+  }));
+  norm.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  res.json({ user_id: userId, activity: norm.slice(0, limit), count: norm.length });
 }));
 
 router.post('/', asyncHandler(async (req, res) => {
@@ -171,6 +259,8 @@ router.post('/', asyncHandler(async (req, res) => {
   const last_name  = String(req.body?.last_name || '').trim();
   const allowed    = Array.isArray(req.body?.allowed) ? req.body.allowed : null;
   const flags      = req.body?.flags ? sanitizeFlags(req.body.flags) : null;
+  const companies  = req.body?.companies !== undefined ? cleanIdList(req.body.companies) : undefined;
+  const exportCfg  = req.body?.export ? sanitizeExport(req.body.export) : null;
   // send_invite=true → use inviteUserByEmail so Supabase sends the welcome
   // email with a magic link to set their password. send_invite=false (or
   // missing) → use createUser with the supplied password (no email sent
@@ -222,20 +312,14 @@ router.post('/', asyncHandler(async (req, res) => {
     }, { onConflict: 'user_id' });
   } catch { /* ignore */ }
 
-  // Initial nav allowlist + flags.
+  // Initial governance facets (nav / flags / companies / export).
   if (allowed && allowed.length) {
     const clean = [...new Set(allowed.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))].slice(0, 64);
-    await supabaseAdmin.from('business_config').upsert({
-      scope: 'global', key: NAV_KEY(userId), value: clean,
-      updated_by: req.user.id, updated_at: new Date().toISOString(),
-    }, { onConflict: 'scope,key' });
+    await writeGov(NAV_KEY(userId), clean, req.user.id, userId);
   }
-  if (flags) {
-    await supabaseAdmin.from('business_config').upsert({
-      scope: 'global', key: FLAGS_KEY(userId), value: flags,
-      updated_by: req.user.id, updated_at: new Date().toISOString(),
-    }, { onConflict: 'scope,key' });
-  }
+  if (flags)                    await writeGov(FLAGS_KEY(userId), flags, req.user.id, userId);
+  if (Array.isArray(companies)) await writeGov(COMPANIES_KEY(userId), companies, req.user.id, userId);
+  if (exportCfg)                await writeGov(EXPORT_KEY(userId), exportCfg, req.user.id, userId);
 
   logger.success('READONLY_ADMIN_CREATE', `Created readonly_admin ${email} (${userId}) via ${sendInvite ? 'invite' : 'password'}`);
   res.status(201).json({ user_id: userId, email, invited: sendInvite });
@@ -269,14 +353,16 @@ router.delete('/:userId', asyncHandler(async (req, res) => {
         .eq('user_id', userId).in('role_id', roles.map(r => r.id));
     }
     await supabaseAdmin.from('business_config').delete()
-      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId)]);
+      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId)]);
+    invalidateGovernance(userId);
     logger.success('READONLY_ADMIN_REVOKE', `Soft-revoked readonly_admin from ${userId}`);
     return res.json({ user_id: userId, revoked: true, permanent: false });
   }
 
   // Permanent: wipe config + delete auth user.
   await supabaseAdmin.from('business_config').delete()
-    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId)]);
+    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId)]);
+    invalidateGovernance(userId);
 
   // Best-effort deactivate role assignments first so any FK on
   // user_company_roles → auth.users doesn't block the delete.

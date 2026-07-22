@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin, supabaseClient } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
+const { resolveGovernance } = require('../utils/readonlyGovernance');
 
 const router = express.Router();
 
@@ -59,6 +60,30 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
       first_name: profile?.first_name,
       last_name: profile?.last_name,
       permissions: (allPerms || []).map(p => p.name),
+    });
+  }
+
+  // READONLY_ADMIN — same fast-path as superadmin (no user_company_roles row).
+  // Returns every permission name (so hasPermission never hides a surface) PLUS
+  // the resolved governance blob, which the frontend reads SYNCHRONOUSLY to hide
+  // tabs / buttons / exports and to enable copy-protection with no flash.
+  if (req.user.role === 'readonly_admin') {
+    const [{ data: allPerms }, { data: profile }, governance] = await Promise.all([
+      supabaseAdmin.from('permissions').select('name'),
+      supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
+      resolveGovernance(userId),
+    ]);
+    return res.json({
+      id: userId,
+      email: req.user.email,
+      role: 'readonly_admin',
+      role_name: 'Read-only Admin',
+      company_id: null,
+      company_name: null,
+      first_name: profile?.first_name,
+      last_name: profile?.last_name,
+      permissions: (allPerms || []).map(p => p.name),
+      governance,
     });
   }
 
@@ -190,9 +215,10 @@ router.post(
       // Recognized via app_metadata.role (stamped on invite + by
       // syncReadonlyAdminMetadata on boot) OR the env list.
       if (data.user.app_metadata?.role === 'readonly_admin' || readonlyEmails.includes(loginEmail)) {
-        const [{ data: allPerms }, { data: roProfile }] = await Promise.all([
+        const [{ data: allPerms }, { data: roProfile }, governance] = await Promise.all([
           supabaseAdmin.from('permissions').select('name'),
           supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', data.user.id).single(),
+          resolveGovernance(data.user.id),
         ]);
         return res.json({
           token:         data.session.access_token,
@@ -210,6 +236,9 @@ router.post(
             // never hide a surface from them. readonlyGuard middleware
             // still 403s every write on the backend regardless of UI.
             permissions: (allPerms || []).map(p => p.name),
+            // Governance rides on the user object so the frontend hydrates it
+            // synchronously from localStorage → tabs/buttons hidden with no flash.
+            governance,
           },
         });
       }
@@ -646,6 +675,27 @@ router.post('/exchange', asyncHandler(async (req, res) => {
         company_id: null, company_name: null,
         first_name: profile?.first_name, last_name: profile?.last_name,
         permissions: (allPerms || []).map(p => p.name),
+      },
+    });
+  }
+
+  // Readonly_admin — mirror the login fast-path (no company role) + governance.
+  const readonlyEmails = (process.env.READONLY_ADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (user.app_metadata?.role === 'readonly_admin' || readonlyEmails.includes((email || '').toLowerCase())) {
+    const [{ data: allPerms }, { data: roProfile }, governance] = await Promise.all([
+      supabaseAdmin.from('permissions').select('name'),
+      supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
+      resolveGovernance(userId),
+    ]);
+    return res.json({
+      token: access_token,
+      refresh_token: refresh_token || null,
+      user: {
+        id: userId, email, role: 'readonly_admin', role_name: 'Read-only Admin',
+        company_id: null, company_name: null,
+        first_name: roProfile?.first_name, last_name: roProfile?.last_name,
+        permissions: (allPerms || []).map(p => p.name),
+        governance,
       },
     });
   }

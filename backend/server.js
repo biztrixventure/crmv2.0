@@ -8,11 +8,13 @@ require('dotenv').config({ path: '.env.local' });
 const { errorHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/authMiddleware');
 const { readonlyGuard } = require('./middleware/readonlyGuard');
+const { readonlyDataGuard } = require('./middleware/readonlyDataGuard');
 
 // Import routes
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const readonlyAdminsRoutes = require('./routes/readonlyAdmins');
+const activityBeaconRoutes = require('./routes/activityBeacon');
 const companiesRoutes = require('./routes/companies');
 const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
@@ -287,15 +289,18 @@ app.use('/api/users', authMiddleware, readonlyGuard, usersRoutes);
 // on req.user.role === 'superadmin', and readonlyGuard would 403 any RO
 // caller trying to PUT/POST/DELETE here anyway.
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
+// RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon
+// so the read-only account's POST passes; the handler ignores non-RO callers.
+app.use('/api/activity', authMiddleware, readonlyGuard, activityBeaconRoutes);
 app.use('/api/companies', authMiddleware, readonlyGuard, companiesRoutes);
 app.use('/api/roles', authMiddleware, readonlyGuard, rolesRoutes);
 app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
-app.use('/api/transfers', authMiddleware, readonlyGuard, egressAudit, transfersRoutes);
+app.use('/api/transfers', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, transfersRoutes);
 // VICIdial fronter app routes (pending-from-dialer list + confirm) — authed.
 app.use('/api/vicidial', authMiddleware, vicidialApi);
-app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, salesRoutes);
+app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, salesRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
-app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, callbacksRoutes);
+app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, callbacksRoutes);
 app.use('/api/payment-reminders', authMiddleware, readonlyGuard, paymentRemindersRoutes);
 app.use('/api/push',        authMiddleware, readonlyGuard, pushRoutes);
 app.use('/api/stats',       authMiddleware, readonlyGuard, statsRoutes);

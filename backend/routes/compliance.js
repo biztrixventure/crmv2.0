@@ -8,6 +8,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
+const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly } = require('../utils/readonlyGovernance');
 
 const { getConfig } = require('../utils/businessConfig');
 
@@ -95,7 +96,11 @@ const CALLBACK_SORT = {
 const { isFeatureEnabled } = require('../utils/featureGate');
 router.use(asyncHandler(async (req, res, next) => {
   const r = req.user.role;
-  if (r === 'compliance_manager' || r === 'superadmin') return next();
+  // readonly_admin ALWAYS passes (full-parity posture) — their per-company
+  // scoping + PII/financial masking is enforced inside the handlers below, not
+  // by gating them out. Without this they'd be 403'd (tool_compliance_review
+  // defaults false) and the governed Sales/Transfers/Callbacks tabs would break.
+  if (r === 'compliance_manager' || r === 'superadmin' || r === 'readonly_admin') return next();
 
   const { data: flagRow } = await supabaseAdmin.from('feature_flags').select('key').eq('key', 'tool_compliance_review').maybeSingle();
   if (flagRow) {
@@ -932,6 +937,15 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
   if (company_id && companyType !== 'fronter') query = query.eq('company_id', company_id);
 
+  // readonly_admin company isolation (server-enforced). null = unrestricted;
+  // an array = only those companies. A specific ?company_id outside scope 403s;
+  // the global (no company_id) view is clamped to the allowed closer companies.
+  const roAllowed = await readonlyAllowedCompanyIds(req);
+  if (Array.isArray(roAllowed)) {
+    if (company_id && !companyInScope(roAllowed, company_id)) return res.status(403).json({ error: 'That company is outside your allowed scope.' });
+    if (!company_id) query = scopeToCompanies(query, roAllowed);
+  }
+
   if (user_ids) {
     const ids = user_ids.split(',').filter(Boolean);
     if (ids.length) query = query.in('closer_id', ids);
@@ -1048,6 +1062,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
         ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact', head: true }).eq('transfers.company_id', company_id)
         : supabaseAdmin.from('sales').select('*', { count: 'exact', head: true });
       if (company_id && companyType !== 'fronter') q = q.eq('company_id', company_id);
+      if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
       if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('closer_id', ids); }
       if (disposition) q = q.eq('closer_disposition', disposition);
       else if (exclude_post_date) q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
@@ -1060,7 +1075,9 @@ router.get('/sales', asyncHandler(async (req, res) => {
     status_counts = await statusCountsExact(makeSaleBase, SALE_STATUSES);
   }
 
-  res.json({ sales: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
+  // Mask PII / financial for a readonly_admin whose superadmin turned those off.
+  const sales = await maskForReadonly(enriched, 'sales', req);
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
@@ -1092,6 +1109,12 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   const includeDuplicates = dedupEnabled && req.query.include_duplicates !== 'false';
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
+  // readonly_admin company isolation (transfers.company_id = fronter company).
+  const roAllowed = await readonlyAllowedCompanyIds(req);
+  if (Array.isArray(roAllowed) && company_id && !companyInScope(roAllowed, company_id)) {
+    return res.status(403).json({ error: 'That company is outside your allowed scope.' });
+  }
+
   // Same filters either way — built against whichever relation we read from.
   // Free-text search hits normalized_phone + the JSONB form_data keys that
   // hold the customer name / phone (parity with the closer-side phone search).
@@ -1101,6 +1124,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
       sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
     );
     if (company_id) q = q.eq('company_id', company_id);
+    if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
     if (user_ids) {
       const ids = user_ids.split(',').filter(Boolean);
       if (ids.length) q = q.in('created_by', ids);
@@ -1125,6 +1149,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   const makeTransferBase = (from) => {
     let q = supabaseAdmin.from(from).select('*', { count: 'exact', head: true });
     if (company_id) q = q.eq('company_id', company_id);
+    if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
     if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('created_by', ids); }
     if (closer_id) q = q.eq('assigned_closer_id', closer_id);
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
@@ -1329,7 +1354,8 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, dedup_enabled: dedupEnabled });
+  const transfers = await maskForReadonly(enriched, 'transfers', req);
+  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, dedup_enabled: dedupEnabled });
 }));
 
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────
@@ -1345,6 +1371,15 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
     if (!scopeCompanyIds.length) {
       return res.json({ callbacks: [], total: 0, page: 1, limit: parseInt(limit) });
     }
+  }
+
+  // readonly_admin company isolation — fold the allow-list into scopeCompanyIds
+  // so both the list query and the status-count base honour it (intersect with
+  // any company_type scope). A specific ?company_id outside scope 403s.
+  const roAllowed = await readonlyAllowedCompanyIds(req);
+  if (Array.isArray(roAllowed)) {
+    if (company_id && !companyInScope(roAllowed, company_id)) return res.status(403).json({ error: 'That company is outside your allowed scope.' });
+    scopeCompanyIds = scopeCompanyIds ? scopeCompanyIds.filter(id => roAllowed.includes(id)) : roAllowed.slice();
   }
 
   let query = applySort(
@@ -1408,7 +1443,8 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
     company_type: companyMap[c.company_id]?.company_type || null,
   }));
 
-  res.json({ callbacks: enriched, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
+  const callbacks = await maskForReadonly(enriched, 'callbacks', req);
+  res.json({ callbacks, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
 }));
 
 // ── GET /compliance/callbacks/phone-history ──────────────────────────────────

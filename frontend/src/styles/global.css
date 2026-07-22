@@ -1399,3 +1399,33 @@ select optgroup {
 .animate-slide-out-right { animation: bsx-drawer-out 220ms cubic-bezier(0.4, 0, 1, 1) both; will-change: transform; }
 .bsx-scrim     { animation: bsx-scrim-in 220ms ease both; }
 .bsx-scrim-out { animation: bsx-scrim-in 200ms ease reverse both; }
+
+/* ── readonly_admin copy-protection ─────────────────────────────────────────
+   When a SuperAdmin turns on `no_copy` for a read-only admin, the AdminPanel
+   shell root gets `.copy-locked` (added synchronously from user.governance, so
+   it's on the FIRST paint → no flash). This is STRICTER than .bsx-no-select:
+   it must beat .bsx-allow-select too, so a read-only admin can't lift data out
+   of otherwise copy-friendly widgets (CopyableNumber/CopyableText, etc.).
+   Placed at end-of-file so it wins the cascade on equal specificity.
+   Form controls stay typeable so search/filter inputs still work; the JS
+   copy-guard (useCopyGuard) blocks the actual copy/cut/contextmenu regardless. */
+.copy-locked,
+.copy-locked *,
+.copy-locked .bsx-allow-select,
+.copy-locked .bsx-allow-select * {
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+.copy-locked input,
+.copy-locked textarea,
+.copy-locked select,
+.copy-locked [contenteditable="true"],
+.copy-locked [contenteditable="true"] * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+}

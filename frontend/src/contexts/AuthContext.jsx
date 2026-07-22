@@ -153,38 +153,57 @@ export const AuthProvider = ({ children }) => {
   // server-side, so a hidden button can't be re-enabled via devtools.
   const isReadOnly = user?.role === 'readonly_admin';
 
-  // Per-user feature flags for a readonly_admin (managed by SuperAdmin in
-  // the Readonly Admins page). Loaded once after login; falls back to "all
-  // permissive" so a fresh deploy never accidentally locks down a screen.
-  // Helpers expose the same API for non-RO users too so call-sites can
-  // call without role-branching: roFlag('view_financial_data') === true
-  // for superadmin / closer / fronter / etc.
-  const [roFlags, setRoFlags] = useState(null);
-  useEffect(() => {
-    if (!isReadOnly || !user?.id) { setRoFlags(null); return; }
-    let cancelled = false;
-    client.get('business-config').then(r => {
-      if (cancelled) return;
-      const v = r.data?.config?.[`readonly_admin.flags.${user.id}`];
-      setRoFlags(v && typeof v === 'object' ? v : {});
-    }).catch(() => setRoFlags({}));
-    return () => { cancelled = true; };
-  }, [isReadOnly, user?.id]);
+  // Governance for a readonly_admin (managed by SuperAdmin in the Readonly
+  // Admins page). It rides on the user object from /auth/me + login, so it's
+  // present SYNCHRONOUSLY on the first render (localStorage-hydrated) — this is
+  // the no-flash guarantee: a disabled tab/button/export is never rendered even
+  // for one paint, and copy-protection is active from frame 0. We deliberately
+  // do NOT fetch it async (the old business-config fetch resolved after first
+  // paint and caused a "briefly visible then hidden" flash).
+  const governance = user?.governance || null;
+  const roFlags = governance?.flags || null;   // back-compat: some call-sites read roFlags
 
-  // roFlag(key) — returns the boolean value of a readonly_admin flag.
-  // For non-readonly users always returns true (the flag is irrelevant).
-  // Missing keys default to true so adding a new gate never silently
-  // hides surfaces from existing RO users until the SuperAdmin reviews it.
+  // roFlag(key) — boolean value of a readonly_admin capability flag. For non-RO
+  // users always true (the flag is irrelevant). Missing keys default to true so
+  // adding a new gate never silently hides a surface from existing RO users
+  // until the SuperAdmin reviews it. EXCEPT no_copy, which defaults false (a
+  // fresh RO must not be copy-locked by accident).
   const roFlag = useCallback((key) => {
+    if (!isReadOnly) return key === 'no_copy' ? false : true;
+    const flags = governance?.flags;
+    if (!flags) return key === 'no_copy' ? false : true;
+    if (key === 'no_copy') return flags.no_copy === true;
+    return flags[key] !== false;
+  }, [isReadOnly, governance]);
+  const roCan = roFlag;   // readable alias at capability call-sites
+
+  // roTabAllowed(tabId) — is this AdminPanel tab visible to the RO? null nav =
+  // full parity (every eligible tab). Dashboard is never hidden.
+  const roTabAllowed = useCallback((tabId) => {
     if (!isReadOnly) return true;
-    if (!roFlags) return true;
-    return roFlags[key] !== false;
-  }, [isReadOnly, roFlags]);
+    const nav = governance?.nav;
+    if (!Array.isArray(nav)) return true;                 // parity
+    return tabId === 'dashboard' || nav.includes(tabId);
+  }, [isReadOnly, governance]);
+
+  // roExportAllowed(area) — may the RO download from this data area? Global
+  // can_export kill-switch first, then the per-area toggle. Non-RO always true.
+  const roExportAllowed = useCallback((area) => {
+    if (!isReadOnly) return true;
+    const flags = governance?.flags;
+    if (flags && flags.can_export === false) return false;
+    const ex = governance?.export;
+    if (!ex || !area) return true;
+    return ex[area] !== false;
+  }, [isReadOnly, governance]);
+
+  // Copy-protection master switch for this RO (drives the shell copy guard).
+  const roNoCopy = isReadOnly && governance?.flags?.no_copy === true;
 
   return (
     <AuthContext.Provider value={{
       user, token, login, logout, updateUser, hasPermission, isReadOnly,
-      roFlags, roFlag,
+      governance, roFlags, roFlag, roCan, roTabAllowed, roExportAllowed, roNoCopy,
       isRefreshing, isAuthenticated: !!user && !!token,
     }}>
       {children}
