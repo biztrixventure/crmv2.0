@@ -9,6 +9,7 @@ const { errorHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/authMiddleware');
 const { readonlyGuard } = require('./middleware/readonlyGuard');
 const { readonlyDataGuard } = require('./middleware/readonlyDataGuard');
+const { geoGate } = require('./middleware/geoGate');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -263,6 +264,12 @@ app.get('/health', (req, res) => {
 // ============================================================================
 // PUBLIC ROUTES (no auth required)
 // ============================================================================
+
+// Location gate (opt-in via env; portal + auth exempt; fails open). Runs before
+// every API route so an out-of-country request to the internal CRM is 403'd,
+// while the overseas client portal stays reachable. Cloudflare's edge rule is
+// the primary gate; this is the in-app second layer + audit log.
+app.use(geoGate);
 
 app.use('/api/auth', authRoutes);
 // VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
