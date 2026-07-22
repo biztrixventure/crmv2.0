@@ -946,12 +946,16 @@ function LiveTab({ scoped, selfId, canOverride, isManager, allowedWt }) {
 }
 
 // ── Reports tab ─────────────────────────────────────────────────────────────────
-const ChartCard = ({ title, children, wide }) => (
-  <div className={`p-4 rounded-2xl ${wide ? 'col-span-full' : ''}`} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-    <div className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-tertiary)' }}>{title}</div>
+const ChartCard = ({ title, hint, children, className = '' }) => (
+  <div className={`p-4 rounded-2xl ${className}`} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <div className="text-[11px] font-bold uppercase tracking-wide mb-3 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{title}{hint && <InfoTip text={hint} />}</div>
     {children}
   </div>
 );
+const SectionTitle = ({ children }) => (
+  <div className="text-[11px] font-bold uppercase tracking-wider mb-2 mt-1" style={{ color: 'var(--color-text-secondary)' }}>{children}</div>
+);
+const NoData = () => <div className="text-xs py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No data in this range.</div>;
 
 // ── single-agent deep report — pick one reviewed fronter/closer, see their full
 // scorecard-driven performance: KPIs w/ vs-previous delta, rank among peers, score
@@ -1073,7 +1077,9 @@ function ReportsTab({ companyId, companyName = '' }) {
   const scoreSeries = [{ name: 'Avg score', color: PALETTE[0], points: ts.map(d => ({ x: d.date, y: d.avg_score })) }];
   if ((s.passed || 0) + (s.failed || 0) > 0) scoreSeries.push({ name: 'Pass rate', color: '#16a34a', points: ts.map(d => ({ x: d.date, y: d.pass_rate == null ? 0 : d.pass_rate })) });
   const volMax = Math.max(1, ...ts.map(d => d.reviews));
-  const agentBars = (data?.by_agent || []).slice(0, 10).map(a => ({ label: a.name, value: a.avg_score }));
+  const byAgent = data?.by_agent || [];
+  const closerBars  = byAgent.filter(a => a.role === 'closer').slice(0, 8).map(a => ({ label: a.name, value: a.avg_score }));
+  const fronterBars = byAgent.filter(a => a.role === 'fronter').slice(0, 8).map(a => ({ label: a.name, value: a.avg_score }));
   const reviewerBars = (data?.by_reviewer || []).slice(0, 10).map(r => ({ label: r.name, value: r.reviews }));
 
   const KPI = ({ label, value, tint }) => (
@@ -1085,6 +1091,7 @@ function ReportsTab({ companyId, companyName = '' }) {
 
   return (
     <div className="h-full overflow-auto pb-4">
+      <div className="max-w-[1480px] mx-auto w-full">
       {/* filters */}
       <div className="flex items-center gap-2 flex-wrap mb-4">
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
@@ -1156,16 +1163,24 @@ function ReportsTab({ companyId, companyName = '' }) {
               <KPI label="Failed" value={s.failed || 0} tint="var(--color-error-600)" />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <SectionTitle>Trends over time</SectionTitle>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mb-4">
+              <ChartCard title="Score & pass rate" hint="Average score per day (and pass rate, when there are pass/fail decisions) across the range."><Lines series={scoreSeries} yMax={100} yUnit="%" /></ChartCard>
+              <ChartCard title="Reviews per day" hint="How many calls your QA team scored each day."><Lines series={[{ name: 'Reviews', color: PALETTE[2], points: ts.map(d => ({ x: d.date, y: d.reviews })) }]} yMax={volMax} /></ChartCard>
+            </div>
+
+            <SectionTitle>Quality breakdown</SectionTitle>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <ChartCard title="Pass vs Fail"><Donut data={passFail} centerValue={`${s.pass_rate || 0}%`} centerLabel="pass" /></ChartCard>
               <ChartCard title="Method mix"><Donut data={methodSplit} centerValue={s.reviews} centerLabel="reviews" /></ChartCard>
               <ChartCard title="Score distribution"><Bars data={bucketBars} /></ChartCard>
+            </div>
 
-              <ChartCard title="Score & pass rate over time" wide><Lines series={scoreSeries} yMax={100} yUnit="%" /></ChartCard>
-              <ChartCard title="Reviews per day" wide><Lines series={[{ name: 'Reviews', color: PALETTE[2], points: ts.map(d => ({ x: d.date, y: d.reviews })) }]} yMax={volMax} /></ChartCard>
-
-              <ChartCard title="By agent — avg score"><Bars data={agentBars} max={100} unit="%" /></ChartCard>
-              <ChartCard title="Who's scoring — reviews"><Bars data={reviewerBars} color={PALETTE[4]} /></ChartCard>
+            <SectionTitle>People — average score &amp; activity</SectionTitle>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <ChartCard title="Closers — avg score" hint="Closers with the most reviews; bar = their average score. Click a name in the table below for the full report.">{closerBars.length ? <Bars data={closerBars} max={100} unit="%" color="#059669" /> : <NoData />}</ChartCard>
+              <ChartCard title="Fronters — avg score" hint="Fronters (transfer agents) with the most reviews; bar = their average score.">{fronterBars.length ? <Bars data={fronterBars} max={100} unit="%" color="#2563eb" /> : <NoData />}</ChartCard>
+              <ChartCard title="QA agents — reviews" hint="Who did the scoring, by number of reviews completed.">{reviewerBars.length ? <Bars data={reviewerBars} color={PALETTE[4]} /> : <NoData />}</ChartCard>
             </div>
 
             {/* full breakdown table */}
@@ -1185,6 +1200,7 @@ function ReportsTab({ companyId, companyName = '' }) {
             </div>
           </>
         )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // ============================================================================
 // Charts.jsx — tiny dependency-free SVG charts for the QA reports tab (no chart
@@ -83,20 +83,32 @@ export function Bars({ data = [], max, unit = '', color = PALETTE[0] }) {
   );
 }
 
-// series: [{ name, color, points: [{ x(label), y(number) }] }]  — shared x axis
-export function Lines({ series = [], height = 180, yMax = 100, yUnit = '' }) {
+// series: [{ name, color, points: [{ x(label), y(number) }] }]  — shared x axis.
+// Renders at a FIXED height and fills the container width (measured, not aspect-
+// scaled) so it never balloons vertically on a wide screen. Coordinates are in
+// real pixels, so lines/dots never distort no matter how wide the card is.
+export function Lines({ series = [], height = 160, yMax = 100, yUnit = '' }) {
   const mounted = useMounted();
-  const W = 560, H = height, padL = 34, padB = 22, padT = 10, padR = 8;
+  const ref = useRef(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    if (!ref.current || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width));
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const W = Math.max(260, Math.round(w) || 520), H = height;
+  const padL = 32, padB = 20, padT = 8, padR = 10;
   const xs = series[0]?.points || [];
   const n = xs.length;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const xAt = (i) => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v) => padT + innerH - (Math.max(0, Math.min(yMax, v)) / yMax) * innerH;
   const gy = [0, 0.25, 0.5, 0.75, 1].map(f => ({ v: Math.round(yMax * (1 - f)), y: padT + innerH * f }));
-  const labelEvery = Math.ceil(n / 8) || 1;
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(innerW / 64))));
   return (
-    <div className="overflow-x-auto">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ minWidth: 360 }}>
+    <div ref={ref} style={{ width: '100%' }}>
+      <svg width={W} height={H} style={{ display: 'block', maxWidth: '100%' }}>
         {gy.map((g, i) => (
           <g key={i}>
             <line x1={padL} y1={g.y} x2={W - padR} y2={g.y} stroke="var(--color-border)" strokeWidth="1" />
@@ -104,7 +116,7 @@ export function Lines({ series = [], height = 180, yMax = 100, yUnit = '' }) {
           </g>
         ))}
         {xs.map((p, i) => (i % labelEvery === 0) && (
-          <text key={i} x={xAt(i)} y={H - 6} textAnchor="middle" fontSize="8" fill="var(--color-text-tertiary)">{String(p.x).slice(5)}</text>
+          <text key={i} x={xAt(i)} y={H - 5} textAnchor="middle" fontSize="9" fill="var(--color-text-tertiary)">{String(p.x).slice(5)}</text>
         ))}
         {series.map((s, si) => {
           const pts = (s.points || []).map((p, i) => `${xAt(i)},${yAt(p.y ?? 0)}`).join(' ');

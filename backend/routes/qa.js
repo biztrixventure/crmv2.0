@@ -2250,7 +2250,11 @@ router.get('/reports', asyncHandler(async (req, res) => {
     for (const r of rows) { const k = keyFn(r); (agg[k] ||= { key: k, name: nameFn(r), reviews: 0, passed: 0, decided: 0, sumPct: 0 }); agg[k].reviews++; agg[k].sumPct += pct(r); if (r.passed === true) agg[k].passed++; if (r.passed === true || r.passed === false) agg[k].decided++; }
     return Object.values(agg).map(a => ({ key: a.key, name: a.name, reviews: a.reviews, passed: a.passed, pass_rate: a.decided ? Math.round(a.passed / a.decided * 100) : null, avg_score: a.reviews ? Math.round(a.sumPct / a.reviews) : 0 })).sort((x, y) => y.reviews - x.reviews);
   };
-  const by_agent = roll(agentKey, agentName);
+  // dominant role per reviewed agent (fronter/closer) so Reports can split the
+  // people charts into Closers vs Fronters.
+  const roleCount = {};
+  for (const r of rows) { const k = agentKey(r); (roleCount[k] ||= { fronter: 0, closer: 0 }); if (r.subject_role === 'closer') roleCount[k].closer++; else roleCount[k].fronter++; }
+  const by_agent = roll(agentKey, agentName).map(a => ({ ...a, role: (roleCount[a.key]?.closer || 0) > (roleCount[a.key]?.fronter || 0) ? 'closer' : 'fronter' }));
   const by_reviewer = roll(r => r.reviewer_id || 'unknown', r => r.reviewer_id ? (uname[r.reviewer_id] || 'Unknown') : 'Unknown').map(x => ({ reviewer_id: x.key === 'unknown' ? null : x.key, name: x.name, reviews: x.reviews, avg_score: x.avg_score, pass_rate: x.pass_rate }));
 
   const ts = {};
