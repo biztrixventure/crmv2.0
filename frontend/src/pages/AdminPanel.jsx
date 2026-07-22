@@ -11,6 +11,7 @@ import DevCredit from "../components/DevCredit";
 import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
+import TeamManager from "../components/Admin/Teams/TeamManager";
 import { useNotifications } from "../hooks/useNotifications";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
@@ -110,6 +111,7 @@ const AdminPanel = () => {
       { id: "cc-callbacks", label: "All Callbacks" },
     ] : []),
     ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
+    ...(isSAorRO                                       ? [{ id: "teams",          label: "Teams"                }] : []),
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
@@ -192,6 +194,7 @@ const AdminPanel = () => {
                   )}
                   {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
                   {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
+                  {activeTab === "teams"       && <TeamManager />}
                   {activeTab === "sale-search" && <LeadIntelligence />}
                   {activeTab === "customer-profiles" && <CustomerProfile />}
                   {activeTab === "numbers"     && <NumbersIntelligence />}

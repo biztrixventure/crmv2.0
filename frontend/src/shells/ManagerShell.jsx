@@ -9,6 +9,7 @@ import BatchInbox from "../components/Distribution/BatchInbox";
 import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import ThemedSelect from '../components/UI/Select';
+import TeamManager from '../components/Admin/Teams/TeamManager';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -229,6 +230,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // company. Superadmin still uses /admin's SPIFF tab for cross-company.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
+    // Team structure — company admins/ops manage; team-lead managers manage own.
+    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+      ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'batches',      label: 'Batches',      icon: Send },
     { key: 'roster',       label: 'Assigned Numbers', icon: Hash },
@@ -1215,6 +1219,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
+        {activeTab === 'teams'     && <TeamManager />}
         {activeTab === 'callbacks' && <ManagerCallbacksTab user={user} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">

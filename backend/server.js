@@ -16,6 +16,7 @@ const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const readonlyAdminsRoutes = require('./routes/readonlyAdmins');
 const activityBeaconRoutes = require('./routes/activityBeacon');
+const teamsRoutes = require('./routes/teams');
 const companiesRoutes = require('./routes/companies');
 const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
@@ -296,6 +297,7 @@ app.use('/api/users', authMiddleware, readonlyGuard, usersRoutes);
 // on req.user.role === 'superadmin', and readonlyGuard would 403 any RO
 // caller trying to PUT/POST/DELETE here anyway.
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
+app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
 // RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon
 // so the read-only account's POST passes; the handler ignores non-RO callers.
 app.use('/api/activity', authMiddleware, readonlyGuard, activityBeaconRoutes);

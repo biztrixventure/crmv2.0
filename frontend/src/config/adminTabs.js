@@ -42,6 +42,7 @@ export const ADMIN_TAB_CATALOG = [
 
   // Admin surfaces
   { id: 'companies',        label: 'Companies',            group: 'admin',         roEligible: true,  defaultForRo: true,  gate: null },
+  { id: 'teams',            label: 'Teams',                group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'forms',            label: 'Form Builder',         group: 'admin',         roEligible: true,  defaultForRo: false, gate: 'manage_forms' },
   { id: 'bulk-upload',      label: 'Bulk Upload',          group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'chat',             label: 'Chat Control',         group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
