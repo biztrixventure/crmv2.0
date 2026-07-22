@@ -4,8 +4,10 @@ import client from '../../api/client';
 import { Overlay, ModalBox, ModalHeader } from './shared';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
+import { useAuth } from '../../contexts/AuthContext';
 
 const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
+  const { canExport } = useAuth();
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
   const [company, setCompany]     = useState('');
@@ -168,13 +170,15 @@ const ExportModal = ({ tab, companyList, cbType, onClose, onExport }) => {
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
             Cancel
           </button>
-          <button onClick={handleExport} disabled={loading}
-            className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-50"
-            style={{ background: 'var(--gradient-sidebar)' }}>
-            {loading
-              ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Preparing…</>
-              : <><Download size={14} /> Download CSV</>}
-          </button>
+          {canExport(tab === 'queue' ? 'sales' : tab) && (
+            <button onClick={handleExport} disabled={loading}
+              className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ background: 'var(--gradient-sidebar)' }}>
+              {loading
+                ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Preparing…</>
+                : <><Download size={14} /> Download CSV</>}
+            </button>
+          )}
         </div>
       </ModalBox>
     </Overlay>

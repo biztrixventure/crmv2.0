@@ -318,7 +318,7 @@ const TODAY = todayET();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
-  const { roFlag } = useAuth();
+  const { roFlag, canExport } = useAuth();
   // Compliance status catalog — drives the dynamic pipeline bar at the top
   // of the dashboard. SuperAdmin enables/disables/renames/recolors statuses
   // in Business Rules → Compliance Workflow, then the pipeline matches.
@@ -827,7 +827,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 </button>
               ))}
             </div>
-            {total > 0 && !isReadOnly && (
+            {total > 0 && !isReadOnly && canExport(dataTab) && (
               <button
                 onClick={handleExport}
                 disabled={exportLoading}

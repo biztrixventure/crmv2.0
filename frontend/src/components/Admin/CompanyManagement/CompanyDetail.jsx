@@ -86,7 +86,7 @@ const dt = (d) => d ? new Date(d).toLocaleString() : null;
 
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type, companyType }) => {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, canExport } = useAuth();
   const canExpand = EXPAND_ROLES.includes(user?.role);
   const canFin    = hasPermission('view_financial_data');
   const [expanded, setExpanded] = useState(canExpand); // on by default for superadmin/managers
@@ -230,7 +230,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
           Search · {total}
         </button>
-        {total > 0 && (
+        {total > 0 && canExport(type) && (
           <button onClick={handleExport} disabled={exportLoading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
@@ -579,7 +579,7 @@ const ImpersonateModal = ({ data, onClose }) => {
 
 // ── MembersPanel ──────────────────────────────────────────────────────────────
 const MembersPanel = ({ companyId }) => {
-  const { hasPermission, user: authUser } = useAuth();
+  const { hasPermission, user: authUser, canExport } = useAuth();
   const isSuperAdmin = authUser?.role === 'superadmin';
   const [users, setUsers]           = useState([]);
   const [loading, setLoading]       = useState(false);
@@ -701,7 +701,7 @@ const MembersPanel = ({ companyId }) => {
       <div className="flex items-center justify-between">
         <p className="text-sm text-text-secondary">{users.length} member{users.length !== 1 ? 's' : ''}</p>
         <div className="flex items-center gap-2">
-          {users.length > 0 && (
+          {users.length > 0 && canExport('company_data') && (
             <button onClick={handleExportMembers} disabled={exportLoading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>

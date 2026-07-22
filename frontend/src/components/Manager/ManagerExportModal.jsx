@@ -6,6 +6,7 @@ import client from '../../api/client';
 import { saleExportColumns, saleToRow } from '../Admin/BulkSaleUploader/saleColumnMapping';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
+import { useAuth } from '../../contexts/AuthContext';
 
 // CSV download (client-side, no row cap).
 function downloadCSV(rows, headers, filename) {
@@ -45,6 +46,7 @@ async function fetchAll(endpoint, baseParams, key, pageSize = 1000) {
 }
 
 const ManagerExportModal = ({ onClose, agents = [] }) => {
+  const { canExport } = useAuth();
   const [type, setType] = useState('sales');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -190,10 +192,12 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
 
         <div className="px-5 py-4 flex justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <button onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-semibold" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-          <button onClick={run} disabled={busy}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Export CSV
-          </button>
+          {canExport(type === 'users' ? 'company_data' : type) && (
+            <button onClick={run} disabled={busy}
+              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Export CSV
+            </button>
+          )}
         </div>
       </div>
     </div>,

@@ -3,6 +3,7 @@ import { Shield, ShieldAlert, ShieldCheck, HelpCircle, Play, Loader2, Download, 
 import { toast } from 'sonner';
 import client from '../../api/client';
 import DncLookupPanel from './DncLookupPanel';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Compliance bulk DNC: single lookup + "scan all sales" (cost-previewed, paced,
 // cached) + a filterable, exportable report of every sale's DNC verdict.
@@ -10,6 +11,7 @@ const fmtDate = (s) => { try { return s ? new Date(s).toLocaleDateString() : '';
 const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 export default function ComplianceDncReport() {
+  const { canExport } = useAuth();
   const [prep, setPrep] = useState(null);          // { distinct_phones, to_check }
   const [scanning, setScanning] = useState(false);
   const [scanProg, setScanProg] = useState(null);  // { done, total, blacklisted, good, failed }
@@ -149,9 +151,11 @@ export default function ComplianceDncReport() {
                 style={{ backgroundColor: filter === s ? STATUS_COLOR[s] : 'var(--color-bg-secondary)', color: filter === s ? '#fff' : 'var(--color-text-secondary)' }}>{s}</button>
             ))}
           </div>
+          {canExport('sales') && (
           <button onClick={exportCsv} disabled={exporting} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
             {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Export CSV
           </button>
+          )}
         </div>
         {rowsLoading ? (
           <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>

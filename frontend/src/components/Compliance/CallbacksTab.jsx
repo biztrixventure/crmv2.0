@@ -366,7 +366,7 @@ const AuditLogView = ({ companyList }) => {
 
 // ── Main CallbacksTab ──────────────────────────────────────────────────────────
 const CallbacksTab = ({ companyList }) => {
-  const { user, roControlAllowed, roFlag, isReadOnly } = useAuth();
+  const { user, roControlAllowed, roFlag, isReadOnly, canExport } = useAuth();
   const isSuper = user?.role === 'superadmin';
   const [mgBusy, setMgBusy]     = useState(false);
   const [mgStatus, setMgStatus] = useState('');
@@ -529,7 +529,7 @@ const CallbacksTab = ({ companyList }) => {
             ? undefined
             : 'Scheduled callbacks across all companies — read-only view'}
         onRefresh={view === 'callbacks' ? () => { setPage(1); load(); } : undefined}
-        onExport={view === 'callbacks' ? () => setExportOpen(true) : undefined}
+        onExport={view === 'callbacks' && canExport('callbacks') ? () => setExportOpen(true) : undefined}
         extra={
           <div className="flex gap-1 p-1 rounded-lg"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>

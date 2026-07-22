@@ -55,6 +55,7 @@ const ReviewsTab = ({ companyList }) => {
         title="Call Reviews"
         subtitle="Ratings and dispositions across all companies"
         onRefresh={load}
+        exportArea="reviews"
         onExport={() => setExportOpen(true)}
         extra={
           <div className="flex items-center gap-2">

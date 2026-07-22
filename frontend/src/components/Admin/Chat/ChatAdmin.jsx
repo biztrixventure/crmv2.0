@@ -110,7 +110,7 @@ const OverviewTab = ({ onOpenConversation, goto }) => {
 
 // ── Conversation viewer (read + moderate, with Members panel) ─────────────────
 const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
-  const { roControlAllowed } = useAuth();
+  const { roControlAllowed, canExport } = useAuth();
   const [tab, setTab] = useState('messages');
   const [detail, setDetail] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -169,7 +169,7 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
             ))}
           </div>
           {conv && <>
-            <Button size="sm" variant="secondary" onClick={exportTranscript} className="flex items-center gap-1.5"><Download size={13} /> Export</Button>
+            {canExport('chat') && <Button size="sm" variant="secondary" onClick={exportTranscript} className="flex items-center gap-1.5"><Download size={13} /> Export</Button>}
             <Button size="sm" variant="secondary" onClick={toggleLock} className="flex items-center gap-1.5">{conv.is_locked ? <Unlock size={13} /> : <Lock size={13} />}{conv.is_locked ? 'Unlock' : 'Lock'}</Button>
             {roControlAllowed('chat.delete_room') && (
               <Button size="sm" variant="danger" onClick={delRoom} className="flex items-center gap-1.5"><Trash2 size={13} /> Delete</Button>
