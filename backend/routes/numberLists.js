@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireFeature } = require('../utils/featureGate');
 const { hasPermission } = require('../models/helpers');
+const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope } = require('../utils/readonlyGovernance');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { titleCase } = require('../utils/titleCase');
 
@@ -84,6 +85,13 @@ router.get('/', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: false });
 
   if (isSuperAdmin(userRole)) {
+    // readonly_admin is grouped with superadmin here, but must be scoped to
+    // their allowed companies (server-enforced). null = unrestricted (true SA).
+    const roAllowed = await readonlyAllowedCompanyIds(req);
+    if (Array.isArray(roAllowed)) {
+      if (companyId && !companyInScope(roAllowed, companyId)) return res.status(403).json({ error: 'That company is outside your allowed scope.' });
+      if (!companyId) query = scopeToCompanies(query, roAllowed);
+    }
     // Superadmin: no forced company filter, but can pass one
     if (companyId) query = query.eq('company_id', companyId);
     if (fronter_id) query = query.eq('fronter_id', fronter_id);

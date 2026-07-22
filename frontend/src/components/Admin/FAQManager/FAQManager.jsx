@@ -8,6 +8,7 @@ import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useFaqs } from '../../../hooks/useFaqs';
 import SearchSettings from '../SearchSettings';
 import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -117,6 +118,7 @@ const StatTile = ({ label, value, color, active, onClick }) => (
 
 // ── Main manager (FAQs only) ─────────────────────────────────────────────────
 const FAQManager = () => {
+  const { roControlAllowed } = useAuth();
   const { faqs, loading, error, fetchFaqs, createFaq, updateFaq, deleteFaq } = useFaqs();
   const catHook = useCategories('faqs');
   const [search, setSearch]     = useState('');
@@ -152,9 +154,11 @@ const FAQManager = () => {
             </div>
             <p className="text-sm text-white/80 max-w-lg">Questions, answers, and keywords agents search during calls.</p>
           </div>
-          <Button variant="primary" onClick={() => setModal({ faq: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
-            <Plus size={16} /> Add FAQ
-          </Button>
+          {roControlAllowed('faqs.add') && (
+            <Button variant="primary" onClick={() => setModal({ faq: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
+              <Plus size={16} /> Add FAQ
+            </Button>
+          )}
         </div>
         <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
       </div>
@@ -169,7 +173,7 @@ const FAQManager = () => {
       </div>
 
       {/* Category filter + management */}
-      <CategoryFilterBar categories={catHook.categories} value={categoryId} onChange={setCategoryId} onManage={() => setCatModal(true)} />
+      <CategoryFilterBar categories={catHook.categories} value={categoryId} onChange={setCategoryId} onManage={roControlAllowed('faqs.categories') ? () => setCatModal(true) : undefined} />
 
       <form onSubmit={onSearch} className="relative">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -194,7 +198,9 @@ const FAQManager = () => {
         <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
           <HelpCircle size={44} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
           <p className="text-sm font-medium mb-3" style={{ color: 'var(--color-text)' }}>No FAQs yet.</p>
-          <Button variant="primary" onClick={() => setModal({ faq: null })} className="inline-flex items-center gap-1.5"><Plus size={15} /> Create your first FAQ</Button>
+          {roControlAllowed('faqs.add') && (
+            <Button variant="primary" onClick={() => setModal({ faq: null })} className="inline-flex items-center gap-1.5"><Plus size={15} /> Create your first FAQ</Button>
+          )}
         </div>
       ) : (
         <div className="space-y-2.5">

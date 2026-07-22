@@ -10,6 +10,7 @@ import SearchSettings from '../SearchSettings';
 import SectionsEditor from './SectionsEditor';
 import RichView from '../../UI/RichView';
 import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -123,6 +124,7 @@ const StatTile = ({ label, value, color, active, onClick }) => (
 
 // ── Main manager (standalone scripts) ────────────────────────────────────────
 const ScriptManager = () => {
+  const { roControlAllowed } = useAuth();
   const { scripts, loading, error, fetchScripts, createScript, updateScript, deleteScript } = useScripts();
   const catHook = useCategories('scripts');
   const [categoryId, setCategoryId] = useState('');
@@ -158,9 +160,11 @@ const ScriptManager = () => {
             </div>
             <p className="text-sm text-white/80 max-w-lg">Standalone call scripts agents read during calls, scoped by role.</p>
           </div>
-          <Button variant="primary" onClick={() => setModal({ script: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
-            <Plus size={16} /> Add Script
-          </Button>
+          {roControlAllowed('scripts.add') && (
+            <Button variant="primary" onClick={() => setModal({ script: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
+              <Plus size={16} /> Add Script
+            </Button>
+          )}
         </div>
         <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
       </div>
@@ -199,7 +203,9 @@ const ScriptManager = () => {
         <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
           <FileText size={44} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
           <p className="text-sm font-medium mb-3" style={{ color: 'var(--color-text)' }}>No scripts yet.</p>
-          <Button variant="primary" onClick={() => setModal({ script: null })} className="inline-flex items-center gap-1.5"><Plus size={15} /> Create your first script</Button>
+          {roControlAllowed('scripts.add') && (
+            <Button variant="primary" onClick={() => setModal({ script: null })} className="inline-flex items-center gap-1.5"><Plus size={15} /> Create your first script</Button>
+          )}
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -227,8 +233,12 @@ const ScriptManager = () => {
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                     <button onClick={() => updateScript(s.id, { is_active: !s.is_active })} title={s.is_active ? 'Hide from agents' : 'Show to agents'} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">{s.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
-                    <button onClick={() => setModal({ script: s })} title="Edit" className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                    <button onClick={() => setConfirm(s)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 transition-colors"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    {roControlAllowed('scripts.edit') && (
+                      <button onClick={() => setModal({ script: s })} title="Edit" className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
+                    )}
+                    {roControlAllowed('scripts.delete') && (
+                      <button onClick={() => setConfirm(s)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 transition-colors"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    )}
                   </div>
                 </div>
                 {open && (

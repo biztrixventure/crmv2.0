@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Zap, ZapOff, Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Building2, AlertTriangle } from 'lucide-react';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 import ThemedSelect from '../UI/Select';
 
 const CATEGORIES = ['core', 'operations', 'quality', 'analytics', 'admin', 'general'];
@@ -151,6 +152,7 @@ function CompanyRow({ company, flagKey, defaultEnabled, onToggle, toggling }) {
 }
 
 const FeatureFlagsManager = () => {
+  const { roControlAllowed } = useAuth();
   const [catalog,      setCatalog]      = useState([]);
   const [companies,    setCompanies]    = useState([]);
   const [loading,      setLoading]      = useState(true);
@@ -237,11 +239,13 @@ const FeatureFlagsManager = () => {
             Enable or disable features per company. Changes take effect immediately.
           </p>
         </div>
+        {roControlAllowed('features.add') && (
         <button onClick={() => { setShowCreate(true); setEditing(null); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
           style={{ background: 'var(--gradient-sidebar)' }}>
           <Plus size={13} /> New Flag
         </button>
+        )}
       </div>
 
       {error && (
@@ -316,14 +320,18 @@ const FeatureFlagsManager = () => {
                   {enabledCount}/{companies.length}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {roControlAllowed('features.edit') && (
                   <button onClick={() => { setEditing(isEditingThis ? null : flag); setShowCreate(false); }}
                     className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors" title="Edit">
                     <Pencil size={13} style={{ color: 'var(--color-text-tertiary)' }} />
                   </button>
+                  )}
+                  {roControlAllowed('features.delete') && (
                   <button onClick={() => setDeleteTarget(flag)}
                     className="p-1.5 rounded-lg hover:bg-error-50 transition-colors" title="Delete">
                     <Trash2 size={13} style={{ color: 'var(--color-error-500)' }} />
                   </button>
+                  )}
                   <button onClick={() => setExpanded(isExpanded ? null : flag.key)}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors"
                     style={{

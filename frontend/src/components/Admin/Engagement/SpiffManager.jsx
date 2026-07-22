@@ -202,6 +202,7 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
 };
 
 const SpiffManager = () => {
+  const { roControlAllowed } = useAuth();
   const { user } = useAuth();
   const [rows, setRows] = useState([]);
   const [reference, setReference] = useState({ roles: [], companies: [], users: [] });
@@ -230,7 +231,7 @@ const SpiffManager = () => {
           <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>SPIFF Campaigns</h2>
           <p className="text-sm text-white/80">Incentive competitions with live leaderboards.</p>
         </div></div>
-        <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>
+        {roControlAllowed('spiff.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>}
       </div>
 
       {error && <Alert type="error" message={error} />}
@@ -278,8 +279,8 @@ const SpiffManager = () => {
                         created, even when it targets their company — mirrors backend canTouch. */}
                     {(user?.role === 'superadmin' || !c.created_by_superadmin) ? (
                       <>
-                        <button onClick={() => setModal({ row: c })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                        <button onClick={() => setConfirm(c)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                        {roControlAllowed('spiff.edit') && <button onClick={() => setModal({ row: c })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>}
+                        {roControlAllowed('spiff.delete') && <button onClick={() => setConfirm(c)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>}
                       </>
                     ) : (
                       <span title="Created by a superadmin — only superadmins can edit or delete this campaign." className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>Locked</span>

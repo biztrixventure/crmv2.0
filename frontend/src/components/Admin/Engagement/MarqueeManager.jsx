@@ -6,6 +6,7 @@ import AudienceTargetPicker from './AudienceTargetPicker';
 import MarqueeStrip from '../../Engagement/MarqueeStrip';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const blank = { byline: '📢 NEWS:', content: '', speed: 'normal', bg_color: '#1e40af', text_color: '#ffffff', target_company_ids: [], target_roles: [], target_user_ids: [], starts_at: '', ends_at: '', is_active: true };
 
@@ -71,6 +72,7 @@ const Modal = ({ row, reference, onClose, onSave }) => {
 };
 
 const MarqueeManager = () => {
+  const { roControlAllowed } = useAuth();
   const [rows, setRows] = useState([]);
   const [reference, setReference] = useState({ roles: [], companies: [], users: [] });
   const [loading, setLoading] = useState(false);
@@ -92,7 +94,7 @@ const MarqueeManager = () => {
           <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Marquee</h2>
           <p className="text-sm text-white/80">Scrolling banners shown at the top of the app.</p>
         </div></div>
-        <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Marquee</Button>
+        {roControlAllowed('marquee.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Marquee</Button>}
       </div>
 
       {error && <Alert type="error" message={error} />}
@@ -111,8 +113,8 @@ const MarqueeManager = () => {
                 </span>
                 <div className="flex items-center gap-1">
                   <button onClick={() => toggle(m)} className="p-1.5 rounded hover:bg-bg-secondary">{m.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
-                  <button onClick={() => setModal({ row: m })} className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                  <button onClick={() => setConfirm(m)} className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                  {roControlAllowed('marquee.edit') && <button onClick={() => setModal({ row: m })} className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>}
+                  {roControlAllowed('marquee.delete') && <button onClick={() => setConfirm(m)} className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>}
                 </div>
               </div>
             </div>

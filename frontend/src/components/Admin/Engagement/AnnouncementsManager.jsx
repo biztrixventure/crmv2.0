@@ -7,6 +7,7 @@ import client from '../../../api/client';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -81,6 +82,7 @@ const Modal = ({ row, reference, onClose, onSave }) => {
 };
 
 const AnnouncementsManager = () => {
+  const { roControlAllowed } = useAuth();
   const [rows, setRows] = useState([]);
   const [reference, setReference] = useState({ roles: [], companies: [], users: [] });
   const [loading, setLoading] = useState(false);
@@ -111,7 +113,9 @@ const AnnouncementsManager = () => {
           <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Announcements</h2>
           <p className="text-sm text-white/80">Broadcast messages to everyone, roles, companies, or specific users.</p>
         </div></div>
-        <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Announcement</Button>
+        {roControlAllowed('announcements.add') && (
+          <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Announcement</Button>
+        )}
       </div>
 
       {error && <Alert type="error" message={error} />}
@@ -134,8 +138,12 @@ const AnnouncementsManager = () => {
                   <td className="px-4 py-3"><Badge variant={a.is_active ? 'success' : 'secondary'} size="sm">{a.is_active ? 'Active' : 'Off'}</Badge></td>
                   <td className="px-4 py-3"><div className="flex items-center gap-1">
                     <button onClick={() => toggle(a)} title={a.is_active ? 'Deactivate' : 'Activate'} className="p-1.5 rounded hover:bg-bg-secondary">{a.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
-                    <button onClick={() => setModal({ row: a })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                    <button onClick={() => setConfirm(a)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    {roControlAllowed('announcements.edit') && (
+                      <button onClick={() => setModal({ row: a })} title="Edit" className="p-1.5 rounded hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
+                    )}
+                    {roControlAllowed('announcements.delete') && (
+                      <button onClick={() => setConfirm(a)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    )}
                   </div></td>
                 </tr>
               ))}

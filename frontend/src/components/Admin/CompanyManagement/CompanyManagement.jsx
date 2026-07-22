@@ -6,6 +6,7 @@ import {
   ArrowUpDown, ChevronUp, ChevronDown, GripVertical,
 } from 'lucide-react';
 import { Alert } from '../../../components/UI';
+import { useAuth } from '../../../contexts/AuthContext';
 import { useCompanies } from '../../../hooks/useCompanies';
 import client from '../../../api/client';
 import CompanyModal from './CompanyModal';
@@ -26,6 +27,7 @@ const TYPE = {
 // adds the dnd handlers only when in custom-sort mode so name / date sort
 // stays static and accidental drags don't reorder a list the user can't save.
 const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onActivate, onDelete, draggable, dragHandlers }) => {
+  const { roControlAllowed } = useAuth();
   const ts = TYPE[company.company_type] || {};
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos,  setMenuPos]  = useState({ top: 0, left: 0 });
@@ -135,38 +137,44 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
           }}
           onClick={e => e.stopPropagation()}
         >
-          <button
-            onClick={() => { setMenuOpen(false); onEdit(company); }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-primary-50 transition-colors"
-            style={{ color: 'var(--color-primary-600)' }}
-          >
-            <Edit2 size={11} /> Edit
-          </button>
-          {company.is_active ? (
+          {roControlAllowed('companies.edit') && (
             <button
-              onClick={() => { setMenuOpen(false); if (window.confirm(`Deactivate "${company.name}"? All users will be deactivated.`)) onDeactivate(company.id); }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-warning-50 transition-colors"
-              style={{ color: 'var(--color-warning-600)' }}
+              onClick={() => { setMenuOpen(false); onEdit(company); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-primary-50 transition-colors"
+              style={{ color: 'var(--color-primary-600)' }}
             >
-              <XCircle size={11} /> Deactivate
-            </button>
-          ) : (
-            <button
-              onClick={() => { setMenuOpen(false); onActivate(company.id); }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-success-50 transition-colors"
-              style={{ color: 'var(--color-success-600)' }}
-            >
-              <CheckCircle size={11} /> Activate
+              <Edit2 size={11} /> Edit
             </button>
           )}
+          {roControlAllowed('companies.activate') && (
+            company.is_active ? (
+              <button
+                onClick={() => { setMenuOpen(false); if (window.confirm(`Deactivate "${company.name}"? All users will be deactivated.`)) onDeactivate(company.id); }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-warning-50 transition-colors"
+                style={{ color: 'var(--color-warning-600)' }}
+              >
+                <XCircle size={11} /> Deactivate
+              </button>
+            ) : (
+              <button
+                onClick={() => { setMenuOpen(false); onActivate(company.id); }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-success-50 transition-colors"
+                style={{ color: 'var(--color-success-600)' }}
+              >
+                <CheckCircle size={11} /> Activate
+              </button>
+            )
+          )}
           <div className="my-1 mx-3 h-px" style={{ backgroundColor: 'var(--color-border)' }} />
-          <button
-            onClick={() => { setMenuOpen(false); if (window.confirm(`PERMANENTLY DELETE "${company.name}"?\n\nThis removes the company and all its users.\n\nThis cannot be undone.`)) onDelete(company.id); }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-error-50 transition-colors"
-            style={{ color: 'var(--color-error-600)' }}
-          >
-            <Trash2 size={11} /> Delete
-          </button>
+          {roControlAllowed('companies.delete') && (
+            <button
+              onClick={() => { setMenuOpen(false); if (window.confirm(`PERMANENTLY DELETE "${company.name}"?\n\nThis removes the company and all its users.\n\nThis cannot be undone.`)) onDelete(company.id); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium hover:bg-error-50 transition-colors"
+              style={{ color: 'var(--color-error-600)' }}
+            >
+              <Trash2 size={11} /> Delete
+            </button>
+          )}
         </div>,
         document.body
       )}
@@ -245,6 +253,7 @@ const Chip = ({ active, onClick, children }) => (
 
 // ── CompanyManagement ──────────────────────────────────────────────────────────
 const CompanyManagement = () => {
+  const { roControlAllowed } = useAuth();
   const {
     companies, loading, error,
     fetchCompanies, createCompany, updateCompany,
@@ -419,13 +428,15 @@ const CompanyManagement = () => {
                   style={{ height: 28, borderColor: 'var(--color-border)' }}
                 />
               </div>
-              <button
-                onClick={() => setShowCreate(true)}
-                title="Add Company"
-                className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 transition-opacity hover:opacity-85"
-                style={{ background: 'var(--gradient-sidebar)' }}>
-                <Plus size={13} />
-              </button>
+              {roControlAllowed('companies.add') && (
+                <button
+                  onClick={() => setShowCreate(true)}
+                  title="Add Company"
+                  className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 transition-opacity hover:opacity-85"
+                  style={{ background: 'var(--gradient-sidebar)' }}>
+                  <Plus size={13} />
+                </button>
+              )}
             </div>
 
             {/* type filter */}
