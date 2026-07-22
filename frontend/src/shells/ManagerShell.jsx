@@ -611,7 +611,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
             <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
           <div className="flex items-center gap-2">
-            {isMgrActionVisible('export') && canExport() && (
+            {/* Export (transfers / sales / callbacks) is ALWAYS available to every
+                manager + team-lead role and is NOT gated by Data Egress — the
+                egress gate resolved async on /auth/me and made the button flash
+                in then vanish. It builds the CSV client-side from data the role
+                can already see. SuperAdmin can still hide it per-shell/role via
+                the shell-layout action toggle (isMgrActionVisible). */}
+            {isMgrActionVisible('export') && (
               <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
                 style={{ background: 'var(--gradient-sidebar)' }}>
                 <FileSpreadsheet size={16} /> Export
