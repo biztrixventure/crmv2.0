@@ -178,14 +178,39 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   const isMember = !!(await supabaseAdmin.from('team_members').select('id').eq('team_id', team.id).eq('user_id', req.user.id).maybeSingle()).data;
   if (!(await canManageCompany(req, team.company_id)) && !isLead && !isMember) return res.status(403).json({ error: 'Not allowed' });
   const from = req.query.from || null, to = req.query.to || null;
-  const ids = await resolveTeamMemberIds(team.id, { includeSub: true, companyId: team.company_id });
+  const includeSub = req.query.includeSub !== 'false';   // flexibility: this-team-only vs full rollup
+  const ids = await resolveTeamMemberIds(team.id, { includeSub, companyId: team.company_id });
   const report = await teamMetrics({ ids, companyId: team.company_id, from, to });
+
+  // Prior equal-length window → period-over-period momentum. Skipped when no
+  // range is given so we never trigger a full-history scan.
+  let previous = null, momentum = null;
+  if (from && to) {
+    const f = new Date(from), t2 = new Date(to);
+    const len = Math.max(1, Math.round((t2 - f) / 864e5) + 1);
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const pTo = new Date(f.getTime() - 864e5);
+    const pFrom = new Date(pTo.getTime() - (len - 1) * 864e5);
+    const prevRep = await teamMetrics({ ids, companyId: team.company_id, from: iso(pFrom), to: iso(pTo) });
+    previous = prevRep.totals;
+    const pct = (c, p) => (p > 0 ? +(100 * (c - p) / p).toFixed(1) : null);   // null = 'NEW' (no prior)
+    momentum = {
+      sales_pct:     pct(report.totals.sales, previous.sales),
+      gross_pct:     pct(report.totals.gross, previous.gross),
+      transfers_pct: pct(report.totals.transfers, previous.transfers),
+      mrr_pct:       pct(report.totals.mrr, previous.mrr),
+    };
+  }
+
   const goal = {
     monthly_sales: team.goal_monthly_sales ?? null, monthly_transfers: team.goal_monthly_transfers ?? null,
     sales_pct: team.goal_monthly_sales ? Math.round(100 * report.totals.sales / team.goal_monthly_sales) : null,
     transfers_pct: team.goal_monthly_transfers ? Math.round(100 * report.totals.transfers / team.goal_monthly_transfers) : null,
   };
-  res.json({ team: { id: team.id, name: team.name, team_type: team.team_type }, ...report, goal, member_count: ids.length });
+  res.json({
+    team: { id: team.id, name: team.name, team_type: team.team_type, lead_user_id: team.lead_user_id },
+    ...report, goal, previous, momentum, range: { from, to }, member_count: ids.length,
+  });
 }));
 
 // ── my team (for the Manager shell) ───────────────────────────────────────────

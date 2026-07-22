@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
+import TeamAnalytics from './TeamAnalytics';
 
 // ── Team structure + reporting (superadmin / company_admin / operations_manager)
 // Additive org layer: create teams per company, assign members, set goals, and
@@ -17,7 +18,6 @@ const TEAM_TYPES = [
   { k: 'mixed',    label: 'Mixed' },
 ];
 const TYPE_COLOR = { fronter: '#2563eb', closer: '#16a34a', mixed: '#9333ea', general: '#6b7280' };
-const money = (n) => `$${(Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const box = { backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' };
 
 export default function TeamManager() {
@@ -55,7 +55,6 @@ export default function TeamManager() {
   useEffect(() => { load(); }, [load]);
 
   const unassigned = useMemo(() => members.filter(m => !m.team_id), [members]);
-  const nameOf = useMemo(() => Object.fromEntries(members.map(m => [m.user_id, m.name])), [members]);
 
   const roots = teams.filter(t => !t.parent_team_id);
   const childrenOf = (id) => teams.filter(t => t.parent_team_id === id);
@@ -218,27 +217,16 @@ function TeamReport({ team, onClose }) {
   const [rep, setRep] = useState(null);
   const [range, setRange] = useState(30);
   useEffect(() => {
+    setRep(null);
     const to = new Date().toISOString().slice(0, 10);
     const from = new Date(Date.now() - range * 864e5).toISOString().slice(0, 10);
     client.get(`teams/${team.id}/report`, { params: { from, to } }).then(r => setRep(r.data)).catch(() => setRep({ error: true }));
   }, [team.id, range]);
-  const t = rep?.totals || {};
-  const Stat = ({ icon, label, value, color }) => (
-    <div className="rounded-xl p-3 text-center" style={{ ...box }}>
-      <div className="flex items-center justify-center gap-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</div>
-      <div className="text-xl font-extrabold mt-1" style={{ color: color || 'var(--color-text)' }}>{value}</div>
-    </div>
-  );
-  const bar = (pct) => (
-    <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-      <div style={{ width: `${Math.min(100, pct || 0)}%`, height: '100%', background: (pct || 0) >= 100 ? '#16a34a' : 'var(--gradient-sidebar)' }} />
-    </div>
-  );
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="rounded-2xl p-5 w-full max-w-2xl max-h-[88vh] overflow-auto space-y-4" style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
+      <div className="rounded-2xl p-5 w-full max-w-5xl max-h-[90vh] overflow-auto space-y-4" style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><BarChart3 size={18} /> {team.name} — progress</h3>
+          <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><BarChart3 size={18} /> {team.name} — analytics</h3>
           <div className="flex items-center gap-2">
             <select value={range} onChange={e => setRange(+e.target.value)} className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
               <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
@@ -246,49 +234,9 @@ function TeamReport({ team, onClose }) {
             <button onClick={onClose}><X size={18} /></button>
           </div>
         </div>
-        {!rep ? <p className="text-sm italic text-center py-6" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p> : rep.error ? <p className="text-sm text-center py-6" style={{ color: '#dc2626' }}>Failed to load report.</p> : (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              <Stat icon={<TrendingUp size={11} />} label="Transfers" value={t.transfers ?? 0} color="#2563eb" />
-              <Stat icon={<DollarSign size={11} />} label="Sales" value={t.sales ?? 0} color="#16a34a" />
-              <Stat icon={<DollarSign size={11} />} label="Gross" value={money(t.gross)} />
-              <Stat icon={<Phone size={11} />} label="Callbacks" value={t.callbacks ?? 0} />
-              <Stat icon={<Target size={11} />} label="Conversion" value={t.conversion != null ? `${t.conversion}%` : '—'} />
-            </div>
-
-            <TrendChart data={rep.trend} />
-
-            {(rep.goal?.monthly_sales || rep.goal?.monthly_transfers) && (
-              <div className="rounded-xl p-3 space-y-2" style={box}>
-                <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Goal progress</p>
-                {rep.goal.monthly_sales != null && <div><div className="flex justify-between text-xs mb-1"><span>Sales</span><span>{t.sales}/{rep.goal.monthly_sales} ({rep.goal.sales_pct}%)</span></div>{bar(rep.goal.sales_pct)}</div>}
-                {rep.goal.monthly_transfers != null && <div><div className="flex justify-between text-xs mb-1"><span>Transfers</span><span>{t.transfers}/{rep.goal.monthly_transfers} ({rep.goal.transfers_pct}%)</span></div>{bar(rep.goal.transfers_pct)}</div>}
-              </div>
-            )}
-
-            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-              <table className="w-full text-xs">
-                <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-                  {['#', 'Member', 'Transfers', 'Sales', 'Gross', 'Callbacks'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold">{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {(rep.members || []).map((m, i) => (
-                    <tr key={m.user_id} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                      <td className="px-3 py-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</td>
-                      <td className="px-3 py-1.5 font-semibold" style={{ color: 'var(--color-text)' }}>{m.name}</td>
-                      <td className="px-3 py-1.5">{m.transfers}</td>
-                      <td className="px-3 py-1.5">{m.sales}</td>
-                      <td className="px-3 py-1.5">{money(m.gross)}</td>
-                      <td className="px-3 py-1.5">{m.callbacks}</td>
-                    </tr>
-                  ))}
-                  {(rep.members || []).length === 0 && <tr><td colSpan={6} className="text-center py-4 italic" style={{ color: 'var(--color-text-tertiary)' }}>No members.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Includes nested sub-teams. Sales credited to the closer (won deals); transfers to the fronter; gross = down payment. Live from records.</p>
-          </>
-        )}
+        {!rep ? <p className="text-sm italic text-center py-6" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>
+          : rep.error ? <p className="text-sm text-center py-6" style={{ color: '#dc2626' }}>Failed to load report.</p>
+          : <TeamAnalytics report={rep} team={rep.team || team} />}
       </div>
     </div>
   );

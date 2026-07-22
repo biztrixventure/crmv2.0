@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
-import { TrendChart } from './TeamManager';
+import TeamAnalytics from './TeamAnalytics';
 
 // ── My Team — the TEAM LEAD's home. Land on your own team: live progress
 // (stats, trend, leaderboard, goals) + manage your roster & goals in one place.
@@ -118,67 +118,34 @@ export default function MyTeam() {
 
       {report?.error ? <p className="text-sm text-center py-4" style={{ color: '#dc2626' }}>Failed to load progress.</p> : (
         <>
-          {/* progress */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            <Stat icon={<TrendingUp size={11} />} label="Transfers" value={t.transfers ?? 0} color="#2563eb" />
-            <Stat icon={<DollarSign size={11} />} label="Sales" value={t.sales ?? 0} color="#16a34a" />
-            <Stat icon={<DollarSign size={11} />} label="Gross" value={money(t.gross)} />
-            <Stat icon={<Phone size={11} />} label="Callbacks" value={t.callbacks ?? 0} />
-            <Stat icon={<Target size={11} />} label="Conversion" value={t.conversion != null ? `${t.conversion}%` : '—'} />
-          </div>
+          <TeamAnalytics report={report} team={team} />
 
-          <TrendChart data={report?.trend} />
-
-          {(report?.goal?.monthly_sales || report?.goal?.monthly_transfers) && (
-            <div className="rounded-xl p-3 space-y-2" style={box}>
-              <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Goal progress</p>
-              {report.goal.monthly_sales != null && <div><div className="flex justify-between text-xs mb-1"><span>Sales</span><span>{t.sales}/{report.goal.monthly_sales} ({report.goal.sales_pct}%)</span></div>{bar(report.goal.sales_pct)}</div>}
-              {report.goal.monthly_transfers != null && <div><div className="flex justify-between text-xs mb-1"><span>Transfers</span><span>{t.transfers}/{report.goal.monthly_transfers} ({report.goal.transfers_pct}%)</span></div>{bar(report.goal.transfers_pct)}</div>}
+          {/* Lead-only roster management — UNMASKED management UI (not analysis),
+              so a lead can see/remove their real members and add unassigned ones. */}
+          {isLead && (
+            <div className="rounded-2xl p-4" style={box}>
+              <p className="text-[11px] font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}><Users size={12} /> Manage roster</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {(report?.members || []).map(m => (
+                  <span key={m.user_id} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
+                    {m.user_id === team.lead_user_id && <Crown size={10} style={{ color: '#d97706' }} />}{m.name}
+                    {m.user_id !== team.lead_user_id && <button onClick={() => removeMember(m.user_id)} title="Remove from team" className="hover:opacity-60" style={{ color: '#ef4444' }}><X size={11} /></button>}
+                  </span>
+                ))}
+                {(report?.members || []).length === 0 && <span className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No members yet.</span>}
+              </div>
+              <p className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Add members ({unassigned.length} unassigned)</p>
+              {unassigned.length === 0 ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Everyone in the company is on a team.</p> : (
+                <div className="flex flex-wrap gap-1.5">
+                  {unassigned.map(m => (
+                    <button key={m.user_id} onClick={() => addMember(m.user_id)} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary-600)' }}>
+                      <UserPlus size={11} /> {m.name}<span className="opacity-60">· {(m.role || '').replace(/_/g, ' ')}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-
-          {/* leaderboard */}
-          <div className="rounded-2xl p-4" style={box}>
-            <p className="text-[11px] font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}><Award size={12} /> Member leaderboard</p>
-            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-              <table className="w-full text-xs">
-                <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-                  {['#', 'Member', 'Transfers', 'Sales', 'Gross', 'Callbacks', ...(isLead ? [''] : [])].map((h, i) => <th key={i} className="text-left px-3 py-2 font-semibold">{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {(report?.members || []).map((m, i) => (
-                    <tr key={m.user_id} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                      <td className="px-3 py-1.5"><span style={{ color: MEDAL[i] || 'var(--color-text-tertiary)', fontWeight: i < 3 ? 800 : 400 }}>{i + 1}</span></td>
-                      <td className="px-3 py-1.5 font-semibold" style={{ color: 'var(--color-text)' }}>{m.name}</td>
-                      <td className="px-3 py-1.5">{m.transfers}</td>
-                      <td className="px-3 py-1.5">{m.sales}</td>
-                      <td className="px-3 py-1.5">{money(m.gross)}</td>
-                      <td className="px-3 py-1.5">{m.callbacks}</td>
-                      {isLead && <td className="px-3 py-1.5"><button onClick={() => removeMember(m.user_id)} title="Remove from team" className="hover:opacity-60" style={{ color: '#ef4444' }}><X size={13} /></button></td>}
-                    </tr>
-                  ))}
-                  {(report?.members || []).length === 0 && <tr><td colSpan={isLead ? 7 : 6} className="text-center py-4 italic" style={{ color: 'var(--color-text-tertiary)' }}>No members yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-
-            {/* add members (lead only) */}
-            {isLead && (
-              <div className="mt-3">
-                <p className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Add members ({unassigned.length} unassigned)</p>
-                {unassigned.length === 0 ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Everyone in the company is on a team.</p> : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {unassigned.map(m => (
-                      <button key={m.user_id} onClick={() => addMember(m.user_id)} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary-600)' }}>
-                        <UserPlus size={11} /> {m.name}<span className="opacity-60">· {(m.role || '').replace(/_/g, ' ')}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Live from records — sales credited to the closer (won deals), transfers to the fronter, gross = down payment. Includes nested sub-teams.</p>
         </>
       )}
 
