@@ -590,14 +590,6 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   return (
     <div className="animate-fade-in space-y-3">
 
-      {isReadOnly && roFlag('show_readonly_badge') && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
-          style={{ backgroundColor: 'var(--color-warning-50)', border: '1px solid var(--color-warning-200)', color: 'var(--color-warning-700)' }}>
-          <Shield size={13} />
-          Read-only admin — view only, no modifications.
-        </div>
-      )}
-
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>

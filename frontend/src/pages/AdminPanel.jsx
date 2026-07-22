@@ -53,7 +53,7 @@ import DotGridBg from "../components/UI/DotGridBg";
 // AdminPanel — main component
 // ============================================================================
 const AdminPanel = () => {
-  const { user, logout, hasPermission, roTabAllowed, roNoCopy } = useAuth();
+  const { user, logout, hasPermission, roTabAllowed, roNoCopy, roFlag } = useAuth();
   const rootRef = useRef(null);
   const { isEnabled } = useFeatureFlags();
   const { theme, toggleTheme } = useTheme();
@@ -181,6 +181,15 @@ const AdminPanel = () => {
               const wrap = 'px-4 sm:px-6 lg:px-8 py-5 w-full';
               return (
                 <div className={wrap}>
+                  {/* One read-only alert on EVERY admin tab, toggleable by the
+                      SuperAdmin (show_readonly_badge). When off, no banner shows. */}
+                  {isReadOnly && roFlag('show_readonly_badge') && (
+                    <div className="flex items-center gap-2 px-3 py-2 mb-3 rounded-lg text-xs font-medium"
+                      style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-200, #fde68a)', color: 'var(--color-warning-700, #b45309)' }}>
+                      <span aria-hidden>🔒</span>
+                      Read-only admin — view only, no modifications.
+                    </div>
+                  )}
                   {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
                   {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
                   {activeTab === "sale-search" && <LeadIntelligence />}

@@ -21,7 +21,7 @@ const daysUntil = (dueStr) => {
 };
 
 export default function PaymentRemindersPanel() {
-  const { user } = useAuth();
+  const { user, roControlAllowed } = useAuth();
   const role = user?.role;
   const isCompliance = role === 'compliance_manager';
   const isSuper = role === 'superadmin';
@@ -184,19 +184,23 @@ export default function PaymentRemindersPanel() {
                       <div className="flex items-center gap-1.5 justify-end flex-wrap">
                         {!isCompliance && r.status !== 'cancelled' && (
                           <>
-                            <button disabled={busy === r.id} onClick={() => act(r.id, 'collected')}
-                              className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50"
-                              style={{ backgroundColor: 'var(--color-success-600)', color: '#fff' }}>
-                              <CheckCircle size={12} /> Collected
-                            </button>
-                            <button disabled={busy === r.id} onClick={() => act(r.id, 'at_risk')}
-                              className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 border disabled:opacity-50"
-                              style={{ borderColor: '#dc2626', color: '#dc2626' }}>
-                              <AlertTriangle size={12} /> At risk
-                            </button>
+                            {roControlAllowed('payments.mark_collected') && (
+                              <button disabled={busy === r.id} onClick={() => act(r.id, 'collected')}
+                                className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50"
+                                style={{ backgroundColor: 'var(--color-success-600)', color: '#fff' }}>
+                                <CheckCircle size={12} /> Collected
+                              </button>
+                            )}
+                            {roControlAllowed('payments.mark_at_risk') && (
+                              <button disabled={busy === r.id} onClick={() => act(r.id, 'at_risk')}
+                                className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 border disabled:opacity-50"
+                                style={{ borderColor: '#dc2626', color: '#dc2626' }}>
+                                <AlertTriangle size={12} /> At risk
+                              </button>
+                            )}
                           </>
                         )}
-                        {isCompliance && r.status !== 'cancelled' && (
+                        {isCompliance && r.status !== 'cancelled' && roControlAllowed('payments.cancel_policy') && (
                           <button disabled={busy === r.id} onClick={() => act(r.id, 'cancelled')}
                             className="text-[11px] font-semibold px-2 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50"
                             style={{ backgroundColor: '#dc2626', color: '#fff' }}>
@@ -260,26 +264,32 @@ export default function PaymentRemindersPanel() {
                 <div className="flex flex-wrap gap-2">
                   {!isCompliance && (
                     <>
-                      <button disabled={busy === selected.id} onClick={() => act(selected.id, 'collected', noteText)}
-                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-success-600)' }}>
-                        <CheckCircle size={14} /> Payment collected
-                      </button>
-                      <button disabled={busy === selected.id} onClick={() => act(selected.id, 'at_risk', noteText)}
-                        className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 border disabled:opacity-50" style={{ borderColor: '#dc2626', color: '#dc2626' }}>
-                        <AlertTriangle size={14} /> Couldn't collect
-                      </button>
+                      {roControlAllowed('payments.mark_collected') && (
+                        <button disabled={busy === selected.id} onClick={() => act(selected.id, 'collected', noteText)}
+                          className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: 'var(--color-success-600)' }}>
+                          <CheckCircle size={14} /> Payment collected
+                        </button>
+                      )}
+                      {roControlAllowed('payments.mark_at_risk') && (
+                        <button disabled={busy === selected.id} onClick={() => act(selected.id, 'at_risk', noteText)}
+                          className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 border disabled:opacity-50" style={{ borderColor: '#dc2626', color: '#dc2626' }}>
+                          <AlertTriangle size={14} /> Couldn't collect
+                        </button>
+                      )}
                     </>
                   )}
-                  {(isCompliance || isSuper) && (
+                  {(isCompliance || isSuper) && roControlAllowed('payments.cancel_policy') && (
                     <button disabled={busy === selected.id} onClick={() => act(selected.id, 'cancelled', noteText)}
                       className="flex-1 text-sm font-bold px-3 py-2 rounded-lg inline-flex items-center justify-center gap-1 text-white disabled:opacity-50" style={{ backgroundColor: '#dc2626' }}>
                       <XCircle size={14} /> Cancel policy
                     </button>
                   )}
-                  <button disabled={busy === selected.id} onClick={() => act(selected.id, undefined, noteText)}
-                    className="text-sm font-semibold px-3 py-2 rounded-lg border disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    Save note
-                  </button>
+                  {roControlAllowed('payments.save_note') && (
+                    <button disabled={busy === selected.id} onClick={() => act(selected.id, undefined, noteText)}
+                      className="text-sm font-semibold px-3 py-2 rounded-lg border disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                      Save note
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -299,6 +309,7 @@ const Row = ({ label, value }) => (
 
 // ── Superadmin settings (window / offsets / notify roles / enable) ───────────
 function SuperSettings({ onSaved }) {
+  const { roControlAllowed } = useAuth();
   const [open, setOpen] = useState(false);
   const [cfg, setCfg]   = useState(null);
   const [saved, setSaved] = useState(false);
@@ -394,9 +405,11 @@ function SuperSettings({ onSaved }) {
               ))}
             </div>
           </div>
-          <button onClick={save} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: 'var(--gradient-sidebar)' }}>
-            {saved ? 'Saved ✓' : 'Save settings'}
-          </button>
+          {roControlAllowed('payments.save_settings') && (
+            <button onClick={save} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: 'var(--gradient-sidebar)' }}>
+              {saved ? 'Saved ✓' : 'Save settings'}
+            </button>
+          )}
         </div>
       )}
     </div>

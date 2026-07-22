@@ -3,11 +3,14 @@ import { Headphones, Plus, Trash2, Pencil, X, History, Power, Loader2, Check, Se
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 
 // ── Superadmin: manage external client logins for the recording portal ───────
 export default function ClientPortalTab() {
+  const { roControlAllowed } = useAuth();
+  const canManageClients = roControlAllowed('chat.client_login');
   const [clients, setClients] = useState(null);
   const [closers, setClosers] = useState([]);
   const [editing, setEditing] = useState(null);   // client obj or 'new'
@@ -85,9 +88,11 @@ export default function ClientPortalTab() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button onClick={() => setEditing('new')} variant="primary" className="text-sm">
-            <Plus size={15} className="inline mr-1" /> New client
-          </Button>
+          {canManageClients && (
+            <Button onClick={() => setEditing('new')} variant="primary" className="text-sm">
+              <Plus size={15} className="inline mr-1" /> New client
+            </Button>
+          )}
         </div>
       </div>
 
@@ -201,9 +206,13 @@ export default function ClientPortalTab() {
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => setAuditFor(c)} title="Listen history" className="p-2 rounded-lg hover:bg-bg-secondary"><History size={15} style={{ color: 'var(--color-text-secondary)' }} /></button>
-                <button onClick={() => toggle(c)} title={c.is_active ? 'Disable' : 'Enable'} className="p-2 rounded-lg hover:bg-bg-secondary"><Power size={15} style={{ color: c.is_active ? 'var(--color-success-600)' : 'var(--color-text-tertiary)' }} /></button>
+                {canManageClients && (
+                  <button onClick={() => toggle(c)} title={c.is_active ? 'Disable' : 'Enable'} className="p-2 rounded-lg hover:bg-bg-secondary"><Power size={15} style={{ color: c.is_active ? 'var(--color-success-600)' : 'var(--color-text-tertiary)' }} /></button>
+                )}
                 <button onClick={() => setEditing(c)} title="Edit" className="p-2 rounded-lg hover:bg-bg-secondary"><Pencil size={15} style={{ color: 'var(--color-text-secondary)' }} /></button>
-                <button onClick={() => del(c)} title="Delete" className="p-2 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                {canManageClients && (
+                  <button onClick={() => del(c)} title="Delete" className="p-2 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                )}
               </div>
             </div>
           ))}

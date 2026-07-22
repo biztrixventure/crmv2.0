@@ -35,7 +35,7 @@ import {
 } from './shared';
 
 const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
-  const { user } = useAuth();
+  const { user, roControlAllowed, roFlag, isReadOnly } = useAuth();
   const isSuper      = user?.role === 'superadmin';
   const isCompliance = user?.role === 'compliance_manager';
   const canReject    = isSuper || isCompliance;
@@ -187,7 +187,11 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
     <div>
       <TabHeader
         title="All Transfers"
-        subtitle={isSuper ? 'Lead transfers across all companies — open a record to edit status or delete' : 'Read-only view of lead transfers across all companies'}
+        subtitle={isSuper
+          ? 'Lead transfers across all companies — open a record to edit status or delete'
+          : (isReadOnly && !roFlag('show_readonly_badge'))
+            ? undefined
+            : 'Read-only view of lead transfers across all companies'}
         onRefresh={() => { setPage(1); load(); }}
         onExport={() => setExportOpen(true)}
         extra={<FetchAllDisposButton onDone={() => { setPage(1); load(); }} />}
@@ -470,7 +474,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
               {/* Compliance + superadmin can edit form_data directly. Backend
                   records the supplied reason on the transfer's edit_history
                   audit blob so the review trail stays intact. */}
-              {canReject && detail.record_type !== 'duplicate_refresh' && (
+              {canReject && roControlAllowed('cc-transfers.edit') && detail.record_type !== 'duplicate_refresh' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Compliance — edit transfer</p>
                   <button onClick={() => setEditOpen(true)} disabled={mgBusy || fieldsLoading}
@@ -483,7 +487,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
               {/* Compliance + superadmin can reject the transfer with a reason.
                   Backend route routes the notification through the same path
                   a closer-side reject uses, so the fronter sees one bell. */}
-              {canReject && detail.record_type !== 'duplicate_refresh' && detail.status !== 'rejected' && detail.status !== 'cancelled' && (
+              {canReject && roControlAllowed('cc-transfers.reject') && detail.record_type !== 'duplicate_refresh' && detail.status !== 'rejected' && detail.status !== 'cancelled' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: '#fff5f5', border: '1px solid #fecaca' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#b91c1c' }}>Compliance — reject transfer</p>
                   {!rejectOpen ? (
@@ -513,7 +517,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   )}
                 </div>
               )}
-              {isSuper && detail.record_type !== 'duplicate_refresh' && (
+              {isSuper && roControlAllowed('cc-transfers.set_status') && detail.record_type !== 'duplicate_refresh' && (
                 <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
                   <div className="flex items-center gap-2 flex-wrap">

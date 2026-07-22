@@ -110,6 +110,7 @@ const OverviewTab = ({ onOpenConversation, goto }) => {
 
 // ── Conversation viewer (read + moderate, with Members panel) ─────────────────
 const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
+  const { roControlAllowed } = useAuth();
   const [tab, setTab] = useState('messages');
   const [detail, setDetail] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -170,7 +171,9 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
           {conv && <>
             <Button size="sm" variant="secondary" onClick={exportTranscript} className="flex items-center gap-1.5"><Download size={13} /> Export</Button>
             <Button size="sm" variant="secondary" onClick={toggleLock} className="flex items-center gap-1.5">{conv.is_locked ? <Unlock size={13} /> : <Lock size={13} />}{conv.is_locked ? 'Unlock' : 'Lock'}</Button>
-            <Button size="sm" variant="danger" onClick={delRoom} className="flex items-center gap-1.5"><Trash2 size={13} /> Delete</Button>
+            {roControlAllowed('chat.delete_room') && (
+              <Button size="sm" variant="danger" onClick={delRoom} className="flex items-center gap-1.5"><Trash2 size={13} /> Delete</Button>
+            )}
           </>}
         </div>
 
@@ -186,7 +189,7 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
                         {m.body}{m.deleted && <span className="ml-1 text-xs">(deleted{m.deleted_by_name ? ` by ${m.deleted_by_name}` : ''})</span>}
                       </p>
                     </div>
-                    {!m.deleted && (
+                    {!m.deleted && roControlAllowed('chat.delete_message') && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                         <button onClick={() => editMsg(m)} title="Edit message" className="p-1 rounded hover:bg-bg-secondary"><Pencil size={13} style={{ color: 'var(--color-primary-600)' }} /></button>
                         <button onClick={() => delMsg(m.id)} title="Delete message" className="p-1 rounded hover:bg-error-50"><Trash2 size={13} style={{ color: '#ef4444' }} /></button>
@@ -209,7 +212,9 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
                     <p className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>{[m.role, m.company].filter(Boolean).join(' · ') || '—'} · last read {m.last_read_at ? fmt(m.last_read_at) : 'never'}</p>
                   </div>
                   <button onClick={() => muteMember(m)} title={m.is_muted ? 'Unmute' : 'Mute'} className="p-1.5 rounded-lg hover:bg-bg-secondary">{m.is_muted ? <Volume2 size={15} style={{ color: 'var(--color-success-600)' }} /> : <VolumeX size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
-                  <button onClick={() => removeMember(m)} title="Remove from room" className="p-1.5 rounded-lg hover:bg-error-50"><UserMinus size={15} style={{ color: '#ef4444' }} /></button>
+                  {roControlAllowed('chat.remove_member') && (
+                    <button onClick={() => removeMember(m)} title="Remove from room" className="p-1.5 rounded-lg hover:bg-error-50"><UserMinus size={15} style={{ color: '#ef4444' }} /></button>
+                  )}
                 </div>
               ))}
             </div>
@@ -399,6 +404,7 @@ const SearchTab = ({ setOpenId }) => {
 
 // ── Users (ban/unban) ─────────────────────────────────────────────────────────
 const UsersTab = () => {
+  const { roControlAllowed } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
@@ -431,9 +437,9 @@ const UsersTab = () => {
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{u.role || '—'}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{u.company || '—'}</td>
                   <td className="px-4 py-3">{u.is_chat_banned ? <Badge variant="error" size="sm">Banned</Badge> : <Badge variant="success" size="sm">Active</Badge>}</td>
-                  <td className="px-4 py-3">{u.is_chat_banned
+                  <td className="px-4 py-3">{roControlAllowed('chat.ban_user') && (u.is_chat_banned
                     ? <Button size="sm" variant="secondary" onClick={() => unban(u)} className="flex items-center gap-1.5"><RotateCcw size={13} /> Unban</Button>
-                    : <Button size="sm" variant="danger" onClick={() => ban(u)} className="flex items-center gap-1.5"><Ban size={13} /> Ban</Button>}</td>
+                    : <Button size="sm" variant="danger" onClick={() => ban(u)} className="flex items-center gap-1.5"><Ban size={13} /> Ban</Button>)}</td>
                 </tr>
               ))}
             </tbody>
@@ -446,7 +452,7 @@ const UsersTab = () => {
 
 // ── Broadcast ───────────────────────────────────────────────────────────────
 const BroadcastTab = () => {
-  const { user } = useAuth();
+  const { user, roControlAllowed } = useAuth();
   const [reference, setReference] = useState({ roles: [], companies: [] });
   const [form, setForm] = useState({ title: '', target_type: 'all', target_company_ids: [], target_roles: [] });
   const [msg, setMsg] = useState(null);
@@ -519,7 +525,7 @@ const BroadcastTab = () => {
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Message *</label>
           <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-            <Composer onSend={send} meId={user?.id} members={[]} />
+            {roControlAllowed('chat.broadcast') && <Composer onSend={send} meId={user?.id} members={[]} />}
           </div>
           <p className="text-[11px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Bold/italic, lists, links, and inline images supported. Press Send to broadcast.</p>
         </div>
@@ -691,7 +697,7 @@ const CompaniesTab = () => {
 };
 
 // ── Guest (outsider) chat links ───────────────────────────────────────────────
-const GuestLinkRow = ({ g, group, onToggle, onDelete }) => {
+const GuestLinkRow = ({ g, group, onToggle, onDelete, canManage = true }) => {
   const [copied, setCopied] = useState(false);
   const url = `${window.location.origin}/guest/${g.token}`;
   const copy = () => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); };
@@ -712,14 +718,18 @@ const GuestLinkRow = ({ g, group, onToggle, onDelete }) => {
       <button onClick={() => onToggle(g)} title={g.is_active ? 'Disable link' : 'Enable link'} className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
         <Power size={14} style={{ color: g.is_active ? '#b91c1c' : '#059669' }} />
       </button>
-      <button onClick={() => onDelete(g)} title="Delete" className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-        <Trash2 size={14} style={{ color: '#b91c1c' }} />
-      </button>
+      {canManage && (
+        <button onClick={() => onDelete(g)} title="Delete" className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+          <Trash2 size={14} style={{ color: '#b91c1c' }} />
+        </button>
+      )}
     </div>
   );
 };
 
 const GuestsTab = () => {
+  const { roControlAllowed } = useAuth();
+  const canManageGuests = roControlAllowed('chat.guest_link');
   const [guests, setGuests] = useState([]);
   const [groups, setGroups] = useState([]);
   const [name, setName] = useState('');
@@ -765,7 +775,7 @@ const GuestsTab = () => {
             <option value="">Pick a group…</option>
             {groups.map(g => <option key={g.id} value={g.id}>{convName(g)}</option>)}
           </ThemedSelect>
-          <Button onClick={create} disabled={creating} className="whitespace-nowrap">{creating ? 'Creating…' : 'Create link'}</Button>
+          {canManageGuests && <Button onClick={create} disabled={creating} className="whitespace-nowrap">{creating ? 'Creating…' : 'Create link'}</Button>}
         </div>
         <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
           The guest opens the link and only sees this one group's chat — no search, no other groups. Disable any time to kill the link; re-enable to restore it (same URL).
@@ -775,7 +785,7 @@ const GuestsTab = () => {
       <div className="space-y-2">
         {guests.length === 0
           ? <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>No guest links yet.</p>
-          : guests.map(g => <GuestLinkRow key={g.id} g={g} group={groupName(g.conversation_id)} onToggle={toggle} onDelete={del} />)}
+          : guests.map(g => <GuestLinkRow key={g.id} g={g} group={groupName(g.conversation_id)} onToggle={toggle} onDelete={del} canManage={canManageGuests} />)}
       </div>
     </div>
   );

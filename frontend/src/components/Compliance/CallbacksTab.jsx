@@ -365,7 +365,7 @@ const AuditLogView = ({ companyList }) => {
 
 // ── Main CallbacksTab ──────────────────────────────────────────────────────────
 const CallbacksTab = ({ companyList }) => {
-  const { user } = useAuth();
+  const { user, roControlAllowed, roFlag, isReadOnly } = useAuth();
   const isSuper = user?.role === 'superadmin';
   const [mgBusy, setMgBusy]     = useState(false);
   const [mgStatus, setMgStatus] = useState('');
@@ -522,7 +522,11 @@ const CallbacksTab = ({ companyList }) => {
     <div>
       <TabHeader
         title="Callbacks"
-        subtitle={isSuper ? 'Scheduled callbacks across all companies — open a record to edit status or delete' : 'Scheduled callbacks across all companies — read-only view'}
+        subtitle={isSuper
+          ? 'Scheduled callbacks across all companies — open a record to edit status or delete'
+          : (isReadOnly && !roFlag('show_readonly_badge'))
+            ? undefined
+            : 'Scheduled callbacks across all companies — read-only view'}
         onRefresh={view === 'callbacks' ? () => { setPage(1); load(); } : undefined}
         onExport={view === 'callbacks' ? () => setExportOpen(true) : undefined}
         extra={
@@ -782,7 +786,7 @@ const CallbacksTab = ({ companyList }) => {
                 </section>
               </div>
               <div className="px-6 pb-6 pt-3 flex-shrink-0 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-                {isSuper && (
+                {isSuper && roControlAllowed('cc-callbacks.set_status') && (
                   <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                     <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-primary-700)' }}>Superadmin — manage (any company)</p>
                     <div className="flex items-center gap-2 flex-wrap">

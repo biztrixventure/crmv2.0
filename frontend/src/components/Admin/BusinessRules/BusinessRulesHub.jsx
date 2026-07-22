@@ -14,6 +14,7 @@ import SystemRules from './SystemRules';
 import BatchRules from './BatchRules';
 import SaleHighlightRules from './SaleHighlightRules';
 import ThemedSelect from '../../UI/Select';
+import { useAuth } from '../../../contexts/AuthContext';
 
 // ── Sub-page registry ────────────────────────────────────────────────────────
 // Each sub-page receives { config, companies, scope, onSave, onReset } so it
@@ -36,6 +37,7 @@ const PAGES = [
 ];
 
 const BusinessRulesHub = () => {
+  const { roControlAllowed } = useAuth();
   const [pageId, setPageId]     = useState('resell');
   const [scope, setScope]       = useState('global');  // 'global' | 'company:<uuid>'
   const [companies, setCompanies] = useState([]);
@@ -150,18 +152,22 @@ const BusinessRulesHub = () => {
           </ThemedSelect>
           {scope !== 'global' && (
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => handleCloneGlobals(false)}
-                title="Copy every global default into this company (skips existing overrides)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
-                style={{ background: 'var(--gradient-sidebar)', color: 'white', minHeight: 36 }}>
-                <Copy size={12} /> Clone globals
-              </button>
-              <button type="button" onClick={() => handleCloneGlobals(true)}
-                title="Overwrite every company setting with global defaults (destructive)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all border"
-                style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)', minHeight: 36 }}>
-                Reset all
-              </button>
+              {roControlAllowed('business-rules.clone_globals') && (
+                <button type="button" onClick={() => handleCloneGlobals(false)}
+                  title="Copy every global default into this company (skips existing overrides)"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                  style={{ background: 'var(--gradient-sidebar)', color: 'white', minHeight: 36 }}>
+                  <Copy size={12} /> Clone globals
+                </button>
+              )}
+              {roControlAllowed('business-rules.reset_all') && (
+                <button type="button" onClick={() => handleCloneGlobals(true)}
+                  title="Overwrite every company setting with global defaults (destructive)"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-all border"
+                  style={{ borderColor: 'var(--color-error-300, #fca5a5)', color: 'var(--color-error-700, #b91c1c)', backgroundColor: 'var(--color-error-50, #fef2f2)', minHeight: 36 }}>
+                  Reset all
+                </button>
+              )}
             </div>
           )}
           {savingMsg && (

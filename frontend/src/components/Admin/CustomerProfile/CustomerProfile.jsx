@@ -325,6 +325,7 @@ function TimelineSection({ uuid }) {
 }
 
 function NotesSection({ uuid }) {
+  const { roControlAllowed } = useAuth();
   const [notes, setNotes] = useState(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -342,6 +343,7 @@ function NotesSection({ uuid }) {
   const pin = async (n) => { try { await client.patch(`customer-profile/${uuid}/notes/${n.id}`, { pinned: !n.pinned }); load(); } catch { /* ignore */ } };
   return (
     <Section title="Notes" icon={StickyNote} count={notes?.length} hint="Internal notes on this customer — anyone with profile access can read/add">
+      {roControlAllowed('customer-profiles.add_note') && (
       <div className="px-2 pb-2 flex gap-2">
         <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
           placeholder="Add a note…" className="flex-1 input text-sm py-1.5" />
@@ -350,6 +352,7 @@ function NotesSection({ uuid }) {
           <Plus size={13} /> Add
         </button>
       </div>
+      )}
       {notes == null ? <Empty>Loading…</Empty> : notes.length === 0 ? <Empty>No notes yet</Empty> : notes.map(n => (
         <div key={n.id} className="px-2 py-2 group" style={{ borderTop: '1px solid var(--color-border)' }}>
           <div className="flex items-start justify-between gap-2">
@@ -358,7 +361,9 @@ function NotesSection({ uuid }) {
             </p>
             <span className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
               <button onClick={() => pin(n)} title={n.pinned ? 'Unpin' : 'Pin'}><Pin size={13} style={{ color: n.pinned ? '#f59e0b' : 'var(--color-text-tertiary)' }} /></button>
-              <button onClick={() => del(n.id)} title="Delete"><Trash2 size={13} style={{ color: '#dc2626' }} /></button>
+              {roControlAllowed('customer-profiles.delete_note') && (
+                <button onClick={() => del(n.id)} title="Delete"><Trash2 size={13} style={{ color: '#dc2626' }} /></button>
+              )}
             </span>
           </div>
           <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{n.author_name} · {fmtDateTimeET(n.created_at)}</span>
@@ -381,7 +386,7 @@ function CopyBtn({ text, label }) {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 export default function CustomerProfile() {
-  const { roExportAllowed } = useAuth();
+  const { roExportAllowed, roControlAllowed } = useAuth();
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [results, setResults] = useState([]);
@@ -453,7 +458,7 @@ export default function CustomerProfile() {
             </div>
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {identity.phone && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone} /><NumberRiskCheck phone={identity.phone} /></span>}
+            {identity.phone && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone} />{roControlAllowed('customer-profiles.risk_check') && <NumberRiskCheck phone={identity.phone} />}</span>}
             {identity.phone_2 && <span className="flex items-center gap-1.5"><Phone size={13} /><CopyableNumber value={identity.phone_2} /></span>}
             {identity.email && <span className="flex items-center gap-1.5"><Mail size={13} />{identity.email}</span>}
             {identity.address && <Tip text={identity.address} className="cursor-help max-w-full"><span className="flex items-center gap-1.5 truncate"><MapPin size={13} />{identity.address}</span></Tip>}

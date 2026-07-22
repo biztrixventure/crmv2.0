@@ -44,7 +44,7 @@ const statusUpdatedAt = (s) => {
 };
 
 const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
-  const { user, isReadOnly } = useAuth();
+  const { user, isReadOnly, roControlAllowed } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
   // Workflow drives the dropdowns, labels, and badge colors. labelOf/badgeOf
   // gracefully fall back to a humanized key / 'secondary' so existing records
@@ -446,7 +446,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       )}
                       <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 flex-wrap justify-end">
-                          {isPostDate && !isReadOnly && (
+                          {isPostDate && !isReadOnly && roControlAllowed('cc-sales.charge') && (
                             <button onClick={() => chargeSale(s)} disabled={charging === s.id}
                               title="Charge the card and move this to All Sales for approval"
                               className="px-2 py-1 rounded-md text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
@@ -460,16 +460,20 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           {!isPostDate && (s.status === 'pending_review' ? (
                             !isReadOnly && (
                               <>
-                                <button onClick={() => approve(s)} disabled={approving === s.id}
-                                  className="px-2 py-1 rounded-md text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
-                                  style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
-                                  {approving === s.id ? '…' : 'Approve'}
-                                </button>
-                                <button onClick={() => openReturn(s)}
-                                  className="px-2 py-1 rounded-md text-xs font-bold hover:opacity-90"
-                                  style={{ color: '#d97706', border: '1px solid #fbbf24', backgroundColor: '#fffbeb' }}>
-                                  Return
-                                </button>
+                                {roControlAllowed('cc-sales.approve') && (
+                                  <button onClick={() => approve(s)} disabled={approving === s.id}
+                                    className="px-2 py-1 rounded-md text-xs font-bold text-white disabled:opacity-60 hover:opacity-90"
+                                    style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
+                                    {approving === s.id ? '…' : 'Approve'}
+                                  </button>
+                                )}
+                                {roControlAllowed('cc-sales.return') && (
+                                  <button onClick={() => openReturn(s)}
+                                    className="px-2 py-1 rounded-md text-xs font-bold hover:opacity-90"
+                                    style={{ color: '#d97706', border: '1px solid #fbbf24', backgroundColor: '#fffbeb' }}>
+                                    Return
+                                  </button>
+                                )}
                               </>
                             )
                           ) : (
@@ -490,7 +494,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           {/* Compliance field-level edit — opens SaleModal pre-filled.
                               Lives next to View so it's discoverable without
                               cluttering the workflow buttons (Approve/Return/Update). */}
-                          {!isReadOnly && (
+                          {!isReadOnly && roControlAllowed('cc-sales.edit') && (
                             <button onClick={() => setEditFieldsTarget(s)} className="px-2 py-1 rounded-lg text-xs font-bold"
                               style={{ color: 'var(--color-primary-700)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
                               Edit
@@ -500,7 +504,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                             style={{ color: 'var(--color-primary-600)' }}>
                             <Eye size={14} />
                           </button>
-                          {!isReadOnly && (
+                          {!isReadOnly && roControlAllowed('cc-sales.delete') && (
                             <button onClick={() => setDeleteTarget(s)} className="p-1 rounded"
                               style={{ color: '#ef4444' }}>
                               <Trash2 size={13} />
