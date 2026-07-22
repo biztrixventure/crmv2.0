@@ -45,6 +45,7 @@ const NAV_KEY       = (uid) => `readonly_admin.nav.${uid}`;
 const FLAGS_KEY     = (uid) => `readonly_admin.flags.${uid}`;
 const COMPANIES_KEY = (uid) => `readonly_admin.companies.${uid}`;
 const EXPORT_KEY    = (uid) => `readonly_admin.export.${uid}`;
+const CONTROLS_KEY  = (uid) => `readonly_admin.controls.${uid}`;
 const DEFAULTS_KEY  = 'readonly_admin.defaults';
 
 // Persist one governance facet + bust BOTH caches (businessConfig getConfig +
@@ -96,6 +97,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const flagsByUserId = new Map();
   const compByUserId = new Map();
   const expByUserId = new Map();
+  const controlsByUserId = new Map();
   let roleDefaults = null;
   (cfgRows || []).forEach(r => {
     if (r.key === 'readonly_admin.defaults') { roleDefaults = r.value; return; }
@@ -103,6 +105,7 @@ router.get('/', asyncHandler(async (req, res) => {
     else if (r.key.startsWith('readonly_admin.flags.'))     flagsByUserId.set(r.key.slice('readonly_admin.flags.'.length), r.value);
     else if (r.key.startsWith('readonly_admin.companies.')) compByUserId.set(r.key.slice('readonly_admin.companies.'.length), r.value);
     else if (r.key.startsWith('readonly_admin.export.'))    expByUserId.set(r.key.slice('readonly_admin.export.'.length), r.value);
+    else if (r.key.startsWith('readonly_admin.controls.'))  controlsByUserId.set(r.key.slice('readonly_admin.controls.'.length), r.value);
   });
 
   const users = (authData?.users || []).filter(u => {
@@ -139,6 +142,7 @@ router.get('/', asyncHandler(async (req, res) => {
       flags:        sanitizeFlags(flagsByUserId.get(u.id), sanitizeFlags(roleDefaults?.flags, DEFAULT_FLAGS)),
       companies:    compByUserId.get(u.id) ?? (Array.isArray(roleDefaults?.companies) ? roleDefaults.companies : null),
       export:       sanitizeExport(expByUserId.get(u.id), sanitizeExport(roleDefaults?.export, allExportOn())),
+      controls:     cleanIdList(controlsByUserId.get(u.id)) ?? (Array.isArray(roleDefaults?.controls) ? roleDefaults.controls : []),
     };
   });
 
@@ -199,6 +203,16 @@ router.put('/:userId/export', asyncHandler(async (req, res) => {
   res.json({ user_id: userId, export: clean });
 }));
 
+// Per-button controls — the list of DISABLED action keys (e.g.
+// 'data-analyzer.send_batch'). Absent/empty = every action allowed (parity).
+router.put('/:userId/controls', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const disabled = cleanIdList(req.body?.controls) || [];
+  await writeGov(CONTROLS_KEY(userId), disabled, req.user.id, userId);
+  logger.success('READONLY_ADMIN_CONTROLS', `Updated disabled controls for ${userId}: ${disabled.length}`);
+  res.json({ user_id: userId, controls: disabled });
+}));
+
 // Role-wide default TEMPLATE applied to every RO under their per-user overrides.
 router.get('/defaults', asyncHandler(async (req, res) => {
   const { data } = await supabaseAdmin.from('business_config')
@@ -213,6 +227,7 @@ router.put('/defaults', asyncHandler(async (req, res) => {
     flags:     body.flags ? sanitizeFlags(body.flags) : undefined,
     companies: cleanIdList(body.companies),                   // null = parity (all)
     export:    body.export ? sanitizeExport(body.export) : undefined,
+    controls:  cleanIdList(body.controls),                    // disabled action keys (null = none)
   };
   // Drop undefined so the template only carries what the operator set.
   Object.keys(value).forEach(k => value[k] === undefined && delete value[k]);
@@ -353,7 +368,7 @@ router.delete('/:userId', asyncHandler(async (req, res) => {
         .eq('user_id', userId).in('role_id', roles.map(r => r.id));
     }
     await supabaseAdmin.from('business_config').delete()
-      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId)]);
+      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId)]);
     invalidateGovernance(userId);
     logger.success('READONLY_ADMIN_REVOKE', `Soft-revoked readonly_admin from ${userId}`);
     return res.json({ user_id: userId, revoked: true, permanent: false });
@@ -361,7 +376,7 @@ router.delete('/:userId', asyncHandler(async (req, res) => {
 
   // Permanent: wipe config + delete auth user.
   await supabaseAdmin.from('business_config').delete()
-    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId)]);
+    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId)]);
     invalidateGovernance(userId);
 
   // Best-effort deactivate role assignments first so any FK on

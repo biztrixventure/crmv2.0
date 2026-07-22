@@ -7,6 +7,7 @@ import client from '../../../api/client';
 import {
   RO_ELIGIBLE_TABS, RO_PARITY_TAB_IDS, RO_DEFAULT_TAB_IDS, ADMIN_TAB_GROUPS, groupedRoTabs,
 } from '../../../config/adminTabs';
+import { ADMIN_CONTROLS, ALL_CONTROL_KEYS, groupedControls } from '../../../config/adminControls';
 
 /*
  * ReadonlyAdminManager — SuperAdmin control center for every readonly_admin.
@@ -96,6 +97,7 @@ export default function ReadonlyAdminManager() {
           flags:     { ...DEFAULT_FLAGS, ...(u.flags || {}) },
           companies: u.companies || null,
           export:    { ...(u.export || {}) },
+          controls:  Array.isArray(u.controls) ? u.controls : [],   // disabled action keys
         };
       });
       return next;
@@ -120,12 +122,21 @@ export default function ReadonlyAdminManager() {
     setRow(id, { companies: next });
   };
 
+  // controls: `disabled` is the list of hidden action keys. Toggling a control
+  // adds/removes its key from that list (checked = allowed/visible).
+  const toggleControl = (id, key) => {
+    const cur = edit[id]?.controls || [];
+    const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
+    setRow(id, { controls: next });
+  };
+  const setAllControls = (id, disableAll) => setRow(id, { controls: disableAll ? [...ALL_CONTROL_KEYS] : [] });
+
   // ── save one RO ─────────────────────────────────────────────────────────
   const saveRow = async (id) => {
     setSavingId(id); setErr('');
     const e = edit[id] || {};
     const u = list.find(x => x.id === id) || {};
-    const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) } };
+    const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [] };
     // Only persist facets the operator actually changed. This is critical: an
     // unconditional write would (a) stamp a full per-user flags/export override
     // that clobbers the role-default template, and (b) coerce a parity null nav
@@ -136,6 +147,7 @@ export default function ReadonlyAdminManager() {
     if (!eq(e.flags, server.flags))         puts.push(client.put(`readonly-admins/${id}/flags`,     { flags: e.flags }));
     if (!eq(e.companies, server.companies)) puts.push(client.put(`readonly-admins/${id}/companies`, { companies: e.companies }));
     if (!eq(e.export, server.export))       puts.push(client.put(`readonly-admins/${id}/export`,    { export: e.export }));
+    if (!eq(e.controls || [], server.controls)) puts.push(client.put(`readonly-admins/${id}/controls`, { controls: e.controls || [] }));
     try {
       await Promise.all(puts);
       await load();
@@ -273,8 +285,8 @@ export default function ReadonlyAdminManager() {
         {list.map(u => {
           const e = edit[u.id] || {};
           const expanded = openId === u.id;
-          const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) } };
-          const dirty = !eq(e.allowed, server.allowed) || !eq(e.flags, server.flags) || !eq(e.companies, server.companies) || !eq(e.export, server.export);
+          const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [] };
+          const dirty = !eq(e.allowed, server.allowed) || !eq(e.flags, server.flags) || !eq(e.companies, server.companies) || !eq(e.export, server.export) || !eq(e.controls || [], server.controls);
           return (
             <div key={u.id} className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <button onClick={() => { const willOpen = !expanded; setOpenId(willOpen ? u.id : null); if (willOpen && !activity[u.id]) loadActivity(u.id); }}
@@ -345,6 +357,16 @@ export default function ReadonlyAdminManager() {
                     <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>The “Allow exports” flag above is the master switch; these refine it per area. Enforced at the egress guard.</p>
                   </Section>
 
+                  {/* Per-button controls */}
+                  <Section icon={<Sliders size={12} />} title="Buttons & actions (per tab)">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <QuickBtn onClick={() => setAllControls(u.id, false)} icon={<Eye size={11} />}>All buttons</QuickBtn>
+                      <QuickBtn onClick={() => setAllControls(u.id, true)} icon={<EyeOff size={11} />}>Hide all buttons</QuickBtn>
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Unchecked = the button never renders for this admin.</span>
+                    </div>
+                    <ControlsMatrix disabled={e.controls ?? server.controls} onToggle={(k) => toggleControl(u.id, k)} />
+                  </Section>
+
                   {/* Activity */}
                   <Section icon={<Activity size={12} />} title="Activity">
                     <ActivityTimeline rows={activity[u.id]} onRefresh={() => loadActivity(u.id)} />
@@ -404,6 +426,27 @@ function TabMatrix({ grouped, allowed, onToggle }) {
             {items.map(t => (
               <label key={t.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
                 <input type="checkbox" checked={isOn(t.id)} disabled={t.id === 'dashboard'} onChange={() => onToggle(t.id)} />{t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+const TAB_LABEL = Object.fromEntries(RO_ELIGIBLE_TABS.map(t => [t.id, t.label]));
+const CC_LABEL = { 'cc-sales': 'All Sales', 'cc-transfers': 'All Transfers', 'cc-callbacks': 'All Callbacks' };
+function ControlsMatrix({ disabled, onToggle }) {
+  const dis = Array.isArray(disabled) ? disabled : [];
+  return (
+    <div className="space-y-2">
+      {groupedControls().map(([tabId, controls]) => (
+        <div key={tabId}>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{TAB_LABEL[tabId] || CC_LABEL[tabId] || tabId}</p>
+          <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {controls.map(c => (
+              <label key={c.key} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
+                <input type="checkbox" checked={!dis.includes(c.key)} onChange={() => onToggle(c.key)} />{c.label}
               </label>
             ))}
           </div>

@@ -73,13 +73,14 @@ const cleanIds = (v) => Array.isArray(v)
 // governance write). Returns { nav, flags, companies, export } where nav/companies
 // are `null` when unconfigured (= parity/all).
 async function resolveGovernance(userId) {
-  if (!userId) return { nav: null, flags: { ...DEFAULT_FLAGS }, companies: null, export: allExportOn() };
+  if (!userId) return { nav: null, flags: { ...DEFAULT_FLAGS }, companies: null, export: allExportOn(), controls: [] };
   return cache.remember(GOV_NS, userId, GOV_TTL_MS, async () => {
-    const [navU, flagsU, compU, expU, defaults] = await Promise.all([
+    const [navU, flagsU, compU, expU, controlsU, defaults] = await Promise.all([
       getConfig(null, `readonly_admin.nav.${userId}`, null),
       getConfig(null, `readonly_admin.flags.${userId}`, null),
       getConfig(null, `readonly_admin.companies.${userId}`, null),
       getConfig(null, `readonly_admin.export.${userId}`, null),
+      getConfig(null, `readonly_admin.controls.${userId}`, null),
       getConfig(null, 'readonly_admin.defaults', null),
     ]);
     const d = defaults && typeof defaults === 'object' ? defaults : {};
@@ -90,7 +91,10 @@ async function resolveGovernance(userId) {
     // nav / companies: per-user ?? role-default ?? null(parity)
     const nav = cleanIds(navU) ?? cleanIds(d.tabs) ?? null;
     const companies = cleanIds(compU) ?? cleanIds(d.companies) ?? null;
-    return { nav, flags, companies, export: exportCfg };
+    // controls: the list of DISABLED action keys (per-user ?? role-default ?? none).
+    // Empty = every action allowed (parity). Frontend hides a button whose key is here.
+    const controls = cleanIds(controlsU) ?? cleanIds(d.controls) ?? [];
+    return { nav, flags, companies, export: exportCfg, controls };
   });
 }
 

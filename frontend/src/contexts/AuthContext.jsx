@@ -200,10 +200,20 @@ export const AuthProvider = ({ children }) => {
   // Copy-protection master switch for this RO (drives the shell copy guard).
   const roNoCopy = isReadOnly && governance?.flags?.no_copy === true;
 
+  // roControlAllowed(key) — may this RO see/use a specific ACTION button (e.g.
+  // 'data-analyzer.send_batch')? governance.controls is the list of DISABLED
+  // keys; absent from it = allowed (parity). Non-RO always true. When false the
+  // caller should NOT render the button at all (it never exists for the RO).
+  const roControlAllowed = useCallback((key) => {
+    if (!isReadOnly || !key) return true;
+    const disabled = governance?.controls;
+    return !(Array.isArray(disabled) && disabled.includes(key));
+  }, [isReadOnly, governance]);
+
   return (
     <AuthContext.Provider value={{
       user, token, login, logout, updateUser, hasPermission, isReadOnly,
-      governance, roFlags, roFlag, roCan, roTabAllowed, roExportAllowed, roNoCopy,
+      governance, roFlags, roFlag, roCan, roTabAllowed, roExportAllowed, roNoCopy, roControlAllowed,
       isRefreshing, isAuthenticated: !!user && !!token,
     }}>
       {children}

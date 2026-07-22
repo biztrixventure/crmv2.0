@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRef } from 'react';
 import { Filter, Search, X, Loader2, Database, ChevronDown, ChevronUp, Download, BookmarkPlus, BarChart3, DollarSign, Send, Trash2, Building2, CalendarRange, GripVertical } from 'lucide-react';
 import client from '../../../api/client';
+import { useAuth } from '../../../contexts/AuthContext';
 import StateGrid, { ChipGrid, CollapsibleChipGrid } from './StateGrid';
 import SendBatchModal from '../../Distribution/SendBatchModal';
 import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
@@ -572,6 +573,7 @@ const Breakdown = ({ items, total }) => {
 };
 
 const DataAnalyzer = () => {
+  const { roControlAllowed, roExportAllowed } = useAuth();
   const [dataset, setDataset] = useState('sales');
   const [fields, setFields]   = useState([]);
   const [filters, setFilters] = useState({});
@@ -836,22 +838,30 @@ const DataAnalyzer = () => {
           <button onClick={reset} className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white">
             Clear ({activeCount})
           </button>
+          {roControlAllowed('data-analyzer.save_preset') && (
           <button onClick={savePreset} title="Save current filters as a preset"
             className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white flex items-center gap-1">
             <BookmarkPlus size={13} /> Preset
           </button>
+          )}
+          {roExportAllowed('data_analyzer') && (
           <button onClick={exportCsv} disabled={exporting || loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/90 hover:bg-white text-primary-700 disabled:opacity-50">
             {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} CSV
           </button>
+          )}
+          {roControlAllowed('data-analyzer.send_batch') && (
           <button onClick={() => setShowSend(true)} disabled={loading} title="Distribute this result as a batch"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white disabled:opacity-50">
             <Send size={13} /> Send batch
           </button>
+          )}
+          {roControlAllowed('data-analyzer.run_query') && (
           <button onClick={() => run(1)} disabled={loading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-white text-primary-700 disabled:opacity-50">
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Run query
           </button>
+          )}
         </div>
       </div>
 
@@ -939,9 +949,11 @@ const DataAnalyzer = () => {
                     style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
                     {p.name} <span className="opacity-60">({p.dataset || 'sales'})</span>
                   </button>
+                  {roControlAllowed('data-analyzer.delete_preset') && (
                   <button onClick={() => deletePreset(p.name)} className="p-1 rounded-md hover:bg-error-50">
                     <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
                   </button>
+                  )}
                 </div>
               ))}
           </Section>
