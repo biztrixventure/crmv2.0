@@ -30,7 +30,9 @@ const FLAG_CATALOG = [
   { key: 'view_financial_data', label: 'See financial data', desc: 'Monthly + down payment amounts, revenue rollups', def: true },
   { key: 'view_pii',            label: 'See customer PII',   desc: 'Phone / email / address / name / VIN columns',  def: true },
   { key: 'view_audit_history',  label: 'See audit history',  desc: 'Expand edit_history audit trail in drawers',     def: true },
+  { key: 'view_recordings',     label: 'Play call recordings', desc: 'Listen to / stream sale-call recordings',      def: true },
   { key: 'can_export',          label: 'Allow exports',      desc: 'Master switch for every CSV / Excel download',   def: true },
+  { key: 'show_readonly_badge', label: 'Show read-only badge', desc: 'The "read-only admin — view only" banner on their dashboard', def: true },
   { key: 'no_copy',             label: 'Block copying',      desc: 'Disable select / copy / cut / right-click / drag', def: false },
 ];
 const DEFAULT_FLAGS = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, f.def]));

@@ -10,6 +10,7 @@ import {
   Link2, ChevronDown, Download, BarChart3, TrendingUp, Hash,
 } from 'lucide-react';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 const STATUS_CFG = {
   new:       { label: 'New',       bg: '#eff6ff', color: '#2563eb' },
@@ -46,6 +47,7 @@ const downloadCSV = (rows, headers, filename) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 const NumbersIntelligence = () => {
+  const { roExportAllowed } = useAuth();
   const [numbers,    setNumbers]    = useState([]);
   const [stats,      setStats]      = useState(null);
   const [loading,    setLoading]    = useState(false);
@@ -153,11 +155,13 @@ const NumbersIntelligence = () => {
             Cross-company lead numbers — track assignment, status, and transfer conversion.
           </p>
         </div>
+        {roExportAllowed('numbers') && (
         <button onClick={handleExport} disabled={numbers.length === 0}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:opacity-40 flex-shrink-0"
           style={{ background: 'var(--gradient-sidebar)', color: '#fff', boxShadow: 'var(--shadow-sm)' }}>
           <Download size={14} /> Export CSV
         </button>
+        )}
       </div>
 
       {/* Summary stats */}

@@ -38,6 +38,8 @@ const DEFAULT_FLAGS = {
   view_pii:            true,   // customer phone / email / address / name / VIN
   can_export:          true,   // global export kill-switch
   view_audit_history:  true,   // edit_history reveal on drawers
+  view_recordings:     true,   // listen to / stream call recordings
+  show_readonly_badge: true,   // show the "read-only admin — view only" banner
   no_copy:             false,  // when true → block select/copy/cut/right-click/drag
 };
 const FLAG_KEYS = Object.keys(DEFAULT_FLAGS);
@@ -149,6 +151,13 @@ async function canExportArea(req, dataset) {
   return cfg[dataset] !== false;   // absent/true = allowed
 }
 
+// May this RO listen to / stream call recordings? Non-RO always true.
+async function canViewRecordings(req) {
+  if (!isReadonly(req)) return true;
+  const gov = await resolveGovernance(req.user.id);
+  return gov.flags.view_recordings !== false;
+}
+
 // ── activity telemetry (fire-and-forget; never throws, never awaited into a
 //    response — mirrors egressGuard.logEgress) ──────────────────────────────
 async function logReadonlyActivity(entry) {
@@ -184,6 +193,6 @@ module.exports = {
   DEFAULT_FLAGS, FLAG_KEYS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport,
   resolveGovernance, invalidateGovernance, isReadonly,
   readonlyAllowedCompanyIds, scopeToCompanies, companyInScope,
-  hideFlagsFor, maskForReadonly, canExportArea,
+  hideFlagsFor, maskForReadonly, canExportArea, canViewRecordings,
   logReadonlyActivity, bulkLogReadonlyActivity,
 };

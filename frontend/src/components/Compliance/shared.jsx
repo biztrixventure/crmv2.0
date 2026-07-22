@@ -1,6 +1,7 @@
 import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown, Search } from 'lucide-react';
 import { ET_ZONE } from '../../utils/timezone';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
+import { useAuth } from '../../contexts/AuthContext';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
@@ -183,8 +184,9 @@ export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
   </th>
 );
 
-export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => {
+export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra, exportArea }) => {
   const { isEnabled } = useFeatureFlags();
+  const { roExportAllowed } = useAuth();
   return (
     <div className="flex items-start justify-between mb-4 gap-4">
       <div className="min-w-0">
@@ -197,7 +199,7 @@ export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra }) => {
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {extra}
-        {onExport && isEnabled('exports') && (
+        {onExport && isEnabled('exports') && roExportAllowed(exportArea) && (
           <button onClick={onExport}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition-colors"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>

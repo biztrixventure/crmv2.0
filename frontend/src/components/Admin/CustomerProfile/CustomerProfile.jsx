@@ -7,6 +7,7 @@ import {
   History, StickyNote, Download, Pin, Trash2, AlertTriangle, Copy, Check, Plus,
 } from 'lucide-react';
 import client from '../../../api/client';
+import { useAuth } from '../../../contexts/AuthContext';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
 import CopyableNumber from '../../UI/CopyableNumber';
 import NumberRiskCheck from '../../Shared/NumberRiskCheck';
@@ -380,6 +381,7 @@ function CopyBtn({ text, label }) {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 export default function CustomerProfile() {
+  const { roExportAllowed } = useAuth();
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [results, setResults] = useState([]);
@@ -424,6 +426,7 @@ export default function CustomerProfile() {
           </button>
           <div className="flex items-center gap-2">
             <CopyBtn text={buildSummary(profile)} label="Copy summary" />
+            {roExportAllowed('customer_profile') && (
             <button onClick={async () => {
                 // Egress governance (soft — single-customer export already loaded).
                 try { await client.post('egress/client-log', { dataset: 'customer_profile', row_count: 1, filters: { customer_uuid: profile.customer_uuid } }); }
@@ -434,6 +437,7 @@ export default function CustomerProfile() {
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <Download size={14} /> Export CSV
             </button>
+            )}
           </div>
         </div>
 

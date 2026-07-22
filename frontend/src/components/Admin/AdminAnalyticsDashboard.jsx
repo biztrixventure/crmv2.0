@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
@@ -317,6 +318,7 @@ const TODAY = todayET();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
+  const { roFlag } = useAuth();
   // Compliance status catalog — drives the dynamic pipeline bar at the top
   // of the dashboard. SuperAdmin enables/disables/renames/recolors statuses
   // in Business Rules → Compliance Workflow, then the pipeline matches.
@@ -588,7 +590,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   return (
     <div className="animate-fade-in space-y-3">
 
-      {isReadOnly && (
+      {isReadOnly && roFlag('show_readonly_badge') && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
           style={{ backgroundColor: 'var(--color-warning-50)', border: '1px solid var(--color-warning-200)', color: 'var(--color-warning-700)' }}>
           <Shield size={13} />

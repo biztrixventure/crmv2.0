@@ -8,7 +8,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
-const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly } = require('../utils/readonlyGovernance');
+const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
 
 const { getConfig } = require('../utils/businessConfig');
 
@@ -156,6 +156,7 @@ async function annotateCandidates(cands, saleCloserAgentIds = []) {
 
 // LIST candidates — by sale_id (resolve its code/agents) OR by phone (+date range)
 router.get('/recordings/candidates', asyncHandler(async (req, res) => {
+  if (!(await canViewRecordings(req))) return res.status(403).json({ error: 'Recording access is disabled for your account.' });
   if (req.query.sale_id) {
     const { data: sale } = await supabaseAdmin.from('sales')
       .select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id, company_id, plan, monthly_payment, reference_no, status, sale_group_id')
@@ -386,6 +387,7 @@ router.get('/recordings/client-sales', asyncHandler(async (req, res) => {
 // nothing stored). Resolve by box_id+lead_id+recording_id (deterministic); a
 // passed location is used as a fast path and re-derived if stale.
 router.get('/recordings/stream', asyncHandler(async (req, res) => {
+  if (!(await canViewRecordings(req))) return res.status(403).json({ error: 'Recording access is disabled for your account.' });
   const ref = { box_id: req.query.box_id, lead_id: req.query.lead_id, recording_id: req.query.recording_id };
   const reresolve = () => locationForRecording(ref);
   let url = req.query.location && /^https?:\/\//.test(req.query.location) ? req.query.location : await reresolve();
@@ -417,6 +419,7 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
 // status ('pending' default | 'confirmed' | 'all'), date range, closer, company,
 // and free-text (name / phone / reference / lead code).
 router.get('/recordings/queue', asyncHandler(async (req, res) => {
+  if (!(await canViewRecordings(req))) return res.status(403).json({ error: 'Recording access is disabled for your account.' });
   const companyId = req.query.company_id || null;
   const status = ['pending', 'confirmed', 'all'].includes(req.query.status) ? req.query.status : 'pending';
   const SORTS = new Set(['sale_date', 'customer_name', 'customer_phone', 'closer_name', 'company_name', 'plan', 'monthly_payment', 'status', 'created_at']);

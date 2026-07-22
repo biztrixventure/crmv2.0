@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Trash2, Database, AlertTriangle, Download, MoreVertical, DownloadCloud, ShieldAlert } from 'lucide-react';
 import { Button } from '../../UI';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const fmt = (d) => { try { return new Date(d).toLocaleString(); } catch { return '—'; } };
 
@@ -98,6 +99,10 @@ const ConfirmModal = ({ target, batchCount, onClose, onConfirm }) => {
 };
 
 const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches, downloadBatch, downloadAllBatches }) => {
+  const { roCan } = useAuth();
+  // A readonly_admin with exports disabled must not see batch-download controls
+  // (these emit re-uploadable CSVs of uploaded sale/transfer data).
+  const canDownload = roCan('can_export');
   const [target, setTarget] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -138,7 +143,7 @@ const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches, dow
                 <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
                 <div className="absolute right-0 mt-1 z-40 w-56 rounded-xl overflow-hidden py-1"
                   style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
-                  {downloadAllBatches && (
+                  {downloadAllBatches && canDownload && (
                     <button onClick={runDownloadAll} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}>
                       <DownloadCloud size={15} style={{ color: 'var(--color-primary-600)' }} />
                       <span>Download all batches<span className="block text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>One re-uploadable CSV per batch</span></span>
@@ -170,7 +175,7 @@ const BatchManager = ({ batches, loadBatches, deleteBatch, deleteAllBatches, dow
                 </p>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                {downloadBatch && (
+                {downloadBatch && canDownload && (
                   <button onClick={() => handleDownload(b)} disabled={downloadingId === b.id}
                     title="Download this batch as a re-uploadable CSV"
                     className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors disabled:opacity-50">
