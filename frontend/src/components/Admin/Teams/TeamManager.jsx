@@ -256,6 +256,8 @@ function TeamReport({ team, onClose }) {
               <Stat icon={<Target size={11} />} label="Conversion" value={t.conversion != null ? `${t.conversion}%` : '—'} />
             </div>
 
+            <TrendChart data={rep.trend} />
+
             {(rep.goal?.monthly_sales || rep.goal?.monthly_transfers) && (
               <div className="rounded-xl p-3 space-y-2" style={box}>
                 <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Goal progress</p>
@@ -294,4 +296,44 @@ function TeamReport({ team, onClose }) {
 
 function Field({ label, children }) {
   return <label className="block"><span className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>{children}</label>;
+}
+
+// Small dependency-free daily trend: grouped bars (transfers = blue, sales =
+// green) per day over the selected range. Shows how the team is working over time.
+function TrendChart({ data }) {
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No activity in this range to chart.</p>;
+  const max = Math.max(1, ...rows.map(r => Math.max(r.transfers || 0, r.sales || 0)));
+  const W = Math.max(rows.length * 16, 200), H = 90, pad = 4;
+  const bw = (W - pad * 2) / rows.length;   // per-day slot
+  const y = (v) => H - pad - (v / max) * (H - pad * 2);
+  return (
+    <div className="rounded-xl p-3" style={box}>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Daily trend</p>
+        <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+          <span className="inline-flex items-center gap-1"><span style={{ width: 8, height: 8, background: '#2563eb', display: 'inline-block', borderRadius: 2 }} /> Transfers</span>
+          <span className="inline-flex items-center gap-1"><span style={{ width: 8, height: 8, background: '#16a34a', display: 'inline-block', borderRadius: 2 }} /> Sales</span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <svg width={W} height={H} style={{ display: 'block' }}>
+          {rows.map((r, i) => {
+            const x = pad + i * bw;
+            const w = Math.max(2, bw / 2 - 1);
+            return (
+              <g key={r.date}>
+                <rect x={x} y={y(r.transfers || 0)} width={w} height={H - pad - y(r.transfers || 0)} fill="#2563eb" rx="1">
+                  <title>{`${r.date}: ${r.transfers || 0} transfers`}</title>
+                </rect>
+                <rect x={x + w + 1} y={y(r.sales || 0)} width={w} height={H - pad - y(r.sales || 0)} fill="#16a34a" rx="1">
+                  <title>{`${r.date}: ${r.sales || 0} sales`}</title>
+                </rect>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
 }
