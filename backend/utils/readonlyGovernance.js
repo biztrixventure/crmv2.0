@@ -40,6 +40,7 @@ const DEFAULT_FLAGS = {
   view_audit_history:  true,   // edit_history reveal on drawers
   view_recordings:     true,   // listen to / stream call recordings
   show_readonly_badge: true,   // show the "read-only admin — view only" banner
+  show_write_blocked_alert: true, // show the "Read-only account: writes disabled" error when a write is blocked
   no_copy:             false,  // when true → block select/copy/cut/right-click/drag
 };
 const FLAG_KEYS = Object.keys(DEFAULT_FLAGS);
@@ -72,15 +73,21 @@ const cleanIds = (v) => Array.isArray(v)
 // Resolve the merged governance for one RO user. Cached 30s (invalidated on any
 // governance write). Returns { nav, flags, companies, export } where nav/companies
 // are `null` when unconfigured (= parity/all).
+// A vanity role name shown in the RO's own profile/header (e.g. "Super Admin").
+// Display-only — never changes the enforced role. Empty/blank = use the real
+// "Read-only Admin" label. Capped so it can't overflow the header.
+const cleanLabel = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 40) : null;
+
 async function resolveGovernance(userId) {
-  if (!userId) return { nav: null, flags: { ...DEFAULT_FLAGS }, companies: null, export: allExportOn(), controls: [] };
+  if (!userId) return { nav: null, flags: { ...DEFAULT_FLAGS }, companies: null, export: allExportOn(), controls: [], display_role_label: null };
   return cache.remember(GOV_NS, userId, GOV_TTL_MS, async () => {
-    const [navU, flagsU, compU, expU, controlsU, defaults] = await Promise.all([
+    const [navU, flagsU, compU, expU, controlsU, labelU, defaults] = await Promise.all([
       getConfig(null, `readonly_admin.nav.${userId}`, null),
       getConfig(null, `readonly_admin.flags.${userId}`, null),
       getConfig(null, `readonly_admin.companies.${userId}`, null),
       getConfig(null, `readonly_admin.export.${userId}`, null),
       getConfig(null, `readonly_admin.controls.${userId}`, null),
+      getConfig(null, `readonly_admin.label.${userId}`, null),
       getConfig(null, 'readonly_admin.defaults', null),
     ]);
     const d = defaults && typeof defaults === 'object' ? defaults : {};
@@ -94,7 +101,9 @@ async function resolveGovernance(userId) {
     // controls: the list of DISABLED action keys (per-user ?? role-default ?? none).
     // Empty = every action allowed (parity). Frontend hides a button whose key is here.
     const controls = cleanIds(controlsU) ?? cleanIds(d.controls) ?? [];
-    return { nav, flags, companies, export: exportCfg, controls };
+    // display_role_label: per-user ?? role-default ?? null (use real label).
+    const display_role_label = cleanLabel(labelU) ?? cleanLabel(d.label) ?? null;
+    return { nav, flags, companies, export: exportCfg, controls, display_role_label };
   });
 }
 
@@ -194,7 +203,7 @@ async function bulkLogReadonlyActivity(rows) {
 }
 
 module.exports = {
-  DEFAULT_FLAGS, FLAG_KEYS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport,
+  DEFAULT_FLAGS, FLAG_KEYS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport, cleanLabel,
   resolveGovernance, invalidateGovernance, isReadonly,
   readonlyAllowedCompanyIds, scopeToCompanies, companyInScope,
   hideFlagsFor, maskForReadonly, canExportArea, canViewRecordings,

@@ -7,7 +7,7 @@
 //
 // Mount AFTER authMiddleware (req.user must already be populated).
 // ============================================================================
-const { logReadonlyActivity } = require('../utils/readonlyGovernance');
+const { logReadonlyActivity, resolveGovernance } = require('../utils/readonlyGovernance');
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -23,7 +23,7 @@ const ALLOWLIST_SUFFIX = [
   '/activity/beacon',   // RO self-reported tab/view/copy telemetry (POST)
 ];
 
-function readonlyGuard(req, res, next) {
+async function readonlyGuard(req, res, next) {
   if (READ_METHODS.has(req.method)) return next();
   if (req.user?.role !== 'readonly_admin') return next();
 
@@ -39,7 +39,23 @@ function readonlyGuard(req, res, next) {
     actionType: 'blocked_write', httpMethod: req.method, path, source: 'server',
   });
 
-  return res.status(403).json({ error: 'Read-only account: writes are disabled for this role.' });
+  // The write is ALWAYS blocked (source of truth). The superadmin only controls
+  // the wording the RO sees: with show_write_blocked_alert OFF, the response
+  // carries a neutral message (no "read-only" tell) and the frontend suppresses
+  // the alert entirely. `readonly_write_blocked:true` lets the client recognize
+  // this case regardless of the message text. Governance is cached (30s), so the
+  // await is effectively free on the rare mutation path.
+  let showAlert = true;
+  try {
+    const gov = await resolveGovernance(req.user.id);
+    showAlert = gov?.flags?.show_write_blocked_alert !== false;
+  } catch { /* fail safe → show the standard message */ }
+
+  return res.status(403).json({
+    error: showAlert ? 'Read-only account: writes are disabled for this role.' : 'Action unavailable.',
+    readonly_write_blocked: true,
+    show_alert: showAlert,
+  });
 }
 
 module.exports = { readonlyGuard };

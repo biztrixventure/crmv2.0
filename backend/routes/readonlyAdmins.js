@@ -25,7 +25,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { setConfig } = require('../utils/businessConfig');
 const {
-  DEFAULT_FLAGS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport,
+  DEFAULT_FLAGS, EXPORT_AREAS, allExportOn, sanitizeFlags, sanitizeExport, cleanLabel,
   invalidateGovernance,
 } = require('../utils/readonlyGovernance');
 
@@ -46,6 +46,7 @@ const FLAGS_KEY     = (uid) => `readonly_admin.flags.${uid}`;
 const COMPANIES_KEY = (uid) => `readonly_admin.companies.${uid}`;
 const EXPORT_KEY    = (uid) => `readonly_admin.export.${uid}`;
 const CONTROLS_KEY  = (uid) => `readonly_admin.controls.${uid}`;
+const LABEL_KEY     = (uid) => `readonly_admin.label.${uid}`;
 const DEFAULTS_KEY  = 'readonly_admin.defaults';
 
 // Persist one governance facet + bust BOTH caches (businessConfig getConfig +
@@ -98,6 +99,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const compByUserId = new Map();
   const expByUserId = new Map();
   const controlsByUserId = new Map();
+  const labelByUserId = new Map();
   let roleDefaults = null;
   (cfgRows || []).forEach(r => {
     if (r.key === 'readonly_admin.defaults') { roleDefaults = r.value; return; }
@@ -106,6 +108,7 @@ router.get('/', asyncHandler(async (req, res) => {
     else if (r.key.startsWith('readonly_admin.companies.')) compByUserId.set(r.key.slice('readonly_admin.companies.'.length), r.value);
     else if (r.key.startsWith('readonly_admin.export.'))    expByUserId.set(r.key.slice('readonly_admin.export.'.length), r.value);
     else if (r.key.startsWith('readonly_admin.controls.'))  controlsByUserId.set(r.key.slice('readonly_admin.controls.'.length), r.value);
+    else if (r.key.startsWith('readonly_admin.label.'))     labelByUserId.set(r.key.slice('readonly_admin.label.'.length), r.value);
   });
 
   const users = (authData?.users || []).filter(u => {
@@ -143,6 +146,8 @@ router.get('/', asyncHandler(async (req, res) => {
       companies:    compByUserId.get(u.id) ?? (Array.isArray(roleDefaults?.companies) ? roleDefaults.companies : null),
       export:       sanitizeExport(expByUserId.get(u.id), sanitizeExport(roleDefaults?.export, allExportOn())),
       controls:     cleanIdList(controlsByUserId.get(u.id)) ?? (Array.isArray(roleDefaults?.controls) ? roleDefaults.controls : []),
+      // Vanity role label shown in the RO's own profile/header. null = real label.
+      display_role_label: cleanLabel(labelByUserId.get(u.id)) ?? cleanLabel(roleDefaults?.label) ?? null,
     };
   });
 
@@ -213,6 +218,23 @@ router.put('/:userId/controls', asyncHandler(async (req, res) => {
   res.json({ user_id: userId, controls: disabled });
 }));
 
+// Display role label — the vanity role name the RO sees in their own profile /
+// header (e.g. "Super Admin"). Display-only; never changes the enforced role.
+// Empty string / blank clears it → the real "Read-only Admin" label is shown.
+router.put('/:userId/label', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  const label = cleanLabel(req.body?.display_role_label ?? req.body?.label);
+  if (label) {
+    await writeGov(LABEL_KEY(userId), label, req.user.id, userId);
+  } else {
+    // Clear → fall back to role-default / real label.
+    await supabaseAdmin.from('business_config').delete().eq('scope', 'global').eq('key', LABEL_KEY(userId));
+    invalidateGovernance(userId);
+  }
+  logger.success('READONLY_ADMIN_LABEL', `Set display label for ${userId}: ${label || '(cleared)'}`);
+  res.json({ user_id: userId, display_role_label: label });
+}));
+
 // Role-wide default TEMPLATE applied to every RO under their per-user overrides.
 router.get('/defaults', asyncHandler(async (req, res) => {
   const { data } = await supabaseAdmin.from('business_config')
@@ -228,6 +250,7 @@ router.put('/defaults', asyncHandler(async (req, res) => {
     companies: cleanIdList(body.companies),                   // null = parity (all)
     export:    body.export ? sanitizeExport(body.export) : undefined,
     controls:  cleanIdList(body.controls),                    // disabled action keys (null = none)
+    label:     cleanLabel(body.label),                        // default vanity role label (null = real)
   };
   // Drop undefined so the template only carries what the operator set.
   Object.keys(value).forEach(k => value[k] === undefined && delete value[k]);
@@ -335,6 +358,8 @@ router.post('/', asyncHandler(async (req, res) => {
   if (flags)                    await writeGov(FLAGS_KEY(userId), flags, req.user.id, userId);
   if (Array.isArray(companies)) await writeGov(COMPANIES_KEY(userId), companies, req.user.id, userId);
   if (exportCfg)                await writeGov(EXPORT_KEY(userId), exportCfg, req.user.id, userId);
+  const initLabel = cleanLabel(req.body?.display_role_label ?? req.body?.label);
+  if (initLabel)                await writeGov(LABEL_KEY(userId), initLabel, req.user.id, userId);
 
   logger.success('READONLY_ADMIN_CREATE', `Created readonly_admin ${email} (${userId}) via ${sendInvite ? 'invite' : 'password'}`);
   res.status(201).json({ user_id: userId, email, invited: sendInvite });
@@ -368,7 +393,7 @@ router.delete('/:userId', asyncHandler(async (req, res) => {
         .eq('user_id', userId).in('role_id', roles.map(r => r.id));
     }
     await supabaseAdmin.from('business_config').delete()
-      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId)]);
+      .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId), LABEL_KEY(userId)]);
     invalidateGovernance(userId);
     logger.success('READONLY_ADMIN_REVOKE', `Soft-revoked readonly_admin from ${userId}`);
     return res.json({ user_id: userId, revoked: true, permanent: false });
@@ -376,7 +401,7 @@ router.delete('/:userId', asyncHandler(async (req, res) => {
 
   // Permanent: wipe config + delete auth user.
   await supabaseAdmin.from('business_config').delete()
-    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId)]);
+    .eq('scope', 'global').in('key', [NAV_KEY(userId), FLAGS_KEY(userId), COMPANIES_KEY(userId), EXPORT_KEY(userId), CONTROLS_KEY(userId), LABEL_KEY(userId)]);
     invalidateGovernance(userId);
 
   // Best-effort deactivate role assignments first so any FK on

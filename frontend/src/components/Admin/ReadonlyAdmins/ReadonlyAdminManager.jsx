@@ -34,6 +34,7 @@ const FLAG_CATALOG = [
   { key: 'view_recordings',     label: 'Play call recordings', desc: 'Listen to / stream sale-call recordings',      def: true },
   { key: 'can_export',          label: 'Allow exports',      desc: 'Master switch for every CSV / Excel download',   def: true },
   { key: 'show_readonly_badge', label: 'Show read-only badge', desc: 'The "read-only admin — view only" banner on their dashboard', def: true },
+  { key: 'show_write_blocked_alert', label: 'Show write-blocked alert', desc: 'The "Read-only account: writes are disabled" error when they try to change something. Off = the attempt fails silently (no alert).', def: true },
   { key: 'no_copy',             label: 'Block copying',      desc: 'Disable select / copy / cut / right-click / drag', def: false },
 ];
 const DEFAULT_FLAGS = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, f.def]));
@@ -98,6 +99,7 @@ export default function ReadonlyAdminManager() {
           companies: u.companies || null,
           export:    { ...(u.export || {}) },
           controls:  Array.isArray(u.controls) ? u.controls : [],   // disabled action keys
+          display_role_label: u.display_role_label || '',           // vanity role label ('' = real)
         };
       });
       return next;
@@ -136,7 +138,7 @@ export default function ReadonlyAdminManager() {
     setSavingId(id); setErr('');
     const e = edit[id] || {};
     const u = list.find(x => x.id === id) || {};
-    const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [] };
+    const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [], display_role_label: u.display_role_label || '' };
     // Only persist facets the operator actually changed. This is critical: an
     // unconditional write would (a) stamp a full per-user flags/export override
     // that clobbers the role-default template, and (b) coerce a parity null nav
@@ -148,6 +150,7 @@ export default function ReadonlyAdminManager() {
     if (!eq(e.companies, server.companies)) puts.push(client.put(`readonly-admins/${id}/companies`, { companies: e.companies }));
     if (!eq(e.export, server.export))       puts.push(client.put(`readonly-admins/${id}/export`,    { export: e.export }));
     if (!eq(e.controls || [], server.controls)) puts.push(client.put(`readonly-admins/${id}/controls`, { controls: e.controls || [] }));
+    if ((e.display_role_label || '') !== server.display_role_label) puts.push(client.put(`readonly-admins/${id}/label`, { display_role_label: e.display_role_label || '' }));
     try {
       await Promise.all(puts);
       await load();
@@ -285,8 +288,8 @@ export default function ReadonlyAdminManager() {
         {list.map(u => {
           const e = edit[u.id] || {};
           const expanded = openId === u.id;
-          const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [] };
-          const dirty = !eq(e.allowed, server.allowed) || !eq(e.flags, server.flags) || !eq(e.companies, server.companies) || !eq(e.export, server.export) || !eq(e.controls || [], server.controls);
+          const server = { allowed: u.nav_allowed || null, flags: { ...DEFAULT_FLAGS, ...(u.flags || {}) }, companies: u.companies || null, export: { ...(u.export || {}) }, controls: Array.isArray(u.controls) ? u.controls : [], display_role_label: u.display_role_label || '' };
+          const dirty = !eq(e.allowed, server.allowed) || !eq(e.flags, server.flags) || !eq(e.companies, server.companies) || !eq(e.export, server.export) || !eq(e.controls || [], server.controls) || (e.display_role_label || '') !== server.display_role_label;
           return (
             <div key={u.id} className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <button onClick={() => { const willOpen = !expanded; setOpenId(willOpen ? u.id : null); if (willOpen && !activity[u.id]) loadActivity(u.id); }}
@@ -324,6 +327,22 @@ export default function ReadonlyAdminManager() {
                   <Section icon={<Building2 size={12} />} title="Company scope (server-enforced)">
                     <CompanyMatrix companies={companies} selected={e.companies ?? server.companies}
                       onToggle={(cid) => toggleCompany(u.id, cid)} onAll={() => setRow(u.id, { companies: null })} onNone={() => setRow(u.id, { companies: [] })} />
+                  </Section>
+
+                  {/* Display identity — vanity role label shown in the RO's own
+                      profile/header. Enforcement never changes; this is cosmetic. */}
+                  <Section icon={<UserIcon size={12} />} title="Display identity">
+                    <label className="text-xs block" style={{ color: 'var(--color-text-secondary)' }}>
+                      Role label shown in their profile
+                      <input
+                        value={e.display_role_label ?? server.display_role_label}
+                        onChange={(ev) => setRow(u.id, { display_role_label: ev.target.value.slice(0, 40) })}
+                        placeholder="Read-only Admin (default)"
+                        className="input text-sm w-full mt-1" />
+                      <span className="text-[11px] block mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                        e.g. “Super Admin”. Display only — they stay read-only everywhere. Blank = real label.
+                      </span>
+                    </label>
                   </Section>
 
                   {/* Flags */}
