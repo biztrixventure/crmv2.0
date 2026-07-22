@@ -62,13 +62,40 @@ const ACTIONS = ['csv_export', 'recording_listen'];
 // Export datasets + their configurable field catalogs (field key → label). Typed
 // columns per surface; the admin toggles which appear in the exported file.
 const EXPORT_DATASETS = {
-  sales:        { label: 'Sales', fields: ['customer_name', 'customer_phone', 'customer_email', 'reference_no', 'status', 'closer_name', 'fronter_name', 'company_name', 'sale_date', 'plan', 'client_name', 'monthly_payment', 'down_payment', 'car_year', 'car_make', 'car_model', 'car_vin'] },
-  transfers:    { label: 'Transfers', fields: ['customer_name', 'customer_phone', 'created_by_name', 'assigned_closer_name', 'latest_disposition', 'company_name', 'status', 'created_at'] },
-  callbacks:    { label: 'Callbacks', fields: ['customer_name', 'customer_phone', 'status', 'priority', 'callback_at', 'notes', 'fronter_name', 'closer_name', 'company_name'] },
+  sales:        { label: 'Sales', fields: ['customer_name', 'customer_phone', 'customer_email', 'reference_no', 'policy_number', 'customer_uuid', 'status', 'closer_name', 'fronter_name', 'company_name', 'sale_date', 'plan', 'client_name', 'monthly_payment', 'down_payment', 'car_year', 'car_make', 'car_model', 'car_vin'] },
+  transfers:    { label: 'Transfers', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'created_by_name', 'assigned_closer_name', 'latest_disposition', 'company_name', 'status', 'created_at'] },
+  callbacks:    { label: 'Callbacks', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'status', 'priority', 'callback_at', 'notes', 'fronter_name', 'closer_name', 'company_name'] },
   reviews:      { label: 'Call Reviews', fields: ['customer_name', 'rating', 'reviewer_name', 'created_at', 'notes'] },
   data_analyzer:{ label: 'Data Analyzer', fields: [] },   // dynamic (label-based) — configured on the analyzer's own columns
 };
 const SHELLS = ['staff', 'manager', 'compliance'];
+
+// Friendly column labels + a realistic sample value for the file PREVIEW. The
+// checkbox + preview show the label; the SAVED config still uses the raw field
+// key (unchanged), so nothing about existing export.columns behavior changes.
+const titleize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+const FIELD_LABELS = {
+  customer_name: 'Customer Name', customer_phone: 'Customer Phone', customer_email: 'Customer Email',
+  customer_uuid: 'Customer UUID', reference_no: 'Reference #', policy_number: 'Policy #',
+  closer_name: 'Closer', fronter_name: 'Fronter', company_name: 'Company', client_name: 'Client / Plan',
+  sale_date: 'Sale Date', monthly_payment: 'Monthly $', down_payment: 'Down $',
+  car_year: 'Car Year', car_make: 'Car Make', car_model: 'Car Model', car_vin: 'VIN',
+  created_by_name: 'Created By', assigned_closer_name: 'Assigned Closer', latest_disposition: 'Disposition',
+  created_at: 'Created At', callback_at: 'Callback At', reviewer_name: 'Reviewer', rating: 'Rating',
+  status: 'Status', priority: 'Priority', notes: 'Notes', plan: 'Plan',
+};
+const labelFor = (k) => FIELD_LABELS[k] || titleize(k);
+const SAMPLE_VALUES = {
+  customer_name: 'John Smith', customer_phone: '(555) 201-4477', customer_email: 'john.smith@example.com',
+  customer_uuid: 'e3b0c442-98fc-1c14-9afb-4c8996fb9242', reference_no: 'REF-100482', policy_number: 'POL-77310',
+  closer_name: 'Ava Reed', fronter_name: 'Mia Cole', company_name: 'WaveTech', client_name: 'Silver Plan',
+  sale_date: '2026-07-18', monthly_payment: '149.00', down_payment: '399.00',
+  car_year: '2019', car_make: 'Toyota', car_model: 'Camry', car_vin: '4T1BF1FK5CU512345',
+  created_by_name: 'Mia Cole', assigned_closer_name: 'Ava Reed', latest_disposition: 'Sold',
+  created_at: '2026-07-18 14:32', callback_at: '2026-07-20 10:00', reviewer_name: 'Sam Diaz', rating: '4.5',
+  status: 'closed_won', priority: 'high', notes: 'Called back, confirmed card.', plan: 'Gold', client_name_alt: '',
+};
+const sampleFor = (k) => SAMPLE_VALUES[k] != null ? SAMPLE_VALUES[k] : '—';
 
 const box = { background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12 };
 const inp = { background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13 };
@@ -378,8 +405,13 @@ function FieldsTab() {
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
 
+  const previewFields = cat.fields.length ? cat.fields.filter(f => (cols == null ? true : cols.has(f))) : [];
+  const uuidField = cat.fields.includes('customer_uuid');
+  const uuidShown = previewFields.includes('customer_uuid');
+
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-2">
       {/* export columns */}
       <div className="p-4" style={box}>
         <div className="flex items-center gap-2 mb-3"><Columns size={16} style={{ color: 'var(--color-primary-600)' }} /><span className="text-sm font-bold">Export columns</span></div>
@@ -395,10 +427,12 @@ function FieldsTab() {
             <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
               {cat.fields.map(field => {
                 const on = cols == null ? true : cols.has(field);
+                const sens = /uuid|phone|email|vin|payment/i.test(field) || field === 'customer_name';
                 return (
-                  <label key={field} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'var(--color-primary-50,#eef2ff)' : 'transparent', border: '1px solid var(--color-border)' }}>
+                  <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'var(--color-primary-50,#eef2ff)' : 'transparent', border: '1px solid var(--color-border)' }}>
                     <input type="checkbox" checked={on} onChange={() => toggleCol(field)} />
-                    {field}
+                    <span className="flex-1">{labelFor(field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
+                    <code className="text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
                   </label>
                 );
               })}
@@ -427,6 +461,51 @@ function FieldsTab() {
         </ThemedSelect>
         <div><button onClick={saveLayout} className="text-sm font-bold px-3 py-1.5 rounded-lg text-white flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)' }}><Check size={13} /> Save display</button></div>
         <p className="text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>Note: column-visibility here (display) is separate from export columns (left) — “what’s on screen” vs “what’s in the file”.</p>
+      </div>
+      </div>
+
+      {/* FILE PREVIEW — exactly how the downloaded .csv header + a sample row look */}
+      <div className="p-4" style={box}>
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <Download size={16} style={{ color: 'var(--color-primary-600)' }} />
+          <span className="text-sm font-bold">File preview — {cat.label} export</span>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· role: {role.replace(/_/g, ' ')}</span>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>Exactly the header row (and a sample data row) of the downloaded <code>.csv</code> for the selections on the left — updates live as you check/uncheck columns.</p>
+        {cat.fields.length === 0 ? (
+          <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Data Analyzer exports use dynamic, label-based columns chosen on the analyzer itself — there is no fixed header to preview here.</p>
+        ) : previewFields.length === 0 ? (
+          <p className="text-xs" style={{ color: 'var(--color-error-600,#dc2626)' }}>No columns selected — the exported file would have no data columns. Check at least one field on the left.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+              <table className="text-xs" style={{ borderCollapse: 'collapse', minWidth: '100%' }}>
+                <thead>
+                  <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                    {previewFields.map(f => (
+                      <th key={f} className="px-3 py-2 text-left whitespace-nowrap font-bold" style={{ borderRight: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                        {labelFor(f)}{(/uuid|phone|email|vin|payment/i.test(f) || f === 'customer_name') && <span title="Sensitive / PII" style={{ color: '#d97706' }}> •</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>{previewFields.map(f => <td key={f} className="px-3 py-2 whitespace-nowrap" style={{ borderRight: '1px solid var(--color-border)', borderTop: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>{sampleFor(f)}</td>)}</tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-2 rounded-lg p-2 overflow-x-auto" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+              <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RAW CSV HEADER (column keys as written to the file)</div>
+              <code className="text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{previewFields.join(',')}</code>
+            </div>
+            {uuidField && (
+              <p className="text-xs mt-2 flex items-start gap-1.5" style={{ color: uuidShown ? 'var(--color-warning-700,#b45309)' : 'var(--color-text-secondary)' }}>
+                <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> Customer UUID column is <strong>{uuidShown ? ' INCLUDED' : ' hidden'}</strong> in this export{uuidShown ? ' — a stable per-customer identifier. Uncheck “Customer UUID” on the left to keep it out of the file.' : '.'}
+              </p>
+            )}
+            <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>{cols == null ? 'This dataset is unconfigured, so ALL catalog columns (plus any raw form fields on the record) export by default.' : `${previewFields.length} column${previewFields.length === 1 ? '' : 's'} will be written for this role.`}</p>
+          </>
+        )}
       </div>
     </div>
   );
