@@ -115,7 +115,10 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `091_vin_active_reconcile.sql`
+Current highest: `208_qa_teams.sql`  ⚠️ **208 is not yet applied in Supabase** — the QA two-tier org (manager↔company↔agent scoping) needs it before it fully works.
+
+### QA department (two-tier org — mig 208)
+Compliance wires the org chart only (assign companies + agents to a quality **manager**); the manager owns all the work (per-agent methods, task assignment, per-company review-type config), scoped to their companies + team. One company → one manager; one agent → one manager (`qa_manager_companies`, `qa_team_members`). `resolveAgent` (transfer→company attribution) is now deterministic. See memory: qa_two_tier_org, qa_ux_reporting_2026_07, vicidial_agent_attribution.
 
 Notable migrations:
 - `007_roles_transfers_compliance.sql` — compliance workflow
