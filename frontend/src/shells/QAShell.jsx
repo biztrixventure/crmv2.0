@@ -1046,6 +1046,7 @@ function AgentReport({ subjectId, subjectName, companyId, from, to }) {
 }
 
 function ReportsTab({ companyId, companyName = '' }) {
+  const { canExport } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
@@ -1113,6 +1114,7 @@ function ReportsTab({ companyId, companyName = '' }) {
         <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
         <ThemedDate value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        {canExport('qa') && (
         <button onClick={() => {
             // THE deliverable: one row per reviewed fronter/closer — the users
             // whose quality this department exists to assure.
@@ -1129,6 +1131,8 @@ function ReportsTab({ companyId, companyName = '' }) {
           title="Download the per-agent quality report as CSV (one row per reviewed fronter/closer)">
           <Download size={13} /> CSV
         </button>
+        )}
+        {canExport('qa') && (
         <button onClick={async () => {
             if (!data?.summary?.reviews) return toast.error('No scored reviews to export yet');
             try {
@@ -1141,6 +1145,7 @@ function ReportsTab({ companyId, companyName = '' }) {
           title="Download a compact PDF: agent performance with charts and a full breakdown table">
           <Download size={13} /> PDF report
         </button>
+        )}
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
       </div>
 
@@ -2211,6 +2216,7 @@ const csvEsc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"'
 // otherwise) and shows: KPI tiles, score trend, the criteria they miss most,
 // call-outcome mix, and every reviewed call — plus a CSV of the file.
 function AgentQualityFile({ subject, managerView, companyId, onClose }) {
+  const { canExport } = useAuth();
   const [daysBack, setDaysBack] = useState(90);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2305,11 +2311,13 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
                 style={daysBack === d ? { background: 'var(--color-primary-600)', color: '#fff' } : { color: 'var(--color-text-secondary)' }}>{d}d</button>
             ))}
           </div>
+          {canExport('qa') && (
           <button onClick={exportFile} disabled={!reviews.length} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg ml-auto"
             style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', opacity: reviews.length ? 1 : 0.5 }}>
             <Download size={13} /> Export file
           </button>
-          <button onClick={onClose}><XCircle size={20} style={{ color: 'var(--color-text-tertiary)' }} /></button>
+          )}
+          <button onClick={onClose} className={canExport('qa') ? '' : 'ml-auto'}><XCircle size={20} style={{ color: 'var(--color-text-tertiary)' }} /></button>
         </div>
 
         {loading ? <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>
@@ -2400,6 +2408,7 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
 }
 
 function CompletedTab({ managerView, companyId, selfId, canOverride }) {
+  const { canExport } = useAuth();
   const today = todayISO();
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -2588,10 +2597,12 @@ function CompletedTab({ managerView, companyId, selfId, canOverride }) {
           </ThemedSelect>
         )}
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
+        {canExport('qa') && (
         <button onClick={exportCsv} disabled={!sorted.length} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
           style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', opacity: sorted.length ? 1 : 0.5 }} title="Download the filtered reviews as CSV">
           <Download size={13} /> CSV
         </button>
+        )}
       </div>
 
       {/* row 2 — the scoreboard tiles */}

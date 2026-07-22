@@ -248,6 +248,7 @@ const PriorityStatsBar = ({ callbacks }) => {
 // ── Audit Log sub-component ────────────────────────────────────────────────────
 const AuditLogView = ({ companyList }) => {
   const { isEnabled } = useFeatureFlags();
+  const { canExport } = useAuth();
   const [entries, setEntries]   = useState([]);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(false);
@@ -350,7 +351,7 @@ const AuditLogView = ({ companyList }) => {
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>
-      {isEnabled('exports') && (
+      {isEnabled('exports') && canExport('callbacks') && (
         <div className="mt-3 flex justify-end">
           <button onClick={handleExport}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors hover:opacity-80"

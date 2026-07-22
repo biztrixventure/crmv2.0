@@ -64,7 +64,7 @@ const SkeletonRow = () => (
 
 // ── main component ────────────────────────────────────────────────────────────
 const ReportsPanel = ({ companyId }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, canExport } = useAuth();
   const { isEnabled } = useFeatureFlags();
 
   const [fronters,   setFronters]   = useState([]);
@@ -260,7 +260,7 @@ const ReportsPanel = ({ companyId }) => {
           ))}
         </div>
 
-        {isEnabled('exports') && (
+        {isEnabled('exports') && canExport('reports') && (
           <button onClick={handleExport} disabled={loading}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
             style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>

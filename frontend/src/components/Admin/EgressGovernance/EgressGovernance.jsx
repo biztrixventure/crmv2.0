@@ -432,10 +432,105 @@ function FieldsTab() {
   );
 }
 
+// ── Export Access tab — per-role / per-user export-BUTTON on/off (mig 210) ─────
+const EXPORT_ROLES = ['closer', 'fronter', 'closer_manager', 'fronter_manager', 'operations_manager', 'company_admin', 'compliance_manager', 'qa_manager', 'qa_agent'];
+const AREA_LABEL = {
+  __global: 'All exports', sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
+  reviews: 'Reviews', numbers: 'Numbers', customer_profile: 'Cust. Profiles',
+  data_analyzer: 'Data Analyzer', company_data: 'Company Data', reports: 'Reports', qa: 'QA',
+};
+function ExportAccessTab() {
+  const [access, setAccess] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    client.get('egress/export-access')
+      .then(r => { setAccess(r.data.access || []); setAreas(r.data.areas || []); })
+      .catch(() => toast.error('Failed to load export access'))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const cols = ['__global', ...areas];
+  const entry = (st, sid) => access.find(x => x.scope_type === st && String(x.scope_id) === String(sid));
+  const isBlocked = (st, sid, area) => entry(st, sid)?.blocked?.[area] === true;
+  const setBlocked = async (st, sid, area, blocked) => {
+    const key = `${st}:${sid}:${area}`;
+    setSaving(key);
+    try {
+      await client.put('egress/export-access', { scope_type: st, scope_id: sid, dataset: area === '__global' ? null : area, blocked });
+      load();
+    } catch { toast.error('Save failed'); } finally { setSaving(''); }
+  };
+
+  const userRows = access.filter(e => e.scope_type === 'user');
+  const addUser = (u) => { if (!userRows.find(r => String(r.scope_id) === String(u.id))) setAccess(a => [...a, { scope_type: 'user', scope_id: u.id, scope_name: u.name, blocked: {} }]); };
+
+  const Cell = ({ st, sid, area }) => {
+    const blocked = isBlocked(st, sid, area);
+    const key = `${st}:${sid}:${area}`;
+    return (
+      <td className="px-2 py-1.5 text-center">
+        <input type="checkbox" checked={!blocked} disabled={saving === key}
+          title={blocked ? 'Blocked — click to allow' : 'Allowed — click to block'}
+          onChange={(e) => setBlocked(st, sid, area, !e.target.checked)} />
+      </td>
+    );
+  };
+  const Matrix = ({ scopeType, rows }) => (
+    <div className="overflow-x-auto rounded-xl" style={box}>
+      <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <th className="px-3 py-2 text-left" style={{ color: 'var(--color-text-secondary)', position: 'sticky', left: 0, background: 'var(--color-surface)' }}>{scopeType === 'role' ? 'Role' : 'User'}</th>
+            {cols.map(c => <th key={c} className="px-2 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{AREA_LABEL[c] || c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <td className="px-3 py-1.5 font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)', position: 'sticky', left: 0, background: 'var(--color-surface)' }}>{row.label}</td>
+              {cols.map(c => <Cell key={c} st={scopeType} sid={row.id} area={c} />)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl p-3 text-xs flex items-start gap-2" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+        <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+        <span>Checked = the export button is <strong>visible + allowed</strong>. Uncheck to hide/disable it for that role or user. <strong>All exports</strong> is the master switch; the others refine it per area. A per-<strong>user</strong> setting overrides their <strong>role</strong>. Enforced server-side (egress guard) and hides the button on the user's next load.</span>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>By role</h3>
+        <button onClick={load} className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={14} /></button>
+      </div>
+      {loading ? <div className="text-center py-6"><Loader2 size={18} className="animate-spin inline" /></div>
+        : <Matrix scopeType="role" rows={EXPORT_ROLES.map(r => ({ id: r, label: r.replace(/_/g, ' ') }))} />}
+
+      <div>
+        <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>By individual user (overrides their role)</h3>
+        <div className="mb-2 max-w-md"><UserSearchPicker onPick={addUser} /></div>
+        {userRows.length === 0
+          ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No per-user overrides yet. Search a person above to add one.</p>
+          : <Matrix scopeType="user" rows={userRows.map(u => ({ id: u.scope_id, label: u.scope_name || u.scope_id }))} />}
+      </div>
+    </div>
+  );
+}
+
 export default function EgressGovernance() {
   const [tab, setTab] = useState('audit');
   const TABS = [
     { k: 'audit', label: 'Export & Recording Audit', Icon: Download },
+    { k: 'export-access', label: 'Export Access', Icon: Check },
     { k: 'limits', label: 'Egress Limits', Icon: Sliders },
     { k: 'fields', label: 'Fields & Display', Icon: Columns },
   ];
@@ -454,6 +549,7 @@ export default function EgressGovernance() {
         ))}
       </div>
       {tab === 'audit' && <AuditTab />}
+      {tab === 'export-access' && <ExportAccessTab />}
       {tab === 'limits' && <LimitsTab />}
       {tab === 'fields' && <FieldsTab />}
     </div>

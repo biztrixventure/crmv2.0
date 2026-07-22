@@ -161,7 +161,7 @@ const MGR_CARD_META = {
 const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
 
 const ManagerShell = ({ workspaceMode = false }) => {
-  const { user, logout, updateUser, hasPermission } = useAuth();
+  const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict } = useFeatureFlags();
   // Superadmin-configurable rows-per-page (list.layout.manager.<role>); falls
@@ -601,7 +601,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
             <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
           <div className="flex items-center gap-2">
-            {isMgrActionVisible('export') && (
+            {isMgrActionVisible('export') && canExport() && (
               <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
                 style={{ background: 'var(--gradient-sidebar)' }}>
                 <FileSpreadsheet size={16} /> Export

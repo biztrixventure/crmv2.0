@@ -30,6 +30,39 @@ const superOnly = asyncHandler(async (req, res, next) => {
   return res.status(403).json({ error: 'Superadmin only' });
 });
 
+// Resolve a batch of user ids → readable names. Never returns a raw UUID:
+// user_profiles full name → portal_clients name → auth email → "Unknown user".
+async function resolveActorNames(ids) {
+  const out = {};
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  if (!uniq.length) return out;
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, first_name, last_name').in('user_id', uniq);
+  for (const p of (profs || [])) {
+    const n = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (n) out[p.user_id] = n;
+  }
+  let missing = uniq.filter(id => !out[id]);
+  if (missing.length) {
+    const { data: pcs } = await supabaseAdmin.from('portal_clients')
+      .select('auth_user_id, name').in('auth_user_id', missing);
+    for (const pc of (pcs || [])) if (pc.name) out[pc.auth_user_id] = `${pc.name} (portal)`;
+    missing = uniq.filter(id => !out[id]);
+  }
+  // Still missing (blank profile / deleted): fall back to the auth email, never
+  // the raw UUID. getUserById is per-id but only runs for the few unresolved.
+  if (missing.length) {
+    await Promise.all(missing.slice(0, 50).map(async (id) => {
+      try {
+        const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+        if (data?.user?.email) out[id] = data.user.email;
+      } catch { /* ignore — falls through to Unknown below */ }
+    }));
+  }
+  for (const id of uniq) if (!out[id]) out[id] = 'Unknown user';
+  return out;
+}
+
 // ── audit browser ─────────────────────────────────────────────────────────────
 router.get('/audit', superOnly, asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
@@ -53,21 +86,10 @@ router.get('/audit', superOnly, asyncHandler(async (req, res) => {
   const { data, error, count } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
-  // hydrate actor names (batched) — same pattern as /audit route
-  const ids = [...new Set((data || []).map(r => r.user_id).filter(Boolean))];
-  let names = {};
-  if (ids.length) {
-    const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
-    names = Object.fromEntries((profs || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.user_id]));
-    // portal clients aren't in user_profiles — fall back to portal_clients
-    const missing = ids.filter(id => !names[id]);
-    if (missing.length) {
-      const { data: pcs } = await supabaseAdmin.from('portal_clients').select('auth_user_id, name').in('auth_user_id', missing);
-      (pcs || []).forEach(pc => { names[pc.auth_user_id] = `${pc.name} (portal)`; });
-    }
-  }
+  // hydrate actor names (batched) — real name / portal / email, never a UUID
+  const names = await resolveActorNames((data || []).map(r => r.user_id));
   res.json({
-    logs: (data || []).map(r => ({ ...r, actor_name: r.user_id ? (names[r.user_id] || r.user_id) : 'System' })),
+    logs: (data || []).map(r => ({ ...r, actor_name: r.user_id ? (names[r.user_id] || 'Unknown user') : 'System' })),
     total: offset === 0 ? (count || 0) : null, page, limit,
   });
 }));
@@ -103,13 +125,13 @@ router.get('/limits', superOnly, asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin.from('egress_limits')
     .select('*').order('scope_type', { ascending: true }).order('scope_id', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
-  // decorate user/company scope rows with a readable name
+  // decorate user/company scope rows with a readable name (never a raw UUID)
   const userIds = (data || []).filter(r => r.scope_type === 'user').map(r => r.scope_id);
   const coIds   = (data || []).filter(r => r.scope_type === 'company').map(r => r.scope_id);
-  let uName = {}, cName = {};
-  if (userIds.length) { const { data: p } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds); uName = Object.fromEntries((p || []).map(x => [x.user_id, `${x.first_name || ''} ${x.last_name || ''}`.trim()])); }
-  if (coIds.length)   { const { data: c } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds); cName = Object.fromEntries((c || []).map(x => [x.id, x.name])); }
-  res.json({ limits: (data || []).map(r => ({ ...r, scope_name: r.scope_type === 'user' ? (uName[r.scope_id] || r.scope_id) : r.scope_type === 'company' ? (cName[r.scope_id] || r.scope_id) : r.scope_id })) });
+  const uName = await resolveActorNames(userIds);
+  let cName = {};
+  if (coIds.length) { const { data: c } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds); cName = Object.fromEntries((c || []).map(x => [x.id, x.name])); }
+  res.json({ limits: (data || []).map(r => ({ ...r, scope_name: r.scope_type === 'user' ? (uName[r.scope_id] || 'Unknown user') : r.scope_type === 'company' ? (cName[r.scope_id] || r.scope_id) : r.scope_id })) });
 }));
 
 const intOrNull = (v) => (v === '' || v == null) ? null : (Number.isFinite(+v) && +v >= 0 ? Math.floor(+v) : null);
@@ -135,6 +157,53 @@ router.delete('/limits/:id', superOnly, asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('egress_limits').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+}));
+
+// ── export ACCESS (per-role / per-user export-button on/off, mig 210) ──────────
+// A superadmin turns the export button OFF for a role or an individual user,
+// globally (__global) or for one data area. export_blocked=true = disabled.
+const EXPORT_ACCESS_AREAS = ['sales', 'transfers', 'callbacks', 'reviews', 'numbers', 'customer_profile', 'data_analyzer', 'company_data', 'reports', 'qa'];
+
+router.get('/export-access', superOnly, asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('egress_limits')
+    .select('scope_type, scope_id, dataset, export_blocked').eq('action_type', 'csv_export');
+  const map = new Map();
+  for (const r of (data || [])) {
+    const key = `${r.scope_type}:${r.scope_id}`;
+    if (!map.has(key)) map.set(key, { scope_type: r.scope_type, scope_id: r.scope_id, blocked: {} });
+    map.get(key).blocked[r.dataset || '__global'] = r.export_blocked === true;
+  }
+  const entries = [...map.values()];
+  const uName = await resolveActorNames(entries.filter(e => e.scope_type === 'user').map(e => e.scope_id));
+  const coIds = entries.filter(e => e.scope_type === 'company').map(e => e.scope_id);
+  let cName = {};
+  if (coIds.length) { const { data: c } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds); cName = Object.fromEntries((c || []).map(x => [x.id, x.name])); }
+  const access = entries.map(e => ({ ...e, scope_name: e.scope_type === 'user' ? (uName[e.scope_id] || 'Unknown user') : e.scope_type === 'company' ? (cName[e.scope_id] || e.scope_id) : e.scope_id }));
+  res.json({ access, areas: EXPORT_ACCESS_AREAS });
+}));
+
+router.put('/export-access', superOnly, asyncHandler(async (req, res) => {
+  const { scope_type, scope_id, dataset, blocked } = req.body || {};
+  if (!['role', 'company', 'user'].includes(scope_type) || !scope_id) {
+    return res.status(400).json({ error: 'scope_type + scope_id required' });
+  }
+  const ds = dataset && dataset !== '__global' ? String(dataset) : null;
+  // Manual upsert: the unique index is functional (COALESCE(dataset,'*')), so
+  // PostgREST onConflict can't target it — find-then-update/insert instead.
+  let sel = supabaseAdmin.from('egress_limits').select('id')
+    .eq('scope_type', scope_type).eq('scope_id', String(scope_id)).eq('action_type', 'csv_export');
+  sel = ds == null ? sel.is('dataset', null) : sel.eq('dataset', ds);
+  const { data: existing } = await sel.maybeSingle();
+  const stamp = { export_blocked: !!blocked, updated_by: req.user.id, updated_at: new Date().toISOString() };
+  if (existing) {
+    const { error } = await supabaseAdmin.from('egress_limits').update(stamp).eq('id', existing.id);
+    if (error) return res.status(500).json({ error: error.message });
+  } else {
+    const { error } = await supabaseAdmin.from('egress_limits')
+      .insert({ scope_type, scope_id: String(scope_id), action_type: 'csv_export', dataset: ds, ...stamp });
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  res.json({ ok: true, scope_type, scope_id: String(scope_id), dataset: ds, blocked: !!blocked });
 }));
 
 // ── export.columns config ─────────────────────────────────────────────────────

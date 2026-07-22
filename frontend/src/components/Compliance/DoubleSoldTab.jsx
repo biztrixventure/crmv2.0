@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { AlertTriangle, Download, RefreshCw, Loader2, Search, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Duplicate-sold report: every customer NUMBER (customer_uuid) with >= 2 real
 // sales. Surfaces the whole picture — the same number sold repeatedly (even in
@@ -45,6 +46,7 @@ const COLS = [
 ];
 
 export default function DoubleSoldTab() {
+  const { canExport } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
@@ -150,9 +152,11 @@ export default function DoubleSoldTab() {
         <button onClick={load} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg" style={card} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
-        <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg" style={card} disabled={!view.length}>
-          <Download size={14} /> Export CSV
-        </button>
+        {canExport('sales') && (
+          <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg" style={card} disabled={!view.length}>
+            <Download size={14} /> Export CSV
+          </button>
+        )}
       </div>
 
       {/* signal filter chips */}

@@ -3,6 +3,7 @@ import { Shield, RefreshCw, Loader2, X, Search, Building2, Check, Settings2, Che
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department (mig 181 + 186).
@@ -90,6 +91,7 @@ function KpiStrip({ kpis }) {
 
 // Productivity roster — every QA person + how much they're doing over the window.
 function TeamReport({ team, onPick }) {
+  const { canExport } = useAuth();
   const [sort, setSort] = useState({ k: 'reviews', dir: -1 });
   if (!team) return <div className="py-8 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   const rows = [...(team.reviewers || [])];
@@ -109,7 +111,9 @@ function TeamReport({ team, onPick }) {
     <div>
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} QA people <InfoTip text="Every QA manager & agent with their productivity over the selected window. Click a column header to sort, or a row to open that person in Team." /></span>
-        <button onClick={exportCsv} title="Download this roster (with turnaround + active-days) as a CSV for the selected window" className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
+        {canExport('qa') && (
+          <button onClick={exportCsv} title="Download this roster (with turnaround + active-days) as a CSV for the selected window" className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
+        )}
       </div>
       <div className="rounded-xl overflow-auto" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>

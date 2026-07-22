@@ -59,13 +59,58 @@ async function resolveEgressLimits({ userId, companyId, role, actionType, datase
       max_rows_per_export:           chosen.max_rows_per_export ?? null,
       max_exports_per_day:           chosen.max_exports_per_day ?? null,
       max_recording_minutes_per_day: chosen.max_recording_minutes_per_day ?? null,
+      export_blocked:                chosen.export_blocked === true,   // mig 210 hard on/off
     };
   } catch (e) {
     logger.warn('EGRESS', `resolveEgressLimits failed (fail-open): ${e.message}`);
     return emptyLimits();
   }
 }
-const emptyLimits = () => ({ max_rows_per_export: null, max_exports_per_day: null, max_recording_minutes_per_day: null });
+const emptyLimits = () => ({ max_rows_per_export: null, max_exports_per_day: null, max_recording_minutes_per_day: null, export_blocked: false });
+
+// Resolve the effective EXPORT permission map for a user across every data area,
+// for the frontend to hide/show export buttons. Returns
+//   { global: bool, areas: { <dataset>: bool } }   (true = allowed)
+// Opt-out posture: no matching block row = allowed. Most-specific row wins
+// (user > company > role; a dataset row beats the catch-all). Never throws
+// (fail-open → all allowed) so a governance outage never hides a button.
+const EXPORT_AREAS_LIST = [
+  'sales', 'transfers', 'callbacks', 'reviews', 'numbers',
+  'customer_profile', 'data_analyzer', 'company_data', 'reports', 'qa',
+];
+async function resolveExportPerms({ userId, companyId, role }) {
+  const allow = { global: true, areas: Object.fromEntries(EXPORT_AREAS_LIST.map(a => [a, true])) };
+  try {
+    const scopes = [];
+    if (role)      scopes.push(['role', String(role)]);
+    if (companyId) scopes.push(['company', String(companyId)]);
+    if (userId)    scopes.push(['user', String(userId)]);
+    if (!scopes.length) return allow;
+    const orClause = scopes.map(([t, id]) => `and(scope_type.eq.${t},scope_id.eq.${id})`).join(',');
+    const { data } = await supabaseAdmin
+      .from('egress_limits')
+      .select('scope_type, dataset, export_blocked')
+      .eq('action_type', 'csv_export')
+      .or(orClause);
+    const rows = (data || []).filter(r => r.export_blocked === true || r.export_blocked === false);
+    if (!rows.length) return allow;
+    const rank = { user: 3, company: 2, role: 1 };
+    // pick the most-specific row for a given dataset (null = catch-all/global)
+    const pick = (ds) => rows
+      .filter(r => (ds ? (r.dataset == null || r.dataset === ds) : r.dataset == null))
+      .sort((a, b) => (rank[b.scope_type] * 2 + (b.dataset ? 1 : 0)) - (rank[a.scope_type] * 2 + (a.dataset ? 1 : 0)))[0];
+    const g = pick(null);
+    if (g && g.export_blocked === true) allow.global = false;
+    for (const a of EXPORT_AREAS_LIST) {
+      const r = pick(a);
+      if (r && r.export_blocked === true) allow.areas[a] = false;
+    }
+    return allow;
+  } catch (e) {
+    logger.warn('EGRESS', `resolveExportPerms failed (fail-open): ${e.message}`);
+    return allow;
+  }
+}
 
 // Today's usage for this user+action from the audit log (allowed rows only).
 // Returns { exports: N, minutes: M }. Index: idx_eal_enforce.
@@ -136,6 +181,14 @@ async function enforceEgress({ user, actionType, dataset, surface, rowCount, dur
     }
   }
 
+  // 0b) hard export/recording block (mig 210 export_blocked). A superadmin
+  //     disabled this area (or globally) for the caller's ROLE or USER via the
+  //     Egress → Export Access matrix. Applies to EVERYONE (the RO gate above is
+  //     the readonly-admin-specific layer). Most-specific row already chosen.
+  if (limits.export_blocked === true) {
+    return deny('Exports are disabled for your account for this data area by an administrator.', 0);
+  }
+
   // 1) row cap (csv) — checked against the FULL export size before draining.
   if (actionType === 'csv_export' && limits.max_rows_per_export != null
       && Number.isFinite(rowCount) && rowCount > limits.max_rows_per_export) {
@@ -168,4 +221,4 @@ async function enforceEgress({ user, actionType, dataset, surface, rowCount, dur
   return { allowed: true, limit: null, limits };
 }
 
-module.exports = { resolveEgressLimits, usageToday, logEgress, enforceEgress };
+module.exports = { resolveEgressLimits, resolveExportPerms, usageToday, logEgress, enforceEgress, EXPORT_AREAS_LIST };

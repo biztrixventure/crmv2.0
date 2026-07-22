@@ -200,6 +200,23 @@ export const AuthProvider = ({ children }) => {
   // Copy-protection master switch for this RO (drives the shell copy guard).
   const roNoCopy = isReadOnly && governance?.flags?.no_copy === true;
 
+  // canExport(area) — UNIFIED export-button gate for EVERY role (not just RO).
+  // superadmin → always; readonly_admin → its governance layer; everyone else →
+  // the per-user/per-role export_perms baked into the auth payload (egress mig
+  // 210). Opt-out: no config = allowed. Returns false → the export button must
+  // NOT render. `area` is a dataset slug (sales/transfers/callbacks/reviews/
+  // numbers/customer_profile/data_analyzer/company_data/reports/qa); omit for a
+  // global check.
+  const canExport = useCallback((area) => {
+    if (user?.role === 'superadmin') return true;
+    if (isReadOnly) return roExportAllowed(area);
+    const p = user?.export_perms;
+    if (!p) return true;                                  // opt-out default
+    if (p.global === false) return false;
+    if (area && p.areas && p.areas[area] === false) return false;
+    return true;
+  }, [user, isReadOnly, roExportAllowed]);
+
   // roControlAllowed(key) — may this RO see/use a specific ACTION button (e.g.
   // 'data-analyzer.send_batch')? governance.controls is the list of DISABLED
   // keys; absent from it = allowed (parity). Non-RO always true. When false the
@@ -213,7 +230,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{
       user, token, login, logout, updateUser, hasPermission, isReadOnly,
-      governance, roFlags, roFlag, roCan, roTabAllowed, roExportAllowed, roNoCopy, roControlAllowed,
+      governance, roFlags, roFlag, roCan, roTabAllowed, roExportAllowed, roNoCopy, roControlAllowed, canExport,
       isRefreshing, isAuthenticated: !!user && !!token,
     }}>
       {children}

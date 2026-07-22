@@ -4,6 +4,7 @@ const { supabaseAdmin, supabaseClient } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 const { resolveGovernance } = require('../utils/readonlyGovernance');
+const { resolveExportPerms } = require('../utils/egressGuard');
 
 const router = express.Router();
 
@@ -136,6 +137,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     }
   }
 
+  const export_perms = await resolveExportPerms({ userId, companyId: ur.company_id, role: roleLevel });
   res.json({
     id: userId,
     email: req.user.email,
@@ -150,6 +152,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     first_name: profile?.first_name,
     last_name: profile?.last_name,
     permissions: userPermissions,
+    export_perms,   // per-user/role export-button permissions (egress mig 210)
   });
 }));
 
@@ -305,6 +308,7 @@ router.post(
       const userPermissions = [...permSet];
 
       // Return user data and token
+      const export_perms = await resolveExportPerms({ userId: data.user.id, companyId: userRole.company_id, role: roleData.level });
       res.json({
         token:         data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -319,6 +323,7 @@ router.post(
           first_name: profile?.first_name,
           last_name: profile?.last_name,
           permissions: userPermissions,
+          export_perms,
         },
       });
     } catch (err) {
@@ -731,6 +736,7 @@ router.post('/exchange', asyncHandler(async (req, res) => {
   }
   userPermissions = [...permSet];
 
+  const export_perms = await resolveExportPerms({ userId, companyId: ur.company_id, role: roleLevel });
   res.json({
     token: access_token,
     refresh_token: refresh_token || null,
@@ -743,6 +749,7 @@ router.post('/exchange', asyncHandler(async (req, res) => {
       company_timezone: ur.companies?.internal_timezone || 'Asia/Karachi',
       first_name: profile?.first_name, last_name: profile?.last_name,
       permissions: userPermissions,
+      export_perms,
     },
   });
 }));
