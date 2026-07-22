@@ -300,7 +300,7 @@ function Field({ label, children }) {
 
 // Small dependency-free daily trend: grouped bars (transfers = blue, sales =
 // green) per day over the selected range. Shows how the team is working over time.
-function TrendChart({ data }) {
+export function TrendChart({ data }) {
   const rows = Array.isArray(data) ? data : [];
   if (!rows.length) return <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No activity in this range to chart.</p>;
   const max = Math.max(1, ...rows.map(r => Math.max(r.transfers || 0, r.sales || 0)));

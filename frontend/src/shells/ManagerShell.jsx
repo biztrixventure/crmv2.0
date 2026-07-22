@@ -10,6 +10,7 @@ import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import ThemedSelect from '../components/UI/Select';
 import TeamManager from '../components/Admin/Teams/TeamManager';
+import MyTeam from '../components/Admin/Teams/MyTeam';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -81,6 +82,7 @@ import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
 // Delegatable superadmin tools (shown only when a superadmin grants the flag).
+// (MyTeam is the team-lead home tab — imported eagerly above, small component.)
 const CustomerProfile = lazy(() => import("../components/Admin/CustomerProfile/CustomerProfile"));
 const DataAnalyzer    = lazy(() => import("../components/Admin/DataAnalyzer/DataAnalyzer"));
 const ChatAdmin       = lazy(() => import("../components/Admin/Chat/ChatAdmin"));
@@ -230,6 +232,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // company. Superadmin still uses /admin's SPIFF tab for cross-company.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
+    // Team-lead home — your own team's live progress + roster/goal management.
+    // Shown to every manager role (they may lead or belong to a team).
+    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+      ? [{ key: 'my_team',    label: 'My Team',        icon: Users      }] : []),
     // Team structure — company admins/ops manage; team-lead managers manage own.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
@@ -1219,6 +1225,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
+        {activeTab === 'my_team'   && <MyTeam />}
         {activeTab === 'teams'     && <TeamManager />}
         {activeTab === 'callbacks' && <ManagerCallbacksTab user={user} />}
         {activeTab === 'numbers'   && (
