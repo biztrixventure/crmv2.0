@@ -75,20 +75,46 @@ const { startBackgroundJobs } = require('./utils/scheduler');
 const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
-// On startup: stamp app_metadata.role='superadmin' for SUPERADMIN_EMAIL users.
+// On startup: RECONCILE app_metadata.role='superadmin' against SUPERADMIN_EMAIL.
 // Once set, the Supabase JWT carries it — no env-var dependency per-request.
+//
+// This is a two-way sync (add AND remove). Stamping alone (the old behavior)
+// left a demoted account stuck as superadmin forever: removing its email from
+// the env never cleared the baked-in stamp, and syncReadonlyAdminMetadata
+// refuses to downgrade a superadmin-stamped user — so the account could never
+// become readonly_admin. Now: emails in the list get stamped; any account that
+// STILL carries a superadmin stamp but is no longer in the list is demoted —
+// straight to readonly_admin if it's in READONLY_ADMIN_EMAIL, else cleared so
+// its role re-derives from user_company_roles.
+//
+// Safety: if SUPERADMIN_EMAIL is empty (missing/misconfigured deploy) we do
+// nothing — never mass-clear superadmins on an accidental env drop.
 async function syncSuperadminMetadata() {
   const emails = (process.env.SUPERADMIN_EMAIL || '')
     .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
   if (!emails.length) return;
+  const roEmails = new Set(
+    (process.env.READONLY_ADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  );
   try {
     const { data } = await _saForSync.auth.admin.listUsers({ perPage: 1000 });
     for (const u of (data?.users || [])) {
-      if (emails.includes((u.email || '').toLowerCase()) && u.app_metadata?.role !== 'superadmin') {
+      const e = (u.email || '').toLowerCase();
+      const stamped = u.app_metadata?.role;
+      if (emails.includes(e)) {
+        if (stamped !== 'superadmin') {
+          await _saForSync.auth.admin.updateUserById(u.id, {
+            app_metadata: { ...u.app_metadata, role: 'superadmin' },
+          });
+          console.log(`[SUPERADMIN] Stamped app_metadata.role=superadmin for ${u.email}`);
+        }
+      } else if (stamped === 'superadmin') {
+        // Stale superadmin — no longer in the env roster. Demote.
+        const newRole = roEmails.has(e) ? 'readonly_admin' : null;
         await _saForSync.auth.admin.updateUserById(u.id, {
-          app_metadata: { ...u.app_metadata, role: 'superadmin' },
+          app_metadata: { ...u.app_metadata, role: newRole },
         });
-        console.log(`[SUPERADMIN] Stamped app_metadata.role=superadmin for ${u.email}`);
+        console.log(`[SUPERADMIN] Cleared stale superadmin stamp for ${u.email} → ${newRole || 'none'}`);
       }
     }
   } catch (err) {
