@@ -12,6 +12,36 @@ import NumberDetail, { PIP_PALETTE } from './NumberDetail';
 // window has none of the app's CSS.
 const supportsPiP = typeof window !== 'undefined' && 'documentPictureInPicture' in window;
 
+// Copy that works from INSIDE a Document-PiP window and under the dashboard's
+// copy-lock. The PiP is a separate, focused document, so the parent window's
+// navigator.clipboard rejects with "Document is not focused" and the copy
+// silently fails. Always target the FOCUSED window (the PiP when open) and fall
+// back to a hidden-textarea execCommand in that same document (the textarea is
+// explicitly selectable, so user-select:none elsewhere can't block it).
+function execCommandCopy(text, win) {
+  try {
+    const doc = (win || window).document;
+    const ta = doc.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;user-select:text;-webkit-user-select:text;';
+    doc.body.appendChild(ta);
+    ta.focus(); ta.select();
+    doc.execCommand('copy');
+    doc.body.removeChild(ta);
+    return true;
+  } catch { return false; }
+}
+function copyToClipboard(text, win) {
+  const w = win || window;
+  try {
+    if (w.navigator?.clipboard?.writeText) {
+      w.navigator.clipboard.writeText(text).catch(() => execCommandCopy(text, w));
+      return;
+    }
+  } catch { /* fall through */ }
+  execCommandCopy(text, w);
+}
+
 const STATUS = {
   new:       { l: 'New',      c: '#2563eb', bg: '#eff6ff' },
   called:    { l: 'Called',   c: '#d97706', bg: '#fef3c7' },
@@ -273,7 +303,10 @@ export default function FronterNumbersWidget({ user }) {
 
   const copyNumber = useCallback((num) => {
     const digits = String(num || '').replace(/\D/g, '');
-    navigator.clipboard?.writeText(digits).catch(() => {});
+    // Copy from the FOCUSED window — the PiP window when it's open, else the page.
+    // Using the parent's clipboard while the PiP is focused silently no-ops.
+    const win = (pipWinRef.current && !pipWinRef.current.closed) ? pipWinRef.current : window;
+    copyToClipboard(digits, win);
     setCopied(num);
     clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopied(c => (c === num ? null : c)), 1200);
