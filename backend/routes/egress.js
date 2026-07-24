@@ -219,17 +219,22 @@ router.put('/export-access', superOnly, asyncHandler(async (req, res) => {
 }));
 
 // ── export.columns config ─────────────────────────────────────────────────────
+// Scope = a specific USER (userId, wins) or a ROLE. Per-user config lets a
+// superadmin give one person a one-column (or many-column) export distinct from
+// their role's default. Key: export.columns.<dataset>.<userId|role>.
 router.get('/columns', superOnly, asyncHandler(async (req, res) => {
-  const { dataset, role } = req.query;
-  if (!dataset || !role) return res.status(400).json({ error: 'dataset and role are required' });
-  const v = await getConfig(null, `export.columns.${dataset}.${role}`, null);
+  const { dataset, role, userId } = req.query;
+  const scope = userId || role;
+  if (!dataset || !scope) return res.status(400).json({ error: 'dataset and role/userId are required' });
+  const v = await getConfig(null, `export.columns.${dataset}.${scope}`, null);
   res.json({ columns: Array.isArray(v) ? v : null });   // null = all (unconfigured)
 }));
 router.put('/columns', superOnly, asyncHandler(async (req, res) => {
-  const { dataset, role } = req.body || {};
+  const { dataset, role, userId } = req.body || {};
+  const scope = userId || role;
   const columns = Array.isArray(req.body.columns) ? req.body.columns.map(String) : null;
-  if (!dataset || !role) return res.status(400).json({ error: 'dataset and role are required' });
-  await setConfig('global', `export.columns.${dataset}.${role}`, columns, req.user.id);
+  if (!dataset || !scope) return res.status(400).json({ error: 'dataset and role/userId are required' });
+  await setConfig('global', `export.columns.${dataset}.${scope}`, columns, req.user.id);
   clearConfigCache();
   res.json({ ok: true, columns });
 }));

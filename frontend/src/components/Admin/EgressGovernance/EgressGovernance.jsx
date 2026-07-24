@@ -403,15 +403,19 @@ function LimitsTab() {
 function FieldsTab() {
   const [dataset, setDataset] = useState('sales');
   const [role, setRole] = useState('closer');
+  const [scopeType, setScopeType] = useState('role');   // export-columns scope: role | user
+  const [colUser, setColUser] = useState(null);          // { id, name } when scopeType==='user'
   const [cols, setCols] = useState(null);        // null = all (unconfigured)
   const [shell, setShell] = useState('compliance');
   const [layout, setLayout] = useState({ page_size: '', default_view: '' });
   const cat = EXPORT_DATASETS[dataset];
 
   useEffect(() => {
-    client.get('egress/columns', { params: { dataset, role } })
+    if (scopeType === 'user' && !colUser) { setCols(null); return; }
+    const params = scopeType === 'user' ? { dataset, userId: colUser.id } : { dataset, role };
+    client.get('egress/columns', { params })
       .then(r => setCols(Array.isArray(r.data.columns) ? new Set(r.data.columns) : null)).catch(() => setCols(null));
-  }, [dataset, role]);
+  }, [dataset, role, scopeType, colUser]);
   useEffect(() => {
     client.get('egress/list-layout', { params: { shell, role } })
       .then(r => setLayout(r.data.layout || { page_size: '', default_view: '' })).catch(() => setLayout({}));
@@ -425,8 +429,10 @@ function FieldsTab() {
     });
   };
   const saveCols = async () => {
+    if (scopeType === 'user' && !colUser) { toast.error('Pick a user first'); return; }
     const arr = cols == null ? null : [...cols];
-    try { await client.put('egress/columns', { dataset, role, columns: arr }); toast.success('Export columns saved'); }
+    const body = scopeType === 'user' ? { dataset, userId: colUser.id, columns: arr } : { dataset, role, columns: arr };
+    try { await client.put('egress/columns', body); toast.success(`Export columns saved${scopeType === 'user' ? ` for ${colUser.name}` : ''}`); }
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
   const saveLayout = async () => {
@@ -444,15 +450,28 @@ function FieldsTab() {
       {/* export columns */}
       <div className="p-4" style={box}>
         <div className="flex items-center gap-2 mb-3"><Columns size={16} style={{ color: 'var(--color-primary-600)' }} /><span className="text-sm font-bold">Export columns</span></div>
-        <div className="flex gap-2 mb-3">
+        <div className="flex gap-2 mb-2 flex-wrap items-center">
           <ThemedSelect value={dataset} onChange={e => setDataset(e.target.value)} style={inp}>{Object.entries(EXPORT_DATASETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</ThemedSelect>
-          <ThemedSelect value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</ThemedSelect>
+          <div className="inline-flex rounded-lg overflow-hidden flex-shrink-0" style={{ border: '1px solid var(--color-border)' }}>
+            {['role', 'user'].map(s => (
+              <button key={s} type="button" onClick={() => setScopeType(s)} className="text-xs font-semibold px-3 py-1.5"
+                style={{ background: scopeType === s ? 'var(--color-primary-600)' : 'transparent', color: scopeType === s ? '#fff' : 'var(--color-text-secondary)' }}>{s === 'role' ? 'By role' : 'By user'}</button>
+            ))}
+          </div>
+          {scopeType === 'role'
+            ? <ThemedSelect value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</ThemedSelect>
+            : <UserSearchPicker onPick={(u) => setColUser({ id: u.id, name: u.name })} />}
         </div>
+        {scopeType === 'user' && (
+          <p className="text-xs mb-2" style={{ color: colUser ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>
+            {colUser ? `Editing export columns for ${colUser.name} — this overrides their role's export.` : 'Pick a person above to set their personal export columns (one column, or as many as you want).'}
+          </p>
+        )}
         {cat.fields.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>The Data Analyzer has dynamic columns — its export field-selection is label-based and configured directly on the analyzer’s output (not a fixed catalog).</p>
         ) : (
           <>
-            <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for this role. {cols == null && <b>Currently all fields (unconfigured).</b>}</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'}. {cols == null && <b>Currently all fields (unconfigured).</b>}</p>
             <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
               {cat.fields.map(field => {
                 const on = cols == null ? true : cols.has(field);
@@ -498,7 +517,7 @@ function FieldsTab() {
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <Download size={16} style={{ color: 'var(--color-primary-600)' }} />
           <span className="text-sm font-bold">File preview — {cat.label} export</span>
-          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· role: {role.replace(/_/g, ' ')}</span>
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {scopeType === 'user' ? (colUser?.name || 'pick a user') : role.replace(/_/g, ' ')}</span>
         </div>
         <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>Exactly the header row (and a sample data row) of the downloaded <code>.csv</code> for the selections on the left — updates live as you check/uncheck columns.</p>
         {cat.fields.length === 0 ? (

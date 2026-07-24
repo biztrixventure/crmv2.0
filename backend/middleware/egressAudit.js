@@ -65,7 +65,7 @@ function egressAudit(req, res, next) {
         }
 
         // Field selection — delete disallowed keys from every row (data-level).
-        const allowed = await resolveExportColumns({ companyId: req.user?.company_id, dataset, role: req.user?.role });
+        const allowed = await resolveExportColumns({ companyId: req.user?.company_id, dataset, role: req.user?.role, userId: req.user?.id });
         if (allowed && allowed.length) {
           const key = DATASET_ROWS_KEY[dataset];
           const rows = key && Array.isArray(payload?.[key]) ? payload[key] : null;

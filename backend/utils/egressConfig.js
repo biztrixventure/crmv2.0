@@ -7,13 +7,16 @@
 // ============================================================================
 const { getConfig } = require('./businessConfig');
 
-// Allowed EXPORT columns for a dataset+role. Falls back role → (dataset-wide '*'
-// role) → null. null means "no restriction → all fields".
-async function resolveExportColumns({ companyId, dataset, role }) {
+// Allowed EXPORT columns for a dataset, most-specific scope first:
+//   per-USER (userId) → per-ROLE (role) → the 'all' catch-all → null.
+// A per-user config lets a superadmin give ONE person a one-column (or many-
+// column) export that differs from their whole role. null = "no restriction →
+// all fields". Keys never collide: userId is a UUID, role a level string.
+async function resolveExportColumns({ companyId, dataset, role, userId }) {
   if (!dataset) return null;
-  for (const r of [role, 'all']) {
-    if (!r) continue;
-    const v = await getConfig(companyId, `export.columns.${dataset}.${r}`, undefined);
+  for (const scope of [userId, role, 'all']) {
+    if (!scope) continue;
+    const v = await getConfig(companyId, `export.columns.${dataset}.${scope}`, undefined);
     if (Array.isArray(v)) return v.map(String);
   }
   return null;
