@@ -611,9 +611,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
             <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Export gated by Data Egress (canExport) — SuperAdmin controls it
-                per role/user from Data Egress → Export Access. */}
-            {isMgrActionVisible('export') && canExport() && (
+            {/* Export gated ONLY by Data Egress (canExport). We deliberately do
+                NOT also gate on the shell-layout action toggle: that config
+                loads async (~2s after mount) so it made the button flash in then
+                vanish for fronter/closer/ops managers (shell.layout.manager had
+                actions.export=false). Data Egress → Export Access is the single
+                source of truth for who can export. */}
+            {canExport() && (
               <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
                 style={{ background: 'var(--gradient-sidebar)' }}>
                 <FileSpreadsheet size={16} /> Export
