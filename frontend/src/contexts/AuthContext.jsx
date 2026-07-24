@@ -43,6 +43,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem("token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("user");
+      localStorage.removeItem("vici_agent_numbers_v1");
       window.location.href = "/login";
     }
   }, []);
@@ -99,6 +100,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     localStorage.removeItem("token");
     localStorage.removeItem("refresh_token");
+    localStorage.removeItem("vici_agent_numbers_v1");   // superadmin dialer pull — never leave dialer PII after logout
   }, []);
 
   const updateUser = useCallback((updates) => {
