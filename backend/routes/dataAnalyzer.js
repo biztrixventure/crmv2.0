@@ -83,7 +83,11 @@ function applyFilter(query, f, cfg) {
       // Specific to state fields because car_make/car_model already use
       // case-insensitive ilike below and "Unspecified" has no meaning there.
       const UNSPEC = '__UNSPECIFIED__';
-      const hasUnspec = rawArr.includes(UNSPEC) && /\bstate\b/i.test(f.field);
+      // The "Unspecified"/"No disposition" pseudo-chip surfaces rows with no
+      // value. Supported for state fields (NULL after mig 067) and the
+      // disposition columns (a transfer with no disposition yet = NULL).
+      const isDispoField = field === 'latest_disposition' || field === 'closer_disposition';
+      const hasUnspec = rawArr.includes(UNSPEC) && (/\bstate\b/i.test(f.field) || isDispoField);
       const arr = rawArr.filter(x => x !== UNSPEC);
 
       if (hasUnspec) {

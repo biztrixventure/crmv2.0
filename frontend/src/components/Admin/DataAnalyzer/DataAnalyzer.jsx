@@ -426,9 +426,9 @@ const FieldControl = ({ field, value, onChange, vehicleMakes = [], vehicleTree =
                 style={{
                   backgroundColor: on ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)',
                   color:           on ? 'white' : 'var(--color-text-secondary)',
-                  border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
+                  border: `1px ${o === '__UNSPECIFIED__' && !on ? 'dashed' : 'solid'} ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}`,
                 }}>
-                {String(o).replace(/_/g, ' ')}
+                {o === '__UNSPECIFIED__' ? 'No disposition' : String(o).replace(/_/g, ' ')}
               </button>
             );
           })}
@@ -690,7 +690,9 @@ const DataAnalyzer = () => {
     // Data values FIRST (sorted by frequency server-side) so the real, most-used
     // dispositions lead the chip grid; config-only names fill in behind. This is
     // what makes "select all" cover every stored value (incl. the unlisted ones).
-    const opts = [...new Set([...(dataDispos || []), ...(dispositions || []), ...saleDispoOpts])];
+    // Lead with the "No disposition" sentinel so undisposed rows (NULL) are
+    // pickable — the backend `in` op turns '__UNSPECIFIED__' into an OR is.null.
+    const opts = ['__UNSPECIFIED__', ...new Set([...(dataDispos || []), ...(dispositions || []), ...saleDispoOpts])];
     return {
       name: dataset === 'sales' ? 'closer_disposition' : 'latest_disposition',
       label: 'Disposition',
