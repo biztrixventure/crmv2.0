@@ -236,8 +236,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // Shown to every manager role (they may lead or belong to a team).
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'my_team',    label: 'My Team',        icon: Users      }] : []),
-    // Team structure — company admins/ops manage; team-lead managers manage own.
-    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+    // Team structure (create/edit/delete teams) is company-org management — only
+    // company_admin + operations_manager (superadmin uses the Admin panel).
+    // Fronter/closer managers do NOT see this; they manage their OWN team from
+    // the "My Team" tab above.
+    ...(['company_admin', 'operations_manager'].includes(user?.role)
       ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'batches',      label: 'Batches',      icon: Send },

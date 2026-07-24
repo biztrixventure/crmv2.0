@@ -94,7 +94,7 @@ router.post('/', asyncHandler(async (req, res) => {
     lead_user_id: b.lead_user_id || null, parent_team_id: b.parent_team_id || null,
     goal_monthly_sales: b.goal_monthly_sales != null && b.goal_monthly_sales !== '' ? +b.goal_monthly_sales : null,
     goal_monthly_transfers: b.goal_monthly_transfers != null && b.goal_monthly_transfers !== '' ? +b.goal_monthly_transfers : null,
-    color: b.color || null, created_by: req.user.id, updated_at: new Date().toISOString(),
+    color: b.color || null, lead_can_edit: !!b.lead_can_edit, created_by: req.user.id, updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabaseAdmin.from('teams').insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -109,7 +109,9 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const team = await teamById(req.params.id);
   if (!team) return res.status(404).json({ error: 'Team not found' });
   const isLead = team.lead_user_id === req.user.id;
-  if (!(await canManageCompany(req, team.company_id)) && !isLead) return res.status(403).json({ error: 'Not allowed' });
+  const canManage = await canManageCompany(req, team.company_id);
+  // A lead may edit their OWN team only if the manager granted it (lead_can_edit).
+  if (!canManage && !(isLead && team.lead_can_edit)) return res.status(403).json({ error: 'Not allowed to edit this team' });
   const b = req.body || {};
   const patch = { updated_at: new Date().toISOString() };
   if (b.name != null) patch.name = String(b.name).slice(0, 120);
@@ -119,10 +121,11 @@ router.put('/:id', asyncHandler(async (req, res) => {
   if (b.goal_monthly_sales !== undefined) patch.goal_monthly_sales = b.goal_monthly_sales === '' || b.goal_monthly_sales == null ? null : +b.goal_monthly_sales;
   if (b.goal_monthly_transfers !== undefined) patch.goal_monthly_transfers = b.goal_monthly_transfers === '' || b.goal_monthly_transfers == null ? null : +b.goal_monthly_transfers;
   // lead + parent + active are manager-only (structural)
-  if (await canManageCompany(req, team.company_id)) {
+  if (canManage) {
     if (b.lead_user_id !== undefined) patch.lead_user_id = b.lead_user_id || null;
     if (b.parent_team_id !== undefined) patch.parent_team_id = b.parent_team_id || null;
     if (b.is_active !== undefined) patch.is_active = !!b.is_active;
+    if (b.lead_can_edit !== undefined) patch.lead_can_edit = !!b.lead_can_edit;   // manager-only switch
   }
   const { data, error } = await supabaseAdmin.from('teams').update(patch).eq('id', team.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -208,7 +211,7 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     transfers_pct: team.goal_monthly_transfers ? Math.round(100 * report.totals.transfers / team.goal_monthly_transfers) : null,
   };
   res.json({
-    team: { id: team.id, name: team.name, team_type: team.team_type, lead_user_id: team.lead_user_id },
+    team: { id: team.id, name: team.name, team_type: team.team_type, lead_user_id: team.lead_user_id, lead_can_edit: team.lead_can_edit },
     ...report, goal, previous, momentum, range: { from, to }, member_count: ids.length,
   });
 }));

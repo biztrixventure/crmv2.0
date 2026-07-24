@@ -64,7 +64,7 @@ async function teamMetrics({ ids, companyId, from, to }) {
     // every member carries the full stat shape so the client never sees undefined
     const m = (id) => (M[id] = M[id] || { user_id: id, transfers: 0, assigned: 0, sales: 0, gross: 0, callbacks: 0, fronted: 0, fronted_gross: 0, mrr: 0 });
     const trend = {};   // date → { transfers, sales, gross, callbacks, assigned }
-    const day = (date) => { const k = dayKey(date); if (!k) return null; return (trend[k] = trend[k] || { date: k, transfers: 0, sales: 0, gross: 0, callbacks: 0, assigned: 0 }); };
+    const day = (date) => { const k = dayKey(date); if (!k) return null; return (trend[k] = trend[k] || { date: k, transfers: 0, sales: 0, gross: 0, callbacks: 0, assigned: 0, fronted: 0 }); };
     const bump = (date, key) => { const d = day(date); if (d) d[key]++; };
     const bumpVal = (date, key, amt) => { const d = day(date); if (d) d[key] += amt; };
 
@@ -107,7 +107,7 @@ async function teamMetrics({ ids, companyId, from, to }) {
           bump(s.sale_date, 'sales'); bumpVal(s.sale_date, 'gross', dp);
         }
         // Fronted-win credit (rows already fetched — the OR filter includes fronter_id).
-        if (idSet.has(s.fronter_id)) { const r2 = m(s.fronter_id); r2.fronted++; r2.fronted_gross += dp; }
+        if (idSet.has(s.fronter_id)) { const r2 = m(s.fronter_id); r2.fronted++; r2.fronted_gross += dp; bump(s.sale_date, 'fronted'); }
       }
     }
 

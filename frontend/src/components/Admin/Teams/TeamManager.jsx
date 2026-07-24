@@ -110,7 +110,7 @@ export default function TeamManager() {
   );
 
   return (
-    <div className="space-y-4 animate-fade-in max-w-5xl">
+    <div className="space-y-4 animate-fade-in w-full">
       <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="flex items-center justify-between gap-3 flex-wrap relative z-10">
           <div className="flex items-center gap-3">
@@ -186,6 +186,7 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
     id: team.id, name: team.name || '', description: team.description || '', team_type: team.team_type || 'general',
     lead_user_id: team.lead_user_id || '', parent_team_id: team.parent_team_id || '',
     goal_monthly_sales: team.goal_monthly_sales ?? '', goal_monthly_transfers: team.goal_monthly_transfers ?? '', color: team.color || '',
+    lead_can_edit: !!team.lead_can_edit,
   });
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
   const inp = { backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '6px 10px', fontSize: 13, width: '100%' };
@@ -204,6 +205,10 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
           <Field label="Monthly sales goal"><input type="number" min="0" value={f.goal_monthly_sales} onChange={e => set('goal_monthly_sales', e.target.value)} placeholder="—" style={inp} /></Field>
           <Field label="Monthly transfers goal"><input type="number" min="0" value={f.goal_monthly_transfers} onChange={e => set('goal_monthly_transfers', e.target.value)} placeholder="—" style={inp} /></Field>
         </div>
+        <label className="flex items-start gap-2 text-xs cursor-pointer pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+          <input type="checkbox" className="mt-0.5" checked={!!f.lead_can_edit} onChange={e => set('lead_can_edit', e.target.checked)} />
+          <span>Let the <b>team lead</b> edit this team (name, color, goals). Off = only company managers can edit it.</span>
+        </label>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
           <button onClick={() => f.name && onSave(f)} disabled={!f.name} className="px-3 py-2 rounded-lg text-sm font-bold text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}><Save size={13} /> Save</button>
@@ -215,22 +220,37 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
 
 function TeamReport({ team, onClose }) {
   const [rep, setRep] = useState(null);
-  const [range, setRange] = useState(30);
+  const [range, setRange] = useState(30);          // 7 | 30 | 90 | 'custom'
+  const [cFrom, setCFrom] = useState('');
+  const [cTo, setCTo] = useState('');
   useEffect(() => {
+    let from, to;
+    if (range === 'custom') {
+      if (!cFrom || !cTo) return;                  // wait for both dates (single day = same date twice)
+      from = cFrom; to = cTo;
+    } else {
+      to = new Date().toISOString().slice(0, 10);
+      from = new Date(Date.now() - range * 864e5).toISOString().slice(0, 10);
+    }
     setRep(null);
-    const to = new Date().toISOString().slice(0, 10);
-    const from = new Date(Date.now() - range * 864e5).toISOString().slice(0, 10);
     client.get(`teams/${team.id}/report`, { params: { from, to } }).then(r => setRep(r.data)).catch(() => setRep({ error: true }));
-  }, [team.id, range]);
+  }, [team.id, range, cFrom, cTo]);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div className="rounded-2xl p-5 w-full max-w-5xl max-h-[90vh] overflow-auto space-y-4" style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><BarChart3 size={18} /> {team.name} — analytics</h3>
           <div className="flex items-center gap-2">
-            <select value={range} onChange={e => setRange(+e.target.value)} className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+            <select value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
               <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+              <option value="custom">Custom / single day…</option>
             </select>
+            {range === 'custom' && (
+              <>
+                <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (same date twice = one day)" className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+                <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+              </>
+            )}
             <button onClick={onClose}><X size={18} /></button>
           </div>
         </div>

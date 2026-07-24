@@ -24,7 +24,9 @@ export default function MyTeam() {
   const [isLead, setIsLead] = useState(false);
   const [report, setReport] = useState(null);
   const [roster, setRoster] = useState([]);
-  const [range, setRange] = useState(30);
+  const [range, setRange] = useState(30);          // 7 | 30 | 90 | 'custom'
+  const [cFrom, setCFrom] = useState('');          // custom range (YYYY-MM-DD)
+  const [cTo, setCTo] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [err, setErr] = useState('');
   const canCreate = ['company_admin', 'operations_manager'].includes(user?.role);
@@ -41,8 +43,14 @@ export default function MyTeam() {
 
   const loadReport = useCallback(async () => {
     if (!team) { setReport(null); return; }
-    const to = new Date().toISOString().slice(0, 10);
-    const from = new Date(Date.now() - range * 864e5).toISOString().slice(0, 10);
+    let from, to;
+    if (range === 'custom') {
+      if (!cFrom || !cTo) return;              // wait until both custom dates picked
+      from = cFrom; to = cTo;                  // single day = pick the same date twice
+    } else {
+      to = new Date().toISOString().slice(0, 10);
+      from = new Date(Date.now() - range * 864e5).toISOString().slice(0, 10);
+    }
     try {
       const [r, m] = await Promise.all([
         client.get(`teams/${team.id}/report`, { params: { from, to } }),
@@ -50,7 +58,7 @@ export default function MyTeam() {
       ]);
       setReport(r.data); setRoster(m.data.members || []);
     } catch { setReport({ error: true }); }
-  }, [team, range, isLead]);
+  }, [team, range, cFrom, cTo, isLead]);
   useEffect(() => { loadReport(); }, [loadReport]);
 
   const unassigned = useMemo(() => roster.filter(m => !m.team_id), [roster]);
@@ -86,7 +94,7 @@ export default function MyTeam() {
   );
 
   return (
-    <div className="space-y-4 animate-fade-in max-w-4xl">
+    <div className="space-y-4 animate-fade-in w-full">
       {/* team header */}
       <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
         <div className="flex items-start justify-between gap-3 flex-wrap relative z-10">
@@ -103,13 +111,20 @@ export default function MyTeam() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <select value={range} onChange={e => setRange(+e.target.value)} className="text-xs rounded-lg px-2 py-1.5 font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)' }}>
+            <select value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} className="text-xs rounded-lg px-2 py-1.5 font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)' }}>
               <option value={7} style={{ color: '#111' }}>Last 7 days</option>
               <option value={30} style={{ color: '#111' }}>Last 30 days</option>
               <option value={90} style={{ color: '#111' }}>Last 90 days</option>
+              <option value="custom" style={{ color: '#111' }}>Custom / single day…</option>
             </select>
+            {range === 'custom' && (
+              <>
+                <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (pick the same date twice for a single day)" className="text-xs rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)', colorScheme: 'dark' }} />
+                <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" className="text-xs rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)', colorScheme: 'dark' }} />
+              </>
+            )}
             <button onClick={() => { loadTeam(); loadReport(); }} className="p-2 rounded-lg text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><RefreshCw size={15} /></button>
-            {isLead && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><Pencil size={13} /> Edit</button>}
+            {isLead && team.lead_can_edit && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><Pencil size={13} /> Edit</button>}
           </div>
         </div>
       </div>

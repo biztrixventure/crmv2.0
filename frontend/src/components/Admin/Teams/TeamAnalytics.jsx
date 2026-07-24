@@ -32,9 +32,12 @@ const SERIES = {
   callbacks: { label: 'Callbacks', color: '#9333ea', tints: ['#c084fc', '#d8b4fe', '#7e22ce'] },
   sales:     { label: 'Sales',     color: '#16a34a', tints: ['#4ade80', '#86efac', '#15803d'] },
   gross:     { label: 'Gross',     color: '#d97706', tints: ['#fbbf24', '#fcd34d', '#b45309'], money: true },
+  fronted:   { label: 'Fronted wins', color: '#0d9488', tints: ['#2dd4bf', '#5eead4', '#0f766e'] },
 };
 const BAR_METRICS = ['transfers', 'assigned', 'callbacks'];
-const LINE_METRICS = ['sales', 'gross', 'callbacks'];
+// 'fronted' = deals a member FRONTED that were won (credit for fronter teams,
+// whose closer-sales are legitimately 0). Default line adapts to team type below.
+const LINE_METRICS = ['sales', 'fronted', 'gross', 'callbacks'];
 
 // ── shared hooks ────────────────────────────────────────────────────────────
 function useMounted() {
@@ -136,11 +139,13 @@ function KpiTile({ label, value, color, deltaPct, spark, icon }) {
 }
 
 // ── the hero: pseudo-3D extruded combo (bars + line) ────────────────────────
-function Combo3DChart({ trend }) {
+function Combo3DChart({ trend, teamType }) {
   const mounted = useMounted();
   const [wrapRef, w] = useMeasure();
   const [barMetric, setBarMetric] = useState('transfers');
-  const [lineMetric, setLineMetric] = useState('sales');
+  // Fronter teams don't close deals, so 'sales' would be a flat zero — default
+  // their line to fronted wins; closer/mixed/general default to sales.
+  const [lineMetric, setLineMetric] = useState(teamType === 'fronter' ? 'fronted' : 'sales');
   const [dual, setDual] = useState(true);
   const [tip, setTip] = useState(null);
 
@@ -475,7 +480,7 @@ export default function TeamAnalytics({ report, team }) {
       </div>
 
       {/* hero combo */}
-      <Combo3DChart trend={filled} />
+      <Combo3DChart trend={filled} teamType={team?.team_type} />
 
       {/* gross-share donut + goal pace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
