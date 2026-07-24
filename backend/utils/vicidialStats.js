@@ -29,6 +29,25 @@ const authKey = (boxId) => `vici_stats.${boxId}`;
 const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
 const tail10 = (d) => (d.length >= 10 ? d.slice(-10) : d);
 
+// ── PROCESS-WIDE limiter ─────────────────────────────────────────────────────
+// A single fetch+parse of a big user_stats.php report is memory-heavy. On a
+// RAM-starved host, several running at once (many agents in one pull, or two
+// superadmins at once) spike memory → GC thrash / OOM that stalls EVERY request
+// (gateway timeouts app-wide). Cap heavy pulls to 2 concurrent across the whole
+// process; the rest queue. Superadmin-only + low volume, so a short queue is fine.
+let _active = 0;
+const _queue = [];
+const MAX_CONCURRENT_PULLS = 2;
+function acquireSlot() {
+  if (_active < MAX_CONCURRENT_PULLS) { _active++; return Promise.resolve(); }
+  return new Promise(resolve => _queue.push(resolve));
+}
+function releaseSlot() {
+  _active--;
+  const next = _queue.shift();
+  if (next) { _active++; next(); }
+}
+
 // Resolve the box for an agent id by its letter prefix (WTI1020 → WTI → wavetech).
 // A bare-numeric id (no prefix) can't be resolved — the caller must pass a boxId.
 function boxForAgent(agentId) {
@@ -95,10 +114,15 @@ async function fetchUserStatsHtml({ box, user, beginDate, endDate, callStatus, a
     const r = await axios.get(`${box.base}/vicidial/user_stats.php`, {
       params,
       auth: { username: auth.user, password: auth.pass },
-      timeout: 45000,
+      timeout: 30000,
       responseType: 'text',
-      maxContentLength: 64 * 1024 * 1024,
-      maxBodyLength: 64 * 1024 * 1024,
+      // HARD memory guard. The old 64MB ceiling let a big archived pull buffer a
+      // huge string AND a parsed DOM on a RAM-starved host → OOM/GC thrash that
+      // wedged the WHOLE event loop (every user got a gateway timeout, not just
+      // the puller). 12MB is far above a normal day's report; a runaway archive
+      // dump is rejected fast instead of taken the server down.
+      maxContentLength: 12 * 1024 * 1024,
+      maxBodyLength: 12 * 1024 * 1024,
       // user_stats.php returns 200 with an HTML login form on bad auth, and 401
       // when Apache guards it — treat <500 as "got a page", inspect below.
       validateStatus: (s) => s >= 200 && s < 500,
@@ -113,6 +137,10 @@ async function fetchUserStatsHtml({ box, user, beginDate, endDate, callStatus, a
     return { ok: true, html };
   } catch (e) {
     logger.warn('VICI_STATS', `fetch failed for ${user}@${box.id}: ${e.message}`);
+    if (e.code === 'ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED' || /maxContentLength/i.test(e.message || ''))
+      return { ok: false, error: 'Report too large — narrow the date range (or turn off Archived)' };
+    if (e.code === 'ECONNABORTED' || /timeout/i.test(e.message || ''))
+      return { ok: false, error: 'Dialer timed out — narrow the date range (Archived scans are slow)' };
     return { ok: false, error: `Dialer unreachable: ${e.message}` };
   }
 }
@@ -139,7 +167,8 @@ function readTable(tableEl) {
   const drop0 = normHead(headers[0]) === '#';
   const H = (drop0 ? headers.slice(1) : headers).map(normHead);
   const rows = [];
-  for (let i = headerIdx + 1; i < trs.length; i++) {
+  const ROW_CAP = 15000;   // > VICIdial's 10k record limit; bounds memory per table
+  for (let i = headerIdx + 1; i < trs.length && rows.length < ROW_CAP; i++) {
     let c = cellsOf(trs[i]);
     if (drop0) c = c.slice(1);
     if (!c.length || c.every(x => x === '')) continue;
@@ -165,7 +194,9 @@ function mapRows(table, spec) {
 // Parse the whole user_stats.php page into the sections we care about.
 function parseUserStats(html) {
   const root = parse(html, { blockTextElements: { script: false, style: false } });
-  const tables = root.querySelectorAll('table').map(readTable).filter(Boolean);
+  // Cap the number of tables scanned — a report has ~6 data tables; anything past
+  // a generous ceiling is layout/nesting and only costs memory to walk.
+  const tables = root.querySelectorAll('table').slice(0, 80).map(readTable).filter(Boolean);
 
   const out = {
     outbound_calls: [], manual_outbound: [], agent_activity: [],
@@ -262,14 +293,19 @@ async function pullAgent({ agentId, boxId, beginDate, endDate, callStatus, archi
   if (!agent) return { agent, ok: false, error: 'Missing agent id' };
   const box = boxId ? boxById(boxId) : boxForAgent(agent);
   if (!box) return { agent, ok: false, error: boxId ? `Unknown box "${boxId}"` : `Can't resolve a dialer for "${agent}" — pick a box` };
-  const fetched = await fetchUserStatsHtml({ box, user: agent, beginDate, endDate, callStatus, archived, db });
-  if (!fetched.ok) return { agent, box: box.id, ok: false, error: fetched.error };
+  // The fetch (big buffer) + parse (DOM in memory) are the heavy part — run them
+  // under the process-wide limiter so app-wide memory can't be swamped.
+  await acquireSlot();
   try {
+    const fetched = await fetchUserStatsHtml({ box, user: agent, beginDate, endDate, callStatus, archived, db });
+    if (!fetched.ok) return { agent, box: box.id, ok: false, error: fetched.error };
     const sections = parseUserStats(fetched.html);
     return { agent, box: box.id, box_prefix: box.prefix, ok: true, ...sections };
   } catch (e) {
-    logger.warn('VICI_STATS', `parse failed for ${agent}@${box.id}: ${e.message}`);
-    return { agent, box: box.id, ok: false, error: `Could not parse the dialer report: ${e.message}` };
+    logger.warn('VICI_STATS', `pull failed for ${agent}@${box.id}: ${e.message}`);
+    return { agent, box: box.id, ok: false, error: `Could not read the dialer report: ${e.message}` };
+  } finally {
+    releaseSlot();
   }
 }
 

@@ -1495,7 +1495,7 @@ api.post('/stats/pull', superOnly, asyncHandler(async (req, res) => {
   const agents = [...new Set(
     (Array.isArray(req.body.agents) ? req.body.agents : [req.body.agent])
       .map(a => String(a || '').trim().toUpperCase()).filter(Boolean)
-  )].slice(0, 25);   // guardrail: at most 25 agents per pull
+  )].slice(0, 12);   // guardrail: at most 12 agents per pull (bounds request duration)
   if (!agents.length) return res.status(400).json({ error: 'At least one agent id is required' });
 
   const beginDate = String(req.body.begin_date || '').slice(0, 10);
@@ -1509,9 +1509,12 @@ api.post('/stats/pull', superOnly, asyncHandler(async (req, res) => {
 
   // Pull agents concurrently (gentle cap). Each result is self-describing so one
   // unreachable box / bad agent never sinks the whole request.
+  // Per-request fan-out is capped at 3, but pullAgent itself also passes through
+  // a PROCESS-WIDE limiter (2), so total heavy work stays bounded no matter how
+  // many agents/superadmins pull at once — the real fix for the app-wide stall.
   const results = [];
   let i = 0;
-  await Promise.all(Array.from({ length: Math.min(4, agents.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(3, agents.length) }, async () => {
     while (i < agents.length) {
       const agentId = agents[i++];
       results.push(await vstats.pullAgent({ agentId, boxId, beginDate, endDate, callStatus, archived, db }));
