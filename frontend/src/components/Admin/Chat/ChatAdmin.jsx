@@ -769,13 +769,21 @@ const GuestsTab = () => {
     <div className="space-y-4">
       <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <h3 className="font-bold text-sm mb-3 flex items-center gap-2" style={{ color: 'var(--color-text)' }}><UserPlus size={16} /> Create a guest link</h3>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Guest name (e.g. John — Vendor)" className="input flex-1" />
-          <ThemedSelect value={groupId} onChange={e => setGroupId(e.target.value)} className="input sm:w-64">
-            <option value="">Pick a group…</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{convName(g)}</option>)}
-          </ThemedSelect>
-          {canManageGuests && <Button onClick={create} disabled={creating} className="whitespace-nowrap">{creating ? 'Creating…' : 'Create link'}</Button>}
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Guest name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. John — Vendor" className="input w-full" />
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="flex-1 min-w-0">
+              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Group they’ll see</label>
+              <ThemedSelect value={groupId} onChange={e => setGroupId(e.target.value)} className="input w-full">
+                <option value="">Pick a group…</option>
+                {groups.map(g => <option key={g.id} value={g.id}>{convName(g)}</option>)}
+              </ThemedSelect>
+            </div>
+            {canManageGuests && <Button onClick={create} disabled={creating} className="whitespace-nowrap sm:w-auto">{creating ? 'Creating…' : 'Create link'}</Button>}
+          </div>
         </div>
         <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
           The guest opens the link and only sees this one group's chat — no search, no other groups. Disable any time to kill the link; re-enable to restore it (same URL).
