@@ -41,13 +41,18 @@ function parseCsv(input) {
 
 // ── GET /vehicles — full make+model tree ─────────────────────────────────────
 router.get('/', asyncHandler(async (req, res) => {
+  // Form typeaheads (default) skip hidden makes/models; the admin manager passes
+  // includeHidden=1 to see + un-hide them.
+  const includeHidden = req.query.includeHidden === '1' || req.query.includeHidden === 'true';
   const [{ data: makes }, { data: models }] = await Promise.all([
     supabaseAdmin.from('vehicle_makes').select('*').order('name'),
     supabaseAdmin.from('vehicle_models').select('*').order('name'),
   ]);
   const modelsByMake = {};
-  (models || []).forEach(m => { (modelsByMake[m.make_id] = modelsByMake[m.make_id] || []).push(m); });
-  const tree = (makes || []).map(mk => ({ ...mk, models: modelsByMake[mk.id] || [] }));
+  (models || []).forEach(m => { if (!includeHidden && m.hidden) return; (modelsByMake[m.make_id] = modelsByMake[m.make_id] || []).push(m); });
+  const tree = (makes || [])
+    .filter(mk => includeHidden || !mk.hidden)
+    .map(mk => ({ ...mk, models: modelsByMake[mk.id] || [] }));
   res.json({ makes: tree });
 }));
 
@@ -76,12 +81,18 @@ router.post('/makes/bulk', superadminOnly, asyncHandler(async (req, res) => {
 // Analyzer already matches case-insensitively for make/model fields, so a
 // historic "Gmc" row keeps matching after the registry entry becomes "GMC".
 router.put('/makes/:id', superadminOnly, asyncHandler(async (req, res) => {
-  const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim();
-  if (!name) return res.status(400).json({ error: 'name required.' });
+  const updates = {};
+  if (req.body?.name !== undefined) {
+    const name = String(req.body.name || '').replace(/\s+/g, ' ').trim();
+    if (!name) return res.status(400).json({ error: 'name required.' });
+    updates.name = name;
+  }
+  if (req.body?.hidden !== undefined) updates.hidden = !!req.body.hidden;   // eye-off toggle
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'nothing to update' });
   const { data, error } = await supabaseAdmin
-    .from('vehicle_makes').update({ name }).eq('id', req.params.id).select().single();
+    .from('vehicle_makes').update(updates).eq('id', req.params.id).select().single();
   if (error) {
-    if (error.code === '23505') return res.status(409).json({ error: `Another make already uses "${name}"` });
+    if (error.code === '23505') return res.status(409).json({ error: `Another make already uses "${updates.name}"` });
     return res.status(500).json({ error: error.message });
   }
   res.json({ make: data });
@@ -118,12 +129,18 @@ router.post('/models/bulk', superadminOnly, asyncHandler(async (req, res) => {
 
 // ── PUT /vehicles/models/:id — rename a model (casing fix, typo correction) ─
 router.put('/models/:id', superadminOnly, asyncHandler(async (req, res) => {
-  const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim();
-  if (!name) return res.status(400).json({ error: 'name required.' });
+  const updates = {};
+  if (req.body?.name !== undefined) {
+    const name = String(req.body.name || '').replace(/\s+/g, ' ').trim();
+    if (!name) return res.status(400).json({ error: 'name required.' });
+    updates.name = name;
+  }
+  if (req.body?.hidden !== undefined) updates.hidden = !!req.body.hidden;   // eye-off toggle
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'nothing to update' });
   const { data, error } = await supabaseAdmin
-    .from('vehicle_models').update({ name }).eq('id', req.params.id).select().single();
+    .from('vehicle_models').update(updates).eq('id', req.params.id).select().single();
   if (error) {
-    if (error.code === '23505') return res.status(409).json({ error: `Another model already uses "${name}" for this make` });
+    if (error.code === '23505') return res.status(409).json({ error: `Another model already uses "${updates.name}" for this make` });
     return res.status(500).json({ error: error.message });
   }
   res.json({ model: data });

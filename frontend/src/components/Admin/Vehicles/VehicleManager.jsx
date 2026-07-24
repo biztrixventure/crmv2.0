@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Car, Plus, Trash2, Loader2, Search, ChevronRight, Pencil, Check, X } from 'lucide-react';
 import { Button, Alert } from '../../UI';
+import HideDeleteMenu from '../../UI/HideDeleteMenu';
 import client from '../../../api/client';
 
 // Tiny inline-edit pill — click pencil, edit, Enter/click-check to save,
@@ -67,7 +68,7 @@ const VehicleManager = () => {
   const load = useCallback(async () => {
     setLoading(true); setErr('');
     try {
-      const r = await client.get('vehicles');
+      const r = await client.get('vehicles', { params: { includeHidden: 1 } });
       setMakes(r.data.makes || []);
       // Re-resolve `active` from the freshly-loaded list so its `models` array
       // reflects whatever just got added/deleted.
@@ -113,6 +114,20 @@ const VehicleManager = () => {
   // the OLD name don't update (the value is denormalized into form_data /
   // sales.car_make), but the Data Analyzer's case-insensitive match on
   // make/model fields keeps the breakdown coherent across the rename.
+  // Eye-off toggle — hide/show a make or model on the form without deleting it.
+  const toggleHiddenMake = async (m) => {
+    setBusy(true); setErr('');
+    try { await client.put(`vehicles/makes/${m.id}`, { hidden: !m.hidden }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to update visibility'); }
+    finally { setBusy(false); }
+  };
+  const toggleHiddenModel = async (m) => {
+    setBusy(true); setErr('');
+    try { await client.put(`vehicles/models/${m.id}`, { hidden: !m.hidden }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to update visibility'); }
+    finally { setBusy(false); }
+  };
+
   const renameMake = async (m, name) => {
     setErr('');
     try { await client.put(`vehicles/makes/${m.id}`, { name }); await load(); }
@@ -220,15 +235,15 @@ const VehicleManager = () => {
                   return (
                     <div key={m.id}
                       className="group flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors"
-                      style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent' }}>
+                      style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent', opacity: m.hidden ? 0.5 : 1 }}>
                       <EditableName name={m.name} onSave={(n) => renameMake(m, n)} busy={busy} />
                       <button onClick={() => setActive(m)} className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                         {m.models?.length || 0} models
                         <ChevronRight size={12} />
                       </button>
-                      <button onClick={() => deleteMake(m)} title="Delete make" className="p-1 rounded hover:bg-error-50">
-                        <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
-                      </button>
+                      <HideDeleteMenu hidden={m.hidden} busy={busy}
+                        onToggleHidden={() => toggleHiddenMake(m)}
+                        onDelete={() => deleteMake(m)} />
                     </div>
                   );
                 })}
@@ -267,11 +282,11 @@ const VehicleManager = () => {
                   ? <p className="text-xs italic py-2" style={{ color: 'var(--color-text-tertiary)' }}>No models yet.</p>
                   : activeModels.map(m => (
                     <div key={m.id} className="group flex items-center gap-2 justify-between px-2.5 py-1.5 rounded-md"
-                      style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                      style={{ backgroundColor: 'var(--color-bg-secondary)', opacity: m.hidden ? 0.5 : 1 }}>
                       <EditableName name={m.name} onSave={(n) => renameModel(m, n)} busy={busy} />
-                      <button onClick={() => deleteModel(m)} title="Delete model" className="p-1 rounded hover:bg-error-50">
-                        <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
-                      </button>
+                      <HideDeleteMenu hidden={m.hidden} busy={busy}
+                        onToggleHidden={() => toggleHiddenModel(m)}
+                        onDelete={() => deleteModel(m)} />
                     </div>
                   ))}
               </div>

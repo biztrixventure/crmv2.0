@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Tag, Plus, Trash2, Loader2, Search, ChevronRight, Save, Briefcase, Link2 } from 'lucide-react';
 import { Button, Alert } from '../../UI';
+import HideDeleteMenu from '../../UI/HideDeleteMenu';
 import client from '../../../api/client';
 
 // ClientPlanManager — Admin → Clients. Two-column layout that mirrors the
@@ -37,8 +38,8 @@ const ClientPlanManager = () => {
     setLoading(true); setErr('');
     try {
       const [c, p, f] = await Promise.all([
-        client.get('sale-configs?type=client'),
-        client.get('sale-configs?type=plan'),
+        client.get('sale-configs?type=client&includeHidden=1'),
+        client.get('sale-configs?type=plan&includeHidden=1'),
         client.get('forms/fields'),
       ]);
       const cl = (c.data.configs || []).sort((a, b) => a.value.localeCompare(b.value));
@@ -142,6 +143,14 @@ const ClientPlanManager = () => {
     finally { setBusy(false); }
   };
 
+  // Eye-off toggle — hide/show a client or plan on the form without deleting it.
+  const toggleHiddenConfig = async (cfg) => {
+    setBusy(true); setErr('');
+    try { await client.put(`sale-configs/${cfg.id}`, { hidden: !cfg.hidden }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to update visibility'); }
+    finally { setBusy(false); }
+  };
+
   const toggleMapping = (clientVal, planVal) => {
     setMapping(prev => {
       const set = new Set(prev[clientVal] || []);
@@ -237,17 +246,17 @@ const ClientPlanManager = () => {
                   return (
                     <div key={c.id}
                       className="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors"
-                      style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent' }}>
+                      style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent', opacity: c.hidden ? 0.5 : 1 }}>
                       <button onClick={() => setActive(c)} className="flex-1 flex items-center justify-between text-left">
-                        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{c.value}</span>
+                        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{c.value}{c.hidden && <span className="ml-1 text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
                         <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                           {count} / {plans.length} plans
                           <ChevronRight size={12} />
                         </span>
                       </button>
-                      <button onClick={() => deleteClient(c)} title="Delete client" className="p-1 rounded hover:bg-error-50">
-                        <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
-                      </button>
+                      <HideDeleteMenu hidden={c.hidden} busy={busy}
+                        onToggleHidden={() => toggleHiddenConfig(c)}
+                        onDelete={() => deleteClient(c)} />
                     </div>
                   );
                 })}
@@ -299,16 +308,16 @@ const ClientPlanManager = () => {
                   const on = active ? activeSet.has(p.value) : false;
                   return (
                     <div key={p.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md"
-                      style={{ backgroundColor: on ? 'var(--color-primary-50)' : 'var(--color-bg-secondary)', border: on ? '1px solid var(--color-primary-300)' : '1px solid transparent' }}>
+                      style={{ backgroundColor: on ? 'var(--color-primary-50)' : 'var(--color-bg-secondary)', border: on ? '1px solid var(--color-primary-300)' : '1px solid transparent', opacity: p.hidden ? 0.5 : 1 }}>
                       <label className="flex-1 flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={on} disabled={!active}
                           onChange={() => toggleMapping(active.value, p.value)}
                           className="w-3.5 h-3.5 accent-primary-600" />
-                        <span className="text-sm font-medium" style={{ color: on ? 'var(--color-primary-700)' : 'var(--color-text)' }}>{p.value}</span>
+                        <span className="text-sm font-medium" style={{ color: on ? 'var(--color-primary-700)' : 'var(--color-text)' }}>{p.value}{p.hidden && <span className="ml-1 text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
                       </label>
-                      <button onClick={() => deletePlan(p)} title="Delete plan from catalog" className="p-1 rounded hover:bg-error-50">
-                        <Trash2 size={12} style={{ color: 'var(--color-error-500)' }} />
-                      </button>
+                      <HideDeleteMenu hidden={p.hidden} busy={busy}
+                        onToggleHidden={() => toggleHiddenConfig(p)}
+                        onDelete={() => deletePlan(p)} />
                     </div>
                   );
                 })}

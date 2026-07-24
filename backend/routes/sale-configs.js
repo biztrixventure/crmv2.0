@@ -32,9 +32,14 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Deduplicate: company-specific value overrides global if same value
+  // Hidden options are excluded from the form-facing read (default) so they no
+  // longer appear on the Sale/Transfer forms; the admin manager passes
+  // includeHidden=1 to see + un-hide them. Deduplicate: company-specific value
+  // overrides global if same value.
+  const includeHidden = req.query.includeHidden === '1' || req.query.includeHidden === 'true';
   const seen = new Set();
   const configs = (data || []).filter(c => {
+    if (!includeHidden && c.hidden) return false;
     const key = `${c.type}:${c.value.toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -102,6 +107,7 @@ router.put('/:id',
     const updates = {};
     if (req.body.value !== undefined) updates.value = req.body.value.trim();
     if (req.body.sort_order !== undefined) updates.sort_order = req.body.sort_order;
+    if (req.body.hidden !== undefined) updates.hidden = !!req.body.hidden;   // eye-off toggle
 
     const { data, error } = await supabaseAdmin
       .from('sale_configs')
