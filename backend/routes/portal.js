@@ -186,6 +186,31 @@ router.patch('/admin/closers/:id/alias', authMiddleware, superOnly, asyncHandler
   res.json({ ok: true, alias });
 }));
 
+// fronters available to assign a pseudonym (same display_alias column as closers,
+// so the alias applies wherever a fronter's name would show — guest links, etc.)
+router.get('/admin/fronters', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const { data: roles } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, custom_roles!inner(level)')
+    .eq('is_active', true)
+    .in('custom_roles.level', ['fronter', 'fronter_manager']);
+  const ids = [...new Set((roles || []).map(r => r.user_id))];
+  const profs = await fetchIn('user_profiles', 'user_id, first_name, last_name, display_alias', 'user_id', ids);
+  const fronters = profs
+    .map(p => ({ id: p.user_id, name: fullName(p) || '(unnamed)', alias: p.display_alias || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ fronters });
+}));
+
+// Set a fronter's pseudonym (alias) — same display_alias column as closers.
+router.patch('/admin/fronters/:id/alias', authMiddleware, superOnly, asyncHandler(async (req, res) => {
+  const alias = String(req.body.alias || '').trim().slice(0, 60);
+  const { error } = await supabaseAdmin
+    .from('user_profiles').update({ display_alias: alias || null }).eq('user_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, alias });
+}));
+
 // Selectable clients (sales.client_name) — configured sale_client options merged
 // with the distinct values actually on sales, so a selection always matches.
 router.get('/admin/sale-clients', authMiddleware, superOnly, asyncHandler(async (req, res) => {

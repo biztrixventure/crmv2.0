@@ -20,14 +20,18 @@ export default function ClientPortalTab() {
 
   const [ta, setTa] = useState({ enabled: false, url: '', label: 'Visualizer demo' });
   const [taBusy, setTaBusy] = useState(false);
-  const [showAlias, setShowAlias] = useState(false);
-  const [aliasSearch, setAliasSearch] = useState('');
+  const [fronters, setFronters] = useState([]);
 
-  const autoAlias = (id) => 'Agent ' + String(id || '').replace(/[^a-f0-9]/gi, '').slice(0, 4).toUpperCase();
   const saveAlias = async (id, alias) => {
     try {
       await client.patch(`portal/admin/closers/${id}/alias`, { alias });
       setClosers(cs => cs.map(c => c.id === id ? { ...c, alias } : c));
+    } catch { toast.error('Could not save alias'); }
+  };
+  const saveFronterAlias = async (id, alias) => {
+    try {
+      await client.patch(`portal/admin/fronters/${id}/alias`, { alias });
+      setFronters(fs => fs.map(f => f.id === id ? { ...f, alias } : f));
     } catch { toast.error('Could not save alias'); }
   };
 
@@ -36,18 +40,20 @@ export default function ClientPortalTab() {
   const [gateBusy, setGateBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [c, cl, t, sc, g] = await Promise.all([
+    const [c, cl, t, sc, g, fr] = await Promise.all([
       client.get('portal/admin/clients').catch(() => ({ data: { clients: [] } })),
       client.get('portal/admin/closers').catch(() => ({ data: { closers: [] } })),
       client.get('portal/admin/test-audio').catch(() => ({ data: { enabled: false, url: '', label: 'Visualizer demo' } })),
       client.get('portal/admin/sale-clients').catch(() => ({ data: { clients: [] } })),
       client.get('portal/admin/review-gate').catch(() => ({ data: { enabled: false } })),
+      client.get('portal/admin/fronters').catch(() => ({ data: { fronters: [] } })),
     ]);
     setClients(c.data.clients || []);
     setClosers(cl.data.closers || []);
     setTa(t.data || { enabled: false, url: '', label: 'Visualizer demo' });
     setSaleClients(sc.data.clients || []);
     setGate(g.data || { enabled: false });
+    setFronters(fr.data.fronters || []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -143,40 +149,14 @@ export default function ClientPortalTab() {
         </div>
       </div>
 
-      {/* Closer pseudonyms — shown to clients + guest links instead of real names */}
-      <div className="rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <button onClick={() => setShowAlias(v => !v)} className="w-full flex items-center justify-between p-4">
-          <div className="flex items-center gap-2 text-left">
-            <Pencil size={15} style={{ color: 'var(--color-primary-500)' }} />
-            <div>
-              <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Closer pseudonyms</div>
-              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Clients + guest links see these aliases, never real names. Blank = auto "Agent XXXX".</div>
-            </div>
-          </div>
-          <span className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>{showAlias ? 'Hide' : 'Edit'}</span>
-        </button>
-        {showAlias && (
-          <div className="px-4 pb-4 space-y-2">
-            <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-              <input value={aliasSearch} onChange={e => setAliasSearch(e.target.value)} placeholder="Filter closers…" className="input text-sm pl-8" />
-            </div>
-            <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
-              {closers.filter(c => !aliasSearch.trim() || c.name.toLowerCase().includes(aliasSearch.trim().toLowerCase())).map(c => (
-                <div key={c.id} className="flex items-center gap-2">
-                  <span className="text-sm flex-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>{c.name}</span>
-                  <input
-                    defaultValue={c.alias || ''}
-                    placeholder={autoAlias(c.id)}
-                    onBlur={e => { const v = e.target.value.trim(); if (v !== (c.alias || '')) saveAlias(c.id, v); }}
-                    className="input text-sm" style={{ maxWidth: 200 }} />
-                </div>
-              ))}
-              {closers.length === 0 && <p className="text-xs italic py-2" style={{ color: 'var(--color-text-tertiary)' }}>No closers found.</p>}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Pseudonyms — clients + guest links see these aliases, never real names.
+          Closers AND fronters, so a guest link can show either side's alias. */}
+      <PseudoAliasSection title="Closer pseudonyms" people={closers} onSave={saveAlias}
+        subtitle={'Clients + guest links see these aliases, never real names. Blank = auto "Agent XXXX".'}
+        emptyLabel="No closers found." filterLabel="Filter closers…" />
+      <PseudoAliasSection title="Fronter pseudonyms" people={fronters} onSave={saveFronterAlias}
+        subtitle={'Assign a fronter alias so guest links / clients see it instead of the fronter’s real name. Blank = auto "Agent XXXX".'}
+        emptyLabel="No fronters found." filterLabel="Filter fronters…" />
 
       {clients === null ? (
         <div className="flex justify-center py-10"><Loader2 className="animate-spin" style={{ color: 'var(--color-primary-500)' }} /></div>
@@ -221,6 +201,49 @@ export default function ClientPortalTab() {
 
       {editing && <ClientEditor client={editing === 'new' ? null : editing} closers={closers} saleClients={saleClients} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {auditFor && <AuditModal client={auditFor} onClose={() => setAuditFor(null)} />}
+    </div>
+  );
+}
+
+// ── reusable pseudonym editor (closers OR fronters) ──────────────────────────
+function PseudoAliasSection({ title, subtitle, people, onSave, emptyLabel, filterLabel }) {
+  const [show, setShow] = useState(false);
+  const [search, setSearch] = useState('');
+  const autoAlias = (id) => 'Agent ' + String(id || '').replace(/[^a-f0-9]/gi, '').slice(0, 4).toUpperCase();
+  const list = people.filter(c => !search.trim() || c.name.toLowerCase().includes(search.trim().toLowerCase()));
+  return (
+    <div className="rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <button onClick={() => setShow(v => !v)} className="w-full flex items-center justify-between p-4">
+        <div className="flex items-center gap-2 text-left">
+          <Pencil size={15} style={{ color: 'var(--color-primary-500)' }} />
+          <div>
+            <div className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{title}</div>
+            <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</div>
+          </div>
+        </div>
+        <span className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>{show ? 'Hide' : 'Edit'}</span>
+      </button>
+      {show && (
+        <div className="px-4 pb-4 space-y-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={filterLabel} className="input text-sm pl-8" />
+          </div>
+          <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+            {list.map(c => (
+              <div key={c.id} className="flex items-center gap-2">
+                <span className="text-sm flex-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>{c.name}</span>
+                <input
+                  defaultValue={c.alias || ''}
+                  placeholder={autoAlias(c.id)}
+                  onBlur={e => { const v = e.target.value.trim(); if (v !== (c.alias || '')) onSave(c.id, v); }}
+                  className="input text-sm" style={{ maxWidth: 200 }} />
+              </div>
+            ))}
+            {people.length === 0 && <p className="text-xs italic py-2" style={{ color: 'var(--color-text-tertiary)' }}>{emptyLabel}</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
