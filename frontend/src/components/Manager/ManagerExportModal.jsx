@@ -111,92 +111,121 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
     } finally { setBusy(false); }
   };
 
+  // z-index note: the ThemedDate calendar and ThemedSelect menus portal to
+  // <body> at zIndex 10000. This modal MUST sit BELOW that or those popups open
+  // BEHIND the dialog (the old z-[2147483647] max-int did exactly that). z-[9000]
+  // keeps the modal above all app chrome (which tops out well under 1000) while
+  // letting the date/agent popups float above it. Do not raise past 9999.
   return createPortal(
-    <div className="fixed inset-0 z-[2147483647] flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(2px)' }}
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)' }}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-      <div className="w-full max-w-lg rounded-2xl overflow-hidden flex flex-col"
-        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
+      <div className="w-full max-w-xl rounded-2xl overflow-hidden flex flex-col animate-scale-in"
+        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)', maxHeight: '90vh' }}>
+        {/* header */}
         <div className="flex items-center justify-between px-5 py-4" style={{ background: 'var(--gradient-sidebar)' }}>
-          <span className="flex items-center gap-2 font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
-            <FileSpreadsheet size={18} /> Export Data
-          </span>
-          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(255,255,255,0.16)' }}>
+              <FileSpreadsheet size={18} className="text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="font-bold text-white leading-tight truncate" style={{ fontFamily: 'var(--font-display)' }}>Export Data</div>
+              <div className="text-[11px] text-white/70 truncate">Download a CSV of your company records</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/30 transition-colors shrink-0"><X size={18} className="text-white" /></button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto">
           {/* Data type */}
-          <div className="grid grid-cols-4 gap-2">
-            {TYPES.map(t => (
-              <button key={t.key} onClick={() => { setType(t.key); setStatus(''); setAgent(''); }}
-                className="flex flex-col items-center gap-1 py-2.5 rounded-xl text-xs font-semibold transition-colors"
-                style={{
-                  background: type === t.key ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)',
-                  color:      type === t.key ? '#fff' : 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                }}>
-                <t.icon size={17} />{t.label}
-              </button>
-            ))}
+          <div>
+            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-tertiary)' }}>What to export</div>
+            <div className="grid grid-cols-4 gap-2">
+              {TYPES.map(t => {
+                const active = type === t.key;
+                return (
+                  <button key={t.key} onClick={() => { setType(t.key); setStatus(''); setAgent(''); }}
+                    className="flex flex-col items-center gap-1.5 py-3 rounded-xl text-xs font-semibold transition-all"
+                    style={{
+                      background: active ? 'var(--gradient-sidebar)' : 'var(--color-bg-secondary)',
+                      color:      active ? '#fff' : 'var(--color-text-secondary)',
+                      border: active ? '1px solid transparent' : '1px solid var(--color-border)',
+                      boxShadow: active ? 'var(--shadow-md)' : 'none',
+                    }}>
+                    <t.icon size={18} />{t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Date range */}
-          {cfg.date && (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-                From
-                <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input mt-1" />
-              </label>
-              <label className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-                To
-                <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)} className="input mt-1" />
-              </label>
+          {/* Filters — grouped so the dialog reads as one connected panel */}
+          {(cfg.date || cfg.status || (cfg.agent && agents.length > 0) || type === 'users') && (
+            <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <div className="text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>Filters</div>
+
+              {/* Date range */}
+              {cfg.date && (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                    From
+                    <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input mt-1" />
+                  </label>
+                  <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                    To
+                    <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)} className="input mt-1" />
+                  </label>
+                </div>
+              )}
+
+              {/* Status */}
+              {cfg.status && (
+                <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Status
+                  <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input mt-1">
+                    {cfg.status.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </ThemedSelect>
+                </label>
+              )}
+
+              {/* Agent */}
+              {cfg.agent && agents.length > 0 && (
+                <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Agent
+                  <ThemedSelect value={agent} onChange={e => setAgent(e.target.value)} className="input mt-1">
+                    <option value="">All agents</option>
+                    {agents.map(a => (
+                      <option key={a.user_id} value={a.user_id}>{`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email}</option>
+                    ))}
+                  </ThemedSelect>
+                </label>
+              )}
+
+              {/* Users option */}
+              {type === 'users' && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+                  <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} className="w-4 h-4 accent-[var(--color-primary-600,#a8885c)]" />
+                  Include inactive users
+                </label>
+              )}
             </div>
           )}
 
-          {/* Status */}
-          {cfg.status && (
-            <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-              Status
-              <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input mt-1">
-                {cfg.status.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </ThemedSelect>
-            </label>
-          )}
-
-          {/* Agent */}
-          {cfg.agent && agents.length > 0 && (
-            <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-              Agent
-              <ThemedSelect value={agent} onChange={e => setAgent(e.target.value)} className="input mt-1">
-                <option value="">All agents</option>
-                {agents.map(a => (
-                  <option key={a.user_id} value={a.user_id}>{`${a.first_name || ''} ${a.last_name || ''}`.trim() || a.email}</option>
-                ))}
-              </ThemedSelect>
-            </label>
-          )}
-
-          {/* Users option */}
-          {type === 'users' && (
-            <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
-              <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} className="w-4 h-4 accent-[var(--color-primary-600,#a8885c)]" />
-              Include inactive users
-            </label>
-          )}
-
-          <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            Exports every matching record (no 1,000-row limit) as a CSV.
+          <p className="flex items-start gap-1.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            <FileSpreadsheet size={13} className="mt-0.5 shrink-0" />
+            <span>Exports every matching record (no 1,000-row limit) as a CSV. Exports are logged for compliance.</span>
           </p>
         </div>
 
-        <div className="px-5 py-4 flex justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-          <button onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-semibold" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-          {canExport(type === 'users' ? 'company_data' : type) && (
+        <div className="px-5 py-4 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <button onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+          {canExport(type === 'users' ? 'company_data' : type) ? (
             <button onClick={run} disabled={busy}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)' }}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Export CSV
+              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-50 transition-opacity" style={{ background: 'var(--gradient-sidebar)' }}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} {busy ? 'Exporting…' : 'Export CSV'}
             </button>
+          ) : (
+            <span className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>Export not permitted for this data.</span>
           )}
         </div>
       </div>
