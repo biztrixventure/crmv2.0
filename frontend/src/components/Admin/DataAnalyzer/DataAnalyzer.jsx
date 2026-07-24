@@ -619,6 +619,7 @@ const DataAnalyzer = () => {
   // Group-by + breakdown
   const [groupBy, setGroupBy] = useState(cfg.groupOptions[0].value);
   const [breakdown, setBreakdown] = useState(null);
+  const [dataDispos, setDataDispos] = useState([]);   // distinct disposition values actually stored in the data
 
   // Filter presets
   const [presets, setPresets] = useState(readPresets);
@@ -662,6 +663,20 @@ const DataAnalyzer = () => {
     setDateField((DATE_FIELDS[dataset] || DATE_FIELDS.sales)[0].v);
   }, [dataset]);
 
+  // Load the DISTINCT disposition values actually stored in the data so "select
+  // all" includes EVERY stored value — even legacy/dialer spellings never added
+  // to the disposition config. Fetched once per dataset (cached 60s server-side).
+  // Closes the gap where transfers with an unlisted disposition were silently
+  // excluded from an all-dispositions filter.
+  useEffect(() => {
+    const field = dataset === 'sales' ? 'closer_disposition' : 'latest_disposition';
+    let cancelled = false;
+    client.post('data-analyzer/field-values', { dataset, field })
+      .then(r => { if (!cancelled) setDataDispos((r.data.values || []).map(v => v.value)); })
+      .catch(() => { if (!cancelled) setDataDispos([]); });
+    return () => { cancelled = true; };
+  }, [dataset]);
+
   // Disposition filter — dynamic options from disposition_configs. Filters the
   // dataset's real disposition column (sales: closer_disposition; transfers:
   // latest_disposition, kept in sync by a trigger), so it scales to any volume.
@@ -672,7 +687,10 @@ const DataAnalyzer = () => {
     // field's values — these may differ).
     const saleDispoField = fields.find(f => f.field_type === 'sale_disposition' || f.field_type === 'sale_status');
     const saleDispoOpts = Array.isArray(saleDispoField?.options) ? saleDispoField.options.filter(o => typeof o === 'string') : [];
-    const opts = [...new Set([...(dispositions || []), ...saleDispoOpts])];
+    // Data values FIRST (sorted by frequency server-side) so the real, most-used
+    // dispositions lead the chip grid; config-only names fill in behind. This is
+    // what makes "select all" cover every stored value (incl. the unlisted ones).
+    const opts = [...new Set([...(dataDispos || []), ...(dispositions || []), ...saleDispoOpts])];
     return {
       name: dataset === 'sales' ? 'closer_disposition' : 'latest_disposition',
       label: 'Disposition',
@@ -680,7 +698,7 @@ const DataAnalyzer = () => {
       options: opts,
       _enum: true,
     };
-  }, [dataset, dispositions, fields]);
+  }, [dataset, dispositions, fields, dataDispos]);
 
   // Agent filters — pick the closer and/or fronter whose data to see. Options
   // are active users (scoped to the selected companies when any are chosen),

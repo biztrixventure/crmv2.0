@@ -659,6 +659,41 @@ router.post('/breakdown', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /field-values — EVERY distinct non-empty value (+count) actually stored
+// in one column. Powers filter option lists that must reflect the real data
+// (Disposition), so "select all" truly includes every stored value — including
+// legacy/dialer spellings never added to the disposition config. Unlike
+// /breakdown this is NOT top-capped (distinct-value counts are small) and takes
+// no filters (a picker should offer every value). Cached 60s per dataset+field.
+// Body: { dataset, field }
+// ============================================================================
+const _fvCache = new Map();   // `${dataset}:${field}` → { at, values }
+const FV_TTL = 60_000;
+router.post('/field-values', asyncHandler(async (req, res) => {
+  const dataset = req.body?.dataset === 'transfers' ? 'transfers' : 'sales';
+  const field   = String(req.body?.field || '').trim();
+  if (!field) return res.status(400).json({ error: 'field required' });
+  const cfg = pickDataset(dataset);
+  const isTyped = cfg.typed.has(field);
+
+  const cacheKey = `${dataset}:${field}`;
+  const hit = _fvCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < FV_TTL) return res.json({ field, values: hit.values, cached: true });
+
+  const rows = await fetchAll(dataset, [], { columns: isTyped ? field : 'form_data' });
+  const counts = new Map();
+  for (const r of rows) {
+    const raw = isTyped ? r[field] : r.form_data?.[field];
+    if (raw == null || raw === '') continue;
+    const v = String(raw);
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  const values = [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+  _fvCache.set(cacheKey, { at: Date.now(), values });
+  res.json({ field, values });
+}));
+
+// ============================================================================
 // POST /send-batch — distribute the current filtered result as a distribution
 // batch (original: parent_batch_id NULL, source 'data_analyzer'). Dedupes the
 // result to DISTINCT phone numbers (a result can have many rows/lead_ids per
