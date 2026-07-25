@@ -11,8 +11,27 @@ import { Lock, Loader2, Save } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import { RO_ELIGIBLE_TABS } from '../../../config/adminTabs';
+import { ADMIN_CONTROLS } from '../../../config/adminControls';
 
 const pretty = (s) => String(s || '').replace(/[._]/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
+
+// Canonical flag catalog (mirrors ReadonlyAdminManager FLAG_CATALOG). Every flag
+// except no_copy means "capability granted" when true; no_copy true = BLOCKED.
+const FLAG_CATALOG = [
+  { key: 'view_financial_data',     label: 'See financial data',       desc: 'Amounts, revenue' },
+  { key: 'view_pii',                label: 'See customer PII',         desc: 'Phone, email, etc.' },
+  { key: 'view_audit_history',      label: 'See audit history',        desc: 'Expand edit history' },
+  { key: 'view_recordings',         label: 'Play call recordings' },
+  { key: 'can_export',              label: 'Allow exports',            desc: 'Master export switch' },
+  { key: 'show_readonly_badge',     label: 'Show read-only badge' },
+  { key: 'show_write_blocked_alert',label: 'Show write-blocked alert' },
+  { key: 'no_copy',                 label: 'Block copying',            desc: 'Checked = copying blocked' },
+];
+const EXPORT_AREA_LABEL = {
+  sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks', customer_profile: 'Customer Profiles',
+  numbers: 'Numbers', data_analyzer: 'Data Analyzer', company_data: 'Company Data', chat: 'Chat Transcripts', reviews: 'QA Reviews',
+};
+const exportAreaLabel = (a) => EXPORT_AREA_LABEL[a] || pretty(a);
 
 export default function GovernanceSection({ account, isReadonlyAdmin }) {
   const userId = account.user_id;
@@ -67,6 +86,11 @@ export default function GovernanceSection({ account, isReadonlyAdmin }) {
     try { await client.put(`readonly-admins/${userId}/label`, { display_role_label: label }); setGov(g => ({ ...g, display_role_label: label || null })); flash('success', 'Label saved.'); }
     catch (e) { flash('error', e.response?.data?.error || 'Save failed.'); } finally { setBusy(null); }
   };
+  const saveControls = async (nextDisabled) => {
+    setBusy('controls');
+    try { await client.put(`readonly-admins/${userId}/controls`, { controls: nextDisabled }); setGov(g => ({ ...g, controls: nextDisabled })); flash('success', 'Button controls saved.'); }
+    catch (e) { flash('error', e.response?.data?.error || 'Save failed.'); } finally { setBusy(null); }
+  };
 
   if (!isReadonlyAdmin) {
     return (
@@ -94,18 +118,45 @@ export default function GovernanceSection({ account, isReadonlyAdmin }) {
 
       {/* Capability / masking flags */}
       <Facet title="Capability & masking flags" busy={busy === 'flags'}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {meta.flag_keys.map(k => (
-            <Toggle key={k} label={pretty(k)} checked={!!flags[k]} onChange={v => saveFlags({ ...flags, [k]: v })} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {FLAG_CATALOG.map(f => (
+            <label key={f.key} className="flex items-start gap-2 cursor-pointer text-sm py-1">
+              <input type="checkbox" checked={!!flags[f.key]} onChange={e => saveFlags({ ...flags, [f.key]: e.target.checked })}
+                className="mt-0.5 accent-[var(--color-primary-600)]" />
+              <span className="min-w-0">
+                <span className="text-text">{f.label}</span>
+                {f.desc && <span className="block text-[11px] text-text-secondary">{f.desc}</span>}
+              </span>
+            </label>
           ))}
         </div>
       </Facet>
 
       {/* Per-area export */}
-      <Facet title="Export allowance by area" busy={busy === 'export'}>
+      <Facet title="Export allowance by area — checked = allowed" busy={busy === 'export'}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {meta.export_areas.map(a => (
-            <Toggle key={a} label={pretty(a)} checked={exp[a] !== false} onChange={v => saveExport({ ...exp, [a]: v })} />
+          {(meta.export_areas || []).map(a => (
+            <Toggle key={a} label={exportAreaLabel(a)} checked={exp[a] !== false} onChange={v => saveExport({ ...exp, [a]: v })} />
+          ))}
+        </div>
+      </Facet>
+
+      {/* Per-button action controls (checked = allowed; unchecked = hidden) */}
+      <Facet title="Button controls — checked = allowed" busy={busy === 'controls'}>
+        <p className="text-[11px] text-text-secondary mb-3">Uncheck to hide a specific action button inside a tab (the tab stays visible; the button disappears).</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+          {Object.entries(ADMIN_CONTROLS).map(([tabId, ctrls]) => (
+            <div key={tabId}>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1">{tabId.replace(/-/g, ' ')}</div>
+              {ctrls.map(c => {
+                const disabled = Array.isArray(gov.controls) ? gov.controls : [];
+                const allowed = !disabled.includes(c.key);
+                return (
+                  <Toggle key={c.key} label={c.label} checked={allowed}
+                    onChange={v => saveControls(v ? disabled.filter(k => k !== c.key) : [...new Set([...disabled, c.key])])} />
+                );
+              })}
+            </div>
           ))}
         </div>
       </Facet>
