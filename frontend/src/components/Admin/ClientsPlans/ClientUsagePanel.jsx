@@ -4,7 +4,7 @@
 // admin sees which products are actually in use. Backed by GET /sale-configs/usage
 // (aggregates the sales table). No writes.
 import { useState, useEffect, useCallback } from 'react';
-import { BarChart3, Loader2, Package, Building2 } from 'lucide-react';
+import { BarChart3, Loader2, Package, Building2, DollarSign, TrendingUp, CalendarClock, ShieldCheck } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
@@ -15,6 +15,7 @@ const STATUS_COLOR = {
 };
 const statusColor = (s) => STATUS_COLOR[s] || 'var(--color-text-tertiary)';
 const pretty = (s) => String(s || 'unknown').replace(/_/g, ' ');
+const money = (n) => '$' + Math.round(n || 0).toLocaleString();
 
 export default function ClientUsagePanel() {
   const [companyId, setCompanyId] = useState('');
@@ -54,11 +55,31 @@ export default function ClientUsagePanel() {
       {loading ? (
         <div className="flex justify-center py-14"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
       ) : !data ? null : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <UsageTable title="By client (carrier)" icon={Building2} rows={data.byClient} />
-          <UsageTable title="By plan" icon={Package} rows={data.byPlan} />
-        </div>
+        <>
+          {/* KPI strip — from plan metadata (mig 214). $ tiles read 0 until plans have price/cost set. */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <Kpi icon={ShieldCheck} label="Active policies" value={(data.summary?.active || 0).toLocaleString()} />
+            <Kpi icon={DollarSign} label="Active revenue" value={money(data.summary?.revenue)} tone="var(--color-success-600)" />
+            <Kpi icon={TrendingUp} label="Est. margin" value={money(data.summary?.margin)} tone="var(--color-primary-600)" />
+            <Kpi icon={CalendarClock} label="Expiring ≤90d" value={(data.summary?.expiring || 0).toLocaleString()} tone="var(--color-warning-600)" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <UsageTable title="By client (carrier)" icon={Building2} rows={data.byClient} />
+            <UsageTable title="By plan" icon={Package} rows={data.byPlan} />
+          </div>
+        </>
       )}
+    </div>
+  );
+}
+
+function Kpi({ icon: Icon, label, value, tone }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1">
+        {Icon && <Icon size={12} style={{ color: tone || 'var(--color-primary-600)' }} />}{label}
+      </div>
+      <div className="text-lg font-bold" style={{ color: tone || 'var(--color-text)' }}>{value}</div>
     </div>
   );
 }
@@ -79,6 +100,8 @@ function UsageTable({ title, icon: Icon, rows }) {
                 <span className="text-sm font-semibold text-text truncate">{r.value}</span>
                 <span className="text-[11px] text-text-secondary flex-shrink-0">
                   <b style={{ color: 'var(--color-success-600)' }}>{r.active}</b> active · {r.total} total
+                  {r.revenue > 0 && <> · <b style={{ color: 'var(--color-text)' }}>{money(r.revenue)}</b></>}
+                  {r.expiring > 0 && <> · <b style={{ color: 'var(--color-warning-600)' }}>{r.expiring} exp</b></>}
                 </span>
               </div>
               {/* proportional bar */}

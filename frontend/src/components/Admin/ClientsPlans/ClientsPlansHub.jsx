@@ -8,18 +8,20 @@
 // It EMBEDS the existing components unchanged, so no working flow breaks — the
 // old screens keep functioning; this is an additive unified home.
 import { useState } from 'react';
-import { Layers, Package, KeyRound, BarChart3, Users2 } from 'lucide-react';
+import { Layers, Package, KeyRound, BarChart3, Users2, Link2 } from 'lucide-react';
 import ChromeTabs from '../../UI/ChromeTabs';
 import ClientPlanManager from '../ClientPlans/ClientPlanManager';
 import ClientPortalTab from '../Chat/ClientPortalTab';
 import PlanMetadataPanel from './PlanMetadataPanel';
 import ClientUsagePanel from './ClientUsagePanel';
+import GuestLinksPanel from './GuestLinksPanel';
 
 const TABS = [
   { key: 'catalog',  label: 'Clients & Plans', icon: Layers },
   { key: 'details',  label: 'Plan details',    icon: Package },
   { key: 'usage',    label: 'Usage & Lifecycle', icon: BarChart3 },
   { key: 'portal',   label: 'Portal accounts', icon: KeyRound },
+  { key: 'guests',   label: 'Guest links',     icon: Link2 },
 ];
 
 export default function ClientsPlansHub() {
@@ -45,6 +47,7 @@ export default function ClientsPlansHub() {
         {tab === 'details' && <PlanMetadataPanel />}
         {tab === 'usage'   && <ClientUsagePanel />}
         {tab === 'portal'  && <ClientPortalTab />}
+        {tab === 'guests'  && <GuestLinksPanel />}
       </div>
     </div>
   );

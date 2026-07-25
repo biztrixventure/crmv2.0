@@ -169,23 +169,56 @@ router.get('/usage', asyncHandler(async (req, res) => {
   const canManage = superadmin || await hasPermission(userId, companyId || req.user.company_id, 'manage_forms');
   if (!canManage) return res.status(403).json({ error: 'Insufficient permissions' });
 
-  let q = supabaseAdmin.from('sales').select('client_name, plan, status').limit(100000);
+  // Plan metadata (mig 214) → revenue/margin/term for lifecycle math. Merge
+  // global + company like the catalog read; first value wins (company overrides).
+  let mq = supabaseAdmin.from('sale_configs').select('value, metadata, company_id').eq('type', 'plan');
+  mq = companyId ? mq.or(`company_id.is.null,company_id.eq.${companyId}`) : mq.is('company_id', null);
+  const { data: metaRows } = await mq;
+  const planMeta = {};
+  for (const r of (metaRows || [])) {
+    const k = (r.value || '').toLowerCase();
+    // company-specific (non-null company_id) wins over global
+    if (!planMeta[k] || r.company_id) planMeta[k] = r.metadata || {};
+  }
+  const metaOf = (plan) => planMeta[(plan || '').toLowerCase()] || {};
+
+  let q = supabaseAdmin.from('sales').select('client_name, plan, status, sale_date').limit(100000);
   if (companyId) q = q.eq('company_id', companyId);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
-  const roll = (map, key, status) => {
+  const now = Date.now();
+  const addMonths = (d, m) => { const x = new Date(d); x.setMonth(x.getMonth() + (parseInt(m, 10) || 0)); return x; };
+
+  const mk = (k) => ({ value: k, total: 0, active: 0, status: {}, revenue: 0, margin: 0, expiring: 0 });
+  const roll = (map, key, s) => {
     const k = key || '(none)';
-    const row = (map[k] ||= { value: k, total: 0, active: 0, status: {} });
+    const row = (map[k] ||= mk(k));
     row.total += 1;
-    row.status[status || 'unknown'] = (row.status[status || 'unknown'] || 0) + 1;
-    if (status === 'closed_won') row.active += 1;   // active policy = closed_won
+    row.status[s.status || 'unknown'] = (row.status[s.status || 'unknown'] || 0) + 1;
+    if (s.status === 'closed_won') {                       // active policy = closed_won
+      row.active += 1;
+      const m = metaOf(s.plan);
+      const price = Number(m.price) || 0, cost = Number(m.cost) || 0, term = Number(m.term_months) || 0;
+      row.revenue += price;
+      row.margin  += (price - cost);
+      if (term && s.sale_date) {                           // expiring within the next 90 days
+        const days = Math.floor((addMonths(s.sale_date, term).getTime() - now) / 86400000);
+        if (days >= 0 && days <= 90) row.expiring += 1;
+      }
+    }
   };
   const byClient = {}, byPlan = {};
-  for (const s of (data || [])) { roll(byClient, s.client_name, s.status); roll(byPlan, s.plan, s.status); }
+  for (const s of (data || [])) { roll(byClient, s.client_name, s); roll(byPlan, s.plan, s); }
   const sort = (m) => Object.values(m).sort((a, b) => b.total - a.total);
+  const bp = sort(byPlan), bc = sort(byClient);
+  const sum = (rows, f) => rows.reduce((n, r) => n + r[f], 0);
 
-  res.json({ total: (data || []).length, byClient: sort(byClient), byPlan: sort(byPlan) });
+  res.json({
+    total: (data || []).length,
+    summary: { active: sum(bp, 'active'), revenue: sum(bp, 'revenue'), margin: sum(bp, 'margin'), expiring: sum(bp, 'expiring') },
+    byClient: bc, byPlan: bp,
+  });
 }));
 
 module.exports = router;
