@@ -75,7 +75,7 @@ export default function ClientUsagePanel() {
 
 function Kpi({ icon: Icon, label, value, tone }) {
   return (
-    <div className="rounded-xl p-3" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+    <div className="rounded-2xl p-3.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
       <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1">
         {Icon && <Icon size={12} style={{ color: tone || 'var(--color-primary-600)' }} />}{label}
       </div>
@@ -87,7 +87,7 @@ function Kpi({ icon: Icon, label, value, tone }) {
 function UsageTable({ title, icon: Icon, rows }) {
   const max = Math.max(1, ...rows.map(r => r.total));
   return (
-    <div className="rounded-xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+    <div className="rounded-2xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
       <div className="flex items-center gap-1.5 mb-3">
         <Icon size={14} style={{ color: 'var(--color-primary-600)' }} />
         <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">{title} ({rows.length})</h4>

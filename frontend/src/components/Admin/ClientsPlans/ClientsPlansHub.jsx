@@ -39,10 +39,10 @@ export default function ClientsPlansHub() {
         </p>
       </div>
 
-      <ChromeTabs variant="chrome" value={tab} onChange={setTab}
+      <ChromeTabs variant="pill" size="sm" value={tab} onChange={setTab}
         items={TABS.map(t => ({ key: t.key, label: t.label, icon: t.icon }))} />
 
-      <div className="rounded-b-xl rounded-tr-xl p-5 min-h-[320px]" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
+      <div className="rounded-2xl p-5 min-h-[320px] mt-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         {tab === 'catalog' && <ClientPlanManager />}
         {tab === 'details' && <PlanMetadataPanel />}
         {tab === 'usage'   && <ClientUsagePanel />}

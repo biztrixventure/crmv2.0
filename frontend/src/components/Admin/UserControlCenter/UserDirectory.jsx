@@ -144,7 +144,7 @@ export default function UserDirectory({ onSelect }) {
               const inactive = results ? false : u.is_active === false;
               return (
                 <button key={(results ? 'r' : 'c') + uid} onClick={() => onSelect(uid)}
-                  className="text-left rounded-xl p-3 flex items-center gap-3 transition-all hover:-translate-y-0.5"
+                  className="text-left rounded-2xl p-3.5 flex items-center gap-3 transition-all hover:-translate-y-0.5"
                   style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: inactive ? 0.6 : 1, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                   <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
                     style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>

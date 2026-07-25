@@ -141,11 +141,11 @@ export default function UserControlCenter() {
           {/* Sticky zone: identity header + segmented tab bar stay pinned while
               the tab body scrolls underneath. Opaque bg so scrolled content
               hides behind it; -mx-6/px-6 bleeds it to the container edges. */}
-          <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-0"
-            style={{ background: 'var(--color-bg)', boxShadow: '0 8px 16px -14px rgba(0,0,0,0.4)' }}>
+          <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-3"
+            style={{ background: 'var(--color-bg)', boxShadow: '0 10px 20px -18px rgba(0,0,0,0.35)' }}>
 
             {/* Identity header */}
-            <div className="rounded-xl p-4 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="rounded-2xl p-4 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 overflow-hidden"
                   style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>
@@ -194,17 +194,18 @@ export default function UserControlCenter() {
               </div>
             </div>
 
-            {/* Chrome-style tab bar (reuses the shared, theme-aware ChromeTabs) */}
+            {/* Minimal pill sub-tabs (matches the Compliance shell sub-nav) */}
             <ChromeTabs
-              variant="chrome"
+              variant="pill"
+              size="sm"
               value={tab}
               onChange={setTab}
               items={visibleTabs.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
             />
           </div>
 
-          {/* Tab body — merges into the active chrome tab above (no gap) */}
-          <div className="rounded-b-xl rounded-tr-xl p-5 min-h-[300px]" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
+          {/* Tab body — clean standalone rounded card */}
+          <div className="rounded-2xl p-5 min-h-[300px] mt-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             {tab === 'account'      && <AccountSection account={account} assignment={activeAssignment} onChanged={reload} />}
             {tab === 'companies'    && <CompaniesRoleSection account={account} assignments={assignments} onChanged={reload} onPick={setActiveId} />}
             {tab === 'permissions'  && (activeAssignment
