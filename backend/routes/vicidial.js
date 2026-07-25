@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
 const vstats = require('../utils/vicidialStats');
@@ -1653,34 +1653,54 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
   const phone = String(req.query.phone || '').replace(/\D/g, '');
   if (phone.length < 7) return res.status(400).json({ error: 'A valid phone number is required' });
   const companyId = req.query.company_id || null;
-
-  const calls = (await lookupCallsByPhone(phone)).slice(0, 100);   // newest-first, capped
+  const tail10 = phone.slice(-10);
   const codeOf = (c) => String(c.call_status || c.lead_status || '').toUpperCase();
 
-  // Map distinct dispo codes → friendly names (company row wins over global) in one query.
-  const codes = [...new Set(calls.map(codeOf).filter(Boolean))];
+  // (1) LIVE dialer call log (recent; archives away for old numbers) + why-empty
+  //     diagnostics so an empty result reads as "couldn't query" when it should.
+  const { calls: rawCalls, errors: dialerErrors } = await lookupCallsByPhoneDiag(phone);
+  const capped = rawCalls.slice(0, 100);
+
+  // (2) DURABLE CRM record — dispositions captured from the dialer via the
+  //     webhooks. Survives dialer archival and includes manual-dial calls that
+  //     became transfers, so an old/manual number still shows its history.
+  const { data: crmTransfers } = await supabaseAdmin.from('transfers')
+    .select('id, vicidial_dispo, vicidial_talk_time, vicidial_dispo_at, created_at, assigned_closer_id, status')
+    .eq('normalized_phone', tail10).order('created_at', { ascending: false }).limit(50);
+  const transferIds = (crmTransfers || []).map(t => t.id);
+  let crmActs = [];
+  if (transferIds.length) {
+    const { data } = await supabaseAdmin.from('disposition_actions')
+      .select('transfer_id, disposition_name, color, created_at, user_id, note, setter_role')
+      .in('transfer_id', transferIds).order('created_at', { ascending: false }).limit(200);
+    crmActs = data || [];
+  }
+
+  // dispo code → friendly name (company row wins over global), one query.
+  const codes = [...new Set(capped.map(codeOf).filter(Boolean))];
   const nameByCode = {};
   if (codes.length) {
     let q = supabaseAdmin.from('vicidial_dispo_map').select('vici_code, disposition_name, company_id').in('vici_code', codes);
     q = companyId ? q.or(`company_id.is.null,company_id.eq.${companyId}`) : q.is('company_id', null);
     const { data } = await q;
-    for (const row of (data || [])) {
-      if (!row.disposition_name) continue;
-      if (!nameByCode[row.vici_code] || row.company_id) nameByCode[row.vici_code] = row.disposition_name;   // company overrides global
-    }
+    for (const row of (data || [])) { if (row.disposition_name && (!nameByCode[row.vici_code] || row.company_id)) nameByCode[row.vici_code] = row.disposition_name; }
   }
 
-  // Resolve dialer agent ids → CRM names (best-effort, one query).
-  const agentIds = [...new Set(calls.map(c => c.user).filter(u => u && !/^(VDAD|VDCL|admin|-+)$/i.test(u)))];
+  // names: dialer agent ids + CRM user ids → display names.
+  const agentIds = [...new Set(capped.map(c => c.user).filter(u => u && !/^(VDAD|VDCL|admin|-+)$/i.test(u)))];
   const agentName = {};
   if (agentIds.length) {
-    const { data } = await supabaseAdmin.from('user_profiles')
-      .select('first_name, last_name, vicidial_agent_ids').overlaps('vicidial_agent_ids', agentIds);
-    for (const p of (data || [])) for (const id of (p.vicidial_agent_ids || []))
-      if (agentIds.includes(id)) agentName[id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null;
+    const { data } = await supabaseAdmin.from('user_profiles').select('first_name, last_name, vicidial_agent_ids').overlaps('vicidial_agent_ids', agentIds);
+    for (const p of (data || [])) for (const id of (p.vicidial_agent_ids || [])) if (agentIds.includes(id)) agentName[id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null;
+  }
+  const crmUserIds = [...new Set([...crmActs.map(a => a.user_id), ...(crmTransfers || []).map(t => t.assigned_closer_id)].filter(Boolean))];
+  const crmName = {};
+  if (crmUserIds.length) {
+    const { data } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', crmUserIds);
+    for (const p of (data || [])) crmName[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null;
   }
 
-  const out = calls.map(c => {
+  const dialerCalls = capped.map(c => {
     const raw = codeOf(c);
     return {
       box: c.box, at: c.call_date, length: Number(c.length) || 0,
@@ -1690,19 +1710,44 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
       hangup: c.hangup_reason || null,
     };
   });
-  const talk = out.reduce((a, c) => a + c.length, 0);
-  const lastReal = out.find(c => c.connected) || null;
+
+  // Talk time per transfer annotates the CRM events.
+  const talkByTransfer = {};
+  (crmTransfers || []).forEach(t => { if (t.vicidial_talk_time != null) talkByTransfer[t.id] = Number(t.vicidial_talk_time) || 0; });
+  const crmEvents = crmActs.map(a => ({
+    at: a.created_at, disposition: a.disposition_name || null, color: a.color || null,
+    who: a.user_id ? (crmName[a.user_id] || null) : null, role: a.setter_role || null,
+    note: a.note || null, talk: talkByTransfer[a.transfer_id] ?? null,
+  }));
+  // A transfer whose dialer dispo produced no disposition_action still surfaces.
+  (crmTransfers || []).forEach(t => {
+    if (t.vicidial_dispo && !crmActs.some(a => a.transfer_id === t.id)) {
+      crmEvents.push({ at: t.vicidial_dispo_at || t.created_at, disposition: t.vicidial_dispo, color: null,
+        who: t.assigned_closer_id ? (crmName[t.assigned_closer_id] || null) : null, role: 'closer', note: 'From dialer', talk: talkByTransfer[t.id] ?? null });
+    }
+  });
+  crmEvents.sort((a, b) => (String(a.at) < String(b.at) ? 1 : -1));
+
+  // Summary — prefer the dialer's per-call reality, fall back to the CRM record.
+  const dialerTalk = dialerCalls.reduce((a, c) => a + c.length, 0);
+  const crmTalk = Object.values(talkByTransfer).reduce((a, s) => a + (s || 0), 0);
+  const lastReal = dialerCalls.find(c => c.connected) || null;
+  const lastCrm = crmEvents[0] || null;
   res.json({
-    phone,
+    phone, tail10,
     summary: {
-      calls: out.length,
-      talk_seconds: talk,
-      last_dispo: lastReal ? (lastReal.dispo_name || lastReal.dispo_raw) : null,
+      dialer_calls: dialerCalls.length,
+      crm_events: crmEvents.length,
+      talk_seconds: dialerTalk || crmTalk,
+      last_dispo: lastReal ? (lastReal.dispo_name || lastReal.dispo_raw) : (lastCrm ? lastCrm.disposition : null),
       last_dispo_raw: lastReal?.dispo_raw || null,
-      last_at: lastReal?.at || (out[0]?.at || null),
-      last_agent: lastReal?.agent_name || lastReal?.agent || (out[0]?.agent_name || out[0]?.agent || null),
+      last_at: lastReal?.at || dialerCalls[0]?.at || lastCrm?.at || null,
+      last_agent: lastReal?.agent_name || lastReal?.agent || lastCrm?.who || null,
+      source: lastReal ? 'dialer' : (lastCrm ? 'crm' : null),
     },
-    calls: out,
+    calls: dialerCalls,
+    crm: crmEvents,
+    diagnostics: dialerErrors,
   });
 }));
 

@@ -8,7 +8,7 @@ import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Search, Filter, RefreshCw, X, Calendar, Building2, Users,
   Link2, ChevronDown, Download, BarChart3, TrendingUp, Hash,
-  PhoneCall, Clock, Loader2, Voicemail,
+  PhoneCall, Clock, Loader2, Voicemail, AlertTriangle, History,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -91,24 +91,31 @@ const NumberActivityPanel = ({ state, row, onReload }) => {
       </div>
     );
   }
-  const s = state.data?.summary || {};
-  const calls = state.data?.calls || [];
+  const d = state.data || {};
+  const s = d.summary || {};
+  const calls = d.calls || [];
+  const crm = d.crm || [];
+  const diags = d.diagnostics || [];
+  const permIssue = diags.find(x => x.permission) || null;
+  const nothing = !calls.length && !crm.length;
+
   return (
     <div className="px-6 py-5">
       {/* summary strip */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
-          <PhoneCall size={13} /> Dialer activity
+          <PhoneCall size={13} /> Number activity
         </span>
         {s.last_dispo
-          ? <DispoBadge raw={s.last_dispo_raw} name={s.last_dispo} />
-          : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No connected disposition yet</span>}
-        <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#eff6ff', color: '#2563eb' }}>
-          {s.calls || 0} call{(s.calls || 0) === 1 ? '' : 's'}
-        </span>
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#ede9fe', color: '#7c3aed' }}>
-          <Clock size={11} /> {fmtSecs(s.talk_seconds)} talk
-        </span>
+          ? <DispoBadge raw={s.last_dispo_raw || s.last_dispo} name={s.last_dispo} />
+          : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No disposition yet</span>}
+        {s.dialer_calls > 0 && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#eff6ff', color: '#2563eb' }}>{s.dialer_calls} dialer call{s.dialer_calls === 1 ? '' : 's'}</span>}
+        {s.crm_events > 0 && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#f0fdf4', color: '#059669' }}>{s.crm_events} CRM record{s.crm_events === 1 ? '' : 's'}</span>}
+        {s.talk_seconds > 0 && (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#ede9fe', color: '#7c3aed' }}>
+            <Clock size={11} /> {fmtSecs(s.talk_seconds)} talk
+          </span>
+        )}
         {s.last_agent && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Last: {s.last_agent} · {fmtDT(s.last_at)}</span>}
         <button onClick={onReload} className="ml-auto text-xs font-semibold hover:underline flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
           <RefreshCw size={11} /> Refresh
@@ -126,39 +133,95 @@ const NumberActivityPanel = ({ state, row, onReload }) => {
         )}
       </div>
 
-      {/* timeline */}
-      {calls.length === 0 ? (
+      {/* diagnostics — the dialer log couldn't be read (why "no records" happens) */}
+      {permIssue && (
+        <div className="flex items-start gap-2 mb-4 px-3 py-2 rounded-lg text-xs" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309' }}>
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <span>Live dialer log unavailable on <b>{permIssue.box}</b>: {permIssue.message}. The dialer API user needs user level 7 with “view reports” enabled. The CRM record below still shows.</span>
+        </div>
+      )}
+
+      {nothing ? (
         <div className="text-center py-6 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
           <Voicemail size={22} className="mx-auto mb-1.5" style={{ color: 'var(--color-text-tertiary)' }} />
-          <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>No dialer calls found</p>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>The number may not have been dialed yet, or its call log has archived.</p>
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>No activity found for this number yet</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>It may not have been dialed, or the dialer log archived and no CRM record was captured.</p>
         </div>
       ) : (
-        <div className="rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ background: 'var(--color-bg-secondary)' }}>
-                {['When', 'Agent', 'Disposition', 'Talk', 'Hangup', 'Box'].map(h => (
-                  <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {calls.map((c, idx) => (
-                <tr key={idx} style={{ borderTop: '1px solid var(--color-border)' }}>
-                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDT(c.at)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{c.agent_name || c.agent || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <DispoBadge raw={c.dispo_raw} name={c.dispo_name} />
-                    {c.dispo_name && c.dispo_raw ? <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>({c.dispo_raw})</span> : null}
-                  </td>
-                  <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: c.length ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{fmtSecs(c.length)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{c.hangup || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{c.box}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          {/* live dialer call log */}
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+              <PhoneCall size={12} /> Dialer call log <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>· live from VICIdial</span>
+            </div>
+            {calls.length === 0 ? (
+              <p className="text-xs px-3 py-3 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+                {permIssue ? 'Unavailable — see the note above.' : 'No live dialer calls (older calls may have archived off the dialer).'}
+              </p>
+            ) : (
+              <div className="rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                      {['When', 'Agent', 'Disposition', 'Talk', 'Hangup', 'Box'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calls.map((c, idx) => (
+                      <tr key={idx} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDT(c.at)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{c.agent_name || c.agent || '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <DispoBadge raw={c.dispo_raw} name={c.dispo_name} />
+                          {c.dispo_name && c.dispo_raw ? <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>({c.dispo_raw})</span> : null}
+                        </td>
+                        <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: c.length ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{fmtSecs(c.length)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{c.hangup || '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{c.box}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* durable CRM record — survives dialer archival */}
+          {crm.length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <History size={12} /> CRM record <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>· kept permanently</span>
+              </div>
+              <div className="rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                      {['When', 'Disposition', 'By', 'Talk', 'Note'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {crm.map((e, idx) => (
+                      <tr key={idx} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDT(e.at)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {e.color
+                            ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold" style={{ backgroundColor: `${e.color}1a`, color: e.color }}>{e.disposition || '—'}</span>
+                            : <DispoBadge raw={e.disposition} name={e.disposition} />}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{e.who || '—'}{e.role ? <span style={{ color: 'var(--color-text-tertiary)' }}> · {e.role}</span> : null}</td>
+                        <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: e.talk ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{e.talk ? fmtSecs(e.talk) : '—'}</td>
+                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)', maxWidth: 260 }}>{e.note || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

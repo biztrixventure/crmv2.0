@@ -39,20 +39,52 @@ const logger = require('./logger');
 
 // phone_number_log on one box for a phone → parsed call rows (any order). Uses
 // axios (always present) — bare global fetch isn't guaranteed on every Node.
-async function phoneCallLog(box, phone) {
+// The phone-number variants a call may be logged under in vicidial_log: the bare
+// last-10 AND the 11-digit 1+10. Manual dials and several campaigns store the
+// full DIALED string (with a leading 1), so a bare-10 query silently misses them
+// — the cause of "no records" and of manual calls not showing. phone_number_log
+// accepts a comma list, so one call matches either form.
+function phoneVariants(phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  const t10 = d.length >= 10 ? d.slice(-10) : d;
+  if (!t10) return [];
+  return [...new Set([t10, '1' + t10])];
+}
+
+// phone_number_log on one box → { rows, error }. Unlike the old helper this does
+// NOT swallow API failures: a permission / auth error (the classic "everything
+// shows no records" cause — phone_number_log needs the api user at level 7 with
+// 'view reports') is returned so the UI can say WHY the log is empty. A genuine
+// "NO RECORDS FOUND" is a normal empty result, not an error.
+async function phoneCallLogDetailed(box, phone) {
+  const variants = phoneVariants(phone);
+  if (!variants.length) return { rows: [], error: null };
   const params = {
     source: 'crm', user: box.user, pass: box.pass, function: 'phone_number_log',
-    phone_number: phone, type: 'ALL', detail: 'ALL', stage: 'pipe',
+    phone_number: variants.join(','), type: 'ALL', detail: 'ALL', stage: 'pipe',
   };
   try {
     const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, { params, timeout: 15000, responseType: 'text' });
-    const text = typeof r.data === 'string' ? r.data : String(r.data || '');
-    if (!text || /^ERROR|^NOTICE/m.test(text)) return [];
-    return text.trim().split(/\r?\n/).filter(Boolean).map(l => {
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (!text) return { rows: [], error: null };
+    if (/NO RECORDS FOUND/i.test(text)) return { rows: [], error: null };
+    if (/^ERROR|^NOTICE/m.test(text)) {
+      const msg = (text.split(/\r?\n/)[0] || '').replace(/^ERROR:\s*/i, '').trim();
+      return { rows: [], error: { box: box.id, message: msg, permission: /PERMISSION/i.test(text) } };
+    }
+    const rows = text.split(/\r?\n/).filter(Boolean).map(l => {
       const [phone_number, call_date, list_id, length_in_sec, lead_status, hangup_reason, call_status, source_id, user] = l.split('|');
-      return { box: box.id, phone_number, call_date, length: parseInt(length_in_sec, 10) || 0, lead_status, hangup_reason, call_status, user };
+      return { box: box.id, phone_number, call_date, list_id, length: parseInt(length_in_sec, 10) || 0, lead_status, hangup_reason, call_status, user };
     }).filter(r => r.call_date);
-  } catch { return []; }
+    return { rows, error: null };
+  } catch (e) {
+    return { rows: [], error: { box: box.id, message: e.message, permission: false } };
+  }
+}
+
+// Back-compat: rows only (fetch-dispo / latestDisposition path).
+async function phoneCallLog(box, phone) {
+  return (await phoneCallLogDetailed(box, phone)).rows;
 }
 
 // Refresh the live BOXES + BOX_BY_PREFIX from the vicidial_boxes table so a
@@ -128,6 +160,16 @@ async function leadAgentByCode(code) {
 async function lookupCallsByPhone(phone) {
   const all = (await Promise.all(BOXES.map(b => phoneCallLog(b, phone)))).flat();
   return all.sort((a, b) => (a.call_date < b.call_date ? 1 : -1));
+}
+
+// Diagnostic variant: the same calls PLUS per-box errors (permission / auth /
+// unreachable). Lets the "number activity" view distinguish "no calls" from
+// "couldn't query the dialer" and tell the superadmin exactly why.
+async function lookupCallsByPhoneDiag(phone) {
+  const results = await Promise.all(BOXES.map(b => phoneCallLogDetailed(b, phone)));
+  const calls = results.flatMap(r => r.rows).sort((a, b) => (a.call_date < b.call_date ? 1 : -1));
+  const errors = results.map(r => r.error).filter(Boolean);
+  return { calls, errors };
 }
 
 // Best guess at the closer's disposition for a phone: the most recent call whose
@@ -670,7 +712,7 @@ module.exports = {
   fetchAgentRoster,
   boxPrefixes,
   refreshBoxes,
-  lookupCallsByPhone, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
+  lookupCallsByPhone, lookupCallsByPhoneDiag, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
