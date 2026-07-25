@@ -72,7 +72,6 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'note-shortcodes',  label: 'Note Shortcuts',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'data-cleanup',     label: 'Data Cleanup',         group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'vicidial',         label: 'VICIdial',             group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
-  { id: 'agent-numbers',    label: 'Agent Numbers',        group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'task-boards',      label: 'Task Boards',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'blacklist',        label: 'Blacklist / DNC',      group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'egress',           label: 'Data Egress',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
