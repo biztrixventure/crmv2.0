@@ -35,6 +35,7 @@ import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
 import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
+import UserControlCenter from "../components/Admin/UserControlCenter";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
 import AppearanceManager from "../components/Admin/Appearance/AppearanceManager";
@@ -143,6 +144,7 @@ const AdminPanel = () => {
     ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "user-control",   label: "User Control Center"  }] : []),
   ].filter(item => roTabAllowed(item.id));   // RO: governance.nav allowlist (null = parity); non-RO = always true
 
   return (
@@ -223,6 +225,7 @@ const AdminPanel = () => {
                   {activeTab === "appearance"   && <AppearanceManager />}
                   {activeTab === "number-lists" && <NumberAssignmentPanel user={user} />}
                   {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
+                  {activeTab === "user-control" && user?.role === 'superadmin' && <UserControlCenter />}
                   <DevCredit />
                 </div>
               );

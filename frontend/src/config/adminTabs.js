@@ -78,6 +78,7 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'branding',         label: 'Branding & SEO',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'appearance',       label: 'Appearance',           group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'readonly-admins',  label: 'Readonly Admins',      group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
+  { id: 'user-control',     label: 'User Control Center',  group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
 ];
 
 // The tabs a readonly_admin can ever be granted (the governance matrix domain).

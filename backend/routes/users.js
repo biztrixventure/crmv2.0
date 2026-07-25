@@ -270,6 +270,95 @@ router.get('/lookup', asyncHandler(async (req, res) => {
 // ============================================================================
 // GET /users/:id - Get user details
 // ============================================================================
+// ============================================================================
+// GET /users/full/:userId — 360° per-user record for the User Control Center.
+// Superadmin-only, READ-ONLY. Returns the user's account/auth meta + profile +
+// EVERY user_company_roles assignment, each assignment shaped IDENTICALLY to a
+// GET /users list row (id=ucr.id, user_id, role, role_id, role_level,
+// company_id, company_name, is_active, …) so the existing embeddable panels
+// (UserPermissionsPanel, UserRecordViewsPanel, UserForm) work unchanged when
+// fed one assignment. This is the backbone loader — all WRITES still go through
+// the existing audited per-user endpoints.
+// ============================================================================
+router.get('/full/:userId', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  const { userId } = req.params;
+
+  // Profile (name, avatar, dialer ids) — tolerate pre-111 (no vicidial_agent_ids).
+  let { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('user_id,first_name,last_name,avatar_url,vicidial_agent_id,vicidial_agent_ids')
+    .eq('user_id', userId).maybeSingle();
+  if (!profile) {
+    ({ data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id,first_name,last_name,avatar_url,vicidial_agent_id')
+      .eq('user_id', userId).maybeSingle());
+  }
+  const dialerIds = (profile?.vicidial_agent_ids && profile.vicidial_agent_ids.length)
+    ? profile.vicidial_agent_ids
+    : (profile?.vicidial_agent_id ? [profile.vicidial_agent_id] : []);
+
+  // Auth meta (email, created, last sign-in).
+  let auth = {};
+  try {
+    const { data: a } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (a?.user) auth = { email: a.user.email, created_at: a.user.created_at, last_sign_in_at: a.user.last_sign_in_at };
+  } catch (e) {
+    logger.warn('GET_USER_FULL', 'auth lookup failed', { userId, err: e.message });
+  }
+
+  // Every assignment (all companies), shaped like a GET /users row.
+  const { data: ucr, error } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('id,user_id,role_id,company_id,is_active,created_at,custom_roles(id,name,level),companies(name)')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) return res.status(400).json({ error: error.message });
+
+  const dialerJoined = dialerIds.join(', ') || null;
+  const assignments = (ucr || []).map(u => ({
+    id: u.id,
+    user_id: u.user_id,
+    email: auth.email || 'N/A',
+    first_name: profile?.first_name || null,
+    last_name: profile?.last_name || null,
+    role: u.custom_roles?.name || null,
+    role_id: u.role_id,
+    role_level: u.custom_roles?.level || null,
+    company_id: u.company_id,
+    company_name: u.companies?.name || null,
+    is_active: u.is_active,
+    created_at: u.created_at,
+    vicidial_agent_id: dialerJoined,
+  }));
+
+  // "Primary" = newest active assignment (mirrors auth.js /me derivation).
+  const activeAssignments = assignments.filter(a => a.is_active);
+  const primary = [...activeAssignments].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))[0]
+    || assignments[0] || null;
+
+  res.json({
+    account: {
+      user_id: userId,
+      email: auth.email || 'N/A',
+      first_name: profile?.first_name || null,
+      last_name: profile?.last_name || null,
+      full_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || null,
+      avatar_url: profile?.avatar_url || null,
+      created_at: auth.created_at || null,
+      last_sign_in_at: auth.last_sign_in_at || null,
+      vicidial_agent_ids: dialerIds,
+      vicidial_agent_id: dialerJoined,
+      is_active: activeAssignments.length > 0,
+    },
+    assignments,
+    primary_assignment_id: primary?.id || null,
+  });
+}));
+
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {
