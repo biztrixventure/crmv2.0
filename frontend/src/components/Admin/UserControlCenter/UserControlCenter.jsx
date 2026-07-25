@@ -21,6 +21,7 @@ import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Badge } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+import ChromeTabs from '../../UI/ChromeTabs';
 import UserPicker from '../../Distribution/UserPicker';
 import UserPermissionsPanel from '../UserManagement/UserPermissionsPanel';
 import UserRecordViewsPanel from '../UserManagement/UserRecordViewsPanel';
@@ -127,72 +128,72 @@ export default function UserControlCenter() {
       {/* ── Step 2: detail ────────────────────────────────────────────────── */}
       {account && (
         <>
-          {/* Header card */}
-          <div className="rounded-xl p-5 mb-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <div className="flex items-start gap-4 flex-wrap">
-              <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-                style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>
-                {account.avatar_url ? <img src={account.avatar_url} alt="" className="w-14 h-14 rounded-full object-cover" /> : initials}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-xl font-bold text-text">{account.full_name || '(unnamed)'}</h2>
-                  <Badge variant={account.is_active ? 'success' : 'error'}>{account.is_active ? 'Active' : 'Inactive'}</Badge>
-                  {isReadonlyAdmin && <Badge variant="info">Readonly Admin</Badge>}
+          {/* Sticky zone: identity header + segmented tab bar stay pinned while
+              the tab body scrolls underneath. Opaque bg so scrolled content
+              hides behind it; -mx-6/px-6 bleeds it to the container edges. */}
+          <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-0"
+            style={{ background: 'var(--color-bg)', boxShadow: '0 8px 16px -14px rgba(0,0,0,0.4)' }}>
+
+            {/* Identity header */}
+            <div className="rounded-xl p-4 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 overflow-hidden"
+                  style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>
+                  {account.avatar_url ? <img src={account.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" /> : initials}
                 </div>
-                <div className="flex items-center gap-4 mt-1 text-sm text-text-secondary flex-wrap">
-                  <span className="flex items-center gap-1"><Mail size={13} />{account.email}</span>
-                  <span className="flex items-center gap-1"><Clock size={13} />Joined {fmtDate(account.created_at)}</span>
-                  <span className="flex items-center gap-1"><Circle size={9} fill="currentColor" />Last seen {fmtDateTime(account.last_sign_in_at)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-lg font-bold text-text truncate">{account.full_name || '(unnamed)'}</h2>
+                    <Badge variant={account.is_active ? 'success' : 'error'} size="sm">{account.is_active ? 'Active' : 'Inactive'}</Badge>
+                    {isReadonlyAdmin && <Badge variant="info" size="sm">Readonly Admin</Badge>}
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 text-[13px] text-text-secondary flex-wrap">
+                    <span className="flex items-center gap-1"><Mail size={12} />{account.email}</span>
+                    <span className="flex items-center gap-1"><Clock size={12} />Joined {fmtDate(account.created_at)}</span>
+                    <span className="flex items-center gap-1"><Circle size={8} fill="currentColor" />Last seen {fmtDateTime(account.last_sign_in_at)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                  {assignments.map(a => (
-                    <span key={a.id} className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                      style={{ background: (LEVEL_COLOR[a.role_level] || '#6b7280') + '22', color: LEVEL_COLOR[a.role_level] || '#6b7280', opacity: a.is_active ? 1 : 0.5 }}>
-                      {prettyRole(a.role_level)} · {a.company_name || '—'}{a.is_active ? '' : ' (inactive)'}
-                    </span>
-                  ))}
-                </div>
+
+                {/* Company-context switcher — drives the company-scoped tabs */}
+                {assignments.length > 1 && (
+                  <div className="flex-shrink-0">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-text-secondary block mb-1">Company context</label>
+                    <ThemedSelect value={activeId || ''} onChange={e => setActiveId(e.target.value)} className="input min-w-[200px]">
+                      {assignments.map(a => (
+                        <option key={a.id} value={a.id}>{a.company_name || '—'} · {prettyRole(a.role_level)}{a.is_active ? '' : ' (inactive)'}</option>
+                      ))}
+                    </ThemedSelect>
+                  </div>
+                )}
               </div>
 
-              {/* Company-context switcher — drives the company-scoped tabs */}
-              {assignments.length > 1 && (
-                <div className="flex-shrink-0">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary block mb-1">Company context</label>
-                  <ThemedSelect value={activeId || ''} onChange={e => setActiveId(e.target.value)} className="input min-w-[220px]">
-                    {assignments.map(a => (
-                      <option key={a.id} value={a.id}>{a.company_name || '—'} · {prettyRole(a.role_level)}{a.is_active ? '' : ' (inactive)'}</option>
-                    ))}
-                  </ThemedSelect>
-                </div>
-              )}
+              {/* Role/company chips */}
+              <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
+                {assignments.map(a => (
+                  <button key={a.id} onClick={() => setActiveId(a.id)}
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all"
+                    style={{
+                      background: (LEVEL_COLOR[a.role_level] || '#6b7280') + (a.id === activeId ? '33' : '18'),
+                      color: LEVEL_COLOR[a.role_level] || '#6b7280',
+                      border: `1px solid ${a.id === activeId ? (LEVEL_COLOR[a.role_level] || '#6b7280') : 'transparent'}`,
+                      opacity: a.is_active ? 1 : 0.5,
+                    }}>
+                    {prettyRole(a.role_level)} · {a.company_name || '—'}{a.is_active ? '' : ' (inactive)'}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {/* Chrome-style tab bar (reuses the shared, theme-aware ChromeTabs) */}
+            <ChromeTabs
+              variant="chrome"
+              value={tab}
+              onChange={setTab}
+              items={TABS.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
+            />
           </div>
 
-          {/* Chrome-style tab bar */}
-          <div className="flex items-end gap-1 border-b overflow-x-auto" style={{ borderColor: 'var(--color-border)' }}>
-            {TABS.map(t => {
-              const Icon = t.icon;
-              const active = tab === t.id;
-              return (
-                <button key={t.id} onClick={() => setTab(t.id)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold whitespace-nowrap rounded-t-lg -mb-px transition-colors"
-                  style={{
-                    background: active ? 'var(--color-surface)' : 'transparent',
-                    border: active ? '1px solid var(--color-border)' : '1px solid transparent',
-                    borderBottomColor: active ? 'var(--color-surface)' : 'transparent',
-                    color: active ? 'var(--color-primary-600)' : 'var(--color-text-secondary)',
-                  }}>
-                  <Icon size={15} /> {t.label}
-                  {t.scope === 'company' && assignments.length > 1 && active && (
-                    <span className="text-[10px] font-medium opacity-70">· {activeAssignment?.company_name}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Tab body */}
+          {/* Tab body — merges into the active chrome tab above (no gap) */}
           <div className="rounded-b-xl rounded-tr-xl p-5 min-h-[300px]" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderTop: 'none' }}>
             {tab === 'account'      && <AccountSection account={account} assignment={activeAssignment} onChanged={reload} />}
             {tab === 'companies'    && <CompaniesRoleSection account={account} assignments={assignments} onChanged={reload} onPick={setActiveId} />}
