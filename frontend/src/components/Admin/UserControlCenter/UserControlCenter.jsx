@@ -217,7 +217,7 @@ export default function UserControlCenter() {
               ? <QaSection account={account} assignment={activeAssignment} />
               : <Empty text="No company assignment." />)}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
-            {tab === 'egress'       && <EgressSection account={account} />}
+            {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}
           </div>
         </>
