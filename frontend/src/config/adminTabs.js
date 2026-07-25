@@ -48,6 +48,7 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'chat',             label: 'Chat Control',         group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'features',         label: 'Features',             group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'business-rules',   label: 'Business Rules',       group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
+  { id: 'clients-plans',    label: 'Clients & Plans',      group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
 
   // Tools / intelligence
   { id: 'sale-search',      label: 'Lead Search',          group: 'tools',         roEligible: true,  defaultForRo: true,  gate: 'search_sales' },

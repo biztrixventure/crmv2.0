@@ -31,7 +31,7 @@ import DataCleanup from "../components/Admin/DataCleanup/DataCleanup";
 import VicidialAdmin from "../components/Admin/Vicidial/VicidialAdmin";
 import TaskBoardsAdmin from "../components/Admin/TaskBoards/TaskBoardsAdmin";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
-import ClientPlanManager from "../components/Admin/ClientPlans/ClientPlanManager";
+import ClientsPlansHub from "../components/Admin/ClientsPlans/ClientsPlansHub";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
 import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
@@ -137,6 +137,7 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "chat",           label: "Chat Control"         }] : []),
     ...(isSAorRO                                       ? [{ id: "features",       label: "Features"             }] : []),
     ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
+    ...(isSAorRO                                       ? [{ id: "clients-plans",  label: "Clients & Plans"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
@@ -208,7 +209,7 @@ const AdminPanel = () => {
                   {activeTab === "vicidial" && <VicidialAdmin />}
                   {activeTab === "task-boards" && <TaskBoardsAdmin />}
                   {activeTab === "vehicles"     && <VehicleManager />}
-                  {activeTab === "clients-plans" && <ClientPlanManager />}
+                  {activeTab === "clients-plans" && <ClientsPlansHub />}
                   {activeTab === "faqs"        && <FAQManager />}
                   {activeTab === "scripts"     && <ScriptManager />}
                   {activeTab === "bulk-upload" && <BulkUploadHub />}

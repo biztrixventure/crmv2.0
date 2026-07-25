@@ -72,9 +72,12 @@ router.post('/',
     const canManage  = superadmin || await hasPermission(userId, companyId, 'manage_forms');
     if (!canManage) return res.status(403).json({ error: 'Insufficient permissions to manage sale configs' });
 
+    // Optional structured metadata (mig 214) — additive; free-text value unchanged.
+    const metadata = (req.body.metadata && typeof req.body.metadata === 'object') ? req.body.metadata : undefined;
+
     const { data, error } = await supabaseAdmin
       .from('sale_configs')
-      .insert({ company_id: companyId, type, value: value.trim(), sort_order })
+      .insert({ company_id: companyId, type, value: value.trim(), sort_order, ...(metadata !== undefined ? { metadata } : {}) })
       .select()
       .single();
 
@@ -108,6 +111,7 @@ router.put('/:id',
     if (req.body.value !== undefined) updates.value = req.body.value.trim();
     if (req.body.sort_order !== undefined) updates.sort_order = req.body.sort_order;
     if (req.body.hidden !== undefined) updates.hidden = !!req.body.hidden;   // eye-off toggle
+    if (req.body.metadata !== undefined) updates.metadata = req.body.metadata;   // structured attrs (mig 214)
 
     const { data, error } = await supabaseAdmin
       .from('sale_configs')
@@ -150,6 +154,38 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({ message: 'Config deleted. Existing sale records retain their saved value.' });
+}));
+
+// ============================================================================
+// GET /sale-configs/usage?company_id=... — read-only lifecycle/usage rollup for
+// the Clients & Plans command center: how many sales each client (carrier) and
+// each plan has, broken down by status, so an admin sees which products are
+// actually in use / active. Reads sales only (no writes). SuperAdmin / manage_forms.
+// ============================================================================
+router.get('/usage', asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const companyId = req.query.company_id || null;
+  const superadmin = await isSuperAdmin(userId);
+  const canManage = superadmin || await hasPermission(userId, companyId || req.user.company_id, 'manage_forms');
+  if (!canManage) return res.status(403).json({ error: 'Insufficient permissions' });
+
+  let q = supabaseAdmin.from('sales').select('client_name, plan, status').limit(100000);
+  if (companyId) q = q.eq('company_id', companyId);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+
+  const roll = (map, key, status) => {
+    const k = key || '(none)';
+    const row = (map[k] ||= { value: k, total: 0, active: 0, status: {} });
+    row.total += 1;
+    row.status[status || 'unknown'] = (row.status[status || 'unknown'] || 0) + 1;
+    if (status === 'closed_won') row.active += 1;   // active policy = closed_won
+  };
+  const byClient = {}, byPlan = {};
+  for (const s of (data || [])) { roll(byClient, s.client_name, s.status); roll(byPlan, s.plan, s.status); }
+  const sort = (m) => Object.values(m).sort((a, b) => b.total - a.total);
+
+  res.json({ total: (data || []).length, byClient: sort(byClient), byPlan: sort(byPlan) });
 }));
 
 module.exports = router;
