@@ -15,14 +15,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
-  Lock, Activity, Download, Search, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck,
+  Lock, Activity, Download, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Badge } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
 import ChromeTabs from '../../UI/ChromeTabs';
-import UserPicker from '../../Distribution/UserPicker';
+import UserDirectory from './UserDirectory';
 import UserPermissionsPanel from '../UserManagement/UserPermissionsPanel';
 import UserRecordViewsPanel from '../UserManagement/UserRecordViewsPanel';
 import AccountSection from './AccountSection';
@@ -106,22 +106,26 @@ export default function UserControlCenter() {
           </h1>
           <p className="text-sm text-text-secondary mt-0.5">Every control for one user — account, role, permissions, teams, dialer, governance, egress, activity.</p>
         </div>
-        {picked && (
-          <button onClick={reload} disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
-            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Reload
-          </button>
+        {account && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setPicked(null); setData(null); }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+              <ArrowLeft size={14} /> Directory
+            </button>
+            <button onClick={reload} disabled={loading}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Reload
+            </button>
+          </div>
         )}
       </div>
 
-      {/* ── Step 1: pick a user ───────────────────────────────────────────── */}
-      <div className="rounded-xl p-4 mb-5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-text-secondary">
-          <Search size={13} /> Pick a user
-        </div>
-        <UserPicker value={picked} onChange={setPicked} placeholder="Search any CRM user by name…" />
-      </div>
+      {/* ── Step 1: pick a user (company → role → user directory) ──────────── */}
+      {!account && !loading && (
+        <UserDirectory onSelect={(uid) => setPicked({ id: uid })} />
+      )}
 
       {error && (
         <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: 'var(--color-error-50, rgba(239,68,68,0.08))', border: '1px solid var(--color-error-500)', color: 'var(--color-error-600)' }}>{error}</div>
@@ -223,12 +227,6 @@ export default function UserControlCenter() {
         </>
       )}
 
-      {!picked && !loading && (
-        <div className="text-center py-16 text-text-secondary">
-          <UserCog size={40} className="mx-auto mb-3 opacity-40" />
-          <p className="text-sm">Search and pick a user above to see every control for that person.</p>
-        </div>
-      )}
     </div>
   );
 }
