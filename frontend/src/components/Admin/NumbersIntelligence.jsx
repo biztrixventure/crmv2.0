@@ -2,12 +2,13 @@
  * NumbersIntelligence — superadmin cross-company numbers view.
  * Full visibility: all companies, all fronters, all dates, transfer linkage.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import {
   Phone, Search, Filter, RefreshCw, X, Calendar, Building2, Users,
   Link2, ChevronDown, Download, BarChart3, TrendingUp, Hash,
+  PhoneCall, Clock, Loader2, Voicemail,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -45,6 +46,125 @@ const downloadCSV = (rows, headers, filename) => {
   URL.revokeObjectURL(url);
 };
 
+// ── Dialer-activity detail (shown when a number row is expanded) ─────────────
+const fmtSecs = (s) => {
+  s = Math.max(0, Math.round(Number(s) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r ? `${m}m ${r}s` : `${m}m`;
+};
+const fmtDT = (iso) => iso
+  ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  : '—';
+// Colour a disposition badge by outcome family (green = good, red = dead, blue = neutral).
+const dispoStyle = (raw) => {
+  const up = String(raw || '').toUpperCase();
+  if (up === 'XFER' || up === 'SALE' || up === 'TRANSFER') return { bg: '#d1fae5', color: '#059669' };
+  if (['DNC', 'N', 'B', 'NI', 'DC', 'DNQ', 'DEC'].includes(up))  return { bg: '#fee2e2', color: '#dc2626' };
+  if (!up) return { bg: '#f3f4f6', color: '#6b7280' };
+  return { bg: '#eff6ff', color: '#2563eb' };
+};
+const DispoBadge = ({ raw, name }) => {
+  const st = dispoStyle(raw);
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold" style={{ backgroundColor: st.bg, color: st.color }}>
+      {name || raw || '—'}
+    </span>
+  );
+};
+
+// The expandable panel: a number's real VICIdial call history (disposition +
+// talk seconds + agent), fetched on demand and tied back to its CRM status.
+const NumberActivityPanel = ({ state, row, onReload }) => {
+  if (!state || state.loading) {
+    return (
+      <div className="px-6 py-6 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        <Loader2 size={15} className="animate-spin" /> Loading dialer activity for {row.phone_number}…
+      </div>
+    );
+  }
+  if (state.error) {
+    return (
+      <div className="px-6 py-5 text-sm flex items-center justify-between gap-3" style={{ color: 'var(--color-text-secondary)' }}>
+        <span>{state.error}</span>
+        <button onClick={onReload} className="text-xs font-semibold hover:underline" style={{ color: 'var(--color-primary-600)' }}>Retry</button>
+      </div>
+    );
+  }
+  const s = state.data?.summary || {};
+  const calls = state.data?.calls || [];
+  return (
+    <div className="px-6 py-5">
+      {/* summary strip */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }}>
+          <PhoneCall size={13} /> Dialer activity
+        </span>
+        {s.last_dispo
+          ? <DispoBadge raw={s.last_dispo_raw} name={s.last_dispo} />
+          : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No connected disposition yet</span>}
+        <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#eff6ff', color: '#2563eb' }}>
+          {s.calls || 0} call{(s.calls || 0) === 1 ? '' : 's'}
+        </span>
+        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#ede9fe', color: '#7c3aed' }}>
+          <Clock size={11} /> {fmtSecs(s.talk_seconds)} talk
+        </span>
+        {s.last_agent && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Last: {s.last_agent} · {fmtDT(s.last_at)}</span>}
+        <button onClick={onReload} className="ml-auto text-xs font-semibold hover:underline flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
+          <RefreshCw size={11} /> Refresh
+        </button>
+      </div>
+
+      {/* CRM linkage — connects the fronter's marked status to the dialer reality */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <span className="inline-flex items-center gap-1.5">Fronter status: <StatusBadge status={row.status} /></span>
+        {row.fronter_name && <span>Assigned to <b style={{ color: 'var(--color-text)' }}>{row.fronter_name}</b></span>}
+        {row.transfer_id && (
+          <span className="inline-flex items-center gap-1 font-bold" style={{ color: '#059669' }}>
+            <Link2 size={11} /> Transferred{row.transferred_at ? ` · ${fmt(row.transferred_at)}` : ''}
+          </span>
+        )}
+      </div>
+
+      {/* timeline */}
+      {calls.length === 0 ? (
+        <div className="text-center py-6 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}>
+          <Voicemail size={22} className="mx-auto mb-1.5" style={{ color: 'var(--color-text-tertiary)' }} />
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>No dialer calls found</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>The number may not have been dialed yet, or its call log has archived.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                {['When', 'Agent', 'Disposition', 'Talk', 'Hangup', 'Box'].map(h => (
+                  <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {calls.map((c, idx) => (
+                <tr key={idx} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{fmtDT(c.at)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{c.agent_name || c.agent || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <DispoBadge raw={c.dispo_raw} name={c.dispo_name} />
+                    {c.dispo_name && c.dispo_raw ? <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>({c.dispo_raw})</span> : null}
+                  </td>
+                  <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: c.length ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{fmtSecs(c.length)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{c.hangup || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{c.box}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 const NumbersIntelligence = () => {
   const { roExportAllowed } = useAuth();
@@ -66,7 +186,28 @@ const NumbersIntelligence = () => {
   // UI
   const [page,       setPage]       = useState(1);
   const [expanded,   setExpanded]   = useState(null);
+  const [activity,   setActivity]   = useState({});   // phone -> { loading, data, error }
   const PAGE_SIZE = 50;
+
+  // Pull a number's real dialer call history on demand (dispo + talk seconds +
+  // agent). Cached per phone so re-expanding is instant; Refresh re-fetches.
+  const loadActivity = useCallback(async (n) => {
+    const phone = n.phone_number;
+    if (!phone) return;
+    setActivity(a => ({ ...a, [phone]: { loading: true } }));
+    try {
+      const r = await client.get('vicidial/number-activity', { params: { phone, ...(n.company_id ? { company_id: n.company_id } : {}) } });
+      setActivity(a => ({ ...a, [phone]: { loading: false, data: r.data } }));
+    } catch (e) {
+      setActivity(a => ({ ...a, [phone]: { loading: false, error: e.response?.data?.error || 'Could not reach the dialer for this number.' } }));
+    }
+  }, []);
+
+  const toggleRow = (n) => {
+    const nextId = expanded === n.id ? null : n.id;
+    setExpanded(nextId);
+    if (nextId && !activity[n.phone_number]) loadActivity(n);
+  };
 
   const searchRef = useRef(null);
   const debRef    = useRef(null);
@@ -321,14 +462,19 @@ const NumbersIntelligence = () => {
                 </thead>
                 <tbody>
                   {paged.map((n, i) => (
-                    <tr key={n.id}
+                    <Fragment key={n.id}>
+                    <tr
                       className="hover:bg-bg-secondary transition-colors cursor-pointer group"
-                      style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--color-bg-secondary)0a' }}
-                      onClick={() => setExpanded(expanded === n.id ? null : n.id)}>
+                      style={{ borderBottom: expanded === n.id ? 'none' : '1px solid var(--color-border)', backgroundColor: expanded === n.id ? 'var(--color-bg-secondary)' : (i % 2 === 0 ? 'transparent' : 'var(--color-bg-secondary)0a') }}
+                      onClick={() => toggleRow(n)}>
                       <td className="px-4 py-3">
-                        <span className="font-mono font-semibold text-xs" style={{ color: 'var(--color-text)' }}>
-                          {n.phone_number}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <ChevronDown size={13} className="transition-transform flex-shrink-0"
+                            style={{ color: 'var(--color-text-tertiary)', transform: expanded === n.id ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
+                          <span className="font-mono font-semibold text-xs" style={{ color: 'var(--color-text)' }}>
+                            {n.phone_number}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs" style={{ color: 'var(--color-text)' }}>
@@ -382,6 +528,14 @@ const NumbersIntelligence = () => {
                         )}
                       </td>
                     </tr>
+                    {expanded === n.id && (
+                      <tr>
+                        <td colSpan={8} style={{ padding: 0, backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                          <NumberActivityPanel state={activity[n.phone_number]} row={n} onReload={() => loadActivity(n)} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

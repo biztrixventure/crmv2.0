@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
 const vstats = require('../utils/vicidialStats');
@@ -1632,6 +1632,78 @@ api.post('/stats/create-batch', superOnly, asyncHandler(async (req, res) => {
   }
   logger.success('VICI_STATS', `create-batch "${name}" (${distribute}) → ${summary.length} recipients, ${items.length} numbers, by ${req.user.id}`);
   res.status(201).json({ ok: true, distribute, mode, total: items.length, batches: summary });
+}));
+
+// ── Dialer activity for one phone (Numbers Intelligence "what happened") ──────
+// One-click, READ-ONLY view of a number's real VICIdial call history: every call
+// with its disposition (raw code → mapped friendly name), talk length in seconds,
+// agent (dialer id → CRM name) and hangup reason, plus a summary (total talk time
+// + the last REAL outcome). Touches the dialer only — writes nothing. Available
+// to superadmin + admin/manager/compliance/readonly roles (not fronters/closers).
+const NUMBER_ACTIVITY_ROLES = new Set([
+  'readonly_admin', 'compliance_manager', 'company_admin',
+  'operations_manager', 'closer_manager', 'fronter_manager',
+]);
+// Dialer codes that are NOT a real customer-contact outcome (answering machine,
+// no-answer, dead air, system/in-progress) — used to surface the last REAL dispo.
+const NA_ACTIVITY = new Set(['A','N','NA','DAIR','DROP','AFTHRS','B','DC','AB','ADC','PDROP','AA','NANQUE','TIMEOT','CXHNGP','INCALL','QUEUE','CH','DISPO','NEW']);
+api.get('/number-activity', asyncHandler(async (req, res) => {
+  const superadmin = await isSuperAdmin(req.user.id);
+  if (!superadmin && !NUMBER_ACTIVITY_ROLES.has(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  const phone = String(req.query.phone || '').replace(/\D/g, '');
+  if (phone.length < 7) return res.status(400).json({ error: 'A valid phone number is required' });
+  const companyId = req.query.company_id || null;
+
+  const calls = (await lookupCallsByPhone(phone)).slice(0, 100);   // newest-first, capped
+  const codeOf = (c) => String(c.call_status || c.lead_status || '').toUpperCase();
+
+  // Map distinct dispo codes → friendly names (company row wins over global) in one query.
+  const codes = [...new Set(calls.map(codeOf).filter(Boolean))];
+  const nameByCode = {};
+  if (codes.length) {
+    let q = supabaseAdmin.from('vicidial_dispo_map').select('vici_code, disposition_name, company_id').in('vici_code', codes);
+    q = companyId ? q.or(`company_id.is.null,company_id.eq.${companyId}`) : q.is('company_id', null);
+    const { data } = await q;
+    for (const row of (data || [])) {
+      if (!row.disposition_name) continue;
+      if (!nameByCode[row.vici_code] || row.company_id) nameByCode[row.vici_code] = row.disposition_name;   // company overrides global
+    }
+  }
+
+  // Resolve dialer agent ids → CRM names (best-effort, one query).
+  const agentIds = [...new Set(calls.map(c => c.user).filter(u => u && !/^(VDAD|VDCL|admin|-+)$/i.test(u)))];
+  const agentName = {};
+  if (agentIds.length) {
+    const { data } = await supabaseAdmin.from('user_profiles')
+      .select('first_name, last_name, vicidial_agent_ids').overlaps('vicidial_agent_ids', agentIds);
+    for (const p of (data || [])) for (const id of (p.vicidial_agent_ids || []))
+      if (agentIds.includes(id)) agentName[id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null;
+  }
+
+  const out = calls.map(c => {
+    const raw = codeOf(c);
+    return {
+      box: c.box, at: c.call_date, length: Number(c.length) || 0,
+      dispo_raw: raw || null, dispo_name: nameByCode[raw] || null,
+      connected: !!raw && !NA_ACTIVITY.has(raw),
+      agent: c.user || null, agent_name: c.user ? (agentName[c.user] || null) : null,
+      hangup: c.hangup_reason || null,
+    };
+  });
+  const talk = out.reduce((a, c) => a + c.length, 0);
+  const lastReal = out.find(c => c.connected) || null;
+  res.json({
+    phone,
+    summary: {
+      calls: out.length,
+      talk_seconds: talk,
+      last_dispo: lastReal ? (lastReal.dispo_name || lastReal.dispo_raw) : null,
+      last_dispo_raw: lastReal?.dispo_raw || null,
+      last_at: lastReal?.at || (out[0]?.at || null),
+      last_agent: lastReal?.agent_name || lastReal?.agent || (out[0]?.agent_name || out[0]?.agent || null),
+    },
+    calls: out,
+  });
 }));
 
 // Exported so the CRM transfer-create / confirm paths can attach a closer
