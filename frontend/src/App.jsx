@@ -16,6 +16,7 @@ import ImpersonateCallback from "./pages/ImpersonateCallback";
 import GuestChat from "./pages/GuestChat";
 import BrandedLoader from "./components/UI/BrandedLoader";
 import ThemeRuntime from "./components/ThemeRuntime";
+import UserThemeRuntime from "./components/UserThemeRuntime";
 import "./styles/global.css";
 
 // Lazy-load dashboards for better perf
@@ -79,6 +80,8 @@ const AppContent = () => {
     <Router>
       {/* Injects the saved Appearance theme (business_config `theme`) app-wide. */}
       <ThemeRuntime />
+      {/* The signed-in user's personal colour theme (localStorage), layered last. */}
+      <UserThemeRuntime />
       <Suspense fallback={<PageSpinner />}>
         <Routes>
           <Route path="/login"              element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />

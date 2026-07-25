@@ -98,7 +98,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
       .limit(1),
     supabaseAdmin
       .from('user_profiles')
-      .select('first_name, last_name')
+      .select('first_name, last_name, vicidial_agent_id, vicidial_agent_ids')
       .eq('user_id', userId)
       .single(),
   ]);
@@ -151,6 +151,10 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     company_timezone: ur.companies?.internal_timezone || 'Asia/Karachi',
     first_name: profile?.first_name,
     last_name: profile?.last_name,
+    // Read-only for the user themselves: their own dialer id(s). Managers set it.
+    vicidial_agent_id: ((profile?.vicidial_agent_ids && profile.vicidial_agent_ids.length)
+      ? profile.vicidial_agent_ids.join(', ')
+      : profile?.vicidial_agent_id) || null,
     permissions: userPermissions,
     export_perms,   // per-user/role export-button permissions (egress mig 210)
   });
