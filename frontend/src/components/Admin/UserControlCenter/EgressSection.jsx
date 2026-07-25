@@ -12,6 +12,9 @@ import { Download, Loader2, Save, Trash2, Columns3 } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+// Single source of truth for the export field catalog — shared with the canonical
+// Data Egress screen so the two never drift (no duplicated hardcoded list).
+import { EXPORT_DATASETS, labelFor } from '../EgressGovernance/EgressGovernance';
 
 const AREA_LABEL = {
   __global: 'All exports', sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
@@ -20,13 +23,6 @@ const AREA_LABEL = {
 };
 const areaLabel = (a) => AREA_LABEL[a] || String(a || '').replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
 
-// Field catalogs per dataset (mirror EgressGovernance EXPORT_DATASETS).
-const EXPORT_DATASETS = {
-  sales: ['customer_name', 'customer_phone', 'customer_email', 'reference_no', 'policy_number', 'customer_uuid', 'status', 'closer_name', 'fronter_name', 'company_name', 'sale_date', 'plan', 'client_name', 'monthly_payment', 'down_payment', 'car_year', 'car_make', 'car_model', 'car_vin'],
-  transfers: ['customer_name', 'customer_phone', 'customer_uuid', 'created_by_name', 'assigned_closer_name', 'latest_disposition', 'company_name', 'status', 'created_at'],
-  callbacks: ['customer_name', 'customer_phone', 'customer_uuid', 'status', 'priority', 'callback_at', 'notes', 'fronter_name', 'closer_name', 'company_name'],
-  reviews: ['customer_name', 'rating', 'reviewer_name', 'created_at', 'notes'],
-};
 const numOrNull = (v) => (v === '' || v == null ? null : v);
 
 export default function EgressSection({ account }) {
@@ -186,7 +182,8 @@ function CsvCapRow({ area, label, row, busy, onSave }) {
 }
 
 function ColumnsCard({ userId, onErr, onOk }) {
-  const datasets = Object.keys(EXPORT_DATASETS);
+  // Only datasets that have a fixed field catalog (data_analyzer is dynamic → skip).
+  const datasets = Object.keys(EXPORT_DATASETS).filter(k => (EXPORT_DATASETS[k].fields || []).length);
   const [ds, setDs] = useState(datasets[0]);
   const [selected, setSelected] = useState(null);   // null = all columns
   const [loading, setLoading] = useState(false);
@@ -200,7 +197,7 @@ function ColumnsCard({ userId, onErr, onOk }) {
 
   useEffect(() => { load(ds); }, [ds, load]);
 
-  const fields = EXPORT_DATASETS[ds] || [];
+  const fields = EXPORT_DATASETS[ds]?.fields || [];
   const isOn = (f) => selected == null ? true : selected.includes(f);
   const toggle = (f) => {
     const base = selected == null ? [...fields] : selected;
@@ -219,7 +216,7 @@ function ColumnsCard({ userId, onErr, onOk }) {
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5"><Columns3 size={13} /> Export columns (per dataset)</h4>
         <ThemedSelect value={ds} onChange={e => setDs(e.target.value)} className="input w-40">
-          {datasets.map(d => <option key={d} value={d}>{areaLabel(d)}</option>)}
+          {datasets.map(d => <option key={d} value={d}>{EXPORT_DATASETS[d].label}</option>)}
         </ThemedSelect>
       </div>
       <p className="text-[11px] text-text-secondary mb-2">{selected == null ? 'All columns (unconfigured — user exports the full set).' : `${selected.length} of ${fields.length} columns.`}</p>
@@ -229,7 +226,7 @@ function ColumnsCard({ userId, onErr, onOk }) {
             {fields.map(f => (
               <label key={f} className="flex items-center gap-2 cursor-pointer text-sm py-0.5">
                 <input type="checkbox" checked={isOn(f)} onChange={() => toggle(f)} className="accent-[var(--color-primary-600)]" />
-                <span className="text-text truncate">{f.replace(/_/g, ' ')}</span>
+                <span className="text-text truncate">{labelFor(f)}</span>
               </label>
             ))}
           </div>

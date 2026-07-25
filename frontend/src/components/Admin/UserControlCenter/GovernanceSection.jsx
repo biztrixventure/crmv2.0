@@ -32,6 +32,7 @@ const EXPORT_AREA_LABEL = {
   numbers: 'Numbers', data_analyzer: 'Data Analyzer', company_data: 'Company Data', chat: 'Chat Transcripts', reviews: 'QA Reviews',
 };
 const exportAreaLabel = (a) => EXPORT_AREA_LABEL[a] || pretty(a);
+const FLAG_META = Object.fromEntries(FLAG_CATALOG.map(f => [f.key, f]));
 
 export default function GovernanceSection({ account, isReadonlyAdmin }) {
   const userId = account.user_id;
@@ -119,16 +120,19 @@ export default function GovernanceSection({ account, isReadonlyAdmin }) {
       {/* Capability / masking flags */}
       <Facet title="Capability & masking flags" busy={busy === 'flags'}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {FLAG_CATALOG.map(f => (
-            <label key={f.key} className="flex items-start gap-2 cursor-pointer text-sm py-1">
-              <input type="checkbox" checked={!!flags[f.key]} onChange={e => saveFlags({ ...flags, [f.key]: e.target.checked })}
-                className="mt-0.5 accent-[var(--color-primary-600)]" />
-              <span className="min-w-0">
-                <span className="text-text">{f.label}</span>
-                {f.desc && <span className="block text-[11px] text-text-secondary">{f.desc}</span>}
-              </span>
-            </label>
-          ))}
+          {(meta.flag_keys?.length ? meta.flag_keys : FLAG_CATALOG.map(f => f.key)).map(k => {
+            const f = FLAG_META[k] || { label: pretty(k) };
+            return (
+              <label key={k} className="flex items-start gap-2 cursor-pointer text-sm py-1">
+                <input type="checkbox" checked={!!flags[k]} onChange={e => saveFlags({ ...flags, [k]: e.target.checked })}
+                  className="mt-0.5 accent-[var(--color-primary-600)]" />
+                <span className="min-w-0">
+                  <span className="text-text">{f.label}</span>
+                  {f.desc && <span className="block text-[11px] text-text-secondary">{f.desc}</span>}
+                </span>
+              </label>
+            );
+          })}
         </div>
       </Facet>
 

@@ -61,7 +61,7 @@ const ROLES = ['closer', 'fronter', 'closer_manager', 'fronter_manager', 'operat
 const ACTIONS = ['csv_export', 'recording_listen'];
 // Export datasets + their configurable field catalogs (field key → label). Typed
 // columns per surface; the admin toggles which appear in the exported file.
-const EXPORT_DATASETS = {
+export const EXPORT_DATASETS = {
   sales:        { label: 'Sales', fields: ['customer_name', 'customer_phone', 'customer_email', 'reference_no', 'policy_number', 'customer_uuid', 'status', 'closer_name', 'fronter_name', 'company_name', 'sale_date', 'plan', 'client_name', 'monthly_payment', 'down_payment', 'car_year', 'car_make', 'car_model', 'car_vin'] },
   transfers:    { label: 'Transfers', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'created_by_name', 'assigned_closer_name', 'latest_disposition', 'company_name', 'status', 'created_at'] },
   callbacks:    { label: 'Callbacks', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'status', 'priority', 'callback_at', 'notes', 'fronter_name', 'closer_name', 'company_name'] },
@@ -84,7 +84,7 @@ const FIELD_LABELS = {
   created_at: 'Created At', callback_at: 'Callback At', reviewer_name: 'Reviewer', rating: 'Rating',
   status: 'Status', priority: 'Priority', notes: 'Notes', plan: 'Plan',
 };
-const labelFor = (k) => FIELD_LABELS[k] || titleize(k);
+export const labelFor = (k) => FIELD_LABELS[k] || titleize(k);
 const SAMPLE_VALUES = {
   customer_name: 'John Smith', customer_phone: '(555) 201-4477', customer_email: 'john.smith@example.com',
   customer_uuid: 'e3b0c442-98fc-1c14-9afb-4c8996fb9242', reference_no: 'REF-100482', policy_number: 'POL-77310',

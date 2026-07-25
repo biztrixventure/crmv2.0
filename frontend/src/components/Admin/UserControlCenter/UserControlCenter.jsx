@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
-  Lock, Activity, Download, Search, Loader2, RefreshCw, Mail, Clock, Circle,
+  Lock, Activity, Download, Search, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -32,6 +32,9 @@ import VicidialSection from './VicidialSection';
 import GovernanceSection from './GovernanceSection';
 import EgressSection from './EgressSection';
 import ActivitySection from './ActivitySection';
+import QaSection from './QaSection';
+
+const QA_ROLES = ['qa_agent', 'qa_manager'];
 
 const LEVEL_COLOR = {
   superadmin: 'var(--color-primary)', readonly_admin: '#8b5cf6',
@@ -52,6 +55,7 @@ const TABS = [
   { id: 'teams',        label: 'Teams',          icon: Users2,         scope: 'company' },
   { id: 'vicidial',     label: 'VICIdial',       icon: Headphones,     scope: 'user' },
   { id: 'record_views', label: 'Record Views',   icon: LayoutTemplate, scope: 'company' },
+  { id: 'qa',           label: 'QA',             icon: ClipboardCheck, scope: 'company', qaOnly: true },
   { id: 'governance',   label: 'Governance',     icon: Lock,           scope: 'user' },
   { id: 'egress',       label: 'Data Egress',    icon: Download,       scope: 'user' },
   { id: 'activity',     label: 'Activity',       icon: Activity,       scope: 'user' },
@@ -87,6 +91,8 @@ export default function UserControlCenter() {
   const assignments = data?.assignments || [];
   const activeAssignment = assignments.find(a => a.id === activeId) || assignments[0] || null;
   const isReadonlyAdmin  = assignments.some(a => a.role_level === 'readonly_admin');
+  const isQaUser         = assignments.some(a => QA_ROLES.includes(a.role_level));
+  const visibleTabs      = TABS.filter(t => !t.qaOnly || isQaUser);
   const initials = (account?.first_name?.[0] || account?.email?.[0] || '?').toUpperCase();
 
   return (
@@ -189,7 +195,7 @@ export default function UserControlCenter() {
               variant="chrome"
               value={tab}
               onChange={setTab}
-              items={TABS.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
+              items={visibleTabs.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
             />
           </div>
 
@@ -207,8 +213,11 @@ export default function UserControlCenter() {
             {tab === 'record_views' && (activeAssignment
               ? <UserRecordViewsPanel user={activeAssignment} />
               : <Empty text="No company assignment." />)}
+            {tab === 'qa'           && (activeAssignment
+              ? <QaSection account={account} assignment={activeAssignment} />
+              : <Empty text="No company assignment." />)}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
-            {tab === 'egress'       && <EgressSection account={account} activeRole={activeAssignment?.role_level} />}
+            {tab === 'egress'       && <EgressSection account={account} />}
             {tab === 'activity'     && <ActivitySection account={account} />}
           </div>
         </>

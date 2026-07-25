@@ -49,7 +49,7 @@ export default function AccountSection({ account, assignment, onChanged }) {
 
   const sendResetLink = async () => {
     setBusy('link');
-    try { await client.post(`users/${assignment.id}/send-invite`); flash('success', 'Reset/invite link generated & emailed.'); }
+    try { await client.post(`users/${assignment.id}/send-invite`); flash('success', 'Recovery link generated (emailed if SMTP is configured).'); }
     catch (e) { flash('error', e.response?.data?.error || 'Could not send link.'); }
     finally { setBusy(null); }
   };
@@ -58,7 +58,8 @@ export default function AccountSection({ account, assignment, onChanged }) {
     setBusy('impersonate');
     try {
       const { data } = await client.post(`users/${account.user_id}/impersonate`);
-      if (data?.action_link) { window.open(data.action_link, '_blank', 'noopener'); flash('success', 'Impersonation link opened in a new tab.'); }
+      const link = data?.link || data?.action_link;   // backend returns { link }
+      if (link) { window.open(link, '_blank', 'noopener'); flash('success', 'Impersonation link opened in a new tab.'); }
       else flash('error', 'No impersonation link returned.');
     } catch (e) { flash('error', e.response?.data?.error || 'Impersonate failed.'); }
     finally { setBusy(null); }
