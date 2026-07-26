@@ -15,6 +15,7 @@ const Alert = ({
   type = 'info',
   title,
   message,
+  children,
   dismissible = true,
   onDismiss = null,
   className = '',
@@ -46,7 +47,9 @@ const Alert = ({
         <Icon size={20} className="flex-shrink-0 mt-0.5" />
         <div className="flex-1">
           {title && <p className="font-semibold">{title}</p>}
-          {message && <p className={title ? 'text-sm mt-1' : ''}>{message}</p>}
+          {/* Render `message` prop OR children — many callers pass the text as
+              children (which previously showed nothing → an empty/invisible alert). */}
+          {(message || children) && <p className={title ? 'text-sm mt-1' : ''}>{message || children}</p>}
         </div>
         {dismissible && (
           <button
