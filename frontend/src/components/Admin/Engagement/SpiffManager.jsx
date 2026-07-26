@@ -8,7 +8,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
-import { Loading } from '../../UI/kit';
+import { Loading, SectionHeader } from '../../UI/kit';
 
 // Plain-text preview for compact UI surfaces (table cells, lists). Mirrors
 // RichView's "has tags?" heuristic so legacy plain-text descriptions stay
@@ -227,13 +227,9 @@ const SpiffManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 relative overflow-hidden flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5"><Trophy size={22} className="text-white" /><div>
-          <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>SPIFF Campaigns</h2>
-          <p className="text-sm text-white/80">Incentive competitions with live leaderboards.</p>
-        </div></div>
-        {roControlAllowed('spiff.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>}
-      </div>
+      <SectionHeader level="page" icon={Trophy} title="SPIFF Campaigns"
+        subtitle="Incentive competitions with live leaderboards."
+        actions={roControlAllowed('spiff.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>} />
 
       {error && <Alert type="error" message={error} />}
 
