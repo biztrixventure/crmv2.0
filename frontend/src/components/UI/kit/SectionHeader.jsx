@@ -41,7 +41,7 @@ export default function SectionHeader({
               {title}
             </h1>
             {subtitle && (
-              <p className="text-[13px] mt-1 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+              <p className="text-[13px] m-0 mt-1 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
             )}
           </div>
         </div>
@@ -72,7 +72,7 @@ export default function SectionHeader({
           <span className="truncate">{title}</span>
         </h3>
         {subtitle && (
-          <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+          <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
         )}
       </div>
       {actions && <div className="flex items-center gap-2 flex-wrap flex-shrink-0">{actions}</div>}

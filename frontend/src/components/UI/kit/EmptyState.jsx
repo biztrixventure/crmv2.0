@@ -25,8 +25,8 @@ export default function EmptyState({
         style={{ background: a.soft }}>
         <Icon size={compact ? 17 : 20} style={{ color: a.fg }} />
       </div>
-      {title && <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{title}</p>}
-      {hint && <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--color-text-secondary)' }}>{hint}</p>}
+      {title && <p className="text-sm font-semibold m-0" style={{ color: 'var(--color-text)' }}>{title}</p>}
+      {hint && <p className="text-xs m-0 mt-1 max-w-md mx-auto" style={{ color: 'var(--color-text-secondary)' }}>{hint}</p>}
       {action && <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">{action}</div>}
     </div>
   );

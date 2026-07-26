@@ -61,25 +61,27 @@ export default function KpiTile({
       {/* tone rail — scan a strip of tiles by color before reading */}
       <span aria-hidden className="absolute left-0 top-0 bottom-0" style={{ width: active ? 4 : 3, background: a.fg }} />
 
-      {/* leading-none matters here: Tailwind's arbitrary text-[10px] sets the
-          font size ONLY, so the label keeps the inherited 24px line-height and
-          a 10px label silently occupies a 24px+ row — which is what made these
-          tiles ~40px taller than intended. */}
+      {/* Two traps make these <p>s taller than they look, and both cost ~40px:
+          1. global.css sets `p { margin: 12px 0 }`, and Tailwind's mt-* only
+             overrides margin-TOP — the base margin-bottom survives. Hence m-0
+             on every <p> here, with spacing re-applied explicitly.
+          2. the arbitrary text-[10px] sets font SIZE only, so the label keeps
+             the inherited 24px line-height. Hence leading-none. */}
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider truncate leading-none"
+        <p className="text-[10px] font-bold uppercase tracking-wider truncate leading-none m-0"
           style={{ color: active ? a.fg : 'var(--color-text-secondary)' }}>
           {label}
         </p>
         {Icon && <Icon size={13} className="flex-shrink-0 -mt-0.5" style={{ color: a.fg, opacity: active ? 1 : 0.55 }} />}
       </div>
 
-      <p className="font-bold leading-none mt-2 tabular-nums"
+      <p className="font-bold leading-none m-0 mt-2 tabular-nums"
         style={{ color: active ? a.fg : 'var(--color-text)', fontSize: 24, letterSpacing: '-0.02em' }}>
         {value}
       </p>
 
       {sub && (
-        <p className="text-[11px] mt-1.5 truncate leading-none" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</p>
+        <p className="text-[11px] m-0 mt-1.5 truncate leading-none" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</p>
       )}
     </Tag>
   );
