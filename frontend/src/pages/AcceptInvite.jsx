@@ -5,8 +5,11 @@ import { Moon, Sun, Lock, Shield, CheckCircle, AlertCircle } from "lucide-react"
 import { Alert } from "../components/UI";
 import { supabase } from "../api/supabase";
 import DevCredit from "../components/DevCredit";
+import { useBranding, splitBrandName } from '../contexts/BrandingContext';
 
 const AcceptInvite = () => {
+  const { siteName } = useBranding();
+  const [brandHead, brandTail] = splitBrandName(siteName);
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [tokenError, setTokenError] = useState(false);
@@ -97,7 +100,7 @@ const AcceptInvite = () => {
             </div>
           </div>
           <h1 className="text-4xl font-black tracking-tight" style={{ color: "var(--color-text)" }}>
-            BizTrix<span style={{ color: "var(--color-primary-500)" }}> CRM</span>
+            {brandHead}{brandTail && <span style={{ color: "var(--color-primary-500)" }}> {brandTail}</span>}
           </h1>
         </div>
 

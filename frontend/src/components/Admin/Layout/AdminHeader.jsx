@@ -6,6 +6,7 @@ import ChatLauncher from '../../Chat/ChatLauncher';
 import MailLauncher from '../../Mail/MailLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
 import { useFocus } from '../../../contexts/FocusContext';
+import { useBranding } from '../../../contexts/BrandingContext';
 
 const AdminHeader = ({
   theme, onToggleTheme, onLogout,
@@ -14,6 +15,7 @@ const AdminHeader = ({
   sidebarOpen = true, onToggleSidebar,
 }) => {
   const { user, updateUser } = useAuth();
+  const { siteName, logoUrl } = useBranding();
   const [profileOpen, setProfileOpen] = useState(false);
   const { openFromNotification } = useFocus();
 
@@ -47,16 +49,23 @@ const AdminHeader = ({
               }
             </button>
           )}
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          {/* Brand first, section second. The product name is what identifies
+              the app, so it takes the primary line and "Admin Panel" becomes the
+              context beneath it — previously this was inverted, which buried the
+              CRM's name in 11px tertiary text under a generic heading. Both
+              come from Branding & SEO, so renaming the CRM renames this. */}
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden"
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
-            <Settings size={18} className="text-white" />
+            {logoUrl
+              ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
+              : <Settings size={18} className="text-white" />}
           </div>
-          <div className="flex-shrink-0">
-            <h1 className="text-base font-bold leading-tight whitespace-nowrap" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
-              Admin Panel
+          <div className="flex-shrink-0 min-w-0">
+            <h1 className="text-base font-bold leading-tight whitespace-nowrap truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+              {siteName}
             </h1>
             <p className="text-xs leading-tight whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
-              BizTrix CRM v2.0
+              Admin Panel
             </p>
           </div>
           <div className="hidden sm:block w-px h-7 mx-2" style={{ backgroundColor: 'var(--color-border)' }} />

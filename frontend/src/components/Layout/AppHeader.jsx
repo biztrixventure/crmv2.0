@@ -6,6 +6,7 @@ import MailLauncher from '../Mail/MailLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useFocus } from '../../contexts/FocusContext';
+import { useBranding } from '../../contexts/BrandingContext';
 
 const CompanyLogoImg = ({ src }) => {
   const [errored, setErrored] = useState(false);
@@ -39,7 +40,7 @@ const IconBtn = ({ onClick, title, children }) => (
 );
 
 const AppHeader = ({
-  title = 'BizTrix CRM',
+  title = null,
   logo = null,
   companyLogoUrl = null,
   theme = 'light',
@@ -64,6 +65,10 @@ const AppHeader = ({
 }) => {
   const [profileOpen, setProfileOpen] = useState(false);
   const { openFromNotification } = useFocus();
+  // Shells pass their own section title ("Compliance", "Manager"); when one
+  // doesn't, fall back to the configured brand rather than a hardcoded name.
+  const { siteName } = useBranding();
+  const headerTitle = title || siteName;
 
   // Push notification setup — lives here so it only runs when authenticated
   const {
@@ -105,7 +110,7 @@ const AppHeader = ({
             <div className="hidden sm:flex flex-col min-w-0 leading-none">
               <span className="font-bold truncate"
                 style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', letterSpacing: '-0.01em', color: 'var(--color-primary-700)', lineHeight: 1.15 }}>
-                {title}
+                {headerTitle}
               </span>
               <span className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-tertiary)', letterSpacing: '0.03em' }}>
                 {companyName || 'CRM Platform'}

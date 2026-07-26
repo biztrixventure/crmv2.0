@@ -16,8 +16,16 @@ function upsertMeta(attr, name, content) {
   el.setAttribute('content', content);
 }
 
+// Last-known brand name, cached at module scope so NON-React code (the QA PDF
+// generator, for instance) can stamp the configured name without a hook.
+// BrandingProvider calls applyBranding on load and after every save, so this
+// stays current. React components should use useBranding() instead.
+let cachedBrandName = 'BizTrix CRM';
+export const getBrandName = () => cachedBrandName;
+
 export function applyBranding(b) {
   if (!b) return;
+  if (b.site_name && String(b.site_name).trim()) cachedBrandName = String(b.site_name).trim();
   if (b.tab_title || b.site_name) document.title = b.tab_title || b.site_name;
   upsertMeta('name', 'description', b.meta_description || '');
   if (b.meta_keywords) upsertMeta('name', 'keywords', b.meta_keywords);

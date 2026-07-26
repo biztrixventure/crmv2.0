@@ -3,6 +3,7 @@ import { Save, Upload, Loader2, Image as ImageIcon, Globe, RefreshCw, Link2 } fr
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { applyBranding } from '../../../utils/branding';
+import { useBranding } from '../../../contexts/BrandingContext';
 import ThemedSelect from '../../UI/Select';
 
 // White-label branding + SEO + social link-preview (Open Graph) editor.
@@ -63,6 +64,7 @@ function ImageField({ label, hint, kind, value, onChange }) {
 }
 
 export default function BrandingManager() {
+  const { refresh: refreshBranding } = useBranding();
   const [b, setB] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -82,8 +84,11 @@ export default function BrandingManager() {
     try {
       const r = await client.put('branding', b);
       setB(r.data.branding);
-      applyBranding(r.data.branding);          // reflect into the current tab now
-      toast.success('Branding saved — live within ~60s for shared links');
+      applyBranding(r.data.branding);          // tab title / favicon / meta, now
+      // Re-read so the NAME updates across the running app (header, sidebar,
+      // login) without a reload.
+      await refreshBranding();
+      toast.success('Branding saved — the new name is live across the app');
     } catch (err) { toast.error(err.response?.data?.error || 'Save failed'); }
     finally { setSaving(false); }
   };

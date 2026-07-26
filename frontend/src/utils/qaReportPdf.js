@@ -8,6 +8,7 @@
 // Section-based (header → KPIs → charts → agent bars → table) so when the Reports
 // layout changes later, only the section builders here change.
 import { jsPDF } from 'jspdf';
+import { getBrandName } from './branding';
 
 const INK = '#0f172a', SLATE = '#334155', MUTE = '#64748b', FAINT = '#94a3b8';
 const LINE = '#e2e8f0', WASH = '#f8fafc', ZEBRA = '#fbfdff';
@@ -208,7 +209,7 @@ export function exportQaReportPdf({ data, filters = {}, companyName = '' } = {})
     doc.setPage(p);
     stroke(LINE); doc.setLineWidth(0.3); doc.line(M, H - 12, W - M, H - 12);
     font('normal', 7); ink(FAINT);
-    doc.text('BizTrix CRM · Quality Assurance', M, H - 8);
+    doc.text(`${getBrandName()} · Quality Assurance`, M, H - 8);
     doc.text(`Page ${p} of ${pages}`, W - M, H - 8, { align: 'right' });
   }
 

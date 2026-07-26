@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid } from 'lucide-react';
+import { useBranding } from '../../../contexts/BrandingContext';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -85,6 +86,7 @@ const EXTRA_ICONS = {
 
 const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) => {
   const navigate = useNavigate();
+  const { siteName } = useBranding();
 
   // navItems is the source of truth for WHICH tabs exist (it already carries
   // every role/permission gate from AdminPanel). NAV_SECTIONS only supplies
@@ -181,10 +183,10 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white"
             style={{ background: 'var(--gradient-sidebar)' }}>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.875rem' }}>B</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.875rem' }}>{(siteName || 'C').charAt(0).toUpperCase()}</span>
           </div>
           <div>
-            <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>BizTrix CRM</p>
+            <p className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{siteName}</p>
             <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>v2.0</p>
           </div>
         </div>

@@ -7,8 +7,11 @@ import { Moon, Sun, Lock, Mail, ArrowRight, Shield } from "lucide-react";
 import { Alert } from "../components/UI";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
+import { useBranding, splitBrandName } from '../contexts/BrandingContext';
 
 const Login = () => {
+  const { siteName } = useBranding();
+  const [brandHead, brandTail] = splitBrandName(siteName);
   const navigate = useNavigate();
   const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -120,7 +123,7 @@ const Login = () => {
               color: "rgba(196, 137, 74, 0.6)",
             }}
           >
-            BizTrix
+            {siteName}
           </span>
         </div>
 
@@ -190,8 +193,7 @@ const Login = () => {
               margin: 0,
             }}
           >
-            BizTrix{" "}
-            <span style={{ color: "var(--color-primary-500)" }}>CRM</span>
+            {brandHead}{brandTail && <>{" "}<span style={{ color: "var(--color-primary-500)" }}>{brandTail}</span></>}
           </h1>
           <p
             className="text-sm mt-1"

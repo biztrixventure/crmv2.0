@@ -5,8 +5,11 @@ import { Moon, Sun, Mail, ArrowLeft, Shield, CheckCircle } from "lucide-react";
 import { Alert } from "../components/UI";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
+import { useBranding, splitBrandName } from '../contexts/BrandingContext';
 
 const ForgotPassword = () => {
+  const { siteName } = useBranding();
+  const [brandHead, brandTail] = splitBrandName(siteName);
   const { theme, toggleTheme } = useTheme();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -73,7 +76,7 @@ const ForgotPassword = () => {
             </div>
           </div>
           <h1 className="text-4xl font-black tracking-tight" style={{ color: "var(--color-text)" }}>
-            BizTrix<span style={{ color: "var(--color-primary-500)" }}> CRM</span>
+            {brandHead}{brandTail && <span style={{ color: "var(--color-primary-500)" }}> {brandTail}</span>}
           </h1>
         </div>
 

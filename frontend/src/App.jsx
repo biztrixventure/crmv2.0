@@ -6,6 +6,7 @@ import { ThemeProvider, ThemeContext } from "./contexts/ThemeContext";
 import { FeatureFlagsProvider, useFeatureFlags } from "./contexts/FeatureFlagsContext";
 import { PresenceProvider } from "./contexts/PresenceContext";
 import { FocusProvider } from "./contexts/FocusContext";
+import { BrandingProvider } from "./contexts/BrandingContext";
 import { hasRoleAccess, getRoleRoute } from "./utils/roleRouting";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
@@ -71,11 +72,10 @@ const AppContent = () => {
   const { isEnabled } = useFeatureFlags();
   const assistantOn = isEnabled('crm_assistant');   // superadmin system-wide toggle (Features tab)
 
-  // Apply configurable branding (tab title / favicon / meta) to the live SPA.
-  // Public endpoint — runs on login page too. Server-side injection handles the
-  // very first paint + crawlers; this keeps it correct across client nav.
-  useEffect(() => { fetchBranding().then(applyBranding).catch(() => {}); }, []);
-
+  // Branding (name / logo / tab title / favicon / meta) comes from
+  // BrandingProvider, mounted below, so the configured name reaches the UI and
+  // not just the browser tab. Public endpoint — it runs on the login page too.
+  // Server-side injection still handles the very first paint + crawlers.
   return (
     <Router>
       {/* Injects the saved Appearance theme (business_config `theme`) app-wide. */}
@@ -170,6 +170,9 @@ const AppToaster = () => {
 function App() {
   return (
     <ThemeProvider>
+      {/* Branding wraps everything, including the signed-OUT pages: the login
+          screen has to show the configured product name too. */}
+      <BrandingProvider>
       <AuthProvider>
         <FeatureFlagsProvider>
           {/* App-wide realtime presence — online from login to logout, every
@@ -183,6 +186,7 @@ function App() {
           </PresenceProvider>
         </FeatureFlagsProvider>
       </AuthProvider>
+      </BrandingProvider>
     </ThemeProvider>
   );
 }
