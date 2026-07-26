@@ -5,10 +5,15 @@
 //   • role sub-tabs = the roles present in the active company (with counts)
 //   • a responsive grid of user cards → click to open that user
 // Superadmin-only surface (the whole tab is gated in AdminPanel).
+//
+// UI from components/UI/kit (docs/ui-design-system.md). This is the one admin
+// surface that legitimately runs TWO tab tiers, exactly like the Compliance
+// shell: chrome for the company axis, PillTabs for the role axis beneath it.
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Loader2, Users, Building2, X, Circle } from 'lucide-react';
+import { Search, Users, Building2, X, Circle } from 'lucide-react';
 import client from '../../../api/client';
 import ChromeTabs from '../../UI/ChromeTabs';
+import { Loading, EmptyState, PillTabs } from '../../UI/kit';
 
 const LEVEL_COLOR = {
   superadmin: 'var(--color-primary)', readonly_admin: '#8b5cf6',
@@ -87,7 +92,7 @@ export default function UserDirectory({ onSelect }) {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search any user across all companies by name…"
           className="w-full text-sm rounded-xl pl-10 pr-9 py-2.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
         {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>}
-        {searching && <Loader2 size={15} className="absolute right-9 top-1/2 -translate-y-1/2 animate-spin" style={{ color: 'var(--color-primary-600)' }} />}
+        {searching && <span className="absolute right-9 top-1/2 -translate-y-1/2"><Loading variant="inline" size={15} label="Searching…" /></span>}
       </div>
 
       {results ? (
@@ -96,32 +101,19 @@ export default function UserDirectory({ onSelect }) {
         </div>
       ) : (
         <>
-          {/* Company chrome tabs */}
+          {/* Company chrome tabs (tier 1) */}
           {loadingCo ? (
-            <div className="py-4"><Loader2 size={18} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+            <Loading variant="rows" rows={1} label="Loading companies…" />
           ) : companies.length === 0 ? (
-            <div className="text-sm text-text-secondary py-4">No companies found.</div>
+            <EmptyState icon={Building2} compact title="No companies found" />
           ) : (
             <ChromeTabs variant="chrome" value={activeCo} onChange={setActiveCo}
               items={companies.map(c => ({ key: c.id, label: c.name, icon: Building2 }))} />
           )}
 
-          {/* Role sub-tabs */}
+          {/* Role sub-tabs (tier 2) */}
           {!loadingCo && companies.length > 0 && (
-            <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-              {roleTabs.map(t => {
-                const on = role === t.key;
-                const col = t.key === 'all' ? 'var(--color-primary-600)' : (LEVEL_COLOR[t.key] || '#6b7280');
-                return (
-                  <button key={t.key} onClick={() => setRole(t.key)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                    style={{ background: on ? col + '22' : 'var(--color-surface)', color: on ? col : 'var(--color-text-secondary)', border: `1px solid ${on ? col : 'var(--color-border)'}` }}>
-                    {t.label}
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: on ? col + '33' : 'var(--color-bg-secondary)' }}>{t.count}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <PillTabs className="mt-3" value={role} onChange={setRole} items={roleTabs} />
           )}
         </>
       )}
@@ -129,12 +121,13 @@ export default function UserDirectory({ onSelect }) {
       {/* User grid */}
       <div className="flex-1 overflow-y-auto mt-3 -mx-1 px-1">
         {(loadingU && !results) ? (
-          <div className="flex justify-center py-16"><Loader2 size={26} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+          <Loading variant="cards" cards={6} label="Loading users…" />
         ) : shown.length === 0 ? (
-          <div className="text-center py-16 text-sm text-text-secondary">
-            <Users size={34} className="mx-auto mb-2 opacity-40" />
-            {results ? 'No users match your search.' : `No users in ${activeCompany?.name || 'this company'}${role !== 'all' ? ` with role ${prettyRole(role)}` : ''}.`}
-          </div>
+          <EmptyState
+            icon={Users}
+            title={results ? 'No users match your search' : 'No users here'}
+            hint={results ? undefined : `${activeCompany?.name || 'This company'} has no users${role !== 'all' ? ` with role ${prettyRole(role)}` : ''}.`}
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pb-4">
             {shown.map(u => {
@@ -145,7 +138,7 @@ export default function UserDirectory({ onSelect }) {
               return (
                 <button key={(results ? 'r' : 'c') + uid} onClick={() => onSelect(uid)}
                   className="text-left rounded-2xl p-3.5 flex items-center gap-3 transition-all hover:-translate-y-0.5"
-                  style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: inactive ? 0.6 : 1, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                  style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: inactive ? 0.6 : 1, boxShadow: 'var(--shadow-xs)' }}>
                   <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
                     style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>
                     {initialsOf(u)}

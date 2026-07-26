@@ -7,10 +7,13 @@
 // GET/PUT /users/:userId/client-access. Catalog + plans-per-client come from the
 // same sources the form uses (sale-configs + the sale_plan field's options), so
 // what you grant here is exactly what the user sees.
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect, useCallback } from 'react';
-import { Briefcase, Loader2, Save, Check, Globe } from 'lucide-react';
+import { Briefcase, Save, Check, Globe } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
+import { SectionHeader, Loading, EmptyState, useFlash, accent } from '../../UI/kit';
 
 export default function ClientAccessSection({ account, assignment }) {
   const userId = account.user_id;
@@ -20,8 +23,7 @@ export default function ClientAccessSection({ account, assignment }) {
   const [selected, setSelected] = useState([]);          // chosen client values ([] = unrestricted)
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
-  const [msg, setMsg]           = useState(null);
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000); };
+  const { msg, flash, clear }   = useFlash();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,7 +42,7 @@ export default function ClientAccessSection({ account, assignment }) {
       setPlanMap(map);
     } catch (e) { flash('error', e.response?.data?.error || 'Failed to load.'); }
     finally { setLoading(false); }
-  }, [userId, companyId]);
+  }, [userId, companyId, flash]);
   useEffect(() => { load(); }, [load]);
 
   const toggle = (value) => setSelected(s => s.includes(value) ? s.filter(x => x !== value) : [...s, value]);
@@ -61,28 +63,33 @@ export default function ClientAccessSection({ account, assignment }) {
     } finally { setSaving(false); }
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>;
+  if (loading) return <Loading variant="cards" cards={4} label="Loading client access…" />;
+
+  const pri = accent('primary');
 
   return (
     <div className="max-w-3xl">
-      <div className="flex items-center gap-2 mb-1">
-        <Briefcase size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">Client access</h3>
-      </div>
-      <p className="text-[11px] text-text-secondary mb-3">
-        Pick the clients this user may work. On their Sale/Transfer form they'll only see these clients (and each client's plans). Select none to leave them unrestricted (all clients).
-      </p>
-      {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      <SectionHeader
+        icon={Briefcase}
+        title="Client access"
+        subtitle="Pick the clients this user may work. On their Sale/Transfer form they'll only see these clients (and each client's plans). Select none to leave them unrestricted (all clients)."
+      />
+      {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
 
       {/* Status banner */}
-      <div className="rounded-2xl p-3 mb-3 flex items-center gap-2 text-sm font-semibold"
-        style={{ background: restricted ? 'var(--color-primary-50, rgba(99,102,241,0.08))' : 'var(--color-bg)', border: `1px solid ${restricted ? 'var(--color-primary-400)' : 'var(--color-border)'}`, color: restricted ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
+      <div className="rounded-xl p-3 mb-3 flex items-center gap-2 text-sm font-semibold"
+        style={{
+          background: restricted ? pri.soft : 'var(--color-bg)',
+          border: `1px solid ${restricted ? pri.fg : 'var(--color-border)'}`,
+          color: restricted ? pri.fg : 'var(--color-text-secondary)',
+        }}>
         {restricted ? <><Check size={15} /> Restricted to {selected.length} client{selected.length === 1 ? '' : 's'}</> : <><Globe size={15} /> Unrestricted — sees all clients</>}
         {restricted && <button onClick={() => setSelected([])} className="ml-auto text-[11px] font-semibold underline">Clear (unrestrict)</button>}
       </div>
 
       {catalog.length === 0 ? (
-        <div className="text-sm text-text-secondary py-8 text-center">No clients in the catalog{companyId ? ' for this company' : ''}. Add them in Clients &amp; Plans first.</div>
+        <EmptyState icon={Briefcase} title={`No clients in the catalog${companyId ? ' for this company' : ''}`}
+          hint="Add them in Clients & Plans first." />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
           {catalog.map(c => {
@@ -90,8 +97,8 @@ export default function ClientAccessSection({ account, assignment }) {
             const plans = planMap[c.value] || [];
             return (
               <button key={c.id} onClick={() => toggle(c.value)}
-                className="text-left rounded-2xl p-3 flex items-start gap-2.5 transition-all"
-                style={{ background: on ? 'var(--color-primary-50, rgba(99,102,241,0.08))' : 'var(--color-bg)', border: `1px solid ${on ? 'var(--color-primary-500)' : 'var(--color-border)'}` }}>
+                className="text-left rounded-xl p-3 flex items-start gap-2.5 transition-all"
+                style={{ background: on ? pri.soft : 'var(--color-bg)', border: `1px solid ${on ? pri.fg : 'var(--color-border)'}` }}>
                 <span className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
                   style={{ background: on ? 'var(--color-primary-600)' : 'transparent', border: `1px solid ${on ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
                   {on && <Check size={13} style={{ color: '#fff' }} />}
@@ -109,8 +116,8 @@ export default function ClientAccessSection({ account, assignment }) {
       )}
 
       <button onClick={save} disabled={saving}
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
-        {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save client access
+        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
+        {saving ? <Loading variant="inline" size={14} /> : <Save size={14} />} Save client access
       </button>
     </div>
   );

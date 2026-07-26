@@ -2,10 +2,13 @@
 // qa_manager). Two controls, both on existing audited endpoints:
 //   1. Bound review methods (qa_agent only) — GET/PUT /qa/agent-methods.
 //   2. Transcription access — GET/PUT /qa/transcription-access (global allowlist).
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect, useCallback } from 'react';
-import { ClipboardCheck, Loader2, Mic } from 'lucide-react';
+import { ClipboardCheck, Mic } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
+import { Panel, SectionHeader, Loading, CheckRow, useFlash } from '../../UI/kit';
 
 // Mirrors qa.js SLOT_LABELS / WORK_TYPES.
 const QA_METHODS = [
@@ -24,9 +27,7 @@ export default function QaSection({ account, assignment }) {
   const [transcribe, setTranscribe] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState(null);
-  const [msg, setMsg]         = useState(null);
-
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000); };
+  const { msg, flash, clear } = useFlash();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,49 +66,36 @@ export default function QaSection({ account, assignment }) {
     } catch (e) { flash('error', e.response?.data?.error || 'Save failed.'); } finally { setBusy(null); }
   };
 
-  if (loading) return <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>;
+  if (loading) return <Loading variant="rows" rows={4} label="Loading QA settings…" />;
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div className="flex items-center gap-2"><ClipboardCheck size={16} style={{ color: 'var(--color-primary-600)' }} /><h3 className="text-sm font-bold text-text">QA settings</h3></div>
-      {msg && <Alert type={msg.type}>{msg.text}</Alert>}
+    <div className="space-y-5 max-w-2xl">
+      <SectionHeader icon={ClipboardCheck} title="QA settings" />
+      {msg && <Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert>}
 
       {/* Bound methods (qa_agent only) */}
       {isAgent && (
-        <div className="rounded-xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">Bound review methods · {assignment.company_name || '—'}</h4>
-            {busy === 'methods' && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} />}
-          </div>
+        <Panel tone="inset" radius="xl">
+          <SectionHeader level="sub" title={`Bound review methods · ${assignment.company_name || '—'}`}
+            actions={busy === 'methods' ? <Loading variant="inline" size={13} /> : null} />
           <p className="text-[11px] text-text-secondary mb-3">Which review types this agent is assigned. Empty = not set up (permissive).</p>
           {!methodsOk && <p className="text-[11px] mb-2" style={{ color: 'var(--color-warning-600)' }}>This agent isn’t in the QA pool for this company yet — saving will create their binding.</p>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {QA_METHODS.map(m => {
-              const on = methods.includes(m.key);
-              return (
-                <label key={m.key} className="flex items-center gap-2 cursor-pointer text-sm py-1">
-                  <input type="checkbox" checked={on} onChange={e => saveMethods(e.target.checked ? [...new Set([...methods, m.key])] : methods.filter(x => x !== m.key))}
-                    className="accent-[var(--color-primary-600)]" />
-                  <span className="text-text">{m.label}</span>
-                </label>
-              );
-            })}
+            {QA_METHODS.map(m => (
+              <CheckRow key={m.key} label={m.label} checked={methods.includes(m.key)}
+                onChange={next => saveMethods(next ? [...new Set([...methods, m.key])] : methods.filter(x => x !== m.key))} />
+            ))}
           </div>
-        </div>
+        </Panel>
       )}
 
       {/* Transcription access (any QA user) */}
-      <div className="rounded-xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-        <div className="flex items-center gap-2 mb-1">
-          <Mic size={13} style={{ color: 'var(--color-primary-600)' }} />
-          <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">Call transcription access</h4>
-          {busy === 'transcribe' && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} />}
-        </div>
-        <label className="flex items-center gap-2 cursor-pointer text-sm py-1">
-          <input type="checkbox" checked={transcribe} onChange={e => saveTranscribe(e.target.checked)} className="accent-[var(--color-primary-600)]" />
-          <span className="text-text">Allow this user to trigger on-demand call transcription</span>
-        </label>
-      </div>
+      <Panel tone="inset" radius="xl">
+        <SectionHeader level="sub" icon={Mic} title="Call transcription access"
+          actions={busy === 'transcribe' ? <Loading variant="inline" size={13} /> : null} />
+        <CheckRow label="Allow this user to trigger on-demand call transcription"
+          checked={transcribe} onChange={saveTranscribe} />
+      </Panel>
     </div>
   );
 }

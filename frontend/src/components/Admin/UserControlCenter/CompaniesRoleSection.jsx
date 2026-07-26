@@ -3,16 +3,19 @@
 // company is derived server-side = newest active assignment (there is no
 // is_primary column), so it's shown, not edited. Company MOVE / new assignment
 // stays in the existing User Management screen (superadmin-gated there too).
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect } from 'react';
-import { Building2, Check, Power, Loader2, Star } from 'lucide-react';
+import { Building2, Check, Power, Star } from 'lucide-react';
 import client from '../../../api/client';
 import { Badge, Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+import { Panel, SectionHeader, Loading, EmptyState, useFlash } from '../../UI/kit';
 
 export default function CompaniesRoleSection({ account, assignments, onChanged, onPick }) {
   const [rolesByCompany, setRolesByCompany] = useState({});   // company_id → roles[]
   const [busy, setBusy] = useState(null);
-  const [msg, setMsg]   = useState(null);
+  const { msg, flash, clear } = useFlash();
 
   // "Primary" = newest active assignment (mirrors the backbone loader).
   const primaryId = [...assignments].filter(a => a.is_active)
@@ -27,8 +30,6 @@ export default function CompaniesRoleSection({ account, assignments, onChanged, 
         .catch(() => setRolesByCompany(prev => ({ ...prev, [cid]: [] })));
     });
   }, [assignments]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000); };
 
   const changeRole = async (a, roleId) => {
     if (!roleId || roleId === a.role_id) return;
@@ -45,21 +46,21 @@ export default function CompaniesRoleSection({ account, assignments, onChanged, 
     finally { setBusy(null); }
   };
 
+  const rowBtn = 'text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5';
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <Building2 size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">Company assignments ({assignments.length})</h3>
-      </div>
-      {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      <SectionHeader icon={Building2} title={`Company assignments (${assignments.length})`} />
+      {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
 
       <div className="space-y-3">
         {assignments.map(a => {
           const roles = rolesByCompany[a.company_id] || [];
           const isPrimary = a.id === primaryId;
           return (
-            <div key={a.id} className="rounded-xl p-4 flex items-center gap-4 flex-wrap"
-              style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', opacity: a.is_active ? 1 : 0.65 }}>
+            <Panel key={a.id} tone="inset" radius="xl"
+              className="flex items-center gap-4 flex-wrap"
+              style={{ opacity: a.is_active ? 1 : 0.65 }}>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-text">{a.company_name || '—'}</span>
@@ -78,22 +79,23 @@ export default function CompaniesRoleSection({ account, assignments, onChanged, 
                 </ThemedSelect>
               </div>
 
-              <button onClick={() => onPick?.(a.id)}
-                className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5"
+              <button onClick={() => onPick?.(a.id)} className={rowBtn}
                 style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}>
                 <Check size={13} /> Use context
               </button>
 
-              <button onClick={() => toggleActive(a)} disabled={busy === a.id + ':active'}
-                className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5"
+              <button onClick={() => toggleActive(a)} disabled={busy === a.id + ':active'} className={rowBtn}
                 style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: a.is_active ? 'var(--color-warning-600)' : 'var(--color-success-600)' }}>
-                {busy === a.id + ':active' ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+                {busy === a.id + ':active' ? <Loading variant="inline" size={13} /> : <Power size={13} />}
                 {a.is_active ? 'Deactivate' : 'Reactivate'}
               </button>
-            </div>
+            </Panel>
           );
         })}
-        {assignments.length === 0 && <div className="text-sm text-text-secondary py-6 text-center">No company assignments.</div>}
+        {assignments.length === 0 && (
+          <EmptyState icon={Building2} title="No company assignments"
+            hint="Assign this user to a company in User Management (company reassignment is superadmin-only)." />
+        )}
       </div>
       <p className="text-[11px] text-text-secondary mt-3">To move a user to a different company or add a new company assignment, use User Management (company reassignment is superadmin-only).</p>
     </div>

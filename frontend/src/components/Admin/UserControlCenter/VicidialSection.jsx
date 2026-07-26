@@ -1,10 +1,13 @@
 // VicidialSection — the user's dialer agent ids (one per box). POST /vicidial/
 // agents REPLACES the whole array, so add = re-post [...ids, new], remove =
 // re-post ids-without-x. A 409 means the id already belongs to another user.
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState } from 'react';
-import { Headphones, Plus, X, Loader2 } from 'lucide-react';
+import { Headphones, Plus, X } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
+import { SectionHeader, Loading, useFlash, accent } from '../../UI/kit';
 
 const norm = (s) => String(s || '').trim().toUpperCase();
 
@@ -12,9 +15,7 @@ export default function VicidialSection({ account, onChanged }) {
   const [ids, setIds]   = useState(() => (account.vicidial_agent_ids || []).map(norm).filter(Boolean));
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg]   = useState(null);
-
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 5000); };
+  const { msg, flash, clear } = useFlash();
 
   // Persist the full list via the existing (clash-checked) endpoint.
   const persist = async (nextIds) => {
@@ -41,20 +42,22 @@ export default function VicidialSection({ account, onChanged }) {
 
   const remove = (id) => persist(ids.filter(x => x !== id));
 
+  const a = accent('primary');
+
   return (
     <div className="max-w-xl">
-      <div className="flex items-center gap-2 mb-1">
-        <Headphones size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">VICIdial agent ids</h3>
-      </div>
-      <p className="text-xs text-text-secondary mb-3">Dialer login/agent id(s). If this person works more than one box with different ids, add them all — dispositions from any of them map to this user.</p>
-      {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      <SectionHeader
+        icon={Headphones}
+        title="VICIdial agent ids"
+        subtitle="Dialer login/agent id(s). If this person works more than one box with different ids, add them all — dispositions from any of them map to this user."
+      />
+      {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
 
       <div className="flex flex-wrap gap-2 mb-3 min-h-[36px]">
         {ids.length === 0 && <span className="text-sm text-text-secondary">No dialer id mapped.</span>}
         {ids.map(id => (
           <span key={id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold"
-            style={{ background: 'var(--color-primary-50, rgba(99,102,241,0.1))', color: 'var(--color-primary-600)', border: '1px solid var(--color-primary-400)' }}>
+            style={{ background: a.soft, color: a.fg, border: `1px solid ${a.soft}` }}>
             {id}
             <button onClick={() => remove(id)} disabled={busy} className="hover:opacity-70"><X size={14} /></button>
           </span>
@@ -68,7 +71,7 @@ export default function VicidialSection({ account, onChanged }) {
         <button onClick={add} disabled={busy || !input.trim()}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
           style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Add
+          {busy ? <Loading variant="inline" size={15} /> : <Plus size={15} />} Add
         </button>
       </div>
     </div>

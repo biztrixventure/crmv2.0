@@ -2,11 +2,14 @@
 // per user per company). Reads the company roster (GET /teams/company-members)
 // to find their current team, lists teams (GET /teams) to move them, and writes
 // through POST /teams/:id/members / DELETE /teams/:id/members/:userId.
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect, useCallback } from 'react';
-import { Users2, Loader2, UserMinus, Crown, User as UserIcon } from 'lucide-react';
+import { Users2, UserMinus, Crown, User as UserIcon, Building2 } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert, Badge } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+import { Panel, SectionHeader, Loading, EmptyState, Field, useFlash } from '../../UI/kit';
 
 export default function TeamSection({ account, assignment }) {
   const companyId = assignment?.company_id;
@@ -15,9 +18,7 @@ export default function TeamSection({ account, assignment }) {
   const [mine, setMine]       = useState(null);   // this user's roster row { team_id, role_in_team, ... }
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState(false);
-  const [msg, setMsg]         = useState(null);
-
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000); };
+  const { msg, flash, clear } = useFlash();
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -32,7 +33,7 @@ export default function TeamSection({ account, assignment }) {
       setTeams(teamsRes.data.teams || teamsRes.data || []);
     } catch (e) { flash('error', e.response?.data?.error || 'Failed to load teams.'); }
     finally { setLoading(false); }
-  }, [companyId, userId]);
+  }, [companyId, userId, flash]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -59,19 +60,19 @@ export default function TeamSection({ account, assignment }) {
     finally { setBusy(false); }
   };
 
-  if (!companyId) return <div className="text-sm text-text-secondary py-8 text-center">No company assignment.</div>;
-  if (loading) return <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>;
+  if (!companyId) return <EmptyState icon={Building2} title="No company assignment" hint="Teams are scoped to a company." />;
+  if (loading) return <Loading variant="rows" rows={4} label="Loading teams…" />;
+
+  const btn = 'text-xs font-semibold px-3 py-2 rounded-lg';
+  const btnStyle = { background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' };
 
   return (
     <div className="max-w-xl">
-      <div className="flex items-center gap-2 mb-3">
-        <Users2 size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">Team · {assignment.company_name || '—'}</h3>
-      </div>
-      {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      <SectionHeader icon={Users2} title={`Team · ${assignment.company_name || '—'}`} />
+      {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
 
       {/* Current membership */}
-      <div className="rounded-xl p-4 mb-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+      <Panel tone="inset" radius="xl" className="mb-4">
         {currentTeamId ? (
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -85,11 +86,11 @@ export default function TeamSection({ account, assignment }) {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => assignTeam(currentTeamId, currentRole === 'lead' ? 'member' : 'lead')} disabled={busy}
-                className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                className={btn} style={btnStyle}>
                 Make {currentRole === 'lead' ? 'member' : 'lead'}
               </button>
               <button onClick={removeFromTeam} disabled={busy}
-                className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-error-600)' }}>
+                className={`${btn} flex items-center gap-1.5`} style={{ ...btnStyle, color: 'var(--color-error-600)' }}>
                 <UserMinus size={13} /> Remove
               </button>
             </div>
@@ -97,17 +98,18 @@ export default function TeamSection({ account, assignment }) {
         ) : (
           <p className="text-sm text-text-secondary">Not on any team in this company.</p>
         )}
-      </div>
+      </Panel>
 
       {/* Move / assign */}
-      <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary block mb-1">{currentTeamId ? 'Move to team' : 'Assign to team'}</label>
-      <div className="flex items-center gap-2">
-        <ThemedSelect value="" onChange={e => assignTeam(e.target.value, 'member')} className="input flex-1" disabled={busy || teams.length === 0}>
-          <option value="">{teams.length ? '— Select a team —' : 'No teams in this company'}</option>
-          {teams.filter(t => t.id !== currentTeamId).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </ThemedSelect>
-        {busy && <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} />}
-      </div>
+      <Field label={currentTeamId ? 'Move to team' : 'Assign to team'} as="div">
+        <div className="flex items-center gap-2">
+          <ThemedSelect value="" onChange={e => assignTeam(e.target.value, 'member')} className="input flex-1" disabled={busy || teams.length === 0}>
+            <option value="">{teams.length ? '— Select a team —' : 'No teams in this company'}</option>
+            {teams.filter(t => t.id !== currentTeamId).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </ThemedSelect>
+          {busy && <Loading variant="inline" />}
+        </div>
+      </Field>
     </div>
   );
 }

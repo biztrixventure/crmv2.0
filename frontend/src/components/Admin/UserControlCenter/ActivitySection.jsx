@@ -1,9 +1,14 @@
 // ActivitySection — read-only per-user activity: presence/engagement summary
 // (GET /presence/admin/activity), the activity log (GET /activity-logs?user_id),
 // and the field-audit trail of records this user changed (GET /audit/by-actor).
+//
+// UI from components/UI/kit (docs/ui-design-system.md). The local Panel helper
+// this file used to declare is now the kit's Panel; the wrapper that adds a
+// sub-heading is `Block` so it doesn't shadow the import.
 import { useState, useEffect, useCallback } from 'react';
-import { Activity, Loader2, Clock, Zap, LogIn, Pencil } from 'lucide-react';
+import { Activity, Clock, Zap, LogIn, Pencil } from 'lucide-react';
 import client from '../../../api/client';
+import { Panel, SectionHeader, Loading, EmptyState } from '../../UI/kit';
 
 const fmt = (iso) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
@@ -29,11 +34,11 @@ export default function ActivitySection({ account }) {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>;
+  if (loading) return <Loading variant="rows" rows={6} label="Loading activity…" />;
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2"><Activity size={16} style={{ color: 'var(--color-primary-600)' }} /><h3 className="text-sm font-bold text-text">Activity & audit</h3></div>
+      <SectionHeader icon={Activity} title="Activity & audit" />
 
       {/* Presence summary */}
       {presence ? (
@@ -48,12 +53,13 @@ export default function ActivitySection({ account }) {
           <Stat label="Last page" value={presence.last_page || '—'} />
         </div>
       ) : (
-        <div className="text-sm text-text-secondary">No presence data (activity monitor may be off, or user never seen).</div>
+        <EmptyState icon={Activity} compact title="No presence data"
+          hint="The activity monitor may be off, or this user has never been seen." />
       )}
 
       {/* Activity log */}
-      <Panel title={`Activity log (${logs.length})`}>
-        {logs.length === 0 ? <Empty /> : (
+      <Block title={`Activity log (${logs.length})`}>
+        {logs.length === 0 ? <Nothing /> : (
           <ul className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
             {logs.map(l => (
               <li key={l.id} className="flex items-center justify-between gap-3 py-2 text-sm">
@@ -63,11 +69,11 @@ export default function ActivitySection({ account }) {
             ))}
           </ul>
         )}
-      </Panel>
+      </Block>
 
       {/* Field audit trail */}
-      <Panel title={`Record changes by this user (${audit.length})`} icon={Pencil}>
-        {audit.length === 0 ? <Empty /> : (
+      <Block title={`Record changes by this user (${audit.length})`} icon={Pencil}>
+        {audit.length === 0 ? <Nothing /> : (
           <ul className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
             {audit.map((e, i) => (
               <li key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
@@ -83,32 +89,31 @@ export default function ActivitySection({ account }) {
             ))}
           </ul>
         )}
-      </Panel>
+      </Block>
     </div>
   );
 }
 
+// A compact label/value cell. Deliberately NOT KpiTile — these values are dates
+// and strings ("Jul 26, 04:29 PM"), which a 2xl numeric tile would truncate.
 function Stat({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-xl p-3" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+    <Panel tone="inset" radius="xl" pad="sm">
       <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1">
         {Icon && <Icon size={12} />}{label}
       </div>
       <div className="text-sm font-semibold text-text truncate">{value}</div>
-    </div>
+    </Panel>
   );
 }
 
-function Panel({ title, icon: Icon, children }) {
+function Block({ title, icon, children }) {
   return (
-    <div className="rounded-xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-      <div className="flex items-center gap-1.5 mb-2">
-        {Icon && <Icon size={13} style={{ color: 'var(--color-primary-600)' }} />}
-        <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">{title}</h4>
-      </div>
+    <Panel tone="inset" radius="xl">
+      <SectionHeader level="sub" icon={icon} title={title} />
       {children}
-    </div>
+    </Panel>
   );
 }
 
-function Empty() { return <div className="text-sm text-text-secondary py-3 text-center">Nothing recorded.</div>; }
+function Nothing() { return <EmptyState compact title="Nothing recorded" />; }
