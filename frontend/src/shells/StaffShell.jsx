@@ -175,6 +175,10 @@ const StaffShell = () => {
   const { sales, total: salesTotal, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
+  // Per-user client access: restrict the client dropdown to this user's allowed
+  // clients (null/absent = unrestricted → full list, unchanged for everyone else).
+  const allowedClientNames = Array.isArray(user?.client_access) ? user.client_access : null;
+  const visibleSaleClients = allowedClientNames ? saleClients.filter(c => allowedClientNames.includes(c.value)) : saleClients;
   const notifHook = useNotifications();
 
   // Cross-closer double-sell badge (issue #6): map of the fronter's own leads
@@ -1672,7 +1676,8 @@ const StaffShell = () => {
                                 <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
                                   <option value="">Select client…</option>
-                                  {saleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+                                  {(() => { const cur = formData[field.name]; return cur && !visibleSaleClients.some(c => c.value === cur) ? <option value={cur}>{cur}</option> : null; })()}
+                                  {visibleSaleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
                                 </ThemedSelect>
                               ) : field.field_type === 'sale_plan' ? (
                                 <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
