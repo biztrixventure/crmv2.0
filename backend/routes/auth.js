@@ -138,8 +138,13 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   }
 
   const export_perms = await resolveExportPerms({ userId, companyId: ur.company_id, role: roleLevel });
+  // Per-user client access (superadmin-set). null/absent = unrestricted → forms
+  // show all clients exactly as before. When set, the Sale/Transfer client
+  // dropdown is filtered to these client names (plans follow via the cascade).
+  const clientAccessRaw = await require('../utils/businessConfig').getConfig(null, `client_access.${userId}`, null);
   res.json({
     id: userId,
+    client_access: Array.isArray(clientAccessRaw) ? clientAccessRaw : null,
     email: req.user.email,
     role: roleLevel,
     role_name: ur.custom_roles.name,

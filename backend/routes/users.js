@@ -1657,4 +1657,32 @@ router.post('/:userId/impersonate', asyncHandler(async (req, res) => {
   res.json({ link: linkData.properties.action_link, email });
 }));
 
+// ============================================================================
+// Per-user CLIENT ACCESS (which warranty clients a user may work). Superadmin.
+// Stored in business_config global key `client_access.<userId>` = array of
+// client names. ABSENT / null / empty = UNRESTRICTED (sees all clients) — this
+// default keeps every existing user's Sale/Transfer form exactly as it was.
+// The selling user reads their own list off /auth/me (client_access); the forms
+// filter the client dropdown by it (plans follow the client via the cascade).
+// ============================================================================
+const CLIENT_ACCESS_KEY = (uid) => `client_access.${uid}`;
+
+router.get('/:userId/client-access', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin access required' });
+  const { getConfig } = require('../utils/businessConfig');
+  const clients = await getConfig(null, CLIENT_ACCESS_KEY(req.params.userId), null);
+  res.json({ clients: Array.isArray(clients) ? clients : null });   // null = unrestricted
+}));
+
+router.put('/:userId/client-access', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin access required' });
+  const { setConfig } = require('../utils/businessConfig');
+  const raw = Array.isArray(req.body?.clients) ? req.body.clients : [];
+  const clean = [...new Set(raw.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))];
+  // Empty selection = unrestricted → store null so the form applies no filter.
+  await setConfig('global', CLIENT_ACCESS_KEY(req.params.userId), clean.length ? clean : null, req.user.id);
+  logger.success('CLIENT_ACCESS', `Set client access for ${req.params.userId}: ${clean.length ? clean.length + ' clients' : 'unrestricted'}`);
+  res.json({ clients: clean.length ? clean : null });
+}));
+
 module.exports = router;

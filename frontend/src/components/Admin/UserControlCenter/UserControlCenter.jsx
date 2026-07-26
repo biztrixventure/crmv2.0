@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
-  Lock, Activity, Download, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft,
+  Lock, Activity, Download, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -33,6 +33,7 @@ import GovernanceSection from './GovernanceSection';
 import EgressSection from './EgressSection';
 import ActivitySection from './ActivitySection';
 import QaSection from './QaSection';
+import ClientAccessSection from './ClientAccessSection';
 
 const QA_ROLES = ['qa_agent', 'qa_manager'];
 
@@ -51,6 +52,7 @@ const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { mon
 const TABS = [
   { id: 'account',      label: 'Account',        icon: UserCog,        scope: 'company' },
   { id: 'companies',    label: 'Companies & Role', icon: Building2,     scope: 'user' },
+  { id: 'client_access', label: 'Client Access', icon: Briefcase,      scope: 'company' },
   { id: 'permissions',  label: 'Permissions',    icon: ShieldCheck,    scope: 'company' },
   { id: 'teams',        label: 'Teams',          icon: Users2,         scope: 'company' },
   { id: 'vicidial',     label: 'VICIdial',       icon: Headphones,     scope: 'user' },
@@ -217,6 +219,9 @@ export default function UserControlCenter() {
             {tab === 'vicidial'     && <VicidialSection account={account} onChanged={reload} />}
             {tab === 'record_views' && (activeAssignment
               ? <UserRecordViewsPanel user={activeAssignment} />
+              : <Empty text="No company assignment." />)}
+            {tab === 'client_access' && (activeAssignment
+              ? <ClientAccessSection account={account} assignment={activeAssignment} />
               : <Empty text="No company assignment." />)}
             {tab === 'qa'           && (activeAssignment
               ? <QaSection account={account} assignment={activeAssignment} />

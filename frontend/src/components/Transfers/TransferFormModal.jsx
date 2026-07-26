@@ -217,10 +217,17 @@ const TransferFormModal = ({
                               onChange={v => setField(field.name, v)} placeholder={field.placeholder || `Select or type ${field.label}`} />
                           );
                         } else if (field.field_type === 'sale_client') {
+                          // Per-user client access: restrict to the signed-in user's
+                          // allowed clients (null = unrestricted). Current value is
+                          // always kept so editing an existing transfer never loses it.
+                          const allowedCl = Array.isArray(user?.client_access) ? user.client_access : null;
+                          const visClients = allowedCl ? saleClients.filter(c => allowedCl.includes(c.value)) : saleClients;
+                          const staleCl = val && !visClients.some(c => c.value === val);
                           input = (
                             <ThemedSelect value={val} onChange={onChange} required={field.is_required} className="input">
                               <option value="">Select client…</option>
-                              {saleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+                              {staleCl && <option value={val}>{val}</option>}
+                              {visClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
                             </ThemedSelect>
                           );
                         } else if (field.field_type === 'sale_plan') {

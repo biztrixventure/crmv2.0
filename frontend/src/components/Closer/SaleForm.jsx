@@ -3,6 +3,7 @@ import { DollarSign, Users, Hash, FileText, Building2, Car, Plus, X } from 'luci
 import client from '../../api/client';
 import { useSaleConfigs } from '../../hooks/useSaleConfigs';
 import { useFormFields } from '../../hooks/useFormFields';
+import { useAuth } from '../../contexts/AuthContext';
 import { vehicleFieldIssues } from '../../utils/vehicleValidation';
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../../utils/formAssist';
 import ComboInput from '../UI/ComboInput';
@@ -121,6 +122,13 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   // the transfer's company here — that's the fronter side, which has no plans.
   const configCompanyId = existingSale?.company_id || user?.company_id;
   const { plans, clients, fetchConfigs } = useSaleConfigs(configCompanyId);
+  // Per-user client access: if the signed-in user is restricted, only show their
+  // allowed clients (null/absent = unrestricted → the full list, unchanged). The
+  // current value is always preserved via StaleOption, so editing an old sale
+  // whose client is now outside the list never loses data.
+  const { user: authUser } = useAuth();
+  const allowedClientNames = Array.isArray(authUser?.client_access) ? authUser.client_access : null;
+  const visibleClients = allowedClientNames ? clients.filter(c => allowedClientNames.includes(c.value)) : clients;
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
   const { years: vehicleYears } = useVehicleYearRange();
   const { colorFor } = useUserColors();
@@ -503,8 +511,8 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select client…</option>
-          <StaleOption value={val} present={clients.some(c => c.value === val)} />
-          {clients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
+          <StaleOption value={val} present={visibleClients.some(c => c.value === val)} />
+          {visibleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
         </ThemedSelect>
       );
     }
