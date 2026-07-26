@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
-import { SectionHeader, PillTabs, Loading } from '../../UI/kit';
+import { SectionHeader, PillTabs, Loading, KpiTile, Field } from '../../UI/kit';
 
 // Searchable "pick a user" control (name → id) backed by the recipients
 // directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
@@ -130,47 +130,44 @@ function AuditTab() {
   const setFilter = (k, v) => { setPage(1); setF(p => ({ ...p, [k]: v })); };
 
   const tiles = [
-    { label: 'Exports today', value: stats?.exports, Icon: Download, tint: 'var(--color-primary-600)' },
-    { label: 'Denied today', value: stats?.denied, Icon: AlertTriangle, tint: '#dc2626' },
-    { label: 'Recordings today', value: stats?.recordings, Icon: Headphones, tint: '#7c3aed' },
-    { label: 'Active users', value: stats?.users, Icon: User, tint: '#059669' },
+    { label: 'Exports today', value: stats?.exports, Icon: Download, tone: 'primary' },
+    { label: 'Denied today', value: stats?.denied, Icon: AlertTriangle, tone: 'danger' },
+    { label: 'Recordings today', value: stats?.recordings, Icon: Headphones, tone: 'info' },
+    { label: 'Active users', value: stats?.users, Icon: User, tone: 'success' },
   ];
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {tiles.map(t => (
-          <div key={t.label} className="p-3 flex items-center gap-3" style={box}>
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-bg-secondary)' }}>
-              <t.Icon size={16} style={{ color: t.tint }} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-lg font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{t.value == null ? '—' : t.value.toLocaleString()}</div>
-              <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t.label}</div>
-            </div>
-          </div>
+          <KpiTile key={t.label} icon={t.Icon} tone={t.tone} label={t.label}
+            value={t.value == null ? '—' : t.value.toLocaleString()} />
         ))}
       </div>
-      <div className="flex flex-wrap items-end gap-2 p-3" style={box}>
-        <label className="text-xs">Action
-          <ThemedSelect value={f.action_type} onChange={e => setFilter('action_type', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
-            <option value="">All</option>{(meta.actions.length ? meta.actions : ACTIONS).map(a => <option key={a} value={a}>{a}</option>)}
+      <div className="flex flex-wrap items-end gap-3 p-3" style={box}>
+        <Field label="Action" className="w-[150px]">
+          <ThemedSelect value={f.action_type} onChange={e => setFilter('action_type', e.target.value)} className="w-full">
+            <option value="">All actions</option>{(meta.actions.length ? meta.actions : ACTIONS).map(a => <option key={a} value={a}>{a}</option>)}
           </ThemedSelect>
-        </label>
-        <label className="text-xs">Dataset
-          <ThemedSelect value={f.dataset} onChange={e => setFilter('dataset', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
-            <option value="">All</option>{meta.datasets.map(d => <option key={d} value={d}>{d}</option>)}
+        </Field>
+        <Field label="Dataset" className="w-[150px]">
+          <ThemedSelect value={f.dataset} onChange={e => setFilter('dataset', e.target.value)} className="w-full">
+            <option value="">All datasets</option>{meta.datasets.map(d => <option key={d} value={d}>{d}</option>)}
           </ThemedSelect>
-        </label>
-        <label className="text-xs">Status
-          <ThemedSelect value={f.status} onChange={e => setFilter('status', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }}>
-            <option value="">All</option><option value="allowed">Allowed</option><option value="denied">Denied</option>
+        </Field>
+        <Field label="Status" className="w-[150px]">
+          <ThemedSelect value={f.status} onChange={e => setFilter('status', e.target.value)} className="w-full">
+            <option value="">All statuses</option><option value="allowed">Allowed</option><option value="denied">Denied</option>
           </ThemedSelect>
-        </label>
-        <label className="text-xs">From<ThemedDate value={f.date_from} onChange={e => setFilter('date_from', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
-        <label className="text-xs">To<ThemedDate value={f.date_to} onChange={e => setFilter('date_to', e.target.value)} style={{ ...inp, display: 'block', marginTop: 4 }} /></label>
-        <button onClick={load} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
-        <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} events</span>
+        </Field>
+        <Field label="From" className="w-[150px]">
+          <ThemedDate value={f.date_from} onChange={e => setFilter('date_from', e.target.value)} style={{ width: '100%' }} />
+        </Field>
+        <Field label="To" className="w-[150px]">
+          <ThemedDate value={f.date_to} onChange={e => setFilter('date_to', e.target.value)} style={{ width: '100%' }} />
+        </Field>
+        <button onClick={load} className="p-2 rounded-lg flex-shrink-0" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }} title="Refresh"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
+        <span className="text-xs ml-auto tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} events</span>
       </div>
 
       <div className="rounded-xl overflow-x-auto" style={box}>
