@@ -318,6 +318,9 @@ router.post(
 
       // Return user data and token
       const export_perms = await resolveExportPerms({ userId: data.user.id, companyId: userRole.company_id, role: roleData.level });
+      // Per-user client access, so a restricted closer is filtered from the very
+      // first render after login (null = unrestricted → unchanged behaviour).
+      const clientAccessLogin = await require('../utils/businessConfig').getConfig(null, `client_access.${data.user.id}`, null);
       res.json({
         token:         data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -332,6 +335,7 @@ router.post(
           first_name: profile?.first_name,
           last_name: profile?.last_name,
           permissions: userPermissions,
+          client_access: Array.isArray(clientAccessLogin) ? clientAccessLogin : null,
           export_perms,
         },
       });
