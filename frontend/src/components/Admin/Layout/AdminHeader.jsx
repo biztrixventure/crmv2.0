@@ -51,18 +51,23 @@ const AdminHeader = ({
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
             <Settings size={18} className="text-white" />
           </div>
-          <div>
-            <h1 className="text-base font-bold leading-tight" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+          <div className="flex-shrink-0">
+            <h1 className="text-base font-bold leading-tight whitespace-nowrap" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
               Admin Panel
             </h1>
-            <p className="text-xs leading-tight" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-xs leading-tight whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
               BizTrix CRM v2.0
             </p>
           </div>
           <div className="hidden sm:block w-px h-7 mx-2" style={{ backgroundColor: 'var(--color-border)' }} />
+          {/* Tint via color-mix, not --color-primary-100: that token is light in
+              BOTH themes, so it renders a light chip on the dark UI. */}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-            style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
-            <div className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse" />
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)',
+              color: 'var(--color-success-600)',
+            }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--color-success-600)' }} />
             Live
           </div>
         </div>
@@ -101,7 +106,7 @@ const AdminHeader = ({
             onClick={() => setProfileOpen(true)}
             className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all group"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-primary-50)'; e.currentTarget.style.borderColor = 'var(--color-primary-300)'; }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--color-primary-600) 10%, var(--color-surface))'; e.currentTarget.style.borderColor = 'var(--color-primary-600)'; }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
             title="View profile"
           >

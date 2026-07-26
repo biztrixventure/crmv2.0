@@ -22,22 +22,26 @@ export default function SectionHeader({
   const a = accent(tone);
 
   if (level === 'page') {
+    // The hairline baseline is structural, not decoration: it separates the
+    // page's identity from its controls, so the tab strip and content below
+    // read as belonging to this title instead of floating on the background.
     return (
-      <div className={`flex items-start justify-between gap-3 flex-wrap mb-5 ${className}`}>
+      <div className={`flex items-end justify-between gap-4 flex-wrap pb-4 mb-5 ${className}`}
+        style={{ borderBottom: '1px solid var(--color-border)' }}>
         <div className="flex items-center gap-3 min-w-0">
           {Icon && (
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              <Icon size={20} className="text-white" />
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
+              <Icon size={18} className="text-white" />
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold leading-tight truncate"
-              style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+            <h1 className="font-bold leading-tight truncate"
+              style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: 26, letterSpacing: '-0.015em' }}>
               {title}
             </h1>
             {subtitle && (
-              <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+              <p className="text-[13px] mt-1 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
             )}
           </div>
         </div>

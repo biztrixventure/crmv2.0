@@ -174,9 +174,10 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
         ))}
       </nav>
 
-      {/* Bottom: version */}
+      {/* Bottom: version. Needs an opaque background — the nav above it scrolls,
+          and a transparent footer lets nav items show through behind it. */}
       <div className="p-4 border-t flex-shrink-0"
-        style={{ borderColor: 'var(--color-border)' }}>
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white"
             style={{ background: 'var(--gradient-sidebar)' }}>
