@@ -48,9 +48,17 @@ export default function ClientAccessSection({ account, assignment }) {
 
   const save = async () => {
     setSaving(true);
-    try { await client.put(`users/${userId}/client-access`, { clients: selected }); flash('success', restricted ? `Restricted to ${selected.length} client(s).` : 'Unrestricted — user sees all clients.'); }
-    catch (e) { flash('error', e.response?.data?.error || 'Save failed.'); }
-    finally { setSaving(false); }
+    try {
+      const r = await client.put(`users/${userId}/client-access`, { clients: selected });
+      // Reflect exactly what the server stored (authoritative) — never trust local
+      // state as "saved". Response: { clients: [...] | null }.
+      const saved = Array.isArray(r.data?.clients) ? r.data.clients : [];
+      setSelected(saved);
+      flash('success', saved.length ? `Restricted to ${saved.length} client(s).` : 'Unrestricted — user sees all clients.');
+    } catch (e) {
+      flash('error', e.response?.data?.error || 'Save failed — reverting to the saved state.');
+      await load();   // re-sync to server truth so the UI can't show an unsaved selection
+    } finally { setSaving(false); }
   };
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>;
