@@ -352,28 +352,33 @@ const EventsCalendar = ({ canEdit = false }) => {
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 py-6 animate-fade-in">
-      {/* Hero header */}
-      <div className="rounded-2xl p-5 sm:p-6 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-        style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md, 0 8px 24px rgba(0,0,0,0.12))' }}>
-        <div className="flex items-center gap-3 text-white">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: 'rgba(255,255,255,0.18)' }}>
-            <CalendarDays size={26} />
+    // No page padding here: every shell that renders this (AdminPanel,
+    // ComplianceShell, ManagerShell) already pads its <main>, so adding more
+    // here double-padded the calendar relative to every sibling tab.
+    <div className="w-full animate-fade-in">
+      {/* Header — matches the page header used across the app. */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
+            <CalendarDays size={18} className="text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold leading-tight" style={{ fontFamily: 'var(--font-display)' }}>
+            <h2 className="font-bold leading-tight"
+              style={{ fontFamily: 'var(--font-display)', fontSize: 26, letterSpacing: '-0.015em', color: 'var(--color-text)' }}>
               Event Calendar
             </h2>
-            <p className="text-sm text-white/80">
+            <p className="text-[13px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
               {canEdit ? 'Create, drag, and manage company events.' : 'Company events & important dates.'}
             </p>
           </div>
         </div>
         {canEdit && (
+          // Was white-on-gradient; with the banner gone it needs the standard
+          // primary fill, or it renders white on white.
           <button onClick={() => openCreate()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.03] self-start sm:self-auto"
-            style={{ backgroundColor: 'white', color: 'var(--color-primary-700, #6b5436)' }}>
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold text-white transition-all self-start sm:self-auto"
+            style={{ backgroundColor: 'var(--color-primary-600)' }}>
             <Plus size={17} /> New Event
           </button>
         )}
