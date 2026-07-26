@@ -190,6 +190,38 @@ then live check on https://crm.vertexpakistan.com in light **and** dark, console
    variant stays reserved for a shell's primary nav (the AdminPanel's primary nav
    is its sidebar, so admin tabs don't use it).
 
+## 8. Phases 4 + 5 — DONE (verified live)
+
+**Native controls (reported from testing).** The first audit only grepped
+`components/Admin` and missed the Teams surfaces: 6 native `<select>` + 4 native
+`<input type="date">` in `TeamManager` / `MyTeam`. All now ThemedSelect /
+ThemedDate. **App-wide sweep: zero native selects, zero native date inputs**
+outside the two themed implementations. The Compliance/Callbacks `type="date"`
+hits were false positives — `FInput` (Compliance/shared.jsx:240) already routes
+them to ThemedDate.
+
+**Phase 4** — AdminPanel wrapper adopts the Compliance padding
+(`px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8`); FormBuilder's Suspense spinner →
+skeleton; sidebar `#ef4444` and header `#22c55e` → tokens. The UCC sticky header
+gained `xl:-mx-10 xl:px-10` so its bleed tracks the new padding step.
+
+**Phase 5** — every page-level gradient banner dropped (16 tabs); all four
+sub-nav families collapsed to PillTabs; page-level spinners → skeleton in ~20
+files.
+
+### Final live sweep (all 36 superadmin tabs, production)
+`native-select: 0 · native-date: 0 · gradient-banner: 0` — one deliberate
+exception, **Calendar**: its banner lives in the SHARED `EventsCalendar`, which
+the Compliance and Manager shells also render, so changing it is cross-shell work
+that was explicitly deferred ("other shells come later").
+
+### Deliberately NOT changed
+- **Loader2 inside buttons** — `Loading variant="inline"` renders that exact
+  spinner, so they were already identical to the kit. Only page/panel-level
+  treatments differed.
+- **Gradient modal title bars** (`rounded-t-2xl`) and **gradient primary buttons**
+  — dialog affordance and brand action color, both used by the Compliance shell.
+
 ## 6. Phase 1 — DONE (verified live)
 
 `UserControlCenter`, `AccountSection`, `EgressSection`, `UserPermissionsPanel`,
