@@ -111,7 +111,7 @@ const Login = () => {
                 fontFamily: "var(--font-display)",
               }}
             >
-              B
+              {(siteName || 'C').charAt(0).toUpperCase()}
             </span>
           </div>
           <span

@@ -8,12 +8,12 @@ import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useFocus } from '../../contexts/FocusContext';
 import { useBranding } from '../../contexts/BrandingContext';
 
-const CompanyLogoImg = ({ src }) => {
+const CompanyLogoImg = ({ src, brandInitial = 'C' }) => {
   const [errored, setErrored] = useState(false);
   if (errored) return (
     <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
       style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
-      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>B</span>
+      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
     </div>
   );
   return (
@@ -69,6 +69,7 @@ const AppHeader = ({
   // doesn't, fall back to the configured brand rather than a hardcoded name.
   const { siteName } = useBranding();
   const headerTitle = title || siteName;
+  const brandInitial = (siteName || 'C').charAt(0).toUpperCase();
 
   // Push notification setup — lives here so it only runs when authenticated
   const {
@@ -100,11 +101,11 @@ const AppHeader = ({
           {/* Left: Logo & Title */}
           <div className="flex items-center gap-3 min-w-0">
             {companyLogoUrl ? (
-              <CompanyLogoImg src={companyLogoUrl} />
+              <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
             ) : logo ?? (
               <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>B</span>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
               </div>
             )}
             <div className="hidden sm:flex flex-col min-w-0 leading-none">

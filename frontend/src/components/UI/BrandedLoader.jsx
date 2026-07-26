@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useBranding } from '../../contexts/BrandingContext';
 
 // BrandedLoader — full-page splash with the active company's logo at center,
 // wrapped by orbiting particles + a counter-rotating ring. The logo picks
@@ -11,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 // Used as the Suspense fallback in App.jsx so the loader appears on every
 // lazy-loaded shell load + the post-login redirect.
 const BrandedLoader = ({ message = 'Loading…' }) => {
+  const { siteName } = useBranding();
   const { theme } = useTheme();
   const { user }  = useAuth();
   const isDark    = theme === 'dark';
@@ -124,7 +126,7 @@ const BrandedLoader = ({ message = 'Loading…' }) => {
               background: 'var(--gradient-sidebar)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-            }}>B</span>
+            }}>{(siteName || 'C').charAt(0).toUpperCase()}</span>
           )}
         </div>
       </div>

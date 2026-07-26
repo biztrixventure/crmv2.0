@@ -66,7 +66,7 @@ const ForgotPassword = () => {
               className="w-20 h-20 rounded-2xl flex items-center justify-center relative"
               style={{ background: "var(--gradient-sidebar)", boxShadow: "var(--shadow-xl)" }}
             >
-              <span className="text-4xl font-black text-white tracking-tight">B</span>
+              <span className="text-4xl font-black text-white tracking-tight">{(siteName || 'C').charAt(0).toUpperCase()}</span>
               <div
                 className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center"
                 style={{ backgroundColor: "var(--color-success-500)" }}
