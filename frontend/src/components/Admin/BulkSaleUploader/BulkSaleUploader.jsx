@@ -9,6 +9,7 @@ import SaleFileRequirementsGuide from './SaleFileRequirementsGuide';
 import UploadBestPractices from '../BulkUploader/UploadBestPractices';
 import SaleColumnMapper from './SaleColumnMapper';
 import SaleValidationSummary from './SaleValidationSummary';
+import { SectionHeader } from '../../UI/kit';
 
 const BulkSaleUploader = () => {
   const u = useBulkSaleUpload();
@@ -16,16 +17,7 @@ const BulkSaleUploader = () => {
 
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <DollarSign size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Bulk Sale Uploader</h2>
-            <p className="text-sm text-white/80">Import completed sales — matched to transfers and inserted/updated exactly like a closer would.</p>
-          </div>
-        </div>
-        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
-      </div>
+      <SectionHeader level="page" icon={DollarSign} title="Bulk Sale Uploader" subtitle="Import completed sales — matched to transfers and inserted/updated exactly like a closer would." />
 
       {u.error && <Alert type="error" message={u.error} />}
       {u.progress && <UploadProgress progress={u.progress} />}

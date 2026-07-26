@@ -152,7 +152,7 @@ const ScriptManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SectionHeader icon={MessageSquareText} title="Scripts" subtitle="Standalone call scripts agents read during calls, scoped by role." actions={<>
+      <SectionHeader level="page" icon={MessageSquareText} title="Scripts" subtitle="Standalone call scripts agents read during calls, scoped by role." actions={<>
           {roControlAllowed('scripts.add') && (
             <Button variant="primary" onClick={() => setModal({ script: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
               <Plus size={16} /> Add Script

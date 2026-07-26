@@ -146,7 +146,7 @@ const FAQManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SectionHeader icon={BookOpen} title="FAQs" subtitle="Questions, answers, and keywords agents search during calls." actions={<>
+      <SectionHeader level="page" icon={BookOpen} title="FAQs" subtitle="Questions, answers, and keywords agents search during calls." actions={<>
           {roControlAllowed('faqs.add') && (
             <Button variant="primary" onClick={() => setModal({ faq: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
               <Plus size={16} /> Add FAQ

@@ -10,6 +10,7 @@ import ValidationSummary from './ValidationSummary';
 import UploadProgress from './UploadProgress';
 import BatchManager from './BatchManager';
 import DuplicateTransferManager from './DuplicateTransferManager';
+import { SectionHeader } from '../../UI/kit';
 
 const BulkUploader = () => {
   const u = useBulkUpload();
@@ -18,16 +19,7 @@ const BulkUploader = () => {
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
       {/* Header */}
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <UploadCloud size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Bulk Transfer Uploader</h2>
-            <p className="text-sm text-white/80">Import transfers from CSV/Excel — inserted exactly as if the fronter added them.</p>
-          </div>
-        </div>
-        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
-      </div>
+      <SectionHeader level="page" icon={UploadCloud} title="Bulk Transfer Uploader" subtitle="Import transfers from CSV/Excel — inserted exactly as if the fronter added them." />
 
       {u.error && <Alert type="error" message={u.error} />}
       {u.progress && <UploadProgress progress={u.progress} />}
