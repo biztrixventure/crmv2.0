@@ -9,6 +9,7 @@ import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
 import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
+import { SectionHeader } from '../../UI/kit';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic
@@ -832,14 +833,9 @@ const DataAnalyzer = () => {
     <div className="space-y-5 animate-fade-in">
       {showSend && <SendBatchModal dataset={dataset} filters={payload} onClose={() => setShowSend(false)} />}
       {/* Header — stacks on mobile so the title + button row don't fight for room. */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-1">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Database size={22} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
-          <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold truncate" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>Data Analyzer</h2>
-            <p className="text-xs sm:text-sm" style={{ color: 'var(--color-text-secondary)' }}>Filter, aggregate, group and export across every form field.</p>
-          </div>
-        </div>
+      <SectionHeader level="page" icon={Database} title="Data Analyzer"
+        subtitle="Filter, aggregate, group and export across every form field."
+        actions={
         <div className="flex flex-wrap items-center gap-2">
           {/* Dataset toggle */}
           <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
@@ -883,7 +879,7 @@ const DataAnalyzer = () => {
           </button>
           )}
         </div>
-      </div>
+        } />
 
       {err && <p className="text-sm rounded-xl p-3" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)' }}>{err}</p>}
 
