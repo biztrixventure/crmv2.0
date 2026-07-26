@@ -190,6 +190,23 @@ then live check on https://crm.vertexpakistan.com in light **and** dark, console
    variant stays reserved for a shell's primary nav (the AdminPanel's primary nav
    is its sidebar, so admin tabs don't use it).
 
+## 6. Phase 1 — DONE (verified live)
+
+`UserControlCenter`, `AccountSection`, `EgressSection`, `UserPermissionsPanel`,
+`UserRecordViewsPanel` (commit `ca828bc`) + a dark-mode badge fix found during
+verification (`ee52ef4`).
+
+Live check on https://crm.vertexpakistan.com as superadmin: Account, Data Egress
+and Permissions all render the SAME shimmer skeleton (probed on tab switch —
+`role="status" .animate-shimmer` present, zero `.animate-spin`), the page h1 is
+the `SectionHeader level="page"` Playfair title, `max-w-[1400px]` is gone (0
+nodes), light and dark both correct, no console errors beyond a pre-existing 404.
+
+Bug caught live and fixed: the Egress source badge used a solid `-600` fill with
+white text. Dark inverts the scales (`--color-warning-600` = `#FCD34D`), so the
+Role/Company labels were unreadable. Now uses the kit's soft-fill + same-tone-text
+pattern. **General rule this proves: never put white text on a `-600` token.**
+
 ## 5. Phase 0 — DONE
 
 `frontend/src/components/UI/kit/`: `tokens.js`, `Panel.jsx`, `SectionHeader.jsx`,
