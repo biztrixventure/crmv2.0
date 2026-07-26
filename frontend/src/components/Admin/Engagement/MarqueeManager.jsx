@@ -7,6 +7,7 @@ import MarqueeStrip from '../../Engagement/MarqueeStrip';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { useAuth } from '../../../contexts/AuthContext';
+import { Loading } from '../../UI/kit';
 
 const blank = { byline: '📢 NEWS:', content: '', speed: 'normal', bg_color: '#1e40af', text_color: '#ffffff', target_company_ids: [], target_roles: [], target_user_ids: [], starts_at: '', ends_at: '', is_active: true };
 
@@ -99,7 +100,7 @@ const MarqueeManager = () => {
 
       {error && <Alert type="error" message={error} />}
 
-      {loading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+      {loading ? <Loading variant="rows" rows={4} />
       : rows.length === 0 ? <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}><Radio size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} /><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No marquee items yet.</p></div>
       : (
         <div className="space-y-2.5">

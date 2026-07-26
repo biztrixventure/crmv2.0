@@ -3,6 +3,7 @@ import { LayoutGrid, Plus, Copy, ExternalLink, Trash2, Archive, ArchiveRestore, 
 import { toast } from 'sonner';
 import { Button } from '../../UI';
 import client from '../../../api/client';
+import { Loading } from '../../UI/kit';
 
 // Superadmin manager for Kanban task boards (kan.bn-style). Create a board, get
 // a shareable no-login link, hand it to whoever needs to add tasks. The board
@@ -52,7 +53,7 @@ export default function TaskBoardsAdmin() {
       </div>
 
       {boards === null ? (
-        <div className="flex justify-center py-10"><Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /></div>
+        <Loading variant="rows" rows={3} />
       ) : boards.length === 0 ? (
         <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No boards yet — create your first one above.</p>
       ) : (

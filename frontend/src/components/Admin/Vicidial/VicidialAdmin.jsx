@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
+import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
 
 // Superadmin config for the VICIdial integration: the per-company prefix
 // registry (makes the correlation code globally unique) and the VICIdial-agent
@@ -32,7 +33,7 @@ const Boxes = () => {
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         The VICIdial servers the CRM talks to for dispositions + recordings. Change a <strong>URL</strong>, <strong>API user/password</strong>, or <strong>prefix</strong> here when a dialer changes — it takes effect within ~60s, no redeploy.
       </p>
-      {rows === null ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div> : (
+      {rows === null ? <Loading variant="rows" rows={3} /> : (
         <div className="space-y-2">
           {rows.map(b => <BoxRow key={b.id} box={b} onSaved={load} onDelete={() => del(b)} />)}
           {adding
@@ -159,7 +160,7 @@ const IPValidation = () => {
       </div>
 
       {/* Per-box validate */}
-      {boxes === null ? <div className="flex justify-center py-4"><Loader2 className="animate-spin" /></div> : boxes.length > 0 && (
+      {boxes === null ? <Loading variant="rows" rows={2} /> : boxes.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           {boxes.map(b => (
             <div key={b.id} className="flex items-center justify-between gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -461,7 +462,7 @@ const Agents = () => {
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people or agent id…" className="input" style={{ paddingLeft: 34 }} />
       </div>
-      {loading ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div> : agents.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users.</p> : (
+      {loading ? <Loading variant="rows" rows={3} /> : agents.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users.</p> : (
         <div className="rounded-2xl overflow-x-auto" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -947,26 +948,17 @@ const VicidialAdmin = () => {
   const [tab, setTab] = useState('boxes');
   return (
     <div className="space-y-5 w-full">
-      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <PhoneCall size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>VICIdial Integration</h2>
-            <p className="text-sm text-white/80">Prefix registry, agent mapping, and the dialer URLs that feed pending transfers + dispositions into the CRM.</p>
-          </div>
-        </div>
-      </div>
+      <SectionHeader
+        level="page"
+        icon={PhoneCall}
+        title="VICIdial Integration"
+        subtitle="Prefix registry, agent mapping, and the dialer URLs that feed pending transfers + dispositions into the CRM."
+      />
 
       <Alert type="info" message="Pending transfers only appear for an agent that's mapped below. Map agents first, then wire the VICIdial URLs (Setup tab)." />
 
-      <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-        {TABS.map(t => (
-          <button key={t.k} onClick={() => setTab(t.k)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-            style={{ background: tab === t.k ? 'var(--gradient-sidebar)' : 'transparent', color: tab === t.k ? 'white' : 'var(--color-text-secondary)' }}>
-            <t.icon size={14} /> {t.label}
-          </button>
-        ))}
-      </div>
+      <PillTabs value={tab} onChange={setTab}
+        items={TABS.map(t => ({ key: t.k, label: t.label, icon: t.icon }))} />
 
       {tab === 'boxes'    && <Boxes />}
       {tab === 'validate' && <IPValidation />}

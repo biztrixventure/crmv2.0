@@ -12,11 +12,12 @@ import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import Composer from '../../Chat/Composer';
 import ClientPortalTab from './ClientPortalTab';
+import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 const fmtDay = (s) => s ? new Date(s).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
-const Spinner = () => <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>;
+const Spinner = () => <Loading variant="rows" rows={3} />;
 const typeColor = (t) => t === 'dm' ? 'info' : t === 'broadcast' ? 'warning' : 'primary';
 const convName = (c) => c.title || (c.members ? c.members.map(m => m.name).slice(0, 2).join(' ↔ ') : 'Conversation');
 
@@ -808,27 +809,15 @@ const ChatAdmin = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 relative overflow-hidden flex items-center gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <Shield size={24} className="text-white flex-shrink-0" />
-        <div className="relative z-10">
-          <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Chat Control</h2>
-          <p className="text-sm text-white/80">Full oversight: monitor every conversation, search messages, moderate members & rooms, broadcast, and roll out per company.</p>
-        </div>
-        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
-      </div>
+      <SectionHeader
+        level="page"
+        icon={Shield}
+        title="Chat Control"
+        subtitle="Full oversight: monitor every conversation, search messages, moderate members & rooms, broadcast, and roll out per company."
+      />
 
-      <div className="flex flex-wrap gap-1.5">
-        {TABS.map(t => {
-          const active = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-colors"
-              style={{ background: active ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: active ? 'white' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-              <t.icon size={15} /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      <PillTabs value={tab} onChange={setTab}
+        items={TABS.map(t => ({ key: t.id, label: t.label, icon: t.icon }))} />
 
       {tab === 'overview' && <OverviewTab onOpenConversation={openConversation} goto={setTab} />}
       {tab === 'conversations' && <ConversationsTab openId={openId} setOpenId={setOpenId} />}

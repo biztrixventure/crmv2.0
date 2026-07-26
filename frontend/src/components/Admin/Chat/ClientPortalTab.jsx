@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
+import { Loading } from '../../UI/kit';
 
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 
@@ -159,7 +160,7 @@ export default function ClientPortalTab() {
         emptyLabel="No fronters found." filterLabel="Filter fronters…" />
 
       {clients === null ? (
-        <div className="flex justify-center py-10"><Loader2 className="animate-spin" style={{ color: 'var(--color-primary-500)' }} /></div>
+        <Loading variant="rows" rows={3} />
       ) : clients.length === 0 ? (
         <div className="text-center py-12 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
           No client logins yet. Create one to give a client recording access.
@@ -383,7 +384,7 @@ function AuditModal({ client: c, onClose }) {
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-secondary"><X size={16} /></button>
         </div>
         {rows === null ? (
-          <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div>
+          <Loading variant="rows" rows={3} />
         ) : rows.length === 0 ? (
           <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>No recordings played yet.</p>
         ) : (

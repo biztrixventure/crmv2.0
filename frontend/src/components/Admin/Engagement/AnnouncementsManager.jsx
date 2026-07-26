@@ -8,6 +8,7 @@ import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { useAuth } from '../../../contexts/AuthContext';
+import { Loading } from '../../UI/kit';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -120,7 +121,7 @@ const AnnouncementsManager = () => {
 
       {error && <Alert type="error" message={error} />}
 
-      {loading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+      {loading ? <Loading variant="rows" rows={4} />
       : rows.length === 0 ? <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}><Megaphone size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} /><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No announcements yet.</p></div>
       : (
         <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

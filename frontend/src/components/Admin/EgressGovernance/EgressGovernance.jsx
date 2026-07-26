@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
+import { SectionHeader, PillTabs, Loading } from '../../UI/kit';
 
 // Searchable "pick a user" control (name → id) backed by the recipients
 // directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
@@ -663,18 +664,14 @@ export default function EgressGovernance() {
   ];
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <Shield size={20} style={{ color: 'var(--color-primary-600)' }} />
-        <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Data Egress Governance</h2>
-      </div>
-      <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-        {TABS.map(({ k, label, Icon }) => (
-          <button key={k} onClick={() => setTab(k)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
-            style={{ background: tab === k ? 'var(--gradient-sidebar)' : 'transparent', color: tab === k ? '#fff' : 'var(--color-text-secondary)' }}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-      </div>
+      <SectionHeader
+        level="page"
+        icon={Shield}
+        title="Data Egress Governance"
+        subtitle="Who may export what, how much per day, and which columns leave the system."
+      />
+      <PillTabs value={tab} onChange={setTab}
+        items={TABS.map(({ k, label, Icon }) => ({ key: k, label, icon: Icon }))} />
       {tab === 'audit' && <AuditTab />}
       {tab === 'export-access' && <ExportAccessTab />}
       {tab === 'limits' && <LimitsTab />}

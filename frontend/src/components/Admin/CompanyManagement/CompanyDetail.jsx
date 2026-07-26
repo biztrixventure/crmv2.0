@@ -25,6 +25,7 @@ import CallbackDetailDrawer          from '../../Shared/CallbackDetailDrawer';
 import UserDetailDrawer              from '../../Shared/UserDetailDrawer';
 import CallbackNumberDetailDrawer    from '../../Shared/CallbackNumberDetailDrawer';
 import CallbackPhoneHistoryDrawer    from '../../Shared/CallbackPhoneHistoryDrawer';
+import { Loading } from '../../UI/kit';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -249,7 +250,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+        <Loading variant="rows" rows={3} />
       ) : displayRows.length === 0 ? (
         <p className="text-center text-text-secondary py-8 text-sm">No records.</p>
       ) : (
@@ -731,7 +732,7 @@ const MembersPanel = ({ companyId }) => {
       {actionErr && <p className="text-sm text-error-600">{actionErr}</p>}
 
       {loading ? (
-        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+        <Loading variant="rows" rows={3} />
       ) : users.length === 0 ? (
         <Card className="p-10 text-center">
           <Users size={40} className="mx-auto mb-3 text-text-tertiary" />
@@ -943,7 +944,7 @@ const RolesPanel = ({ companyId }) => {
       {actionErr && <p className="text-sm text-error-600">{actionErr}</p>}
 
       {loading ? (
-        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+        <Loading variant="rows" rows={3} />
       ) : roles.length === 0 ? (
         <Card className="p-10 text-center">
           <Shield size={40} className="mx-auto mb-3 text-text-tertiary" />
@@ -1132,7 +1133,7 @@ const NumbersPanel = ({ companyId }) => {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+        <Loading variant="rows" rows={3} />
       ) : rows.length === 0 ? (
         <p className="text-center text-text-secondary py-8 text-sm">No callback numbers.</p>
       ) : (

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Check, X, Loader2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { Loading } from '../UI/kit';
 
 // Superadmin search tooling: manage synonym groups (query expansion) that make
 // FAQ/Script search match related terms.
@@ -66,7 +67,7 @@ const SynonymsManager = () => {
         </button>
       </div>
 
-      {loading ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+      {loading ? <Loading variant="rows" rows={3} />
         : rows.length === 0 ? <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>No synonym groups yet. Add one above. (If this never loads, run migration 055.)</p>
         : (
           <div className="space-y-1.5">

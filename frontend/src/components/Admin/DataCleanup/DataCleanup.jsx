@@ -7,6 +7,7 @@ import { useFormFields } from '../../../hooks/useFormFields';
 import ThemedSelect from '../../UI/Select';
 import CalendarDateInput from '../../Form/CalendarDateInput';
 import { useCancellationReasons } from '../../../hooks/useCancellationReasons';
+import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
 
 const fmt = (s) => { try { return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } };
 
@@ -622,26 +623,16 @@ const DataCleanup = () => {
   return (
     <div className="w-full space-y-5">
       {/* Header */}
-      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <Eraser size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Data Cleanup</h2>
-            <p className="text-sm text-white/80">Search & fix dirty values, bulk-update by record id, or fill City/State from ZIP — every change is logged and revertible.</p>
-          </div>
-        </div>
-      </div>
+      <SectionHeader
+        level="page"
+        icon={Eraser}
+        title="Data Cleanup"
+        subtitle="Search & fix dirty values, bulk-update by record id, or fill City/State from ZIP — every change is logged and revertible."
+      />
 
       {/* Tabs */}
-      <div className="flex gap-1.5 flex-wrap">
-        {TABS.map(t => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)}
-            className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-xl transition-colors"
-            style={{ background: tab === t.key ? 'var(--gradient-sidebar)' : 'var(--color-surface)', color: tab === t.key ? '#fff' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-            <t.icon size={15} /> {t.label}
-          </button>
-        ))}
-      </div>
+      <PillTabs value={tab} onChange={setTab}
+        items={TABS.map(t => ({ key: t.key, label: t.label, icon: t.icon }))} />
 
       {tab === 'bulk'  && <BulkByIdPanel fields={fields} onDone={loadHistory} />}
       {tab === 'cancel' && <BulkCancelPanel onDone={loadHistory} />}

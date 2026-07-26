@@ -21,6 +21,7 @@ import {
 import client from '../../api/client';
 import { usePresenceContext } from '../../contexts/PresenceContext';
 import { formatLastSeen } from '../../utils/lastSeen';
+import { Loading } from '../UI/kit';
 
 const fmtMin = (m) => {
   const v = Math.round(m || 0);
@@ -300,7 +301,7 @@ const ActivityPanel = () => {
         {/* User list */}
         <div className="flex-1 overflow-y-auto">
           {!data && loading ? (
-            <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
+            <Loading variant="rows" rows={3} />
           ) : shown.length === 0 ? (
             <p className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>No users match.</p>
           ) : (
