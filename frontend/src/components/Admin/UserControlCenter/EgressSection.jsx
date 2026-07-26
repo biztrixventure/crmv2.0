@@ -20,7 +20,7 @@ import { Download, Save, Trash2, Columns3, RotateCcw, Sliders } from 'lucide-rea
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
-import { Panel, SectionHeader, Loading, CheckRow, Field, useFlash } from '../../UI/kit';
+import { Panel, SectionHeader, Loading, CheckRow, Field, useFlash, accent } from '../../UI/kit';
 // Single source of truth for the export field catalog — shared with the canonical
 // Data Egress screen so the two never drift (no duplicated hardcoded list).
 import { EXPORT_DATASETS, labelFor } from '../EgressGovernance/EgressGovernance';
@@ -34,17 +34,26 @@ const areaLabel = (a) => AREA_LABEL[a] || String(a || '').replace(/_/g, ' ').rep
 const numOrNull = (v) => (v === '' || v == null ? null : v);
 const prettyRole = (r) => String(r || '').replace(/_/g, ' ');
 
-// Source badge for a resolved value.
-const SOURCE_STYLE = {
-  user:    { bg: 'var(--color-primary-600)', fg: '#fff',  label: 'User' },
-  company: { bg: 'var(--color-info-500)',    fg: '#fff',  label: 'Company' },
-  role:    { bg: 'var(--color-warning-600)', fg: '#fff',  label: 'Role' },
-  default: { bg: 'var(--color-border)',      fg: 'var(--color-text-secondary)', label: 'Default' },
+// Source badge for a resolved value. Tinted fill + same-tone text (the kit's
+// accent pattern) rather than a solid fill with white text: dark mode INVERTS the
+// semantic scales, so white on --color-warning-600 (#FCD34D in dark) was
+// unreadable. soft/fg from tokens stay legible on either theme.
+const SOURCE_TONE = {
+  user:    { tone: 'primary', label: 'User' },
+  company: { tone: 'info',    label: 'Company' },
+  role:    { tone: 'warn',    label: 'Role' },
+  default: { tone: 'muted',   label: 'Default' },
 };
 function SourceBadge({ source, roleLevel }) {
-  const s = SOURCE_STYLE[source] || SOURCE_STYLE.default;
+  const s = SOURCE_TONE[source] || SOURCE_TONE.default;
+  const a = accent(s.tone);
   const label = source === 'role' && roleLevel ? `Role · ${prettyRole(roleLevel)}` : s.label;
-  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: s.bg, color: s.fg }}>{label}</span>;
+  return (
+    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+      style={{ background: a.soft, color: a.fg, border: `1px solid ${a.soft}` }}>
+      {label}
+    </span>
+  );
 }
 
 export default function EgressSection({ account, assignment }) {
