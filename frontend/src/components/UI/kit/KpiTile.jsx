@@ -42,10 +42,13 @@ export default function KpiTile({
   const isToggle = interactive && active !== undefined;
   const Tag = interactive ? 'button' : 'div';
 
+  // Note: no w-full here. Grid parents stretch the tile to its cell anyway,
+  // whereas in a flex-wrap row w-full forces one tile per line — that stacked
+  // the FAQ filter tiles vertically. Flex callers pass flex-1 + a min-width.
   return (
     <Tag
       type={interactive ? 'button' : undefined}
-      className={`relative overflow-hidden rounded-xl pl-4 pr-3 py-2.5 text-left w-full ${interactive ? 'cursor-pointer transition-colors' : ''} ${className}`}
+      className={`relative overflow-hidden rounded-xl pl-4 pr-3 py-2.5 text-left ${interactive ? 'cursor-pointer transition-colors' : ''} ${className}`}
       style={{
         background: active ? a.soft : 'var(--color-surface)',
         border: `1px solid ${active ? a.fg : 'var(--color-border)'}`,

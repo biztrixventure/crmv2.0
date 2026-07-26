@@ -112,7 +112,7 @@ const FAQModal = ({ faq, categories, onClose, onSave }) => {
 // Audience filter tiles use the shared KpiTile (tone-mapped, so no per-audience
 // hex leaks in here). `active` = this filter is applied.
 const StatTile = ({ label, value, tone, active, onClick }) => (
-  <KpiTile label={label} value={value} tone={tone} active={active} onClick={onClick} className="min-w-[150px]" />
+  <KpiTile label={label} value={value} tone={tone} active={active} onClick={onClick} className="flex-1 min-w-[150px]" />
 );
 
 // ── Main manager (FAQs only) ─────────────────────────────────────────────────
