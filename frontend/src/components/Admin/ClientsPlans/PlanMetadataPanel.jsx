@@ -4,10 +4,11 @@
 // .metadata (mig 214) via the existing GET/PUT /sale-configs endpoints. The
 // free-text sales.plan / sales.client_name contract is untouched.
 import { useState, useEffect, useCallback } from 'react';
-import { Package, Loader2, Save, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { Package, Save, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+import { Panel, SectionHeader, Loading, EmptyState, PillTabs, Field, useFlash } from '../../UI/kit';
 
 const PLAN_FIELDS = [
   { key: 'tier',          label: 'Tier',            type: 'text',   ph: 'Silver / Gold / Platinum' },
@@ -30,8 +31,7 @@ export default function PlanMetadataPanel() {
   const [companies, setCompanies] = useState([]);
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [msg, setMsg]           = useState(null);
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000); };
+  const { msg, flash, clear }   = useFlash();
 
   useEffect(() => { client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
 
@@ -44,33 +44,23 @@ export default function PlanMetadataPanel() {
       setRows(r.data.configs || []);
     } catch (e) { flash('error', e.response?.data?.error || 'Failed to load.'); }
     finally { setLoading(false); }
-  }, [kind, companyId]);
+  }, [kind, companyId, flash]);
   useEffect(() => { load(); }, [load]);
 
   const fields = kind === 'plan' ? PLAN_FIELDS : CLIENT_FIELDS;
 
   return (
     <div className="max-w-4xl">
-      <div className="flex items-center gap-2 mb-1">
-        <Package size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">Plan details {kind === 'client' ? '' : '(product attributes)'}</h3>
-      </div>
-      <p className="text-[11px] text-text-secondary mb-3 flex items-start gap-1">
-        <Info size={12} className="mt-0.5 flex-shrink-0" />
-        Optional — enriches each catalog entry. Nothing here changes what's stored on a sale; it just makes plans real products. Keep VSC vs manufacturer accurate (FTC).
-      </p>
-      {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      <SectionHeader
+        icon={Package}
+        title={`Plan details ${kind === 'client' ? '' : '(product attributes)'}`}
+        subtitle="Optional — enriches each catalog entry. Nothing here changes what's stored on a sale; it just makes plans real products. Keep VSC vs manufacturer accurate (FTC)."
+      />
+      {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
 
       <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <div className="inline-flex rounded-lg p-0.5" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {['plan', 'client'].map(k => (
-            <button key={k} onClick={() => setKind(k)}
-              className="px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-colors"
-              style={{ background: kind === k ? 'var(--color-surface)' : 'transparent', color: kind === k ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
-              {k}s
-            </button>
-          ))}
-        </div>
+        <PillTabs value={kind} onChange={setKind}
+          items={[{ key: 'plan', label: 'Plans' }, { key: 'client', label: 'Clients' }]} />
         <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input w-56">
           <option value="">Global defaults</option>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -78,9 +68,9 @@ export default function PlanMetadataPanel() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+        <Loading variant="rows" rows={5} label="Loading catalog…" />
       ) : rows.length === 0 ? (
-        <div className="text-sm text-text-secondary py-10 text-center">No {kind}s in this scope. Add them in the Clients &amp; Plans tab first.</div>
+        <EmptyState icon={Package} title={`No ${kind}s in this scope`} hint="Add them in the Clients & Plans tab first." />
       ) : (
         <div className="space-y-2">
           {rows.map(row => <MetaRow key={row.id} row={row} fields={fields} onSaved={() => flash('success', 'Saved.')} />)}
@@ -112,7 +102,7 @@ function MetaRow({ row, fields, onSaved }) {
     meta.deductible != null ? `$${meta.deductible} ded` : null, meta.price != null ? `$${meta.price}` : null].filter(Boolean).join(' · ');
 
   return (
-    <div className="rounded-xl" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+    <Panel tone="inset" radius="xl" pad="none">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-4 py-3 text-left">
         {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         <span className="font-semibold text-text">{row.value}</span>
@@ -126,8 +116,7 @@ function MetaRow({ row, fields, onSaved }) {
         <div className="px-4 pb-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {fields.map(f => (
-              <label key={f.key} className="block">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary block mb-1">{f.label}</span>
+              <Field key={f.key} label={f.label}>
                 {f.type === 'select' ? (
                   <ThemedSelect value={meta[f.key] ?? ''} onChange={e => set(f.key, e.target.value)} className="input w-full">
                     {f.opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -136,15 +125,15 @@ function MetaRow({ row, fields, onSaved }) {
                   <input type={f.type === 'number' ? 'number' : 'text'} value={meta[f.key] ?? ''} placeholder={f.ph || ''}
                     onChange={e => set(f.key, e.target.value, f.type === 'number')} className="input w-full" />
                 )}
-              </label>
+              </Field>
             ))}
           </div>
           <button onClick={save} disabled={saving}
             className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save details
+            {saving ? <Loading variant="inline" size={14} /> : <Save size={14} />} Save details
           </button>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

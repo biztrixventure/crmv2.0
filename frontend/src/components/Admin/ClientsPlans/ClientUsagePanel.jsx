@@ -4,10 +4,11 @@
 // admin sees which products are actually in use. Backed by GET /sale-configs/usage
 // (aggregates the sales table). No writes.
 import { useState, useEffect, useCallback } from 'react';
-import { BarChart3, Loader2, Package, Building2, DollarSign, TrendingUp, CalendarClock, ShieldCheck } from 'lucide-react';
+import { BarChart3, Package, Building2, DollarSign, TrendingUp, CalendarClock, ShieldCheck } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
+import { Panel, SectionHeader, Loading, EmptyState, KpiTile } from '../../UI/kit';
 
 const STATUS_COLOR = {
   closed_won: 'var(--color-success-600)', pending_review: 'var(--color-warning-600)',
@@ -39,29 +40,29 @@ export default function ClientUsagePanel() {
 
   return (
     <div className="max-w-5xl">
-      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <BarChart3 size={16} style={{ color: 'var(--color-primary-600)' }} />
-          <h3 className="text-sm font-bold text-text">Usage &amp; lifecycle</h3>
-          {data && <span className="text-[11px] text-text-secondary">{data.total.toLocaleString()} sales</span>}
-        </div>
-        <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input w-56">
-          <option value="">All companies</option>
-          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </ThemedSelect>
-      </div>
+      <SectionHeader
+        icon={BarChart3}
+        title="Usage & lifecycle"
+        subtitle={data ? `${data.total.toLocaleString()} sales` : undefined}
+        actions={
+          <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input w-56">
+            <option value="">All companies</option>
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </ThemedSelect>
+        }
+      />
       {err && <div className="mb-3"><Alert type="error">{err}</Alert></div>}
 
       {loading ? (
-        <div className="flex justify-center py-14"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+        <Loading variant="cards" cards={4} label="Loading usage…" />
       ) : !data ? null : (
         <>
           {/* KPI strip — from plan metadata (mig 214). $ tiles read 0 until plans have price/cost set. */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            <Kpi icon={ShieldCheck} label="Active policies" value={(data.summary?.active || 0).toLocaleString()} />
-            <Kpi icon={DollarSign} label="Active revenue" value={money(data.summary?.revenue)} tone="var(--color-success-600)" />
-            <Kpi icon={TrendingUp} label="Est. margin" value={money(data.summary?.margin)} tone="var(--color-primary-600)" />
-            <Kpi icon={CalendarClock} label="Expiring ≤90d" value={(data.summary?.expiring || 0).toLocaleString()} tone="var(--color-warning-600)" />
+            <KpiTile icon={ShieldCheck} label="Active policies" value={(data.summary?.active || 0).toLocaleString()} />
+            <KpiTile icon={DollarSign} label="Active revenue" value={money(data.summary?.revenue)} tone="success" />
+            <KpiTile icon={TrendingUp} label="Est. margin" value={money(data.summary?.margin)} tone="primary" />
+            <KpiTile icon={CalendarClock} label="Expiring ≤90d" value={(data.summary?.expiring || 0).toLocaleString()} tone="warn" />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <UsageTable title="By client (carrier)" icon={Building2} rows={data.byClient} />
@@ -73,26 +74,12 @@ export default function ClientUsagePanel() {
   );
 }
 
-function Kpi({ icon: Icon, label, value, tone }) {
-  return (
-    <div className="rounded-2xl p-3.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1">
-        {Icon && <Icon size={12} style={{ color: tone || 'var(--color-primary-600)' }} />}{label}
-      </div>
-      <div className="text-lg font-bold" style={{ color: tone || 'var(--color-text)' }}>{value}</div>
-    </div>
-  );
-}
-
 function UsageTable({ title, icon: Icon, rows }) {
   const max = Math.max(1, ...rows.map(r => r.total));
   return (
-    <div className="rounded-2xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-      <div className="flex items-center gap-1.5 mb-3">
-        <Icon size={14} style={{ color: 'var(--color-primary-600)' }} />
-        <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary">{title} ({rows.length})</h4>
-      </div>
-      {rows.length === 0 ? <div className="text-sm text-text-secondary py-4 text-center">No data.</div> : (
+    <Panel tone="inset" radius="2xl">
+      <SectionHeader level="sub" icon={Icon} title={`${title} (${rows.length})`} />
+      {rows.length === 0 ? <EmptyState compact title="No data" /> : (
         <div className="space-y-2.5 max-h-[520px] overflow-y-auto">
           {rows.map(r => (
             <div key={r.value}>
@@ -118,6 +105,6 @@ function UsageTable({ title, icon: Icon, rows }) {
           ))}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

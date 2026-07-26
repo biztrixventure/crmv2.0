@@ -2,13 +2,16 @@
 // Plans command center (alongside portal accounts, since both are "external
 // access"). Self-contained: hits the same chat/admin/guests endpoints as the
 // Chat Control → Guest Links tab, which stays in place. Nothing removed.
+//
+// UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect, useCallback } from 'react';
-import { Link2, UserPlus, Copy, Check, Power, Trash2, Loader2 } from 'lucide-react';
+import { Link2, UserPlus, Copy, Check, Power, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../../components/UI';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import ThemedSelect from '../../UI/Select';
+import { Panel, SectionHeader, Loading, EmptyState, Field, accent } from '../../UI/kit';
 
 const convName = (g) => g?.name || g?.title || g?.subject || 'Group';
 
@@ -16,30 +19,33 @@ function GuestRow({ g, group, onToggle, onDelete, canManage }) {
   const [copied, setCopied] = useState(false);
   const url = `${window.location.origin}/guest/${g.token}`;
   const copy = () => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  const ok = accent('success');
+  const bad = accent('danger');
+  const iconBtn = 'p-2 rounded-lg';
   return (
-    <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <Panel radius="xl" pad="sm" className="flex items-center gap-2">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           {g.name}
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-            style={{ background: g.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)', color: g.is_active ? '#047857' : '#b91c1c' }}>
+            style={{ background: g.is_active ? ok.soft : bad.soft, color: g.is_active ? ok.fg : bad.fg }}>
             {g.is_active ? 'Active' : 'Disabled'}
           </span>
         </p>
         <p className="text-[11px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>→ {group || 'group'} · <span className="font-mono">{url}</span></p>
       </div>
-      <button onClick={copy} title="Copy link" className="p-2 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
-        {copied ? <Check size={14} style={{ color: '#059669' }} /> : <Copy size={14} style={{ color: 'var(--color-text-secondary)' }} />}
+      <button onClick={copy} title="Copy link" className={iconBtn} style={{ background: 'var(--color-bg-secondary)' }}>
+        {copied ? <Check size={14} style={{ color: ok.fg }} /> : <Copy size={14} style={{ color: 'var(--color-text-secondary)' }} />}
       </button>
-      <button onClick={() => onToggle(g)} title={g.is_active ? 'Disable link' : 'Enable link'} className="p-2 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
-        <Power size={14} style={{ color: g.is_active ? '#b91c1c' : '#059669' }} />
+      <button onClick={() => onToggle(g)} title={g.is_active ? 'Disable link' : 'Enable link'} className={iconBtn} style={{ background: 'var(--color-bg-secondary)' }}>
+        <Power size={14} style={{ color: g.is_active ? bad.fg : ok.fg }} />
       </button>
       {canManage && (
-        <button onClick={() => onDelete(g)} title="Delete" className="p-2 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
-          <Trash2 size={14} style={{ color: '#b91c1c' }} />
+        <button onClick={() => onDelete(g)} title="Delete" className={iconBtn} style={{ background: 'var(--color-bg-secondary)' }}>
+          <Trash2 size={14} style={{ color: bad.fg }} />
         </button>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -83,38 +89,33 @@ export default function GuestLinksPanel() {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <div className="flex items-center gap-2">
-        <Link2 size={16} style={{ color: 'var(--color-primary-600)' }} />
-        <h3 className="text-sm font-bold text-text">Guest links</h3>
-      </div>
+      <SectionHeader icon={Link2} title="Guest links" />
       {!canManage && <Alert type="info">You can view guest links but not change them.</Alert>}
 
-      <div className="rounded-2xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-        <h4 className="font-bold text-sm mb-3 flex items-center gap-2" style={{ color: 'var(--color-text)' }}><UserPlus size={16} /> Create a guest link</h4>
+      <Panel tone="inset" radius="2xl">
+        <SectionHeader level="sub" icon={UserPlus} title="Create a guest link" />
         <div className="space-y-2.5">
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Guest name</label>
+          <Field label="Guest name">
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. John — Vendor" className="input w-full" />
-          </div>
+          </Field>
           <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-            <div className="flex-1 min-w-0">
-              <label className="block text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Group they'll see</label>
+            <Field label="Group they'll see" className="flex-1 min-w-0">
               <ThemedSelect value={groupId} onChange={e => setGroupId(e.target.value)} className="input w-full">
                 <option value="">Pick a group…</option>
                 {groups.map(g => <option key={g.id} value={g.id}>{convName(g)}</option>)}
               </ThemedSelect>
-            </div>
+            </Field>
             {canManage && <Button onClick={create} disabled={creating} className="whitespace-nowrap sm:w-auto">{creating ? 'Creating…' : 'Create link'}</Button>}
           </div>
         </div>
         <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
           The guest opens the link and only sees this one group's chat — no search, no other groups. Disable any time to kill the link; re-enable to restore it (same URL).
         </p>
-      </div>
+      </Panel>
 
       <div className="space-y-2">
-        {loading ? <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
-          : guests.length === 0 ? <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-tertiary)' }}>No guest links yet.</p>
+        {loading ? <Loading variant="rows" rows={3} label="Loading guest links…" />
+          : guests.length === 0 ? <EmptyState icon={Link2} title="No guest links yet" hint="Create one above to give an outsider access to a single group chat." />
             : guests.map(g => <GuestRow key={g.id} g={g} group={groupNameOf(g.conversation_id)} onToggle={toggle} onDelete={del} canManage={canManage} />)}
       </div>
     </div>
