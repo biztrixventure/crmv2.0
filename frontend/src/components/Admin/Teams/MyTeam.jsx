@@ -6,6 +6,9 @@ import {
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import TeamAnalytics from './TeamAnalytics';
+import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
+import { SectionHeader, accent } from '../../UI/kit';
 
 // ── My Team — the TEAM LEAD's home. Land on your own team: live progress
 // (stats, trend, leaderboard, goals) + manage your roster & goals in one place.
@@ -96,42 +99,43 @@ export default function MyTeam() {
   return (
     <div className="space-y-4 animate-fade-in w-full">
       {/* team header */}
-      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-start justify-between gap-3 flex-wrap relative z-10">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Users size={22} className="text-white" />
-              <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{team.name}</h2>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: 'white' }}>{team.team_type}</span>
-            </div>
-            <p className="text-sm text-white/80 mt-1 flex items-center gap-3 flex-wrap">
-              <span>{report?.member_count ?? '—'} members</span>
-              {isLead && <span className="inline-flex items-center gap-1"><Crown size={12} /> You lead this team</span>}
-              {(team.goal_monthly_sales || team.goal_monthly_transfers) && <span className="inline-flex items-center gap-1"><Target size={12} /> Goal: {team.goal_monthly_sales ? `${team.goal_monthly_sales} sales` : ''}{team.goal_monthly_sales && team.goal_monthly_transfers ? ' · ' : ''}{team.goal_monthly_transfers ? `${team.goal_monthly_transfers} transfers` : ''}/mo</span>}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <select value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} className="text-xs rounded-lg px-2 py-1.5 font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)' }}>
-              <option value={7} style={{ color: '#111' }}>Last 7 days</option>
-              <option value={30} style={{ color: '#111' }}>Last 30 days</option>
-              <option value={90} style={{ color: '#111' }}>Last 90 days</option>
-              <option value="custom" style={{ color: '#111' }}>Custom / single day…</option>
-            </select>
+      <SectionHeader
+        level="page"
+        icon={Users}
+        title={team.name}
+        subtitle={
+          <span className="flex items-center gap-3 flex-wrap">
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded"
+              style={{ background: accent('primary').soft, color: accent('primary').fg }}>{team.team_type}</span>
+            <span>{report?.member_count ?? '—'} members</span>
+            {isLead && <span className="inline-flex items-center gap-1"><Crown size={12} /> You lead this team</span>}
+            {(team.goal_monthly_sales || team.goal_monthly_transfers) && <span className="inline-flex items-center gap-1"><Target size={12} /> Goal: {team.goal_monthly_sales ? `${team.goal_monthly_sales} sales` : ''}{team.goal_monthly_sales && team.goal_monthly_transfers ? ' · ' : ''}{team.goal_monthly_transfers ? `${team.goal_monthly_transfers} transfers` : ''}/mo</span>}
+          </span>
+        }
+        actions={
+          <>
+            <ThemedSelect value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} variant="pill" style={{ fontSize: 12 }}>
+              <option value={7}>Last 7 days</option>
+              <option value={30}>Last 30 days</option>
+              <option value={90}>Last 90 days</option>
+              <option value="custom">Custom / single day…</option>
+            </ThemedSelect>
             {range === 'custom' && (
               <>
-                <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (pick the same date twice for a single day)" className="text-xs rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)', colorScheme: 'dark' }} />
-                <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" className="text-xs rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)', colorScheme: 'dark' }} />
+                <ThemedDate value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (pick the same date twice for a single day)" placeholder="From" style={{ fontSize: 12, minWidth: 140 }} />
+                <ThemedDate value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" placeholder="To" style={{ fontSize: 12, minWidth: 140 }} />
               </>
             )}
-            <button onClick={() => { loadTeam(); loadReport(); }} className="p-2 rounded-lg text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><RefreshCw size={15} /></button>
-            {isLead && team.lead_can_edit && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><Pencil size={13} /> Edit</button>}
-          </div>
-        </div>
-      </div>
+            <button onClick={() => { loadTeam(); loadReport(); }} title="Refresh" className="p-2 rounded-lg"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><RefreshCw size={15} /></button>
+            {isLead && team.lead_can_edit && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'var(--color-primary-600)' }}><Pencil size={13} /> Edit</button>}
+          </>
+        }
+      />
 
-      {err && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-error-50,#fef2f2)', color: 'var(--color-error-700,#b91c1c)', border: '1px solid var(--color-error-200,#fecaca)' }}>{err}</div>}
+      {err && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)', border: '1px solid var(--color-error-200)' }}>{err}</div>}
 
-      {report?.error ? <p className="text-sm text-center py-4" style={{ color: '#dc2626' }}>Failed to load progress.</p> : (
+      {report?.error ? <p className="text-sm text-center py-4" style={{ color: accent('danger').fg }}>Failed to load progress.</p> : (
         <>
           <TeamAnalytics report={report} team={team} />
 

@@ -6,6 +6,9 @@ import {
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import TeamAnalytics from './TeamAnalytics';
+import ThemedSelect from '../../UI/Select';
+import ThemedDate from '../../UI/ThemedDate';
+import { Panel, SectionHeader, Loading, EmptyState, Field, accent } from '../../UI/kit';
 
 // ── Team structure + reporting (superadmin / company_admin / operations_manager)
 // Additive org layer: create teams per company, assign members, set goals, and
@@ -111,34 +114,32 @@ export default function TeamManager() {
 
   return (
     <div className="space-y-4 animate-fade-in w-full">
-      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap relative z-10">
-          <div className="flex items-center gap-3">
-            <Users size={22} className="text-white" />
-            <div>
-              <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Teams</h2>
-              <p className="text-sm text-white/80">Org structure, members, goals and live progress — per company.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+      <SectionHeader
+        level="page"
+        icon={Users}
+        title="Teams"
+        subtitle="Org structure, members, goals and live progress — per company."
+        actions={
+          <>
             {companies.length > 1 && (
-              <select value={companyId} onChange={e => setCompanyId(e.target.value)}
-                className="text-sm rounded-lg px-3 py-2 font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.4)' }}>
-                {companies.map(c => <option key={c.id} value={c.id} style={{ color: '#111' }}>{c.name}</option>)}
-              </select>
+              <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input min-w-[200px]">
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </ThemedSelect>
             )}
-            <button onClick={load} className="p-2 rounded-lg text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><RefreshCw size={15} /></button>
-            <button onClick={() => setEditTeam({})} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)' }}><Plus size={14} /> New team</button>
-          </div>
-        </div>
-      </div>
+            <button onClick={load} title="Refresh" className="p-2 rounded-lg"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><RefreshCw size={15} /></button>
+            <button onClick={() => setEditTeam({})} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+              style={{ background: 'var(--color-primary-600)' }}><Plus size={14} /> New team</button>
+          </>
+        }
+      />
 
-      {err && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-error-50,#fef2f2)', color: 'var(--color-error-700,#b91c1c)', border: '1px solid var(--color-error-200,#fecaca)' }}>{err}</div>}
+      {err && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)', border: '1px solid var(--color-error-200)' }}>{err}</div>}
 
-      {loading ? <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p> : (
+      {loading ? <Loading variant="cards" cards={3} label="Loading teams…" /> : (
         <>
           {roots.length === 0 ? (
-            <p className="text-sm text-center py-8 italic" style={{ color: 'var(--color-text-secondary)' }}>No teams yet for this company. Click <b>New team</b> to start.</p>
+            <EmptyState icon={Users} title="No teams yet for this company" hint="Click New team to start." />
           ) : roots.map(t => <TeamCard key={t.id} t={t} />)}
 
           <div className="rounded-2xl p-4" style={box}>
@@ -196,11 +197,11 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
         <div className="flex items-center justify-between"><h3 className="font-bold" style={{ color: 'var(--color-text)' }}>{f.id ? 'Edit team' : 'New team'}</h3><button onClick={onClose}><X size={18} /></button></div>
         <Field label="Name"><input value={f.name} onChange={e => set('name', e.target.value)} style={inp} /></Field>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Type"><select value={f.team_type} onChange={e => set('team_type', e.target.value)} style={inp}>{TEAM_TYPES.map(t => <option key={t.k} value={t.k}>{t.label}</option>)}</select></Field>
+          <Field label="Type"><ThemedSelect value={f.team_type} onChange={e => set('team_type', e.target.value)} className="w-full">{TEAM_TYPES.map(t => <option key={t.k} value={t.k}>{t.label}</option>)}</ThemedSelect></Field>
           <Field label="Color"><input type="color" value={f.color || TYPE_COLOR[f.team_type]} onChange={e => set('color', e.target.value)} style={{ ...inp, padding: 2, height: 34 }} /></Field>
         </div>
-        <Field label="Team lead"><select value={f.lead_user_id} onChange={e => set('lead_user_id', e.target.value)} style={inp}><option value="">— none —</option>{members.map(m => <option key={m.user_id} value={m.user_id}>{m.name} ({(m.role || '').replace(/_/g, ' ')})</option>)}</select></Field>
-        <Field label="Parent team (nesting)"><select value={f.parent_team_id} onChange={e => set('parent_team_id', e.target.value)} style={inp}><option value="">— top level —</option>{teams.filter(t => t.id !== f.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+        <Field label="Team lead"><ThemedSelect value={f.lead_user_id} onChange={e => set('lead_user_id', e.target.value)} className="w-full" placeholder="— none —"><option value="">— none —</option>{members.map(m => <option key={m.user_id} value={m.user_id}>{m.name} ({(m.role || '').replace(/_/g, ' ')})</option>)}</ThemedSelect></Field>
+        <Field label="Parent team (nesting)"><ThemedSelect value={f.parent_team_id} onChange={e => set('parent_team_id', e.target.value)} className="w-full" placeholder="— top level —"><option value="">— top level —</option>{teams.filter(t => t.id !== f.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</ThemedSelect></Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Monthly sales goal"><input type="number" min="0" value={f.goal_monthly_sales} onChange={e => set('goal_monthly_sales', e.target.value)} placeholder="—" style={inp} /></Field>
           <Field label="Monthly transfers goal"><input type="number" min="0" value={f.goal_monthly_transfers} onChange={e => set('goal_monthly_transfers', e.target.value)} placeholder="—" style={inp} /></Field>
@@ -241,30 +242,28 @@ function TeamReport({ team, onClose }) {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><BarChart3 size={18} /> {team.name} — analytics</h3>
           <div className="flex items-center gap-2">
-            <select value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+            <ThemedSelect value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} variant="pill" style={{ fontSize: 12 }}>
               <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
               <option value="custom">Custom / single day…</option>
-            </select>
+            </ThemedSelect>
             {range === 'custom' && (
               <>
-                <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (same date twice = one day)" className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-                <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" className="text-xs rounded-lg px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+                <ThemedDate value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (same date twice = one day)" placeholder="From" style={{ fontSize: 12, minWidth: 140 }} />
+                <ThemedDate value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" placeholder="To" style={{ fontSize: 12, minWidth: 140 }} />
               </>
             )}
             <button onClick={onClose}><X size={18} /></button>
           </div>
         </div>
-        {!rep ? <p className="text-sm italic text-center py-6" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>
-          : rep.error ? <p className="text-sm text-center py-6" style={{ color: '#dc2626' }}>Failed to load report.</p>
+        {!rep ? <Loading variant="rows" rows={5} label="Loading report…" />
+          : rep.error ? <p className="text-sm text-center py-6" style={{ color: accent('danger').fg }}>Failed to load report.</p>
           : <TeamAnalytics report={rep} team={rep.team || team} />}
       </div>
     </div>
   );
 }
 
-function Field({ label, children }) {
-  return <label className="block"><span className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>{children}</label>;
-}
+// (the local Field helper is gone — kit/Field is the same label+control wrapper)
 
 // Small dependency-free daily trend: grouped bars (transfers = blue, sales =
 // green) per day over the selected range. Shows how the team is working over time.
