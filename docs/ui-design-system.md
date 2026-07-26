@@ -125,13 +125,33 @@ Use `compact` inside an already-small panel.
 ### `<KpiTile>`
 `icon` · `label` · `value` · `sub` · `tone` · `onClick`
 
+Label-first, then the number — you read what it is before what it says. Value at
+24px, icon demoted to a quiet corner mark, and a **3px left rail in the metric's
+tone** so a strip of tiles is scannable by color before you read a word. That
+rail is the design system's signature: it's the one decorative element, and it
+encodes status, so it earns its place.
+
 One number per tile; lay them out in your own grid
 (`grid grid-cols-2 lg:grid-cols-4 gap-3`). Format numbers at the call site —
 the tile never guesses a locale or currency. (`UI/StatCardTriple.jsx` remains
 for the fixed 3-up composite it was built for.)
 
+**Don't hand-roll a stat tile.** Data Egress had a local one, so it silently
+missed the redesign and kept rendering the old hollow layout. If a surface needs
+a metric, import this.
+
 ### `<PillTabs>` — sub-navigation
-`items=[{ key, label, icon, count }]` · `value` · `onChange`
+`items=[{ key, label, icon, count }]` · `value` · `onChange` · `scrollable`
+
+Drawn as a **segmented control**: a recessed track (bg-secondary + border + full
+radius) with the active tab lifted out of it on a surface + shadow. The track
+matters — with only the active pill tinted, the inactive ones are unstyled text
+floating on the page background and the group has no edge, so it reads as loose
+links rather than a set of choices. Elevation (not color alone) carries which
+one is selected.
+
+Long sets scroll on one line with an edge fade that appears **only when the
+track actually clips** — a permanent fade on a short set is decoration.
 
 **Chrome vs pill:**
 
