@@ -3,6 +3,7 @@ import {
   TrendingUp, DollarSign, Phone, Target, Users, Award, Crown, ChevronDown,
   ArrowUpRight, ArrowDownRight, Minus, Repeat, AlertTriangle,
 } from 'lucide-react';
+import { accent } from '../../UI/kit';
 
 // ============================================================================
 // TeamAnalytics — ONE shared, dependency-free SVG analytics body used by BOTH
@@ -123,16 +124,23 @@ function Sparkline({ points, color }) {
     </svg>
   );
 }
-function KpiTile({ label, value, color, deltaPct, spark, icon }) {
+// TrendTile — the analytics variant of a metric tile: same left tone rail as
+// kit/KpiTile, but it also carries a period-over-period delta and a sparkline,
+// which the kit tile deliberately does not. Named TrendTile (it used to be
+// called KpiTile) so it no longer shadows the kit component of that name.
+// Takes a semantic `tone`, not a raw color, so the rail/value/sparkline track
+// the theme instead of staying fixed hex in dark mode.
+function TrendTile({ label, value, tone = 'primary', deltaPct, spark, icon }) {
+  const c = accent(tone).fg;
   return (
-    <div className="rounded-xl p-3" style={{ ...box, borderLeft: `3px solid ${color}` }}>
+    <div className="rounded-xl p-3" style={{ ...box, borderLeft: `3px solid ${c}` }}>
       <div className="flex items-center justify-between gap-1">
         <span className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</span>
         {deltaPct !== undefined && <DeltaChip pct={deltaPct} />}
       </div>
       <div className="flex items-end justify-between gap-2 mt-1">
-        <span className="text-xl font-extrabold tabular-nums" style={{ color: color }}>{value}</span>
-        {spark && <Sparkline points={spark} color={color} />}
+        <span className="text-xl font-extrabold tabular-nums" style={{ color: c }}>{value}</span>
+        {spark && <Sparkline points={spark} color={c} />}
       </div>
     </div>
   );
@@ -463,20 +471,20 @@ export default function TeamAnalytics({ report, team }) {
 
       {/* KPI grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <KpiTile label="Transfers" icon={<TrendingUp size={11} />} color="#2563eb" value={totals.transfers ?? 0} deltaPct={mo.transfers_pct} spark={spark('transfers')} />
-        <KpiTile label="Sales" icon={<DollarSign size={11} />} color="#16a34a" value={totals.sales ?? 0} deltaPct={mo.sales_pct} spark={spark('sales')} />
-        <KpiTile label="Gross" icon={<DollarSign size={11} />} color="#d97706" value={money(totals.gross)} deltaPct={mo.gross_pct} spark={spark('gross')} />
-        <KpiTile label="MRR" icon={<Repeat size={11} />} color="#7c3aed" value={money(totals.mrr)} deltaPct={mo.mrr_pct} />
-        <KpiTile label="Avg deal" icon={<DollarSign size={11} />} color="#d97706" value={totals.avg_deal != null ? money(totals.avg_deal) : '—'} />
-        <KpiTile label="Close rate" icon={<Target size={11} />} color="#16a34a" value={totals.close_rate != null ? `${totals.close_rate}%` : '—'} />
+        <TrendTile label="Transfers" icon={<TrendingUp size={11} />} tone="info" value={totals.transfers ?? 0} deltaPct={mo.transfers_pct} spark={spark('transfers')} />
+        <TrendTile label="Sales" icon={<DollarSign size={11} />} tone="success" value={totals.sales ?? 0} deltaPct={mo.sales_pct} spark={spark('sales')} />
+        <TrendTile label="Gross" icon={<DollarSign size={11} />} tone="warn" value={money(totals.gross)} deltaPct={mo.gross_pct} spark={spark('gross')} />
+        <TrendTile label="MRR" icon={<Repeat size={11} />} tone="primary" value={money(totals.mrr)} deltaPct={mo.mrr_pct} />
+        <TrendTile label="Avg deal" icon={<DollarSign size={11} />} tone="warn" value={totals.avg_deal != null ? money(totals.avg_deal) : '—'} />
+        <TrendTile label="Close rate" icon={<Target size={11} />} tone="success" value={totals.close_rate != null ? `${totals.close_rate}%` : '—'} />
       </div>
 
       {/* secondary strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <KpiTile label="Callbacks" icon={<Phone size={11} />} color="#9333ea" value={totals.callbacks ?? 0} spark={spark('callbacks')} />
-        <KpiTile label="Fronted wins" icon={<TrendingUp size={11} />} color="#0891b2" value={totals.fronted ?? 0} />
-        <KpiTile label="Active" icon={<Users size={11} />} color="#2563eb" value={participation != null ? `${totals.active_members}/${report.member_count}` : (totals.active_members ?? 0)} />
-        <KpiTile label="Callbacks / sale" icon={<Phone size={11} />} color="#9333ea" value={cbPerSale != null ? cbPerSale : '—'} />
+        <TrendTile label="Callbacks" icon={<Phone size={11} />} tone="primary" value={totals.callbacks ?? 0} spark={spark('callbacks')} />
+        <TrendTile label="Fronted wins" icon={<TrendingUp size={11} />} tone="info" value={totals.fronted ?? 0} />
+        <TrendTile label="Active" icon={<Users size={11} />} tone="info" value={participation != null ? `${totals.active_members}/${report.member_count}` : (totals.active_members ?? 0)} />
+        <TrendTile label="Callbacks / sale" icon={<Phone size={11} />} tone="primary" value={cbPerSale != null ? cbPerSale : '—'} />
       </div>
 
       {/* hero combo */}

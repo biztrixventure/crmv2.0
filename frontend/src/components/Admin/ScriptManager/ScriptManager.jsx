@@ -11,7 +11,7 @@ import SectionsEditor from './SectionsEditor';
 import RichView from '../../UI/RichView';
 import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
 import { useAuth } from '../../../contexts/AuthContext';
-import { SectionHeader } from '../../UI/kit';
+import { SectionHeader, KpiTile } from '../../UI/kit';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -115,12 +115,10 @@ const ScriptModal = ({ script, categories, onClose, onSave }) => {
   );
 };
 
-const StatTile = ({ label, value, color, active, onClick }) => (
-  <button onClick={onClick} className="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
-    style={{ backgroundColor: active ? color : 'var(--color-surface)', border: `1px solid ${active ? color : 'var(--color-border)'}`, boxShadow: active ? 'var(--shadow-md)' : 'none' }}>
-    <span className="text-2xl font-bold" style={{ color: active ? 'white' : 'var(--color-text)' }}>{value}</span>
-    <span className="text-xs font-semibold uppercase tracking-wide text-left leading-tight" style={{ color: active ? 'rgba(255,255,255,0.85)' : 'var(--color-text-secondary)' }}>{label}</span>
-  </button>
+// Audience filter tiles use the shared KpiTile (tone-mapped, so no per-audience
+// hex leaks in here). `active` = this filter is applied.
+const StatTile = ({ label, value, tone, active, onClick }) => (
+  <KpiTile label={label} value={value} tone={tone} active={active} onClick={onClick} className="min-w-[150px]" />
 );
 
 // ── Main manager (standalone scripts) ────────────────────────────────────────
@@ -163,10 +161,10 @@ const ScriptManager = () => {
       {error && <Alert type="error" message={error} />}
 
       <div className="flex flex-wrap gap-2.5">
-        <StatTile label="Total Scripts" value={counts.total} color="var(--color-primary-600)" active={audience === ''} onClick={() => setAudience('')} />
-        <StatTile label="Closers"  value={counts.closer}  color={AUDIENCE_META.closer.color}  active={audience === 'closer'}  onClick={() => setAudience('closer')} />
-        <StatTile label="Fronters" value={counts.fronter} color={AUDIENCE_META.fronter.color} active={audience === 'fronter'} onClick={() => setAudience('fronter')} />
-        <StatTile label="Both"     value={counts.both}    color={AUDIENCE_META.both.color}    active={audience === 'both'}    onClick={() => setAudience('both')} />
+        <StatTile label="Total Scripts" value={counts.total} tone="primary" active={audience === ''} onClick={() => setAudience('')} />
+        <StatTile label="Closers"  value={counts.closer}  tone="info"     active={audience === 'closer'}  onClick={() => setAudience('closer')} />
+        <StatTile label="Fronters" value={counts.fronter} tone="warn"    active={audience === 'fronter'} onClick={() => setAudience('fronter')} />
+        <StatTile label="Both"     value={counts.both}    tone="success" active={audience === 'both'}    onClick={() => setAudience('both')} />
       </div>
 
       <CategoryFilterBar categories={catHook.categories} value={categoryId} onChange={setCategoryId} onManage={() => setCatModal(true)} />
