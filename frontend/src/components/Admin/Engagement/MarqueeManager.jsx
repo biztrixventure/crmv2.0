@@ -7,7 +7,7 @@ import MarqueeStrip from '../../Engagement/MarqueeStrip';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { useAuth } from '../../../contexts/AuthContext';
-import { Loading } from '../../UI/kit';
+import { Loading, SectionHeader } from '../../UI/kit';
 
 const blank = { byline: '📢 NEWS:', content: '', speed: 'normal', bg_color: '#1e40af', text_color: '#ffffff', target_company_ids: [], target_roles: [], target_user_ids: [], starts_at: '', ends_at: '', is_active: true };
 
@@ -90,13 +90,9 @@ const MarqueeManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 relative overflow-hidden flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5"><Radio size={22} className="text-white" /><div>
-          <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Marquee</h2>
-          <p className="text-sm text-white/80">Scrolling banners shown at the top of the app.</p>
-        </div></div>
-        {roControlAllowed('marquee.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Marquee</Button>}
-      </div>
+      <SectionHeader level="page" icon={Radio} title="Marquee"
+        subtitle="Scrolling banners shown at the top of the app."
+        actions={roControlAllowed('marquee.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Marquee</Button>} />
 
       {error && <Alert type="error" message={error} />}
 

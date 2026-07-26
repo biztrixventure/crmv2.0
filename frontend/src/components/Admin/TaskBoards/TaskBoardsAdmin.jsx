@@ -3,7 +3,7 @@ import { LayoutGrid, Plus, Copy, ExternalLink, Trash2, Archive, ArchiveRestore, 
 import { toast } from 'sonner';
 import { Button } from '../../UI';
 import client from '../../../api/client';
-import { Loading } from '../../UI/kit';
+import { Loading, SectionHeader } from '../../UI/kit';
 
 // Superadmin manager for Kanban task boards (kan.bn-style). Create a board, get
 // a shareable no-login link, hand it to whoever needs to add tasks. The board
@@ -32,15 +32,8 @@ export default function TaskBoardsAdmin() {
 
   return (
     <div className="space-y-5 w-full">
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <LayoutGrid size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Task Boards</h2>
-            <p className="text-sm text-white/80">Temporary, no-login Kanban boards for coordinating CRM changes. Create one, share the link — anyone with it can add tasks, images, and annotations. No account needed.</p>
-          </div>
-        </div>
-      </div>
+      <SectionHeader level="page" icon={LayoutGrid} title="Task Boards"
+        subtitle="Temporary, no-login Kanban boards for coordinating CRM changes. Create one, share the link — anyone with it can add tasks, images, and annotations. No account needed." />
 
       <div className="rounded-2xl p-4 flex items-end gap-2 flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex-1 min-w-[220px]">

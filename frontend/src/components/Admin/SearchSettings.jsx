@@ -2,22 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Check, X, Loader2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
-import { Loading } from '../UI/kit';
+import { Loading, SectionHeader } from '../UI/kit';
 
 // Superadmin search tooling: manage synonym groups (query expansion) that make
 // FAQ/Script search match related terms.
 const SearchSettings = ({ embedded = false }) => (
   <div className={`space-y-5 ${embedded ? '' : 'animate-fade-in max-w-5xl'}`}>
     {!embedded && (
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center gap-2.5">
-          <Search size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Search Settings</h2>
-            <p className="text-sm text-white/80">Tune FAQ &amp; Script search relevance with synonyms.</p>
-          </div>
-        </div>
-      </div>
+      <SectionHeader level="page" icon={Search} title="Search Settings"
+        subtitle="Tune FAQ & Script search relevance with synonyms." />
     )}
     <SynonymsManager />
   </div>

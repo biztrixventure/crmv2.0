@@ -3,6 +3,7 @@ import { Car, Plus, Trash2, Loader2, Search, ChevronRight, Pencil, Check, X } fr
 import { Button, Alert } from '../../UI';
 import HideDeleteMenu from '../../UI/HideDeleteMenu';
 import client from '../../../api/client';
+import { SectionHeader } from '../../UI/kit';
 
 // Tiny inline-edit pill — click pencil, edit, Enter/click-check to save,
 // Escape/click-X to cancel. Keeps the row layout the same width so the
@@ -158,18 +159,13 @@ const VehicleManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5">
-          <Car size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Vehicles</h2>
-            <p className="text-sm text-white/80">Paste a CSV of makes; click a make to paste its models. Forms will use these for typeaheads.</p>
-          </div>
-        </div>
-        <span className="text-xs text-white/70">
-          {makes.length} makes · {makes.reduce((n, m) => n + (m.models?.length || 0), 0)} models
-        </span>
-      </div>
+      <SectionHeader level="page" icon={Car} title="Vehicles"
+        subtitle="Paste a CSV of makes; click a make to paste its models. Forms will use these for typeaheads."
+        actions={
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            {makes.length} makes · {makes.reduce((n, m) => n + (m.models?.length || 0), 0)} models
+          </span>
+        } />
 
       {err && <Alert type="error" message={err} />}
 

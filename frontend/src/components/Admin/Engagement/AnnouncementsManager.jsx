@@ -8,7 +8,7 @@ import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { useAuth } from '../../../contexts/AuthContext';
-import { Loading } from '../../UI/kit';
+import { Loading, SectionHeader } from '../../UI/kit';
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -109,15 +109,11 @@ const AnnouncementsManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 relative overflow-hidden flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5"><Megaphone size={22} className="text-white" /><div>
-          <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Announcements</h2>
-          <p className="text-sm text-white/80">Broadcast messages to everyone, roles, companies, or specific users.</p>
-        </div></div>
-        {roControlAllowed('announcements.add') && (
+      <SectionHeader level="page" icon={Megaphone} title="Announcements"
+        subtitle="Broadcast messages to everyone, roles, companies, or specific users."
+        actions={roControlAllowed('announcements.add') && (
           <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New Announcement</Button>
-        )}
-      </div>
+        )} />
 
       {error && <Alert type="error" message={error} />}
 

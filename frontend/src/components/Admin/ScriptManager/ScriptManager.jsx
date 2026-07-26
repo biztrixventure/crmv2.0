@@ -11,6 +11,7 @@ import SectionsEditor from './SectionsEditor';
 import RichView from '../../UI/RichView';
 import { useCategories, CategoryPicker, CategoryChips, CategoryFilterBar, CategoryManagerModal } from '../shared/CategorySystem';
 import { useAuth } from '../../../contexts/AuthContext';
+import { SectionHeader } from '../../UI/kit';
 
 const AUDIENCE_META = {
   closer:  { label: 'Closer',  color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', icon: Headphones },
@@ -151,23 +152,13 @@ const ScriptManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <MessageSquareText size={22} className="text-white" />
-              <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Scripts</h2>
-            </div>
-            <p className="text-sm text-white/80 max-w-lg">Standalone call scripts agents read during calls, scoped by role.</p>
-          </div>
+      <SectionHeader icon={MessageSquareText} title="Scripts" subtitle="Standalone call scripts agents read during calls, scoped by role." actions={<>
           {roControlAllowed('scripts.add') && (
             <Button variant="primary" onClick={() => setModal({ script: null })} className="flex items-center gap-1.5 flex-shrink-0 self-start lg:self-auto">
               <Plus size={16} /> Add Script
             </Button>
           )}
-        </div>
-        <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, white, transparent 70%)' }} />
-      </div>
+        </>} />
 
       {error && <Alert type="error" message={error} />}
 
