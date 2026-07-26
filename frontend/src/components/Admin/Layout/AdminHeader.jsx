@@ -101,7 +101,7 @@ const AdminHeader = ({
             onClick={() => setProfileOpen(true)}
             className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all group"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-primary-50, #f5f3ff)'; e.currentTarget.style.borderColor = 'var(--color-primary-300)'; }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-primary-50)'; e.currentTarget.style.borderColor = 'var(--color-primary-300)'; }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
             title="View profile"
           >
@@ -111,7 +111,7 @@ const AdminHeader = ({
                 {initials}
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full"
-                style={{ backgroundColor: '#22c55e', border: '2px solid var(--color-surface)' }} />
+                style={{ backgroundColor: 'var(--color-success-500)', border: '2px solid var(--color-surface)' }} />
             </div>
             <div className="text-right">
               <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--color-text)' }}>

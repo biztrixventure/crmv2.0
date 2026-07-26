@@ -50,6 +50,7 @@ import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import client from "../api/client";
 import DotGridBg from "../components/UI/DotGridBg";
+import { Loading } from "../components/UI/kit";
 
 // ============================================================================
 // AdminPanel — main component
@@ -170,7 +171,7 @@ const AdminPanel = () => {
 
         <main className="flex-1 overflow-auto relative z-10">
           {activeTab === 'forms' ? (
-            <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <Suspense fallback={<div className="px-4 sm:px-6 lg:px-8 xl:px-10 py-6"><Loading variant="rows" rows={6} label="Loading form builder…" /></div>}>
               <FormBuilder />
             </Suspense>
           ) : activeTab === 'companies' ? (
@@ -183,7 +184,10 @@ const AdminPanel = () => {
             // strands empty margins on wide monitors. Individual panels lay
             // their own content out in grids so the space is used, not stretched.
             (() => {
-              const wrap = 'px-4 sm:px-6 lg:px-8 py-5 w-full';
+              // Same responsive padding as the Compliance shell, so every admin
+              // tab sits on the identical page rhythm. Surfaces must NOT add
+              // their own p-6/max-w — this wrapper is the single source.
+              const wrap = 'px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 w-full';
               return (
                 <div className={wrap}>
                   {/* One read-only alert on EVERY admin tab, toggleable by the

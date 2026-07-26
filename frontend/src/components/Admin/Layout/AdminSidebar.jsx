@@ -157,7 +157,7 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
                       {badge > 0 && (
                         <span className="text-xs font-bold px-1.5 py-0.5 rounded-full min-w-5 text-center"
                           style={{
-                            backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : '#ef4444',
+                            backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : 'var(--color-error-500)',
                             color: 'white',
                           }}>
                           {badge}

@@ -140,7 +140,7 @@ export default function UserControlCenter() {
               body scrolls underneath. Opaque bg so scrolled content hides
               behind it; the negative margins bleed it to the AdminPanel
               wrapper's padding edges, so they track that padding scale. */}
-          <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 pt-1 pb-3"
+          <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 xl:-mx-10 xl:px-10 pt-1 pb-3"
             style={{ background: 'var(--color-bg)', boxShadow: '0 10px 20px -18px rgba(0,0,0,0.35)' }}>
 
             {/* Identity header */}
