@@ -1,28 +1,39 @@
 // AccountSection — profile edit (reuses UserForm → PUT /users/:assignmentId) +
 // account actions (reset password, send reset link, impersonate, activate/
 // deactivate, delete). All actions hit the existing audited /users endpoints.
+//
+// UI from components/UI/kit (docs/ui-design-system.md). This tab previously had
+// NO loading state at all — it now shows the same skeleton every other tab uses
+// while the role list the profile form needs is loading.
 import { useState, useEffect } from 'react';
-import { KeyRound, Send, LogIn, Power, Trash2, Loader2 } from 'lucide-react';
+import { KeyRound, Send, LogIn, Power, Trash2, UserCog, Wrench } from 'lucide-react';
 import client from '../../../api/client';
 import { Button, Alert } from '../../../components/UI';
+import { SectionHeader, Loading, EmptyState, ActionRow, useFlash, accent } from '../../UI/kit';
 import UserForm from '../UserManagement/UserForm';
 
 export default function AccountSection({ account, assignment, onChanged }) {
   const [roles, setRoles]     = useState([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
   const [busy, setBusy]       = useState(null);   // which action is running
-  const [msg, setMsg]         = useState(null);   // { type, text }
+  const { msg, flash, clear } = useFlash();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
-    if (!assignment?.company_id) { setRoles([]); return; }
+    if (!assignment?.company_id) { setRoles([]); setRolesLoading(false); return; }
+    let alive = true;
+    setRolesLoading(true);
     client.get('roles', { params: { company_id: assignment.company_id, for_assignment: true } })
-      .then(r => setRoles(r.data.roles || [])).catch(() => setRoles([]));
+      .then(r => { if (alive) setRoles(r.data.roles || []); })
+      .catch(() => { if (alive) setRoles([]); })
+      .finally(() => { if (alive) setRolesLoading(false); });
+    return () => { alive = false; };
   }, [assignment?.company_id]);
 
-  const flash = (type, text) => { setMsg({ type, text }); setTimeout(() => setMsg(null), 5000); };
-
-  if (!assignment) return <div className="text-sm text-text-secondary py-8 text-center">No company assignment to edit.</div>;
+  if (!assignment) {
+    return <EmptyState icon={UserCog} title="No company assignment to edit" hint="Assign this user to a company on the Companies & Role tab first." />;
+  }
 
   // Save profile via the existing PUT /users/:id (assignment id).
   const saveProfile = async (payload) => {
@@ -79,30 +90,37 @@ export default function AccountSection({ account, assignment, onChanged }) {
     finally { setBusy(null); }
   };
 
+  const danger = accent('danger');
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       {/* Profile form (reused) */}
       <div>
-        <h3 className="text-sm font-bold text-text mb-3">Profile · {assignment.company_name || '—'}</h3>
-        {msg && <div className="mb-3"><Alert type={msg.type}>{msg.text}</Alert></div>}
-        <UserForm user={assignment} onSubmit={saveProfile} isLoading={saving} roles={roles} />
+        <SectionHeader icon={UserCog} title={`Profile · ${assignment.company_name || '—'}`} />
+        {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
+        {rolesLoading
+          ? <Loading variant="rows" rows={6} label="Loading profile…" />
+          : <UserForm user={assignment} onSubmit={saveProfile} isLoading={saving} roles={roles} />}
       </div>
 
       {/* Account actions */}
       <div>
-        <h3 className="text-sm font-bold text-text mb-3">Account actions</h3>
+        <SectionHeader icon={Wrench} title="Account actions" />
         <div className="space-y-2.5">
-          <ActionBtn icon={KeyRound} label="Reset password" hint="Set a new password directly" onClick={resetPassword} busy={busy === 'password'} />
-          <ActionBtn icon={Send} label="Send reset link" hint="Email a recovery / set-password link" onClick={sendResetLink} busy={busy === 'link'} />
-          <ActionBtn icon={LogIn} label="Impersonate (login as)" hint="Open a one-time login link in a new tab" onClick={impersonate} busy={busy === 'impersonate'} />
-          <ActionBtn icon={Power} label={assignment.is_active ? 'Deactivate' : 'Reactivate'} hint={assignment.is_active ? 'Block this assignment from logging in' : 'Restore access'} onClick={toggleActive} busy={busy === 'active'}
-            tone={assignment.is_active ? 'warn' : 'ok'} />
+          <ActionRow icon={KeyRound} label="Reset password" hint="Set a new password directly" onClick={resetPassword} busy={busy === 'password'} />
+          <ActionRow icon={Send} label="Send reset link" hint="Email a recovery / set-password link" onClick={sendResetLink} busy={busy === 'link'} />
+          <ActionRow icon={LogIn} label="Impersonate (login as)" hint="Open a one-time login link in a new tab" onClick={impersonate} busy={busy === 'impersonate'} />
+          <ActionRow icon={Power}
+            label={assignment.is_active ? 'Deactivate' : 'Reactivate'}
+            hint={assignment.is_active ? 'Block this assignment from logging in' : 'Restore access'}
+            onClick={toggleActive} busy={busy === 'active'}
+            tone={assignment.is_active ? 'warn' : 'success'} />
           <div className="pt-2 mt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
             {!confirmDelete ? (
-              <ActionBtn icon={Trash2} label="Delete user" hint="Removes auth login + deactivates assignment" onClick={() => setConfirmDelete(true)} tone="danger" />
+              <ActionRow icon={Trash2} label="Delete user" hint="Removes auth login + deactivates assignment" onClick={() => setConfirmDelete(true)} tone="danger" />
             ) : (
-              <div className="rounded-lg p-3" style={{ background: 'var(--color-error-50, rgba(239,68,68,0.08))', border: '1px solid var(--color-error-500)' }}>
-                <p className="text-xs font-semibold mb-2" style={{ color: 'var(--color-error-600)' }}>Delete {account.email}? This removes their auth login.</p>
+              <div className="rounded-xl p-3" style={{ background: danger.soft, border: `1px solid ${danger.fg}` }}>
+                <p className="text-xs font-semibold mb-2" style={{ color: danger.fg }}>Delete {account.email}? This removes their auth login.</p>
                 <div className="flex gap-2">
                   <Button size="sm" variant="danger" loading={busy === 'delete'} onClick={doDelete}>Yes, delete</Button>
                   <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)}>Cancel</Button>
@@ -113,20 +131,5 @@ export default function AccountSection({ account, assignment, onChanged }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function ActionBtn({ icon: Icon, label, hint, onClick, busy, tone = 'default' }) {
-  const color = tone === 'danger' ? 'var(--color-error-600)' : tone === 'warn' ? 'var(--color-warning-600)' : tone === 'ok' ? 'var(--color-success-600)' : 'var(--color-text)';
-  return (
-    <button onClick={onClick} disabled={busy}
-      className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors disabled:opacity-60"
-      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-      {busy ? <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color }} /> : <Icon size={16} className="flex-shrink-0" style={{ color }} />}
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold" style={{ color }}>{label}</span>
-        <span className="block text-[11px] text-text-secondary truncate">{hint}</span>
-      </span>
-    </button>
   );
 }

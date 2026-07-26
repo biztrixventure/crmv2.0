@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShieldCheck, ShieldX, Shield, Save, Loader, Search, RotateCcw, Check, X, Zap, Layers, Users, Eye, BookmarkPlus, ChevronUp, ChevronDown, MessageSquare } from 'lucide-react';
+import { ShieldCheck, ShieldX, Shield, Save, Search, RotateCcw, Check, X, Zap, Layers, Users, Eye, BookmarkPlus, ChevronUp, ChevronDown, MessageSquare } from 'lucide-react';
 import { Button, Alert } from '../../../components/UI';
 import { usePermissions } from '../../../hooks/usePermissions';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
+import { Loading } from '../../UI/kit';
 
 const AREA_LABEL = {
   sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
@@ -226,9 +227,7 @@ const UserPermissionsPanel = ({ user }) => {
     }
   };
 
-  if (loading || permsLoading) {
-    return <div className="flex items-center justify-center py-12 gap-3 text-text-secondary"><Loader size={20} className="animate-spin" /><span>Loading access settings…</span></div>;
-  }
+  if (loading || permsLoading) return <Loading variant="rows" rows={7} label="Loading access settings…" />;
 
   const q = search.trim().toLowerCase();
   const matchP = (p) => !q || p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q) || pretty(p.name).toLowerCase().includes(q);
@@ -251,15 +250,15 @@ const UserPermissionsPanel = ({ user }) => {
         <Shield size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
         <span style={{ color: 'var(--color-text-secondary)' }}>
           Base access = role <strong style={{ color: 'var(--color-text)' }}>{user.role}</strong> + company features. Toggle anything below to
-          <strong style={{ color: '#16a34a' }}> enable</strong> or <strong style={{ color: '#dc2626' }}> disable</strong> it for <strong style={{ color: 'var(--color-text)' }}>{[user.first_name, user.last_name].filter(Boolean).join(' ') || 'this user'}</strong> only.
+          <strong style={{ color: 'var(--color-success-600)' }}> enable</strong> or <strong style={{ color: 'var(--color-error-600)' }}> disable</strong> it for <strong style={{ color: 'var(--color-text)' }}>{[user.first_name, user.last_name].filter(Boolean).join(' ') || 'this user'}</strong> only.
           “Default” inherits the role/company.
         </span>
       </div>
 
       {(bypassRole || readonlyRole) && (
-        <div className="rounded-xl p-3 text-sm flex items-start gap-2" style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a' }}>
-          <ShieldX size={15} className="mt-0.5 flex-shrink-0" style={{ color: '#d97706' }} />
-          <span style={{ color: '#92400e' }}>
+        <div className="rounded-xl p-3 text-sm flex items-start gap-2" style={{ backgroundColor: 'var(--color-warning-50)', border: '1px solid var(--color-warning-200)' }}>
+          <ShieldX size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning-600)' }} />
+          <span style={{ color: 'var(--color-warning-700)' }}>
             {bypassRole
               ? 'This user is a Superadmin — they bypass all permission and feature checks, so overrides here have no effect.'
               : 'This user is a Readonly Admin — they have broad read access by design; overrides may have limited effect.'}
@@ -280,10 +279,10 @@ const UserPermissionsPanel = ({ user }) => {
                 <div key={u.user_id} className="flex items-center justify-between px-4 py-2 text-sm">
                   <span style={{ color: 'var(--color-text)' }}>{u.name}{u.user_id === user.user_id && <span style={{ color: 'var(--color-primary-600)' }}> · this user</span>}</span>
                   <span className="flex gap-2 text-xs font-semibold">
-                    {u.grants > 0 && <span style={{ color: '#16a34a' }}>+{u.grants}</span>}
-                    {u.revokes > 0 && <span style={{ color: '#dc2626' }}>−{u.revokes}</span>}
-                    {u.features > 0 && <span style={{ color: '#7c3aed' }}>{u.features} feat</span>}
-                    {u.record_views > 0 && <span style={{ color: '#6366f1' }}>{u.record_views} view{u.record_views !== 1 ? 's' : ''}</span>}
+                    {u.grants > 0 && <span style={{ color: 'var(--color-success-600)' }}>+{u.grants}</span>}
+                    {u.revokes > 0 && <span style={{ color: 'var(--color-error-600)' }}>−{u.revokes}</span>}
+                    {u.features > 0 && <span style={{ color: 'var(--color-primary-600)' }}>{u.features} feat</span>}
+                    {u.record_views > 0 && <span style={{ color: 'var(--color-info-600)' }}>{u.record_views} view{u.record_views !== 1 ? 's' : ''}</span>}
                   </span>
                 </div>
               ))}
@@ -307,15 +306,15 @@ const UserPermissionsPanel = ({ user }) => {
         {diag && !diag.loading && (
           <div className="mt-2 text-xs space-y-1">
             {diag.error ? (
-              <p style={{ color: '#dc2626' }}>{diag.error}</p>
+              <p style={{ color: 'var(--color-error-600)' }}>{diag.error}</p>
             ) : (
               <>
                 {!diag.migrations_applied && (
-                  <p className="font-semibold" style={{ color: '#dc2626' }}>
+                  <p className="font-semibold" style={{ color: 'var(--color-error-600)' }}>
                     ✗ Missing flags in catalog: {diag.missing_flags?.join(', ')} — apply migrations 126–129 in Supabase.
                   </p>
                 )}
-                <p style={{ color: diag.resolved?.custom_workspace === true ? '#16a34a' : '#dc2626' }}>
+                <p style={{ color: diag.resolved?.custom_workspace === true ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>
                   custom_workspace resolves: <strong>{String(diag.resolved?.custom_workspace)}</strong>
                 </p>
                 <p style={{ color: 'var(--color-text-tertiary)' }}>{diag.hint}</p>
@@ -352,8 +351,8 @@ const UserPermissionsPanel = ({ user }) => {
             ))}
           </ThemedSelect>
         )}
-        <button onClick={() => bulkAll('on')}  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#bbf7d0', color: '#16a34a' }}><Check size={12} /> Grant all perms</button>
-        <button onClick={() => bulkAll('off')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: '#fecaca', color: '#dc2626' }}><X size={12} /> Revoke all</button>
+        <button onClick={() => bulkAll('on')}  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-success-200)', color: 'var(--color-success-600)' }}><Check size={12} /> Grant all perms</button>
+        <button onClick={() => bulkAll('off')} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-error-200)', color: 'var(--color-error-600)' }}><X size={12} /> Revoke all</button>
         <button onClick={clearAll}             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} title="Clear ALL overrides (perms + features) back to defaults"><RotateCcw size={12} /> Reset all</button>
       </div>
 
@@ -377,9 +376,9 @@ const UserPermissionsPanel = ({ user }) => {
 
       <div className="flex flex-wrap gap-2 text-xs">
         <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{effGranted}/{allPermList.length} options enabled</span>
-        {grantCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: '#dcfce7', color: '#166534' }}><Zap size={10} className="inline" /> {grantCount} granted</span>}
-        {revokeCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}>{revokeCount} revoked</span>}
-        {featOvCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: '#ede9fe', color: '#5b21b6' }}>{featOvCount} feature override{featOvCount !== 1 ? 's' : ''}</span>}
+        {grantCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-success-50)', color: 'var(--color-success-700)' }}><Zap size={10} className="inline" /> {grantCount} granted</span>}
+        {revokeCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)' }}>{revokeCount} revoked</span>}
+        {featOvCount > 0 && <span className="px-2 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-700)' }}>{featOvCount} feature override{featOvCount !== 1 ? 's' : ''}</span>}
         {overrideCount === 0 && featOvCount === 0 && <span className="px-2 py-1 rounded-full" style={{ color: 'var(--color-text-tertiary)' }}>No overrides — all defaults</span>}
       </div>
 
@@ -397,20 +396,20 @@ const UserPermissionsPanel = ({ user }) => {
               const ov = featOv[f.key];
               return (
                 <div key={f.key} className="flex items-center gap-3 px-4 py-2.5">
-                  {on ? <ShieldCheck size={15} className="flex-shrink-0" style={{ color: '#16a34a' }} />
-                      : <ShieldX size={15} className="flex-shrink-0" style={{ color: '#9ca3af' }} />}
+                  {on ? <ShieldCheck size={15} className="flex-shrink-0" style={{ color: 'var(--color-success-600)' }} />
+                      : <ShieldX size={15} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{f.label || pretty(f.key)}</p>
                     <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{f.description || f.key}</p>
                   </div>
                   <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
-                    style={{ backgroundColor: featCompany[f.key] ? '#dcfce7' : 'var(--color-bg-secondary)', color: featCompany[f.key] ? '#166534' : 'var(--color-text-tertiary)', border: `1px solid ${featCompany[f.key] ? '#bbf7d0' : 'var(--color-border)'}` }}>
+                    style={{ backgroundColor: featCompany[f.key] ? 'var(--color-success-50)' : 'var(--color-bg-secondary)', color: featCompany[f.key] ? 'var(--color-success-700)' : 'var(--color-text-tertiary)', border: `1px solid ${featCompany[f.key] ? 'var(--color-success-200)' : 'var(--color-border)'}` }}>
                     {featCompany[f.key] ? 'company ✓' : 'company ✗'}
                   </span>
                   <TriPill value={ov === undefined ? 'default' : ov} options={[
                     { label: 'Default', value: 'default' },
-                    { label: 'On',  value: true,  color: '#16a34a' },
-                    { label: 'Off', value: false, color: '#dc2626' },
+                    { label: 'On',  value: true,  color: 'var(--color-success-600)' },
+                    { label: 'Off', value: false, color: 'var(--color-error-600)' },
                   ].map(o => ({ ...o, color: o.color || 'var(--color-text-secondary)' }))}
                     onChange={(v) => setOneFeat(f.key, v === 'default' ? undefined : v)} />
                 </div>
@@ -445,7 +444,7 @@ const UserPermissionsPanel = ({ user }) => {
                 {n === 0 ? 'All' : `Last ${n}`}
               </button>
             ))}
-            {chatLimitMsg && <span className="text-xs font-semibold" style={{ color: chatLimitMsg.type === 'ok' ? '#16a34a' : '#dc2626' }}>{chatLimitMsg.text}</span>}
+            {chatLimitMsg && <span className="text-xs font-semibold" style={{ color: chatLimitMsg.type === 'ok' ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{chatLimitMsg.text}</span>}
           </div>
         </div>
       )}
@@ -463,11 +462,11 @@ const UserPermissionsPanel = ({ user }) => {
                 {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
                 <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{areaLabel(category)}</span>
                 <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{visible.length}</span>
-                {ovc > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: '#ede9fe', color: '#5b21b6' }}>{ovc}</span>}
+                {ovc > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-700)' }}>{ovc}</span>}
               </button>
               <div className="flex items-center gap-1">
-                <button onClick={() => bulkGroup(perms, 'on')}      className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: '#16a34a' }}>Grant all</button>
-                <button onClick={() => bulkGroup(perms, 'off')}     className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: '#dc2626' }}>Revoke all</button>
+                <button onClick={() => bulkGroup(perms, 'on')}      className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: 'var(--color-success-600)' }}>Grant all</button>
+                <button onClick={() => bulkGroup(perms, 'off')}     className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: 'var(--color-error-600)' }}>Revoke all</button>
                 <button onClick={() => bulkGroup(perms, 'default')} className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: 'var(--color-text-secondary)' }}>Reset</button>
               </div>
             </div>
@@ -478,20 +477,20 @@ const UserPermissionsPanel = ({ user }) => {
                 const ov = overrides[perm.name] ?? null;
                 return (
                   <div key={perm.id} className="flex items-center gap-3 px-4 py-2.5">
-                    {on ? <ShieldCheck size={15} className="flex-shrink-0" style={{ color: '#16a34a' }} />
-                        : <ShieldX size={15} className="flex-shrink-0" style={{ color: '#9ca3af' }} />}
+                    {on ? <ShieldCheck size={15} className="flex-shrink-0" style={{ color: 'var(--color-success-600)' }} />
+                        : <ShieldX size={15} className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{perm.description || pretty(perm.name)}</p>
                       <p className="text-[11px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>{perm.name}</p>
                     </div>
                     <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
-                      style={{ backgroundColor: hasRole ? '#dcfce7' : 'var(--color-bg-secondary)', color: hasRole ? '#166534' : 'var(--color-text-tertiary)', border: `1px solid ${hasRole ? '#bbf7d0' : 'var(--color-border)'}` }}>
+                      style={{ backgroundColor: hasRole ? 'var(--color-success-50)' : 'var(--color-bg-secondary)', color: hasRole ? 'var(--color-success-700)' : 'var(--color-text-tertiary)', border: `1px solid ${hasRole ? 'var(--color-success-200)' : 'var(--color-border)'}` }}>
                       {hasRole ? 'role ✓' : 'role ✗'}
                     </span>
                     <TriPill value={ov === null ? 'default' : ov} options={[
                       { label: 'Default', value: 'default', color: 'var(--color-text-secondary)' },
-                      { label: '+ Grant',  value: 'grant',  color: '#16a34a', toggleOff: 'default' },
-                      { label: '− Revoke', value: 'revoke', color: '#dc2626', toggleOff: 'default' },
+                      { label: '+ Grant',  value: 'grant',  color: 'var(--color-success-600)', toggleOff: 'default' },
+                      { label: '− Revoke', value: 'revoke', color: 'var(--color-error-600)', toggleOff: 'default' },
                     ]} onChange={(v) => setOnePerm(perm.name, v === 'default' ? null : v)} />
                   </div>
                 );

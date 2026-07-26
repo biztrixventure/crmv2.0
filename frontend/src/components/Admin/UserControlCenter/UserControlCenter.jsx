@@ -11,17 +11,21 @@
 // a GET /users list row, so the existing embeddable panels (UserPermissionsPanel,
 // UserRecordViewsPanel, UserForm) work unchanged when handed one assignment.
 // The company switcher chooses which assignment the company-scoped tabs act on.
+//
+// UI: composed from components/UI/kit (see docs/ui-design-system.md) so this tab
+// looks like the Compliance shell and like every other admin tab. No local
+// padding/max-width — the AdminPanel wrapper owns page padding.
 // ============================================================================
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
-  Lock, Activity, Download, Loader2, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
+  Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
-import { Badge } from '../../../components/UI';
+import { Badge, Alert } from '../../../components/UI';
 import ThemedSelect from '../../UI/Select';
-import ChromeTabs from '../../UI/ChromeTabs';
+import { Panel, SectionHeader, Loading, EmptyState, PillTabs, Field } from '../../UI/kit';
 import UserDirectory from './UserDirectory';
 import UserPermissionsPanel from '../UserManagement/UserPermissionsPanel';
 import UserRecordViewsPanel from '../UserManagement/UserRecordViewsPanel';
@@ -97,57 +101,50 @@ export default function UserControlCenter() {
   const visibleTabs      = TABS.filter(t => !t.qaOnly || isQaUser);
   const initials = (account?.first_name?.[0] || account?.email?.[0] || '?').toUpperCase();
 
+  // Shared secondary-button styling for the header actions.
+  const btn = 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold';
+  const btnStyle = { background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' };
+
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
-      {/* ── Title ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-text flex items-center gap-2">
-            <UserCog size={24} style={{ color: 'var(--color-primary-600)' }} />
-            User Control Center
-          </h1>
-          <p className="text-sm text-text-secondary mt-0.5">Every control for one user — account, role, permissions, teams, dialer, governance, egress, activity.</p>
-        </div>
-        {account && (
-          <div className="flex items-center gap-2">
-            <button onClick={() => { setPicked(null); setData(null); }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
-              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+    <div>
+      <SectionHeader
+        level="page"
+        icon={UserCog}
+        title="User Control Center"
+        subtitle="Every control for one user — account, role, permissions, teams, dialer, governance, egress, activity."
+        actions={account && (
+          <>
+            <button onClick={() => { setPicked(null); setData(null); }} className={btn} style={btnStyle}>
               <ArrowLeft size={14} /> Directory
             </button>
-            <button onClick={reload} disabled={loading}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
-              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+            <button onClick={reload} disabled={loading} className={btn} style={btnStyle}>
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Reload
             </button>
-          </div>
+          </>
         )}
-      </div>
+      />
 
       {/* ── Step 1: pick a user (company → role → user directory) ──────────── */}
       {!account && !loading && (
         <UserDirectory onSelect={(uid) => setPicked({ id: uid })} />
       )}
 
-      {error && (
-        <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: 'var(--color-error-50, rgba(239,68,68,0.08))', border: '1px solid var(--color-error-500)', color: 'var(--color-error-600)' }}>{error}</div>
-      )}
+      {error && <div className="mb-4"><Alert type="error" onDismiss={() => setError(null)}>{error}</Alert></div>}
 
-      {loading && !data && (
-        <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
-      )}
+      {loading && !data && <Loading variant="rows" rows={5} label="Loading user…" />}
 
       {/* ── Step 2: detail ────────────────────────────────────────────────── */}
       {account && (
         <>
-          {/* Sticky zone: identity header + segmented tab bar stay pinned while
-              the tab body scrolls underneath. Opaque bg so scrolled content
-              hides behind it; -mx-6/px-6 bleeds it to the container edges. */}
-          <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-3"
+          {/* Sticky zone: identity header + tab bar stay pinned while the tab
+              body scrolls underneath. Opaque bg so scrolled content hides
+              behind it; the negative margins bleed it to the AdminPanel
+              wrapper's padding edges, so they track that padding scale. */}
+          <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 pt-1 pb-3"
             style={{ background: 'var(--color-bg)', boxShadow: '0 10px 20px -18px rgba(0,0,0,0.35)' }}>
 
             {/* Identity header */}
-            <div className="rounded-2xl p-4 mb-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <Panel className="mb-3">
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 overflow-hidden"
                   style={{ background: 'var(--gradient-sidebar, var(--color-primary-600))' }}>
@@ -168,14 +165,13 @@ export default function UserControlCenter() {
 
                 {/* Company-context switcher — drives the company-scoped tabs */}
                 {assignments.length > 1 && (
-                  <div className="flex-shrink-0">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-text-secondary block mb-1">Company context</label>
+                  <Field label="Company context" className="flex-shrink-0">
                     <ThemedSelect value={activeId || ''} onChange={e => setActiveId(e.target.value)} className="input min-w-[200px]">
                       {assignments.map(a => (
                         <option key={a.id} value={a.id}>{a.company_name || '—'} · {prettyRole(a.role_level)}{a.is_active ? '' : ' (inactive)'}</option>
                       ))}
                     </ThemedSelect>
-                  </div>
+                  </Field>
                 )}
               </div>
 
@@ -194,42 +190,40 @@ export default function UserControlCenter() {
                   </button>
                 ))}
               </div>
-            </div>
+            </Panel>
 
-            {/* Minimal pill sub-tabs (matches the Compliance shell sub-nav) */}
-            <ChromeTabs
-              variant="pill"
-              size="sm"
+            {/* Sub-nav — the one pill tab bar (matches the Compliance sub-nav) */}
+            <PillTabs
               value={tab}
               onChange={setTab}
               items={visibleTabs.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
             />
           </div>
 
-          {/* Tab body — clean standalone rounded card */}
-          <div className="rounded-2xl p-5 min-h-[300px] mt-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          {/* Tab body — one standalone page card */}
+          <Panel pad="lg" className="min-h-[300px] mt-3">
             {tab === 'account'      && <AccountSection account={account} assignment={activeAssignment} onChanged={reload} />}
             {tab === 'companies'    && <CompaniesRoleSection account={account} assignments={assignments} onChanged={reload} onPick={setActiveId} />}
             {tab === 'permissions'  && (activeAssignment
               ? <UserPermissionsPanel user={activeAssignment} />
-              : <Empty text="No company assignment to scope permissions to." />)}
+              : <NoAssignment hint="Permissions are scoped to a company — assign this user to one on the Companies & Role tab first." />)}
             {tab === 'teams'        && (activeAssignment
               ? <TeamSection account={account} assignment={activeAssignment} />
-              : <Empty text="No company assignment." />)}
+              : <NoAssignment />)}
             {tab === 'vicidial'     && <VicidialSection account={account} onChanged={reload} />}
             {tab === 'record_views' && (activeAssignment
               ? <UserRecordViewsPanel user={activeAssignment} />
-              : <Empty text="No company assignment." />)}
+              : <NoAssignment />)}
             {tab === 'client_access' && (activeAssignment
               ? <ClientAccessSection account={account} assignment={activeAssignment} />
-              : <Empty text="No company assignment." />)}
+              : <NoAssignment />)}
             {tab === 'qa'           && (activeAssignment
               ? <QaSection account={account} assignment={activeAssignment} />
-              : <Empty text="No company assignment." />)}
+              : <NoAssignment />)}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}
-          </div>
+          </Panel>
         </>
       )}
 
@@ -237,6 +231,12 @@ export default function UserControlCenter() {
   );
 }
 
-function Empty({ text }) {
-  return <div className="text-center py-12 text-sm text-text-secondary">{text}</div>;
+function NoAssignment({ hint }) {
+  return (
+    <EmptyState
+      icon={Building2}
+      title="No company assignment"
+      hint={hint || 'Assign this user to a company on the Companies & Role tab first.'}
+    />
+  );
 }

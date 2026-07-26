@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Info, RotateCcw } from 'lucide-react';
 import client from '../../../api/client';
+import { Loading, accent } from '../../UI/kit';
 import DrawerLayoutRules from '../BusinessRules/DrawerLayoutRules';
 import { clearDrawerLayoutCache } from '../../../hooks/useDrawerLayout';
 import RecordViewTemplates from './RecordViewTemplates';
@@ -34,9 +35,7 @@ export default function UserRecordViewsPanel({ user }) {
     }
   };
 
-  if (loading) {
-    return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>;
-  }
+  if (loading) return <Loading variant="rows" rows={4} label="Loading record views…" />;
 
   const userName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email || 'this user';
   const uid = user.user_id || user.id;
@@ -77,7 +76,7 @@ export default function UserRecordViewsPanel({ user }) {
           </button>
         </div>
       )}
-      {msg && <p className="text-xs mb-2 font-semibold" style={{ color: msg.type === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.text}</p>}
+      {msg && <p className="text-xs mb-2 font-semibold" style={{ color: accent(msg.type === 'ok' ? 'success' : 'danger').fg }}>{msg.text}</p>}
       <RecordViewTemplates uid={uid} userRole={userRole} userName={userName} companyId={user.company_id} config={config} onApplied={load} />
       <DrawerLayoutRules config={config} scope="global" userId={uid} userName={userName} userRole={userRole} onSave={save} />
     </div>
