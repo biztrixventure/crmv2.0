@@ -3,6 +3,7 @@ import { Tag, Plus, Trash2, Loader2, Search, ChevronRight, Save, Briefcase, Link
 import { Button, Alert } from '../../UI';
 import HideDeleteMenu from '../../UI/HideDeleteMenu';
 import client from '../../../api/client';
+import { SectionHeader } from '../../UI/kit';
 
 // ClientPlanManager — Admin → Clients. Two-column layout that mirrors the
 // VehicleManager pattern: the left column holds clients (paste CSV to add,
@@ -193,18 +194,13 @@ const ClientPlanManager = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="rounded-2xl p-6 flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="flex items-center gap-2.5">
-          <Tag size={22} className="text-white" />
-          <div>
-            <h2 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Clients &amp; Plans</h2>
-            <p className="text-sm text-white/80">Paste a CSV of clients; click a client to pick which plans appear when it's selected on the form.</p>
-          </div>
-        </div>
-        <span className="text-xs text-white/70">
-          {clients.length} clients · {plans.length} plans · {totalMappings} mappings
-        </span>
-      </div>
+      <SectionHeader level="page" icon={Tag} title="Clients & Plans"
+        subtitle="Paste a CSV of clients; click a client to pick which plans appear when it's selected on the form."
+        actions={
+          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            {clients.length} clients · {plans.length} plans · {totalMappings} mappings
+          </span>
+        } />
 
       {err && <Alert type="error" message={err} />}
 

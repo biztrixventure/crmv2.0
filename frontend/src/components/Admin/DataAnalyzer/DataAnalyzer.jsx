@@ -832,53 +832,53 @@ const DataAnalyzer = () => {
     <div className="space-y-5 animate-fade-in">
       {showSend && <SendBatchModal dataset={dataset} filters={payload} onClose={() => setShowSend(false)} />}
       {/* Header — stacks on mobile so the title + button row don't fight for room. */}
-      <div className="rounded-2xl p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3" style={{ background: 'var(--gradient-sidebar)' }}>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-1">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Database size={22} className="text-white flex-shrink-0" />
+          <Database size={22} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
           <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold text-white truncate" style={{ fontFamily: 'var(--font-display)' }}>Data Analyzer</h2>
-            <p className="text-xs sm:text-sm text-white/80">Filter, aggregate, group and export across every form field.</p>
+            <h2 className="text-xl sm:text-2xl font-bold truncate" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>Data Analyzer</h2>
+            <p className="text-xs sm:text-sm" style={{ color: 'var(--color-text-secondary)' }}>Filter, aggregate, group and export across every form field.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Dataset toggle */}
-          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.3)' }}>
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
             {Object.entries(DATASETS).map(([key, d]) => {
               const Icon = d.icon;
               const on = dataset === key;
               return (
                 <button key={key} onClick={() => setDataset(key)}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold transition-colors"
-                  style={{ backgroundColor: on ? 'white' : 'transparent', color: on ? 'var(--color-primary-700)' : 'white' }}>
+                  style={{ backgroundColor: on ? 'var(--color-primary-600)' : 'transparent', color: on ? '#fff' : 'var(--color-text-secondary)' }}>
                   <Icon size={13} /> {d.label}
                 </button>
               );
             })}
           </div>
-          <button onClick={reset} className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white">
+          <button onClick={reset} className="px-3 py-2 rounded-lg text-xs font-bold" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
             Clear ({activeCount})
           </button>
           {roControlAllowed('data-analyzer.save_preset') && (
           <button onClick={savePreset} title="Save current filters as a preset"
-            className="px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white flex items-center gap-1">
+            className="px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
             <BookmarkPlus size={13} /> Preset
           </button>
           )}
           {roExportAllowed('data_analyzer') && (
           <button onClick={exportCsv} disabled={exporting || loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/90 hover:bg-white text-primary-700 disabled:opacity-50">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-50" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}>
             {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} CSV
           </button>
           )}
           {roControlAllowed('data-analyzer.send_batch') && (
           <button onClick={() => setShowSend(true)} disabled={loading} title="Distribute this result as a batch"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/20 hover:bg-white/30 text-white disabled:opacity-50">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-50" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
             <Send size={13} /> Send batch
           </button>
           )}
           {roControlAllowed('data-analyzer.run_query') && (
           <button onClick={() => run(1)} disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-white text-primary-700 disabled:opacity-50">
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50" style={{ background: 'var(--color-primary-600)' }}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Run query
           </button>
           )}

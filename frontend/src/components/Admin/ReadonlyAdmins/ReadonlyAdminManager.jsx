@@ -8,6 +8,7 @@ import {
   RO_ELIGIBLE_TABS, RO_PARITY_TAB_IDS, RO_DEFAULT_TAB_IDS, ADMIN_TAB_GROUPS, groupedRoTabs,
 } from '../../../config/adminTabs';
 import { ADMIN_CONTROLS, ALL_CONTROL_KEYS, groupedControls } from '../../../config/adminControls';
+import { SectionHeader, Loading } from '../../UI/kit';
 
 /*
  * ReadonlyAdminManager — SuperAdmin control center for every readonly_admin.
@@ -206,28 +207,22 @@ export default function ReadonlyAdminManager() {
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
       {/* Hero */}
-      <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'var(--gradient-sidebar)' }}>
-        <div className="relative z-10 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <Shield size={22} className="text-white" />
-            <div>
-              <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Readonly Admins</h2>
-              <p className="text-sm text-white/80">
-                Full SuperAdmin visibility, zero writes — governed per person: tabs, companies, masked fields, exports, copy-lock, and an activity log.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: 'white' }}>{list.length} active</span>
-            <button onClick={() => setShowDefaults(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border" style={{ borderColor: 'rgba(255,255,255,0.4)', color: 'white', background: 'rgba(255,255,255,0.12)' }}>
+      <SectionHeader level="page" icon={Shield} title="Readonly Admins"
+        subtitle="Full SuperAdmin visibility, zero writes — governed per person: tabs, companies, masked fields, exports, copy-lock, and an activity log."
+        actions={
+          <>
+            <span className="px-2.5 py-1 rounded-lg text-xs font-bold"
+              style={{ background: 'color-mix(in srgb, var(--color-primary-600) 12%, transparent)', color: 'var(--color-primary-600)' }}>{list.length} active</span>
+            <button onClick={() => setShowDefaults(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-surface)' }}>
               <Sliders size={14} /> Role defaults
             </button>
-            <button onClick={() => setShowCreate(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border" style={{ borderColor: 'rgba(255,255,255,0.4)', color: 'white', background: 'rgba(255,255,255,0.12)' }}>
+            <button onClick={() => setShowCreate(s => !s)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+              style={{ background: 'var(--color-primary-600)' }}>
               <Plus size={14} /> {showCreate ? 'Close' : 'Add'}
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        } />
 
       <div className="rounded-xl p-3 text-xs flex items-start gap-2" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
         <Info size={13} className="flex-shrink-0 mt-0.5" />
@@ -281,7 +276,7 @@ export default function ReadonlyAdminManager() {
 
       {/* List */}
       <div className="space-y-3">
-        {loading && <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>}
+        {loading && <Loading variant="rows" rows={4} label="Loading readonly admins…" />}
         {!loading && list.length === 0 && (
           <p className="text-sm text-center py-6 italic" style={{ color: 'var(--color-text-secondary)' }}>No readonly admins yet. Use Add above or set the <code>READONLY_ADMIN_EMAIL</code> env var.</p>
         )}
