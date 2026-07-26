@@ -177,7 +177,7 @@ const StaffShell = () => {
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   // Per-user client access: restrict the client dropdown to this user's allowed
   // clients (null/absent = unrestricted → full list, unchanged for everyone else).
-  const allowedClientNames = Array.isArray(user?.client_access) ? user.client_access : null;
+  const allowedClientNames = (Array.isArray(user?.client_access) && user.client_access.length) ? user.client_access : null;
   const visibleSaleClients = allowedClientNames ? saleClients.filter(c => allowedClientNames.includes(c.value)) : saleClients;
   const notifHook = useNotifications();
 

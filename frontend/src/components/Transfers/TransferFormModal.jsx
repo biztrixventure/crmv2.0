@@ -220,7 +220,7 @@ const TransferFormModal = ({
                           // Per-user client access: restrict to the signed-in user's
                           // allowed clients (null = unrestricted). Current value is
                           // always kept so editing an existing transfer never loses it.
-                          const allowedCl = Array.isArray(user?.client_access) ? user.client_access : null;
+                          const allowedCl = (Array.isArray(user?.client_access) && user.client_access.length) ? user.client_access : null;
                           const visClients = allowedCl ? saleClients.filter(c => allowedCl.includes(c.value)) : saleClients;
                           const staleCl = val && !visClients.some(c => c.value === val);
                           input = (

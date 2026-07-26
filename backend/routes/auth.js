@@ -144,7 +144,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const clientAccessRaw = await require('../utils/businessConfig').getConfig(null, `client_access.${userId}`, null);
   res.json({
     id: userId,
-    client_access: Array.isArray(clientAccessRaw) ? clientAccessRaw : null,
+    client_access: (Array.isArray(clientAccessRaw) && clientAccessRaw.length) ? clientAccessRaw : null,
     email: req.user.email,
     role: roleLevel,
     role_name: ur.custom_roles.name,
@@ -335,7 +335,7 @@ router.post(
           first_name: profile?.first_name,
           last_name: profile?.last_name,
           permissions: userPermissions,
-          client_access: Array.isArray(clientAccessLogin) ? clientAccessLogin : null,
+          client_access: (Array.isArray(clientAccessLogin) && clientAccessLogin.length) ? clientAccessLogin : null,
           export_perms,
         },
       });

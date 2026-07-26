@@ -127,7 +127,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   // current value is always preserved via StaleOption, so editing an old sale
   // whose client is now outside the list never loses data.
   const { user: authUser } = useAuth();
-  const allowedClientNames = Array.isArray(authUser?.client_access) ? authUser.client_access : null;
+  const allowedClientNames = (Array.isArray(authUser?.client_access) && authUser.client_access.length) ? authUser.client_access : null;
   const visibleClients = allowedClientNames ? clients.filter(c => allowedClientNames.includes(c.value)) : clients;
   const { fields, loading: fieldsLoading, fetchFields } = useFormFields();
   const { years: vehicleYears } = useVehicleYearRange();

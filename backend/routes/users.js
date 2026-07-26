@@ -1671,7 +1671,7 @@ router.get('/:userId/client-access', asyncHandler(async (req, res) => {
   if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Superadmin access required' });
   const { getConfig } = require('../utils/businessConfig');
   const clients = await getConfig(null, CLIENT_ACCESS_KEY(req.params.userId), null);
-  res.json({ clients: Array.isArray(clients) ? clients : null });   // null = unrestricted
+  res.json({ clients: (Array.isArray(clients) && clients.length) ? clients : null });   // null/[] = unrestricted
 }));
 
 router.put('/:userId/client-access', asyncHandler(async (req, res) => {
@@ -1679,8 +1679,9 @@ router.put('/:userId/client-access', asyncHandler(async (req, res) => {
   const { setConfig } = require('../utils/businessConfig');
   const raw = Array.isArray(req.body?.clients) ? req.body.clients : [];
   const clean = [...new Set(raw.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))];
-  // Empty selection = unrestricted → store null so the form applies no filter.
-  await setConfig('global', CLIENT_ACCESS_KEY(req.params.userId), clean.length ? clean : null, req.user.id);
+  // business_config.value is JSONB NOT NULL — NEVER store null. Empty selection =
+  // unrestricted → store [] (the resolvers/forms treat empty as "no filter").
+  await setConfig('global', CLIENT_ACCESS_KEY(req.params.userId), clean, req.user.id);
   logger.success('CLIENT_ACCESS', `Set client access for ${req.params.userId}: ${clean.length ? clean.length + ' clients' : 'unrestricted'}`);
   res.json({ clients: clean.length ? clean : null });
 }));
