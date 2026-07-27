@@ -10,6 +10,13 @@
 -- dataset IS NULL is the __global scope, so this blocks every data area for
 -- those two roles in one row each.
 --
+-- The button is ALSO gated on the staff_export feature flag, seeded below as
+-- disabled. Two independent gates on purpose: the frontend uses
+-- isEnabledStrict, which is false for a flag missing from this catalog, so the
+-- surface stays off even if this migration is never applied. (Plain isEnabled
+-- returns TRUE for unknown keys — using it here would have shipped the export
+-- switched ON.)
+--
 -- Migration 209 replaced the 3-column UNIQUE on egress_limits with a FUNCTIONAL
 -- unique index over COALESCE(dataset,'*'). ON CONFLICT cannot target a
 -- functional index, which is why this is a guarded INSERT rather than an upsert
@@ -28,6 +35,14 @@ WHERE NOT EXISTS (
     AND e.action_type = 'csv_export'
     AND e.dataset IS NULL
 );
+
+-- The feature-flag half of the gate. Seeded DISABLED so it shows up in the
+-- admin Feature Flags list as an explicit off switch rather than an absence.
+INSERT INTO feature_flags (key, label, description, is_enabled) VALUES
+  ('staff_export', 'Staff CSV export',
+   'Lets closers and fronters export their own sales, transfers and callbacks from StaffShell. Off by default; the role or the individual user must also be allowed in Data Egress → Export access.',
+   false)
+ON CONFLICT (key) DO NOTHING;
 
 -- Verify:
 --   SELECT scope_type, scope_id, dataset, export_blocked

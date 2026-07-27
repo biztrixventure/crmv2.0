@@ -919,10 +919,16 @@ const StaffShell = () => {
               <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>
             </p>
           </div>
-          {/* Staff export ships blocked for closer + fronter (migration 215), so
-              canExport is false for both and this renders nothing until a
-              superadmin enables it per role or per person in Data Egress. */}
-          {(canExport('sales') || canExport('transfers') || canExport('callbacks')) && (
+          {/* Default-OFF, two independent ways, because either one alone can be
+              missed: isEnabledStrict is FALSE for a flag that is not in the DB
+              catalog (plain isEnabled returns TRUE for unknown keys, which would
+              have shipped this surface switched ON before migration 215 was
+              applied), and 215 also blocks csv_export for the closer + fronter
+              roles so canExport is false even once the flag exists. A superadmin
+              turns on the flag, then grants the role or the person in
+              Data Egress → Export access. */}
+          {isEnabledStrict('staff_export')
+            && (canExport('sales') || canExport('transfers') || canExport('callbacks')) && (
             <button onClick={() => setExportOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition-colors self-start sm:self-auto flex-shrink-0"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
