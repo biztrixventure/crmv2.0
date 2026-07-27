@@ -1415,15 +1415,20 @@ select optgroup {
     min-height: 44px;
   }
 
-  /* Icon-only buttons — the row edit/delete/menu actions. A measured sweep of
-     the admin found ~2,900 of them rendering at ~26px (p-1.5 around a 14px
-     icon), which is the single most-tapped control in the product and the one
-     hardest to hit.
+  /* Buttons whose only ELEMENT child is an icon — the row edit/delete/menu
+     actions. A measured sweep found them rendering at 21–27px (p-1.5 or p-0.5
+     around a 14px icon); they are the most-tapped controls in the product and
+     the hardest to hit. Measured effect: FAQs 120 buttons 27x27 -> 44x44,
+     Clients & Plans 52 at 21x21, Scripts 6.
 
-     `:has(> svg:only-child)` is the precise test for "this button is nothing
-     but an icon", so buttons with a text label keep their own padding and
-     nothing reflows. Inline-flex + centering so the icon stays optically
-     centred in the larger box rather than pinned top-left. */
+     Note `svg:only-child` tests for the only ELEMENT child, not the absence of
+     text — so a button like <button><Icon/>Save</button> matches too and gets
+     the same 44px floor (measured: 34px -> 44px). That is intended on touch,
+     where 34px is under the minimum either way; it is called out because the
+     selector reads narrower than it behaves.
+
+     Inline-flex + centering so the icon stays optically centred in the larger
+     box instead of pinned to the top-left. */
   button:has(> svg:only-child) {
     min-width: 44px;
     min-height: 44px;
