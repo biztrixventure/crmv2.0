@@ -3,7 +3,8 @@ import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, T
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
-import { DATASETS, CONFIGURABLE_DATASETS, columnLabel, defaultColumnsForRole } from '../../../utils/exportSpec';
+import { DATASETS, CONFIGURABLE_DATASETS, columnLabel, defaultColumnsForRole, FORM_FIELD_PREFIX, FORM_DATA_DATASETS } from '../../../utils/exportSpec';
+import ColumnArranger from './ColumnArranger';
 import ThemedDate from '../../UI/ThemedDate';
 import { SectionHeader, PillTabs, Loading, KpiTile, Field } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
@@ -411,8 +412,12 @@ function FieldsTab() {
   const [dataset, setDataset] = useState('sales');
   const [role, setRole] = useState('closer');
   const [scopeType, setScopeType] = useState('role');   // export-columns scope: role | user
-  const [colUser, setColUser] = useState(null);          // { id, name } when scopeType==='user'
-  const [cols, setCols] = useState(null);        // null = all (unconfigured)
+  const [colUser, setColUser] = useState(null);          // { id, name, role } when scopeType==='user'
+  // ORDERED list of column keys. null = unconfigured. Order matters: it is the
+  // left-to-right column order of the exported file (resolveColumns maps the
+  // saved array in order), which is what the drag-and-drop arranger edits.
+  const [cols, setCols] = useState(null);
+  const [formFields, setFormFields] = useState([]);
   const [shell, setShell] = useState('compliance');
   const [layout, setLayout] = useState({ page_size: '', default_view: '' });
   const cat = EXPORT_DATASETS[dataset];
@@ -421,8 +426,14 @@ function FieldsTab() {
     if (scopeType === 'user' && !colUser) { setCols(null); return; }
     const params = scopeType === 'user' ? { dataset, userId: colUser.id } : { dataset, role };
     client.get('egress/columns', { params })
-      .then(r => setCols(Array.isArray(r.data.columns) ? new Set(r.data.columns) : null)).catch(() => setCols(null));
+      .then(r => setCols(Array.isArray(r.data.columns) ? r.data.columns : null)).catch(() => setCols(null));
   }, [dataset, role, scopeType, colUser]);
+  // The live form-field catalog widens the pool beyond the fixed columns: any
+  // form field can be added as `fd:<name>`, and the exporter synthesizes it, so
+  // these are real controls rather than decoration.
+  useEffect(() => {
+    client.get('forms/fields').then(r => setFormFields(r.data.fields || [])).catch(() => setFormFields([]));
+  }, []);
   useEffect(() => {
     client.get('egress/list-layout', { params: { shell, role } })
       .then(r => setLayout(r.data.layout || { page_size: '', default_view: '' })).catch(() => setLayout({}));
@@ -435,21 +446,28 @@ function FieldsTab() {
   // fallback: a compliance manager's sale export is 12 columns, the fallback is
   // 9, and saving from the wrong baseline would silently narrow their file.
   const defaultCols = useMemo(
-    () => new Set(defaultColumnsForRole(dataset, scopeType === 'role' ? role : colUser?.role)),
+    () => defaultColumnsForRole(dataset, scopeType === 'role' ? role : colUser?.role),
     [dataset, role, scopeType, colUser],
   );
-  const isOn = (field) => (cols == null ? defaultCols.has(field) : cols.has(field));
+  // What the file contains right now: the saved order, or this role's default.
+  const effectiveCols = cols == null ? defaultCols : cols;
 
-  const toggleCol = (field) => {
-    setCols(prev => {
-      const next = new Set(prev == null ? defaultCols : prev);   // seeds from today's real columns
-      next.has(field) ? next.delete(field) : next.add(field);
-      return next;
-    });
-  };
+  // The pool the arranger offers = the dataset's fixed columns PLUS every live
+  // form field (as fd:<name>) for datasets whose rows carry form_data. A form
+  // field is only offered where the exporter can actually read it.
+  const poolColumns = useMemo(() => {
+    const base = (cat.fields || []).map(k => ({ key: k, label: labelFor(dataset, k), group: 'standard' }));
+    if (!FORM_DATA_DATASETS.includes(dataset)) return base;
+    const seen = new Set(base.map(c => c.key));
+    const extra = (formFields || [])
+      .map(f => ({ key: `${FORM_FIELD_PREFIX}${f.name}`, label: f.label || f.name, group: 'form field' }))
+      .filter(c => !seen.has(c.key));
+    return [...base, ...extra];
+  }, [cat, dataset, formFields]);
+
   const saveCols = async () => {
     if (scopeType === 'user' && !colUser) { toast.error('Pick a user first'); return; }
-    const arr = cols == null ? null : [...cols];
+    const arr = cols == null ? null : cols;
     const body = scopeType === 'user' ? { dataset, userId: colUser.id, columns: arr } : { dataset, role, columns: arr };
     try { await client.put('egress/columns', body); toast.success(`Export columns saved${scopeType === 'user' ? ` for ${colUser.name}` : ''}`); }
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
@@ -459,7 +477,10 @@ function FieldsTab() {
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
 
-  const previewFields = cat.fields.length ? cat.fields.filter(isOn) : [];
+  // The preview IS the arranged order, not the catalog order — otherwise the
+  // "exactly how the file looks" claim would be false the moment you reorder.
+  const previewFields = cat.fields.length ? effectiveCols : [];
+  const previewLabel = (k) => poolColumns.find(c => c.key === k)?.label || k;
   const uuidField = cat.fields.includes('customer_uuid');
   const uuidShown = previewFields.includes('customer_uuid');
 
@@ -490,31 +511,21 @@ function FieldsTab() {
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>The Data Analyzer has dynamic columns — its export field-selection is label-based and configured directly on the analyzer’s output (not a fixed catalog).</p>
         ) : (
           <>
-            <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'}. {cols == null && <b>Unconfigured — showing the columns this export writes today.</b>}</p>
-            {/* One column below sm: at 390 two cells cannot hold checkbox +
-                label + the raw key, and the key clipped mid-word into the
-                neighbouring cell. */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
-              {cat.fields.map(field => {
-                const on = isOn(field);
-                const sens = /uuid|phone|email|vin|payment/i.test(field) || field === 'customer_name';
-                // Checked state is a TINT of the accent, not the --color-primary-50
-                // step: the -50 scales stay light under the dark theme while the
-                // text token flips to near-white, which measured 1.15:1 at 390 in
-                // dark — invisible. color-mix composites over whatever the surface
-                // is, so the selection reads in both themes.
-                return (
-                  <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'color-mix(in srgb, var(--color-primary-600) 18%, transparent)' : 'transparent', border: `1px solid ${on ? 'color-mix(in srgb, var(--color-primary-600) 45%, transparent)' : 'var(--color-border)'}` }}>
-                    <input type="checkbox" checked={on} onChange={() => toggleCol(field)} className="flex-shrink-0" />
-                    <span className="flex-1 min-w-0 truncate leading-none">{labelFor(dataset, field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
-                    <code className="text-[11px] sm:text-[9px] leading-none truncate max-w-[45%] flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
-                  </label>
-                );
-              })}
+            <p className="text-xs mb-2 m-0" style={{ color: 'var(--color-text-secondary)' }}>
+              Drag to set the order of the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'} — the top row is the first column.
+              {' '}{cols == null && <b>Unconfigured — showing the columns this export writes today.</b>}
+            </p>
+            <div className="mb-3">
+              <ColumnArranger
+                columns={poolColumns}
+                value={effectiveCols}
+                onChange={setCols}
+                sensitive={(k) => /uuid|phone|email|vin|payment/i.test(k) || k === 'customer_name'}
+              />
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button onClick={saveCols} className="text-sm font-bold px-3 py-1.5 rounded-lg text-white flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)' }}><Check size={13} /> Save columns</button>
-              {cols != null && <button onClick={() => setCols(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>Reset to all</button>}
+              {cols != null && <button onClick={() => setCols(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>Revert to the default set</button>}
             </div>
           </>
         )}
@@ -559,7 +570,7 @@ function FieldsTab() {
                   <tr style={{ background: 'var(--color-bg-secondary)' }}>
                     {previewFields.map(f => (
                       <th key={f} className="px-3 py-2 text-left whitespace-nowrap font-bold" style={{ borderRight: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
-                        {labelFor(dataset, f)}{(/uuid|phone|email|vin|payment/i.test(f) || f === 'customer_name') && <span title="Sensitive / PII" style={{ color: '#d97706' }}> •</span>}
+                        {previewLabel(f)}{(/uuid|phone|email|vin|payment/i.test(f) || f === 'customer_name') && <span title="Sensitive / PII" style={{ color: '#d97706' }}> •</span>}
                       </th>
                     ))}
                   </tr>
@@ -571,7 +582,12 @@ function FieldsTab() {
             </TableScroll>
             <div className="mt-2 rounded-lg p-2 overflow-x-auto" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
               <div className="text-[11px] sm:text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RAW CSV HEADER (column keys as written to the file)</div>
-              <code className="text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{previewFields.join(',')}</code>
+              {/* The header actually written. A form-field column stores as
+                  fd:<name> but writes the bare field name, so strip the prefix
+                  here rather than showing a header the file never contains. */}
+              <code className="text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
+                {previewFields.map(f => (f.startsWith(FORM_FIELD_PREFIX) ? f.slice(FORM_FIELD_PREFIX.length) : f)).join(',')}
+              </code>
             </div>
             {uuidField && (
               <p className="text-xs mt-2 flex items-start gap-1.5" style={{ color: uuidShown ? 'var(--color-warning-700,#b45309)' : 'var(--color-text-secondary)' }}>

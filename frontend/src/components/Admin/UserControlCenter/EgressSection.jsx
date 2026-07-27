@@ -15,7 +15,7 @@
 // global scope (never the strings '__all'/'__global').
 //
 // UI from components/UI/kit (docs/ui-design-system.md).
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Download, Save, Trash2, Columns3, RotateCcw, Sliders } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
@@ -24,7 +24,8 @@ import { Panel, SectionHeader, Loading, CheckRow, Field, useFlash, accent } from
 // Single source of truth for the export field catalog — shared with the canonical
 // Data Egress screen so the two never drift (no duplicated hardcoded list).
 import { EXPORT_DATASETS, labelFor } from '../EgressGovernance/EgressGovernance';
-import { defaultColumnsForRole } from '../../../utils/exportSpec';
+import ColumnArranger from '../EgressGovernance/ColumnArranger';
+import { defaultColumnsForRole, FORM_FIELD_PREFIX, FORM_DATA_DATASETS } from '../../../utils/exportSpec';
 
 const AREA_LABEL = {
   __global: 'All exports', sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
@@ -289,9 +290,14 @@ function ColumnsCard({ userId, role, onErr, onOk }) {
   // Only datasets that have a fixed field catalog (data_analyzer is dynamic → skip).
   const datasets = Object.keys(EXPORT_DATASETS).filter(k => (EXPORT_DATASETS[k].fields || []).length);
   const [ds, setDs] = useState(datasets[0]);
-  const [selected, setSelected] = useState(null);   // null = all columns
+  const [selected, setSelected] = useState(null);   // null = unconfigured; else ORDERED keys
+  const [formFields, setFormFields] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    client.get('forms/fields').then(r => setFormFields(r.data.fields || [])).catch(() => setFormFields([]));
+  }, []);
 
   const load = useCallback(async (dataset) => {
     setLoading(true);
@@ -303,17 +309,23 @@ function ColumnsCard({ userId, role, onErr, onOk }) {
 
   const fields = EXPORT_DATASETS[ds]?.fields || [];
   // Unconfigured means "whatever this export writes today", NOT every catalog
-  // column — seeding an edit from the real defaults keeps a save from silently
-  // widening this person's export.
-  // THIS user's role, not the generic fallback — a compliance manager's sale
-  // export is 12 columns where the fallback is 9, and seeding an edit from the
-  // wrong baseline would silently narrow their file on the first save.
+  // column. THIS user's role, not the generic fallback — a compliance manager's
+  // sale export is 12 columns where the fallback is 9, and seeding an edit from
+  // the wrong baseline would mis-set their file on the first save.
   const defaults = defaultColumnsForRole(ds, role);
-  const isOn = (f) => selected == null ? defaults.includes(f) : selected.includes(f);
-  const toggle = (f) => {
-    const base = selected == null ? [...defaults] : selected;
-    setSelected(base.includes(f) ? base.filter(x => x !== f) : [...base, f]);
-  };
+  const effective = selected == null ? defaults : selected;
+
+  // The pool also offers every live form field as fd:<name> for datasets whose
+  // rows carry form_data — the exporter synthesizes those columns, so they are
+  // real controls and not decoration.
+  const pool = useMemo(() => {
+    const base = fields.map(k => ({ key: k, label: labelFor(ds, k), group: 'standard' }));
+    if (!FORM_DATA_DATASETS.includes(ds)) return base;
+    const seen = new Set(base.map(c => c.key));
+    return [...base, ...(formFields || [])
+      .map(f => ({ key: `${FORM_FIELD_PREFIX}${f.name}`, label: f.label || f.name, group: 'form field' }))
+      .filter(c => !seen.has(c.key))];
+  }, [fields, ds, formFields]);
   const save = async (cols) => {
     setSaving(true);
     try { await client.put('egress/columns', { dataset: ds, userId, columns: cols }); setSelected(cols); onOk('Columns saved.'); }
@@ -332,16 +344,20 @@ function ColumnsCard({ userId, role, onErr, onOk }) {
           </ThemedSelect>
         }
       />
-      <p className="text-[11px] text-text-secondary mb-2">{selected == null ? `Unconfigured — this user gets their role's export (${defaults.length} columns, shown checked).` : `${selected.length} of ${fields.length} columns.`}</p>
+      <p className="text-[11px] text-text-secondary mb-2 m-0">{selected == null ? `Unconfigured — this user gets their role's export (${defaults.length} columns). Drag to reorder; the top row is the first column.` : `${selected.length} columns, in this order.`}</p>
       {loading ? <Loading variant="rows" rows={3} label="Loading columns…" /> : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-56 overflow-y-auto">
-            {fields.map(f => (
-              <CheckRow key={f} checked={isOn(f)} onChange={() => toggle(f)} label={labelFor(ds, f)} />
-            ))}
-          </div>
-          <div className="flex items-center gap-2 mt-3">
-            <button onClick={() => save(selected == null ? fields : selected)} disabled={saving}
+          <ColumnArranger
+            columns={pool}
+            value={effective}
+            onChange={setSelected}
+            sensitive={(k) => /uuid|phone|email|vin|payment/i.test(k) || k === 'customer_name'}
+          />
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            {/* save(effective), NOT save(fields): with nothing configured this
+                used to write the ENTIRE catalog, so one click on an untouched
+                card silently widened the person's export to every column. */}
+            <button onClick={() => save(effective)} disabled={saving}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
               {saving ? <Loading variant="inline" size={14} /> : <Save size={14} />} Save columns
             </button>

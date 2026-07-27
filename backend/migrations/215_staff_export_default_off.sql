@@ -38,10 +38,18 @@ WHERE NOT EXISTS (
 
 -- The feature-flag half of the gate. Seeded DISABLED so it shows up in the
 -- admin Feature Flags list as an explicit off switch rather than an absence.
-INSERT INTO feature_flags (key, label, description, is_enabled) VALUES
+--
+-- Column note: 020 created feature_flags with an is_enabled column, but 021
+-- DROPped and recreated the table as a pure CATALOG — per-company state moved to
+-- company_feature_flags.is_enabled, and the catalog carries default_enabled /
+-- category / sort_order instead. Writing is_enabled here fails with 42703.
+-- No company_feature_flags rows are seeded on purpose: routes/featureFlags.js
+-- resolves `override ?? default_enabled`, so with no override this key is false
+-- for every company, which is the intended off-everywhere state.
+INSERT INTO feature_flags (key, label, description, category, default_enabled, sort_order) VALUES
   ('staff_export', 'Staff CSV export',
    'Lets closers and fronters export their own sales, transfers and callbacks from StaffShell. Off by default; the role or the individual user must also be allowed in Data Egress → Export access.',
-   false)
+   'admin', false, 20)
 ON CONFLICT (key) DO NOTHING;
 
 -- Verify:

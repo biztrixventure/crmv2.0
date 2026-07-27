@@ -288,6 +288,32 @@ export const DATASETS = {
 // honour them — the same mistake the old EXPORT_DATASETS literal made.)
 export const CONFIGURABLE_DATASETS = Object.keys(DATASETS);
 
+// ── form-field columns ───────────────────────────────────────────────────────
+// A column the admin added from the live form_fields catalog, stored as
+// `fd:<field name>`. These are SYNTHESIZED at export time, so a surface does not
+// have to fetch the form catalog for an added field to produce a value — which
+// is what makes the "add a field that isn't part of this role" control real
+// rather than a checkbox that quietly does nothing.
+//
+// The header is the raw field name, matching how form-field keys already travel
+// through the bulk uploader.
+export const FORM_FIELD_PREFIX = 'fd:';
+export const isFormFieldKey = (k) => typeof k === 'string' && k.startsWith(FORM_FIELD_PREFIX);
+export function formFieldColumn(key, label) {
+  const name = key.slice(FORM_FIELD_PREFIX.length);
+  return {
+    key, label: label || name, headerKey: name, formField: true,
+    get: (row) => {
+      const v = (row?.form_data || {})[name];
+      if (v == null) return '';
+      return typeof v === 'object' ? JSON.stringify(v) : v;
+    },
+  };
+}
+
+// Datasets whose rows carry form_data, so form-field columns can resolve.
+export const FORM_DATA_DATASETS = ['sales', 'transfers'];
+
 export const datasetColumns = (dataset) => DATASETS[dataset]?.columns || [];
 export const columnLabel = (dataset, key) =>
   datasetColumns(dataset).find(c => c.key === key)?.label || key;
@@ -335,7 +361,10 @@ export function resolveColumns(dataset, surfaceId, allowed, extraColumns) {
   const base = surface.columns.length ? surface.columns : extra.map(c => c.key);
   const keys = (Array.isArray(allowed) && allowed.length) ? allowed : base;
   return {
-    columns: keys.map(k => byKey.get(k)).filter(Boolean),
+    // A configured key the catalog doesn't know is a form field if it carries
+    // the fd: prefix — synthesize it. Anything else is stale config and is
+    // dropped, so a rename can never widen the file to a column nothing writes.
+    columns: keys.map(k => byKey.get(k) || (isFormFieldKey(k) ? formFieldColumn(k) : null)).filter(Boolean),
     header: surface.header === 'key' ? 'key' : 'label',
   };
 }
