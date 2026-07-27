@@ -52,6 +52,15 @@ function metaBlock(b, reqUrl) {
     b.meta_keywords ? `<meta name="keywords" content="${esc(b.meta_keywords)}" />` : '',
     `<meta name="theme-color" content="${esc(b.theme_color || '#6E5838')}" />`,
     `<link rel="icon" href="${favicon}" />`,
+    // PWA. The manifest is served by the BACKEND (/manifest.webmanifest) and
+    // built from the same branding row this block reads, so the installed app
+    // and the site can never drift to different names or colours.
+    // Linking it unconditionally is safe — it only makes the app installable,
+    // and nothing installs itself. The service worker stays gated behind the
+    // superadmin's `enabled` switch, which is the part that changes behaviour.
+    `<link rel="manifest" href="/manifest.webmanifest" />`,
+    `<meta name="apple-mobile-web-app-title" content="${esc(b.site_name || 'BizTrix')}" />`,
+    favicon ? `<link rel="apple-touch-icon" href="${favicon}" />` : '',
     `<meta property="og:type" content="${esc(b.og_type || 'website')}" />`,
     b.site_name ? `<meta property="og:site_name" content="${esc(b.site_name)}" />` : '',
     `<meta property="og:title" content="${ogTitle}" />`,
@@ -73,7 +82,8 @@ function render(b, reqUrl) {
     .replace(/<title>[\s\S]*?<\/title>/i, '')
     .replace(/<meta\s+name="description"[^>]*>/i, '')
     .replace(/<meta\s+name="theme-color"[^>]*>/i, '')
-    .replace(/<link\s+rel="icon"[^>]*>/i, '');
+    .replace(/<link\s+rel="icon"[^>]*>/i, '')
+    .replace(/<link\s+rel="manifest"[^>]*>/i, '');
   return html.replace('</head>', `    ${metaBlock(b, reqUrl)}\n  </head>`);
 }
 

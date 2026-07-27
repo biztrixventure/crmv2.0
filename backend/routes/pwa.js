@@ -1,0 +1,297 @@
+// ============================================================================
+// /pwa — Progressive Web App configuration + the push-notification matrix.
+//
+//   GET  /api/pwa/manifest      PUBLIC — the web app manifest, merged with
+//                               Branding. Served as application/manifest+json
+//                               so the browser can install the app.
+//   GET  /api/pwa/public        PUBLIC — the handful of flags the SPA needs
+//                               before it has a token (is the PWA on, versions).
+//   GET  /api/pwa               superadmin — full settings + the event catalog.
+//   PUT  /api/pwa               superadmin — save settings.
+//   GET  /api/pwa/devices       superadmin — subscribed devices.
+//   DELETE /api/pwa/devices/:id superadmin — revoke one device.
+//   POST /api/pwa/test-push     superadmin — send a test push to yourself.
+//
+// Storage: business_config GLOBAL key `pwa` — the same mechanism Branding uses
+// (mig 068), so this needs no migration and no new table.
+//
+// IMPORTANT — why the push defaults are all true. Today notifyUsers() calls
+// sendPushToUsers() unconditionally, so EVERY event already pushes to every
+// subscribed device. Defaulting push:true across the board is therefore what
+// "preserve current behaviour" actually means. The value of this matrix is
+// being able to turn things DOWN and re-target them, not up.
+// ============================================================================
+const express = require('express');
+const { supabaseAdmin } = require('../config/database');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { isSuperAdmin } = require('../models/helpers');
+const { getConfig, setConfig } = require('../utils/businessConfig');
+const { sendPushToUser } = require('../utils/pushService');
+const logger = require('../utils/logger');
+
+const router = express.Router();
+const CONFIG_KEY = 'pwa';
+
+// ─── Event catalog ──────────────────────────────────────────────────────────
+// Single source of truth for what the admin can tune. `id` matches the `type`
+// written to notifications.type and used as the push tag, so the UI, the gate
+// and the stored rows all speak the same vocabulary.
+//
+// `legacyKey` maps an event onto a notification flag that ALREADY gates it in
+// notificationService (there were exactly three). Those keep working as before
+// and this UI becomes another way to set the same value — no silent behaviour
+// change, and no second setting that can disagree with the first.
+const EVENT_CATALOG = [
+  { id: 'transfer_created',      group: 'Transfers',  label: 'Transfer created',        detail: 'A fronter sent a new transfer.' },
+  { id: 'transfer_assigned',     group: 'Transfers',  label: 'Transfer assigned',       detail: 'A transfer landed on a closer.', legacyKey: 'transfer_assigned_notify_closer' },
+  { id: 'transfer_rejected',     group: 'Transfers',  label: 'Transfer rejected',       detail: 'A closer rejected a transfer.',  legacyKey: 'transfer_reject_notify_fronter' },
+  { id: 'transfer_edited',       group: 'Transfers',  label: 'Transfer edited',         detail: 'A transfer was edited after the fact.' },
+  { id: 'transfer_refresh',      group: 'Transfers',  label: 'Duplicate — refreshed',   detail: 'Re-transfer inside the dedup window.' },
+  { id: 'transfer_reengaged',    group: 'Transfers',  label: 'Duplicate — re-engaged',  detail: 'Old lead transferred again.' },
+  { id: 'transfer_sale_overlap', group: 'Transfers',  label: 'Duplicate — sale exists', detail: 'New transfer despite a completed sale.' },
+
+  { id: 'sale_pending_review',   group: 'Sales',      label: 'Sale submitted',           detail: 'A sale entered the compliance queue.' },
+  { id: 'sale_approved',         group: 'Sales',      label: 'Sale approved',            detail: 'Compliance approved a sale.' },
+  { id: 'sale_needs_revision',   group: 'Sales',      label: 'Sale returned',            detail: 'Compliance sent a sale back.' },
+  { id: 'compliance_updated',    group: 'Sales',      label: 'Compliance edited a sale', detail: 'A sale was changed by compliance.' },
+  { id: 'resell_created',        group: 'Sales',      label: 'Resell created',           detail: 'A customer was sold again.', legacyKey: 'resell_notify_compliance' },
+  { id: 'disposition_submitted', group: 'Sales',      label: 'Disposition submitted',    detail: 'A non-sale disposition was logged.' },
+
+  { id: 'callback_due',          group: 'Callbacks',  label: 'Callback due',            detail: 'A scheduled callback came due.' },
+  { id: 'number_claimable',      group: 'Numbers',    label: 'Number claimable',        detail: 'An assigned number became claimable.' },
+  { id: 'chat_message',          group: 'Messaging',  label: 'Chat message',            detail: 'A new chat message arrived.' },
+  { id: 'email_received',        group: 'Messaging',  label: 'Internal email',          detail: 'A new internal email arrived.' },
+];
+
+// Recipient targeting. `roles: null` means "whoever this event already
+// notifies" — the existing routing in notificationService, untouched. Anything
+// else is an explicit override the admin chose.
+const ROLE_CHOICES = [
+  'superadmin', 'readonly_admin', 'compliance_manager',
+  'company_admin', 'operations_manager',
+  'closer_manager', 'fronter_manager', 'manager',
+  'closer', 'fronter',
+];
+
+const defaultEvents = () => Object.fromEntries(
+  EVENT_CATALOG.map(e => [e.id, { inapp: true, push: true, roles: null }]),
+);
+
+// Code defaults — a fresh install behaves exactly like today: the PWA layer is
+// OFF (no service worker at boot, no manifest link) and every event still
+// notifies + pushes exactly the way it already does.
+const DEFAULTS = {
+  enabled: false,
+  install: {
+    name:             '',            // '' → falls back to branding.site_name
+    short_name:       '',
+    description:      '',
+    theme_color:      '',            // '' → branding.theme_color
+    background_color: '#0B1F1A',
+    display:          'standalone',
+    orientation:      'any',
+    start_url:        '/dashboard',
+    scope:            '/',
+    icon_192:         '',
+    icon_512:         '',
+    icon_maskable:    '',
+  },
+  sw: {
+    cache_enabled:    true,
+    cache_version:    1,
+    offline_fallback: true,
+    auto_update:      false,         // false → prompt through the existing UpdateBanner
+  },
+  push: {
+    quiet_hours:         { enabled: false, start: '22:00', end: '07:00' },
+    require_interaction: false,
+    vibrate:             true,
+    urgency:             'high',
+    ttl:                 86400,
+  },
+  events: defaultEvents(),
+};
+
+// Deep-merge saved values over the defaults, so a settings object written
+// before a field existed never renders as undefined in the UI.
+function merge(saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  return {
+    ...DEFAULTS, ...s,
+    install: { ...DEFAULTS.install, ...(s.install || {}) },
+    sw:      { ...DEFAULTS.sw,      ...(s.sw      || {}) },
+    push:    {
+      ...DEFAULTS.push, ...(s.push || {}),
+      quiet_hours: { ...DEFAULTS.push.quiet_hours, ...((s.push || {}).quiet_hours || {}) },
+    },
+    events:  { ...defaultEvents(), ...(s.events || {}) },
+  };
+}
+
+const readSettings = async () => merge(await getConfig(null, CONFIG_KEY, null));
+
+// ─── PUBLIC: manifest ───────────────────────────────────────────────────────
+// Merged with Branding so the installed app carries the same identity as the
+// site — one place to rename the product, not two.
+//
+// Exported standalone (not on the router) because server.js mounts the whole
+// router behind authMiddleware — same split branding.js uses for publicGet.
+const publicManifest = asyncHandler(async (req, res) => {
+  const [pwa, branding] = await Promise.all([
+    readSettings(),
+    getConfig(null, 'branding', {}),
+  ]);
+  const b = branding || {};
+  const i = pwa.install;
+
+  const iconEntry = (url, size, purpose) => url
+    ? [{
+        src:   url,
+        sizes: `${size}x${size}`,
+        type:  url.endsWith('.svg') ? 'image/svg+xml' : 'image/png',
+        ...(purpose ? { purpose } : {}),
+      }]
+    : [];
+
+  const icons = [
+    ...iconEntry(i.icon_192, 192),
+    ...iconEntry(i.icon_512, 512),
+    ...iconEntry(i.icon_maskable, 512, 'maskable'),
+  ];
+  // Always ship at least one icon, or the browser refuses to offer install.
+  if (!icons.length) icons.push({ src: b.favicon_url || '/favicon.svg', sizes: 'any', type: 'image/svg+xml' });
+
+  res.type('application/manifest+json').json({
+    name:             i.name || b.site_name || 'BizTrix CRM',
+    short_name:       i.short_name || (b.site_name || 'BizTrix').split(' ')[0],
+    description:      i.description || b.meta_description || '',
+    start_url:        i.start_url || '/dashboard',
+    scope:            i.scope || '/',
+    display:          i.display || 'standalone',
+    orientation:      i.orientation || 'any',
+    theme_color:      i.theme_color || b.theme_color || '#6E5838',
+    background_color: i.background_color || '#0B1F1A',
+    icons,
+  });
+});
+
+// ─── PUBLIC: the flags the SPA needs before it has a token ──────────────────
+const publicFlags = asyncHandler(async (req, res) => {
+  const s = await readSettings();
+  res.json({
+    enabled:          !!s.enabled,
+    cache_enabled:    !!s.sw.cache_enabled,
+    cache_version:    s.sw.cache_version || 1,
+    auto_update:      !!s.sw.auto_update,
+    offline_fallback: !!s.sw.offline_fallback,
+  });
+});
+
+// ─── superadmin guard ───────────────────────────────────────────────────────
+const superadminOnly = asyncHandler(async (req, res, next) => {
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin only' });
+  next();
+});
+
+// ─── full settings + catalog ────────────────────────────────────────────────
+router.get('/', superadminOnly, asyncHandler(async (req, res) => {
+  res.json({
+    settings: await readSettings(),
+    catalog:  EVENT_CATALOG,
+    roles:    ROLE_CHOICES,
+    vapid_configured: !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+  });
+}));
+
+router.put('/', superadminOnly, asyncHandler(async (req, res) => {
+  const incoming = merge(req.body?.settings);
+  const prev = await readSettings();
+
+  // Bump the cache version when the caching rules change, so clients already
+  // holding an old app shell pick up the new rules instead of sitting on a
+  // stale one forever.
+  if (prev.sw.cache_enabled !== incoming.sw.cache_enabled) {
+    incoming.sw.cache_version = (Number(prev.sw.cache_version) || 1) + 1;
+  }
+  await setConfig(null, CONFIG_KEY, incoming, req.user.id);
+
+  // Keep the three pre-existing notification flags in lockstep, so the older
+  // Business Rules panel and this one can never disagree about one setting.
+  for (const e of EVENT_CATALOG) {
+    if (!e.legacyKey) continue;
+    const ev = incoming.events[e.id];
+    if (ev) await setConfig(null, `notifications.${e.legacyKey}`, !!(ev.inapp || ev.push), req.user.id);
+  }
+
+  logger.info('PWA', `Settings saved by ${req.user.email || req.user.id}`);
+  res.json({ settings: incoming });
+}));
+
+// ─── devices ────────────────────────────────────────────────────────────────
+router.get('/devices', superadminOnly, asyncHandler(async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('push_subscriptions')
+    .select('id, user_id, endpoint, user_agent, created_at')
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const ids = [...new Set((data || []).map(d => d.user_id).filter(Boolean))];
+  let profiles = {};
+  if (ids.length) {
+    const { data: rows } = await supabaseAdmin
+      .from('user_profiles').select('id, email, first_name, last_name').in('id', ids);
+    profiles = Object.fromEntries((rows || []).map(p => [p.id, p]));
+  }
+
+  res.json({
+    devices: (data || []).map(d => {
+      const p = profiles[d.user_id] || {};
+      return {
+        id:         d.id,
+        user_id:    d.user_id,
+        user:       [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || 'Unknown',
+        email:      p.email || null,
+        user_agent: d.user_agent || null,
+        // A push endpoint is a capability URL — anyone holding it can push to
+        // that device. Only the host is returned; the token never leaves here.
+        provider:   (() => { try { return new URL(d.endpoint).host; } catch { return 'unknown'; } })(),
+        created_at: d.created_at,
+      };
+    }),
+  });
+}));
+
+router.delete('/devices/:id', superadminOnly, asyncHandler(async (req, res) => {
+  const { error } = await supabaseAdmin.from('push_subscriptions').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+}));
+
+// ─── test push ──────────────────────────────────────────────────────────────
+// Sends only to the caller. A "send to everyone" button on a live CRM is a
+// footgun with no undo, so it deliberately does not exist.
+router.post('/test-push', superadminOnly, asyncHandler(async (req, res) => {
+  const s = await readSettings();
+  let sent = true, detail = null;
+  try {
+    await sendPushToUser(req.user.id, {
+      title: 'Test notification',
+      body:  'If you can see this, instant push is working on this device.',
+      tag:   'pwa_test',
+      data:  { type: 'pwa_test' },
+      requireInteraction: !!s.push.require_interaction,
+    });
+  } catch (e) { sent = false; detail = e.message; }
+  res.json({ sent, detail });
+}));
+
+// `loadManifest` lets the frontend meta-injection server (server.cjs) build the
+// <link rel="manifest"> + theme-color without a second HTTP hop back into us.
+module.exports = {
+  publicManifest,
+  publicFlags,
+  adminRouter: router,
+  EVENT_CATALOG,
+  readSettings,
+};

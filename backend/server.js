@@ -350,6 +350,15 @@ app.use('/api/business-config',   authMiddleware, readonlyGuard, businessConfigR
 const branding = require('./routes/branding');
 app.get('/api/branding', branding.publicGet);
 app.use('/api/branding', authMiddleware, readonlyGuard, branding.adminRouter);
+
+// PWA. The manifest and the boot flags MUST be tokenless: the browser fetches
+// the manifest before anyone is signed in, and the SPA has to know whether to
+// register a service worker on its very first paint.
+const pwa = require('./routes/pwa');
+app.get('/api/pwa/manifest', pwa.publicManifest);
+app.get('/manifest.webmanifest', pwa.publicManifest);   // the canonical path browsers expect
+app.get('/api/pwa/public', pwa.publicFlags);
+app.use('/api/pwa', authMiddleware, readonlyGuard, pwa.adminRouter);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, complianceRoutes);
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
 // QA Department — recording review + scoring. egressAudit so QA recording plays
