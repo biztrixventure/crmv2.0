@@ -164,9 +164,14 @@ export default function BrandingManager() {
           <div className="p-4" style={card}>
             <h3 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-muted)' }}>Preview</h3>
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-              <div className="w-full flex items-center justify-center" style={{ aspectRatio: '1200 / 630', background: 'var(--color-bg)' }}>
+              {/* `min-w-0` on both: an <img> is a replaced element, so its
+                  min-width:auto resolves to the IMAGE's intrinsic width — a
+                  1200px OG image therefore set a ~419px floor that `w-full`
+                  can't override, and that floor was what made this whole panel
+                  92px too wide at 390. */}
+              <div className="w-full min-w-0 flex items-center justify-center" style={{ aspectRatio: '1200 / 630', background: 'var(--color-bg)' }}>
                 {b.og_image_url
-                  ? <img src={b.og_image_url} alt="" className="w-full h-full object-cover" />
+                  ? <img src={b.og_image_url} alt="" className="w-full h-full min-w-0 object-cover" />
                   : <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}><ImageIcon size={20} className="inline mr-1" /> No preview image</span>}
               </div>
               <div className="p-3" style={{ background: 'var(--color-surface-hover)' }}>
