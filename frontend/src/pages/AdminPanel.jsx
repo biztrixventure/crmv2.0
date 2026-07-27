@@ -65,7 +65,12 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
   const [activeTab, setActiveTab]     = usePersistedState("biztrix.adminTab", "dashboard");
+  // Two separate things, deliberately. `sidebarOpen` is the DESKTOP collapse
+  // toggle (lg+). `mobileNavOpen` is the off-canvas drawer below lg and always
+  // starts closed — it used to share one flag defaulting to true, which is why
+  // a 390px phone opened with 256px of sidebar and 82px of content.
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const notifHook = useNotifications();
 
   const handleLogout = () => { logout(); navigate("/login"); };
@@ -238,13 +243,26 @@ const AdminPanel = () => {
         onClearNotifications={notifHook.clearAll}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
+        onOpenMobileNav={() => setMobileNavOpen(true)}
       />
 
       <EngagementBanners />
-      <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
-        {sidebarOpen && <AdminSidebar navItems={sidebarItems} activeTab={activeTab} onTabChange={setActiveTab} />}
+      {/* dvh, not vh: mobile browsers count the collapsing URL bar in `vh`, so
+          `100vh` left the row taller than the screen and produced a dead scroll. */}
+      <div className="flex" style={{ height: 'calc(100dvh - 64px)' }}>
+        <AdminSidebar
+          navItems={sidebarItems}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          desktopOpen={sidebarOpen}
+          mobileOpen={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+        />
 
-        <main className="flex-1 overflow-auto relative z-10">
+        {/* `min-w-0`: a flex child defaults to min-width:auto, so any wide child
+            (a table, a long tab strip) stretched this column and pushed the
+            whole PAGE horizontally instead of scrolling inside its own box. */}
+        <main className="flex-1 min-w-0 overflow-auto relative z-10">
           {activeTab === 'forms' ? (
             <Suspense fallback={<div className="px-4 sm:px-6 lg:px-8 xl:px-10 py-6"><Loading variant="rows" rows={6} label="Loading form builder…" /></div>}>
               <FormBuilder />

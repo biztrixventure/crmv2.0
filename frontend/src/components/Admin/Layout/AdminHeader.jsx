@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft, Menu } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
 import ChatLauncher from '../../Chat/ChatLauncher';
@@ -12,7 +12,7 @@ const AdminHeader = ({
   theme, onToggleTheme, onLogout,
   notifications = [], unreadCount = 0,
   onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications,
-  sidebarOpen = true, onToggleSidebar,
+  sidebarOpen = true, onToggleSidebar, onOpenMobileNav,
 }) => {
   const { user, updateUser } = useAuth();
   const { siteName, logoUrl } = useBranding();
@@ -26,7 +26,7 @@ const AdminHeader = ({
   return (
     <>
       <header
-        className="h-16 px-6 flex items-center justify-between sticky top-0 z-40"
+        className="h-16 px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 sticky top-0 z-40"
         style={{
           backgroundColor: 'var(--color-surface)',
           borderBottom: '1px solid var(--color-border)',
@@ -35,11 +35,25 @@ const AdminHeader = ({
         }}
       >
         {/* Left: Sidebar toggle + Logo + Title */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Below `lg` the sidebar is an off-canvas drawer, so the control is a
+              hamburger that OPENS it. At `lg`+ it's the collapse toggle for the
+              persistent column — two different jobs, so two buttons rather than
+              one that means different things at different widths. */}
+          {onOpenMobileNav && (
+            <button
+              onClick={onOpenMobileNav}
+              className="lg:hidden w-9 h-9 rounded-xl flex items-center justify-center transition-all flex-shrink-0"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+              aria-label="Open navigation"
+            >
+              <Menu size={18} style={{ color: 'var(--color-text-secondary)' }} />
+            </button>
+          )}
           {onToggleSidebar && (
             <button
               onClick={onToggleSidebar}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:scale-105 flex-shrink-0"
+              className="hidden lg:flex w-9 h-9 rounded-xl items-center justify-center transition-all hover:scale-105 flex-shrink-0"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
               title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
             >
@@ -60,18 +74,22 @@ const AdminHeader = ({
               ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
               : <Settings size={18} className="text-white" />}
           </div>
-          <div className="flex-shrink-0 min-w-0">
-            <h1 className="text-base font-bold leading-tight whitespace-nowrap truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+          {/* The brand text is the first thing to go when width runs out — the
+              logo chip beside it already identifies the app, and the real page
+              title comes from each tab's SectionHeader. `min-w-0` (not
+              flex-shrink-0) so `truncate` can actually engage. */}
+          <div className="hidden md:block min-w-0">
+            <h1 className="text-base font-bold leading-tight truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
               {siteName}
             </h1>
-            <p className="text-xs leading-tight whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-xs leading-tight whitespace-nowrap m-0" style={{ color: 'var(--color-text-tertiary)' }}>
               Admin Panel
             </p>
           </div>
-          <div className="hidden sm:block w-px h-7 mx-2" style={{ backgroundColor: 'var(--color-border)' }} />
+          <div className="hidden lg:block w-px h-7 mx-2 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
           {/* Tint via color-mix, not --color-primary-100: that token is light in
               BOTH themes, so it renders a light chip on the dark UI. */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0"
             style={{
               backgroundColor: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)',
               color: 'var(--color-success-600)',
@@ -82,7 +100,7 @@ const AdminHeader = ({
         </div>
 
         {/* Right */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           <MailLauncher />
           <ChatLauncher />
           <NotificationBell
@@ -108,12 +126,25 @@ const AdminHeader = ({
             }
           </button>
 
-          <div className="hidden sm:block w-px h-6 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
+          <div className="hidden xl:block w-px h-6 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
+
+          {/* Below `xl` the name+role text is what doesn't fit, not the control
+              itself — so the pill collapses to its avatar rather than
+              disappearing. Same tap, same profile modal. */}
+          <button
+            onClick={() => setProfileOpen(true)}
+            className="xl:hidden w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 relative"
+            style={{ background: 'var(--gradient-sidebar)' }}
+            aria-label="View profile"
+            title="View profile"
+          >
+            <span className="text-xs font-bold text-white">{initials}</span>
+          </button>
 
           {/* User pill — clickable to open profile */}
           <button
             onClick={() => setProfileOpen(true)}
-            className="hidden sm:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all group"
+            className="hidden xl:flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-xl transition-all group"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
             onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--color-primary-600) 10%, var(--color-surface))'; e.currentTarget.style.borderColor = 'var(--color-primary-600)'; }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
@@ -141,11 +172,13 @@ const AdminHeader = ({
           {/* Logout */}
           <button
             onClick={onLogout}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 hover:scale-[1.02]"
+            className="flex items-center justify-center gap-2 w-9 h-9 lg:w-auto lg:h-auto lg:px-3 lg:py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 hover:scale-[1.02] flex-shrink-0"
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}
+            aria-label="Logout"
+            title="Logout"
           >
             <LogOut size={15} />
-            <span className="hidden sm:inline">Logout</span>
+            <span className="hidden lg:inline">Logout</span>
           </button>
         </div>
       </header>

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, X } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 // Items with an `href` navigate to another shell instead of switching an
@@ -81,9 +81,35 @@ const EXTRA_ICONS = {
   'note-shortcodes': Tag,
 };
 
-const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) => {
+// Responsive pattern:
+//   • below `lg` — an off-canvas drawer over the page with a dimmed backdrop.
+//     It used to be a hardcoded 256px column that was ALWAYS mounted, so a
+//     390px phone had 82px left for content.
+//   • at `lg` and up — the sticky column it has always been, shown/hidden by
+//     the header's collapse toggle (`desktopOpen`).
+// Mount is unconditional now: the drawer has to stay in the DOM to animate, and
+// hiding on desktop is a class, not an unmount.
+const AdminSidebar = ({
+  navItems, activeTab, onTabChange, badgeCounts = {},
+  desktopOpen = true, mobileOpen = false, onClose,
+}) => {
   const navigate = useNavigate();
   const { siteName } = useBranding();
+  const panelRef = useRef(null);
+
+  // Escape closes the mobile drawer, and opening it moves focus inside so the
+  // nav is reachable by keyboard instead of being a visual-only overlay.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = e => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    panelRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen, onClose]);
+
+  // A tab pick closes the drawer — on a phone the panel covers the content it
+  // just navigated to.
+  const pick = (id) => { onTabChange(id); onClose?.(); };
 
   // navItems is the source of truth for WHICH tabs exist (it already carries
   // every role/permission gate from AdminPanel). NAV_SECTIONS only supplies
@@ -100,14 +126,48 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
     : NAV_SECTIONS;
 
   return (
-    <aside className="w-64 flex-shrink-0 flex flex-col"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        borderRight: '1px solid var(--color-border)',
-        height: 'calc(100vh - 64px)',
-        position: 'sticky',
-        top: 64,
-      }}>
+    <>
+      {/* Backdrop — drawer mode only. Never rendered at `lg`, where the sidebar
+          is a column beside the content rather than over it. */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" aria-hidden
+          style={{ backgroundColor: 'color-mix(in srgb, var(--color-text) 45%, transparent)' }}
+          onClick={onClose} />
+      )}
+
+      <aside
+        ref={panelRef}
+        tabIndex={-1}
+        aria-label="Admin navigation"
+        aria-hidden={mobileOpen ? undefined : 'true'}
+        className={[
+          'flex flex-col flex-shrink-0 outline-none',
+          // drawer (below lg)
+          'fixed inset-y-0 left-0 z-50 w-[min(280px,85vw)] shadow-2xl transition-transform duration-200 ease-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none',
+          // column (lg and up) — no transform, no shadow, back in the flex row
+          'lg:sticky lg:inset-y-auto lg:top-16 lg:z-auto lg:w-64 lg:h-[calc(100dvh-64px)]',
+          'lg:translate-x-0 lg:pointer-events-auto lg:shadow-none lg:transition-none',
+          desktopOpen ? 'lg:flex' : 'lg:hidden',
+        ].join(' ')}
+        style={{
+          backgroundColor: 'var(--color-surface)',
+          borderRight: '1px solid var(--color-border)',
+        }}>
+
+        {/* Drawer-only title bar. At `lg` the header above already carries the
+            brand, so this row would be a duplicate. */}
+        <div className="flex items-center justify-between px-4 h-16 flex-shrink-0 lg:hidden"
+          style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <span className="text-sm font-bold truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+            {siteName}
+          </span>
+          <button onClick={onClose} aria-label="Close navigation"
+            className="w-11 h-11 -mr-2 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ color: 'var(--color-text-secondary)' }}>
+            <X size={20} />
+          </button>
+        </div>
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-5">
@@ -131,7 +191,7 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
                   return (
                     <button
                       key={item.id}
-                      onClick={() => item.href ? navigate(item.href, { state: item.state }) : onTabChange(item.id)}
+                      onClick={() => item.href ? (onClose?.(), navigate(item.href, { state: item.state })) : pick(item.id)}
                       className="w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-3 group"
                       style={{
                         background: isActive ? 'var(--gradient-sidebar)' : 'transparent',
@@ -193,7 +253,8 @@ const AdminSidebar = ({ navItems, activeTab, onTabChange, badgeCounts = {} }) =>
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 
