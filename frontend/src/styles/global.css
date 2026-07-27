@@ -1400,6 +1400,36 @@ select optgroup {
 .bsx-scrim     { animation: bsx-scrim-in 220ms ease both; }
 .bsx-scrim-out { animation: bsx-scrim-in 200ms ease reverse both; }
 
+/* ── Sticky first column for scrollable tables (kit/TableScroll) ────────────
+   A wide table scrolls inside its own box, but scrolling right then loses the
+   column that IDENTIFIES the row (customer, company, user) — which is exactly
+   the column you're scrolling to compare against. Pinning it keeps the row
+   readable at any scroll offset.
+
+   Opt-in via <TableScroll stickyFirst>: it's wrong for tables whose first cell
+   is a checkbox or a drag handle.
+
+   Two flavours because row backgrounds differ:
+     .bsx-table-sticky            — pinned cell paints --color-surface. Correct
+                                    for plain tables.
+     .bsx-table-sticky--inherit   — pinned cell inherits the row's background,
+                                    so per-row tints (the compliance duplicate
+                                    highlight, focus highlight) survive. Needs
+                                    the <tr> to actually set a background. */
+.bsx-table-sticky table th:first-child,
+.bsx-table-sticky table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  /* A border would add width and shift the layout; a shadow is drawn outside. */
+  box-shadow: 1px 0 0 var(--color-border);
+}
+.bsx-table-sticky table thead th:first-child { z-index: 2; }
+
+.bsx-table-sticky--inherit table th:first-child,
+.bsx-table-sticky--inherit table td:first-child { background: inherit; }
+
 /* ── readonly_admin copy-protection ─────────────────────────────────────────
    When a SuperAdmin turns on `no_copy` for a read-only admin, the AdminPanel
    shell root gets `.copy-locked` (added synchronously from user.governance, so

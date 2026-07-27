@@ -15,6 +15,8 @@ export { default as Loading }       from './Loading';
 export { default as EmptyState }    from './EmptyState';
 export { default as KpiTile }       from './KpiTile';
 export { default as PillTabs }      from './PillTabs';
+export { default as TableScroll }   from './TableScroll';
+export { default as IconButton }    from './IconButton';
 export { default as Field }         from './Field';
 export { default as ActionRow }     from './ActionRow';
 export { default as useFlash }      from './useFlash';
