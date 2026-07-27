@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Activity, RefreshCw, Send, CheckCircle2, XCircle, AlertTriangle, Info,
+  Activity, RefreshCw, Send, CheckCircle2, XCircle, AlertTriangle, Info, BellRing,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import client from '../../../api/client';
 import { Panel, SectionHeader, Loading, ActionRow } from '../../UI/kit';
 import Button from '../../UI/Button';
@@ -42,11 +43,23 @@ function Row({ label, value, tone = 'dim', hint }) {
   );
 }
 
+// Base64url VAPID key → the Uint8Array the Push API wants. Same conversion as
+// usePushNotifications; duplicated rather than imported because mounting that
+// hook here would start a second registration loop and a second 5-minute
+// health timer beside the one AdminPanel already runs.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw     = window.atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 export default function DiagnosticsSection({ vapidConfigured, requireInteraction }) {
   const [probe, setProbe]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [enabling, setEnabling] = useState(false);
 
   const measure = useCallback(async () => {
     setLoading(true);
@@ -90,6 +103,55 @@ export default function DiagnosticsSection({ vapidConfigured, requireInteraction
   }, []);
 
   useEffect(() => { measure(); }, [measure]);
+
+  // Ask for permission and subscribe THIS browser. Reporting "you will not
+  // receive pushes" without offering the one action that fixes it is a
+  // diagnosis with no treatment — and the browser will only show its permission
+  // dialog from inside a user gesture, so it has to be a button.
+  const enablePush = async () => {
+    setEnabling(true);
+    try {
+      if (!('Notification' in window) || !('PushManager' in window)) {
+        toast.error('This browser does not support push notifications.');
+        return;
+      }
+      let perm = Notification.permission;
+      if (perm === 'default') perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        toast.error(perm === 'denied'
+          ? 'Blocked. Allow notifications for this site in the browser’s site settings, then re-check.'
+          : 'Permission was not granted.');
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      // Reuse an existing subscription if the browser still holds one — calling
+      // subscribe() again with a different key would throw.
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        const { data } = await client.get('push/vapid-key');
+        if (!data?.publicKey) { toast.error('Server has no VAPID public key configured.'); return; }
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(data.publicKey),
+        });
+      }
+      const j = sub.toJSON();
+      await client.post('push/subscribe', {
+        endpoint:  j.endpoint,
+        keys:      j.keys,
+        userAgent: navigator.userAgent.slice(0, 200),
+      });
+      toast.success('This browser is subscribed. Send a test push to confirm.');
+    } catch (e) {
+      toast.error(e.response?.data?.error || e.message || 'Could not enable push on this browser.');
+    } finally {
+      setEnabling(false);
+      measure();
+    }
+  };
 
   const sendTest = async () => {
     setTesting(true);
@@ -159,11 +221,40 @@ export default function DiagnosticsSection({ vapidConfigured, requireInteraction
               : p.permission === 'default' ? 'Not asked yet on this device.' : null} />
           <Row label="Push subscription" value={p.subscription || 'None'}
             tone={p.subscription ? 'ok' : 'dim'}
-            hint={p.subscription ? 'Push service host for this browser.' : 'This browser will not receive device pushes.'} />
+            hint={p.subscription
+              ? 'Push service host for this browser.'
+              : 'This browser will not receive device pushes — use the button below to enable them.'} />
           <Row label="Manifest link" value={p.manifestHref || 'Missing'} tone={p.manifestHref ? 'ok' : 'warn'} />
           <Row label="Running installed" value={p.installed ? 'Yes' : 'No — browser tab'}
             tone={p.installed ? 'ok' : 'dim'} />
         </div>
+
+        {/* The fix, next to the finding. `denied` is the one state no button can
+            resolve — the browser will not re-ask — so it gets an explanation
+            rather than a control that would do nothing. */}
+        {!p.subscription && p.swSupported && p.pushSupported && (
+          <div className="mt-4">
+            {p.permission === 'denied' ? (
+              <Panel tone="inset" radius="xl" pad="sm">
+                <p className="text-[11px] m-0" style={{ color: 'var(--color-error-600)' }}>
+                  Notifications are blocked for this site, and a blocked browser will never ask again. Allow them in
+                  the padlock menu beside the address bar, then press Re-check.
+                </p>
+              </Panel>
+            ) : (
+              <ActionRow
+                icon={BellRing}
+                label="Enable push on this browser"
+                hint={p.permission === 'granted'
+                  ? 'Permission is already granted but no subscription exists — this recreates it.'
+                  : 'Asks for notification permission, then subscribes this browser.'}
+                tone="primary"
+                busy={enabling}
+                onClick={enablePush}
+              />
+            )}
+          </div>
+        )}
       </Panel>
 
       <div className="space-y-5 min-w-0">
