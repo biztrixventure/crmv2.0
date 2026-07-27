@@ -10,6 +10,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import Tooltip from '../UI/Tooltip';
 import TeamPerformance from '../Manager/TeamPerformance';
+import { toast } from '../../utils/toast';
+import { writeExport, logClientExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 // Plain-English explanation for every metric shown on this page.
 const METRIC_TIP = {
@@ -32,16 +35,10 @@ const AVATAR_PAL = ['#6366f1','#0891b2','#059669','#dc2626','#7c3aed','#ea580c',
 const initials   = n => (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 const avatarClr  = n => AVATAR_PAL[(n?.charCodeAt(0) || 0) % AVATAR_PAL.length];
 
-const downloadCSV = (rows, headers, filename) => {
-  const csv = [headers, ...rows]
-    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const a = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })),
-    download: filename,
-  });
-  a.click(); URL.revokeObjectURL(a.href);
-};
+// downloadCSV now comes from utils/exportSpec via writeExport (one writer, not
+// four). The only thing this copy did differently was prepend a UTF-8 BOM for
+// Excel; the shared writer declares charset=utf-8 on the blob instead.
+
 
 const SkeletonRow = () => (
   <div className="flex items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -64,6 +61,8 @@ const SkeletonRow = () => (
 
 // ── main component ────────────────────────────────────────────────────────────
 const ReportsPanel = ({ companyId }) => {
+  // null = unconfigured → each leaderboard keeps its own default column set.
+  const { allowedFor } = useExportColumns(['reports_fronters', 'reports_closers']);
   const { hasPermission, canExport } = useAuth();
   const { isEnabled } = useFeatureFlags();
 
@@ -140,28 +139,22 @@ const ReportsPanel = ({ companyId }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const today = new Date().toISOString().split('T')[0];
-    if (activeTab === 'fronters') {
-      downloadCSV(
-        fronters.map((f, i) => [
-          i + 1, f.name, f.total, f.completed, f.converted, f.rejected,
-          f.total > 0 ? `${Math.round((f.converted / f.total) * 100)}%` : '0%',
-        ]),
-        ['Rank', 'Name', 'Leads', 'Connected', 'Converted', 'Rejected', 'Conv %'],
-        `fronters_report_${today}.csv`
-      );
-    } else {
-      downloadCSV(
-        closers.map((c, i) => [
-          i + 1, c.name, c.total, c.won,
-          c.total > 0 ? `${Math.round((c.won / c.total) * 100)}%` : '0%',
-          `$${c.revenue.toLocaleString()}`,
-        ]),
-        ['Rank', 'Name', 'Sales', 'Won', 'Win Rate', 'Down Payment Rev'],
-        `closers_report_${today}.csv`
-      );
+    const isFronters = activeTab === 'fronters';
+    const dataset = isFronters ? 'reports_fronters' : 'reports_closers';
+    const rows = isFronters ? fronters : closers;
+    // These rows are aggregated in the browser, so there is no list request for
+    // egressAudit to intercept — this soft log is the only audit this surface
+    // can have, and it still enforces the daily export cap.
+    if (!await logClientExport(dataset, rows.length, { company_id: companyId })) {
+      toast.error('Export blocked by your daily limit.');
+      return;
     }
+    writeExport({
+      dataset, surface: dataset, allowed: allowedFor(dataset), rows,
+      filename: `${isFronters ? 'fronters' : 'closers'}_report_${today}.csv`,
+    });
   };
 
   const convRate = summary.transfers > 0 ? Math.round((summary.won / summary.transfers) * 100) : 0;

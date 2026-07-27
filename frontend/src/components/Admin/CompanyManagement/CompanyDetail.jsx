@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toastError } from '../../../utils/toast';
 import { transferPhone } from '../../../utils/phone';
 import { useAuth } from '../../../contexts/AuthContext';
+import { writeExport, logClientExport } from '../../../utils/exportSpec';
+import { useExportColumns } from '../../../hooks/useExportColumns';
 import ThemedSelect from '../../UI/Select';
 import {
   ArrowLeft, Users, Shield, Send, DollarSign, Building2,
@@ -54,16 +56,6 @@ const PriorityBadge = ({ priority }) => {
   );
 };
 
-const downloadCSV = (rows, headers, filename) => {
-  const csv = [headers, ...rows]
-    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
 const SortTh = ({ col, sort, onSort, children }) => {
   const Icon = sort.col !== col ? ChevronsUpDown : sort.dir === 'asc' ? ChevronUp : ChevronDown;
   return (
@@ -88,6 +80,8 @@ const dt = (d) => d ? new Date(d).toLocaleString() : null;
 
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
 const RecordsPanel = ({ companyId, type, companyType }) => {
+  // null = unconfigured → each record type keeps its own default column set.
+  const { allowedFor } = useExportColumns(['sales', 'transfers', 'callbacks']);
   const { user, hasPermission, canExport } = useAuth();
   const canExpand = EXPAND_ROLES.includes(user?.role);
   const canFin    = hasPermission('view_financial_data');
@@ -155,39 +149,16 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
       const res = await client.get(type, { params });
       const data = res.data[type] || res.data.transfers || res.data.callbacks || [];
 
-      if (type === 'sales') {
-        const rows = data.map(s => [
-          s.customer_name||'', s.customer_phone||'', s.reference_no||'',
-          s.fronter_name||'', s.closer_name||'',
-          s.status||'', s.plan||'',
-          s.monthly_payment ? `$${s.monthly_payment}` : '',
-          new Date(s.created_at).toLocaleDateString(),
-        ]);
-        downloadCSV(rows, ['Customer','Phone','Reference','Fronter','Closer','Status','Plan','Monthly','Created'],
-          `${type}_${companyId}_${today}.csv`);
-      } else if (type === 'transfers') {
-        const rows = data.map(t => {
-          const fd = t.form_data || {};
-          const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName||''}`.trim() : '') || '';
-          const closer = t.assigned_closer_name || (t.closer ? `${t.closer.first_name||''} ${t.closer.last_name||''}`.trim() : '') || '';
-          return [name, fd.Phone||fd.customer_phone||'', t.created_by_name||t.fronter_name||'', closer, t.status||'', new Date(t.created_at).toLocaleDateString()];
-        });
-        downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Status','Created'],
-          `transfers_${companyId}_${today}.csv`);
-      } else {
-        const rows = data.map(cb => {
-          const ct = cb.company_type || companyType;
-          return [
-            cb.customer_name||'', cb.customer_phone||'', cb.priority||'',
-            ct === 'fronter' ? (cb.user_name||'') : '',
-            ct === 'closer'  ? (cb.user_name||'') : '',
-            cb.status||'',
-            cb.callback_at ? new Date(cb.callback_at).toLocaleString() : '',
-          ];
-        });
-        downloadCSV(rows, ['Customer','Phone','Priority','Fronter','Closer','Status','Scheduled'],
-          `callbacks_${companyId}_${today}.csv`);
-      }
+      // Columns come from the shared catalog; unconfigured resolves to this
+      // panel's own surface, so all three files are unchanged. companyType is
+      // passed because callback rows from this endpoint can omit company_type
+      // and the panel already knows which side of the link it is showing.
+      writeExport({
+        dataset: type,
+        surface: { sales: 'company_sales', transfers: 'company_transfers', callbacks: 'company_callbacks' }[type],
+        allowed: allowedFor(type), rows: data, ctx: { companyType },
+        filename: `${type}_${companyId}_${today}.csv`,
+      });
     } catch (err) {
       if (err?.response?.data?.code === 'EGRESS_LIMIT') window.alert(err.response.data.error || 'Export blocked by your limit.');
     } finally { setExportLoading(false); }
@@ -581,6 +552,8 @@ const ImpersonateModal = ({ data, onClose }) => {
 
 // ── MembersPanel ──────────────────────────────────────────────────────────────
 const MembersPanel = ({ companyId }) => {
+  // null = unconfigured → the members CSV keeps its own default column set.
+  const { allowedFor } = useExportColumns(['company_members']);
   const { hasPermission, user: authUser, canExport } = useAuth();
   const isSuperAdmin = authUser?.role === 'superadmin';
   const [users, setUsers]           = useState([]);
@@ -683,19 +656,24 @@ const MembersPanel = ({ companyId }) => {
     setConfirm(null);
   };
 
-  const handleExportMembers = () => {
+  const handleExportMembers = async () => {
     if (!users.length) return;
     setExportLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const rows = sorted.map(u => [
-      [u.first_name, u.last_name].filter(Boolean).join(' ') || '',
-      u.email || '',
-      u.role || '',
-      u.role_level?.replace(/_/g, ' ') || '',
-      u.is_active ? 'Active' : 'Inactive',
-    ]);
-    downloadCSV(rows, ['Name', 'Email', 'Role', 'Level', 'Status'], `members_${companyId}_${today}.csv`);
-    setExportLoading(false);
+    try {
+      // The member rows are already loaded, so there is no list request left for
+      // egressAudit to intercept — this soft log was missing entirely, making
+      // the members CSV the last unlogged export in the admin shell.
+      if (!await logClientExport('company_members', sorted.length, { company_id: companyId })) {
+        window.alert('Export blocked by your daily limit.');
+        return;
+      }
+      writeExport({
+        dataset: 'company_members', surface: 'company_members',
+        allowed: allowedFor('company_members'), rows: sorted,
+        filename: `members_${companyId}_${today}.csv`,
+      });
+    } finally { setExportLoading(false); }
   };
 
   return (

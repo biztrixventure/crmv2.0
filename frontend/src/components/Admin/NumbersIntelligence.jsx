@@ -13,6 +13,8 @@ import {
 import client from '../../api/client';
 import { TableScroll } from '../UI/kit';
 import { useAuth } from '../../contexts/AuthContext';
+import { writeExport, logClientExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 const STATUS_CFG = {
   new:       { label: 'New',       bg: '#eff6ff', color: '#2563eb' },
@@ -36,16 +38,10 @@ const fmt = (iso) => iso
   ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
   : '—';
 
-// CSV download helper
-const downloadCSV = (rows, headers, filename) => {
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))];
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-};
+// CSV writing moved to utils/exportSpec (writeExport). This copy read each row
+// by header key; the spec's accessors read the same fields, so the file is
+// identical — headers stay raw keys via the surface's header:'key' mode.
+
 
 // ── Dialer-activity detail (shown when a number row is expanded) ─────────────
 const fmtSecs = (s) => {
@@ -231,6 +227,8 @@ const NumberActivityPanel = ({ state, row, onReload }) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 const NumbersIntelligence = () => {
+  // null = unconfigured → this view keeps its own default column set.
+  const { allowedFor } = useExportColumns(['numbers']);
   const { roExportAllowed } = useAuth();
   const [numbers,    setNumbers]    = useState([]);
   const [stats,      setStats]      = useState(null);
@@ -339,11 +337,16 @@ const NumbersIntelligence = () => {
   numbers.forEach(n => { byStatus[n.status] = (byStatus[n.status] || 0) + 1; });
 
   const handleExport = async () => {
-    // Egress governance (soft — data is already loaded): log + daily-cap check.
-    try { await client.post('egress/client-log', { dataset: 'numbers', row_count: numbers.length }); }
-    catch (err) { if (err?.response?.data?.code === 'EGRESS_LIMIT') { window.alert(err.response.data.error); return; } }
-    const headers = ['phone_number', 'customer_name', 'status', 'list_name', 'assignment_day', 'fronter_name', 'company_name', 'transferred_at'];
-    downloadCSV(numbers, headers, `numbers-intelligence-${new Date().toISOString().slice(0,10)}.csv`);
+    // Egress governance (soft — the rows are already in memory, so there is no
+    // list request left for egressAudit to intercept): log + daily-cap check.
+    if (!await logClientExport('numbers', numbers.length)) {
+      window.alert('Export blocked by your daily limit.');
+      return;
+    }
+    writeExport({
+      dataset: 'numbers', surface: 'numbers_intelligence', allowed: allowedFor('numbers'),
+      rows: numbers, filename: `numbers-intelligence-${new Date().toISOString().slice(0, 10)}.csv`,
+    });
   };
 
   return (

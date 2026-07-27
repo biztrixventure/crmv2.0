@@ -205,6 +205,24 @@ export const DATASETS = {
     },
   },
 
+  // The company Members CSV inside CompanyDetail. Rows are already loaded into
+  // the panel, so like reports it carries the soft client-log audit rather than
+  // the __egress marker.
+  company_members: {
+    label: 'Company Members',
+    aggregate: true,
+    columns: [
+      { key: 'name',      label: 'Name',   get: u => [u.first_name, u.last_name].filter(Boolean).join(' ') || '' },
+      { key: 'email',     label: 'Email',  get: u => u.email || '' },
+      { key: 'role',      label: 'Role',   get: u => u.role || '' },
+      { key: 'level',     label: 'Level',  get: u => u.role_level?.replace(/_/g, ' ') || '' },
+      { key: 'is_active', label: 'Status', get: u => (u.is_active ? 'Active' : 'Inactive') },
+    ],
+    surfaces: {
+      company_members: { columns: ['name', 'email', 'role', 'level', 'is_active'] },
+    },
+  },
+
   numbers: {
     label: 'Numbers Intelligence',
     rowsKey: 'numbers',
@@ -285,6 +303,7 @@ const DEFAULT_SURFACE = {
   sales: 'company_sales', transfers: 'manager_transfers', callbacks: 'manager_callbacks',
   callback_audit: 'compliance_callback_audit', reviews: 'compliance_reviews', users: 'manager_users',
   numbers: 'numbers_intelligence', reports_fronters: 'reports_fronters', reports_closers: 'reports_closers',
+  company_members: 'company_members',
 };
 export function defaultColumnsForRole(dataset, role) {
   const ds = DATASETS[dataset];
