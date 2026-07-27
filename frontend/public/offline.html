@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Offline</title>
+<!--
+  Served by the service worker only when a navigation fails and there is no
+  cached copy of that page. Deliberately self-contained: no font link, no CSS
+  file, no JS bundle — each of those is a network request, and by definition
+  there is no network when this renders.
+
+  It also does NOT claim anything was saved. This CRM writes straight to the
+  API with no offline queue, so telling someone their work is safe would be a
+  lie at the worst possible moment.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0B1F1A; color: #E8EDEB;
+  }
+  @media (prefers-color-scheme: light) { body { background: #F6F8F7; color: #16241F; } }
+  .card { max-width: 380px; text-align: center; }
+  .dot {
+    width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 20px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(127,176,155,0.16); font-size: 26px;
+  }
+  h1 { font-size: 20px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  p  { font-size: 14px; line-height: 1.55; margin: 0 0 20px; opacity: 0.75; }
+  button {
+    font: inherit; font-weight: 600; font-size: 14px;
+    min-height: 44px; padding: 0 20px; border-radius: 12px; cursor: pointer;
+    background: #7FB09B; color: #08201A; border: none;
+  }
+  button:active { transform: scale(0.98); }
+  .state { margin-top: 14px; font-size: 12px; opacity: 0.6; min-height: 16px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="dot">⚡</div>
+    <h1>You're offline</h1>
+    <p>
+      This page needs a connection. Anything you were part-way through has not
+      been sent yet — check your connection and try again.
+    </p>
+    <button id="retry" type="button">Try again</button>
+    <div class="state" id="state"></div>
+  </div>
+
+<script>
+  var state = document.getElementById('state');
+  function retry() { location.reload(); }
+  document.getElementById('retry').addEventListener('click', retry);
+  // Reload on its own the moment the browser sees a connection again, so nobody
+  // is left staring at this page after the network quietly came back.
+  window.addEventListener('online', function () {
+    state.textContent = 'Back online — reloading…';
+    setTimeout(retry, 400);
+  });
+  if (navigator.onLine) {
+    state.textContent = 'Your device reports a connection, but the server did not answer.';
+  }
+</script>
+</body>
+</html>
