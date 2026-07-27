@@ -76,9 +76,11 @@ const COLUMN_DEPS = {
     status:         ['status'],
     priority:       ['priority'],
     notes:          ['notes'],
-    // fronter/closer are the SAME source column split by company_type.
+    // fronter/closer are the SAME source column split by company_type;
+    // agent_name is that column unsplit (the Manager modal's "Agent").
     fronter_name:   ['company_type', 'user_name'],
     closer_name:    ['company_type', 'user_name'],
+    agent_name:     ['user_name'],
     company_name:   ['company_name'],
     created_at:     ['created_at'],
     customer_uuid:  ['customer_uuid'],
