@@ -82,10 +82,9 @@ async function processDueCallbacks() {
 
         // 0. The matrix gate. Defaults to both channels on, i.e. unchanged.
         const gate = await resolveDelivery('callback_due', [cb.user_id], cb.company_id);
-        const reaches = gate.ids.length > 0;
 
         // 1. Create in-app notification
-        if (reaches && gate.inapp) {
+        if (gate.inappIds.length) {
           const { error: notifErr } = await supabaseAdmin.from('notifications').insert({
             user_id:    cb.user_id,
             company_id: cb.company_id,
@@ -106,8 +105,8 @@ async function processDueCallbacks() {
         // 2. Send Web Push. requireInteraction stays hardcoded true here and
         // overrides the global preference: a callback that came due is the one
         // notification that must not scroll away before it is seen.
-        if (reaches && gate.push) {
-          await pushNow(gate.ids, {
+        if (gate.pushIds.length) {
+          await pushNow(gate.pushIds, {
             title,
             body:               message,
             tag:                `callback-${cb.id}`,
@@ -222,8 +221,7 @@ async function processCallbackNumberExpiry() {
 
         // Gate once for the whole manager set — one config read, not one per
         // manager per number. In-app only: this event has never pushed.
-        const claimGate = await resolveDelivery('number_claimable', mgrIds, companyId);
-        const claimTargets = claimGate.inapp ? claimGate.ids : [];
+        const claimTargets = (await resolveDelivery('number_claimable', mgrIds, companyId)).inappIds;
 
         for (const mgrId of claimTargets) {
           for (const n of nums) {

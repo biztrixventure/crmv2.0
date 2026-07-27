@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Download, X, Smartphone } from 'lucide-react';
-import { canInstall, subscribeInstall, promptInstall, isInstallDismissed, dismissInstall, getFlags, loadFlags } from '../../utils/pwa';
+import { canInstall, subscribeInstall, promptInstall, isInstallDismissed, dismissInstall } from '../../utils/pwa';
 import { useBranding } from '../../contexts/BrandingContext';
-import { useAuth } from '../../contexts/AuthContext';
+import client from '../../api/client';
 
 // ============================================================================
 // InstallPrompt — the app's own install affordance.
@@ -19,22 +19,30 @@ import { useAuth } from '../../contexts/AuthContext';
 // ============================================================================
 export default function InstallPrompt() {
   const { siteName } = useBranding();
-  const { user } = useAuth();
+  const [allowed, setAllowed] = useState(null);   // null = not answered yet
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const role = user?.role;
+  // The verdict is the SERVER's: it folds the global audience together with any
+  // per-user override from the User Control Center. Deciding it in the browser
+  // would mean two copies of the rule, and the per-user override would be
+  // invisible to the one component that has to honour it.
+  useEffect(() => {
+    let cancelled = false;
+    client.get('pwa/me')
+      .then(r => { if (!cancelled) setAllowed(!!r.data?.install_prompt); })
+      .catch(() => { if (!cancelled) setAllowed(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const sync = useCallback(() => {
-    const flags = getFlags();
-    // Until the config lands, show nothing. An affordance that flashes in and
-    // then disappears once the answer arrives is worse than one that waits.
-    const audienceOk = flags ? (flags.install_audience !== 'superadmin' || role === 'superadmin') : false;
-    setVisible(audienceOk && canInstall() && !isInstallDismissed());
-  }, [role]);
+    // Until the answer lands, show nothing. An affordance that flashes in and
+    // then retracts is worse than one that waits — and it would flash at
+    // exactly the people an audience setting exists to exclude.
+    setVisible(allowed === true && canInstall() && !isInstallDismissed());
+  }, [allowed]);
 
   useEffect(() => {
-    loadFlags().then(sync);
     sync();
     return subscribeInstall(sync);
   }, [sync]);

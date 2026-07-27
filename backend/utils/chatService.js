@@ -93,8 +93,8 @@ async function pushNewMessage({ conversationId, senderId, senderName, body, memb
   let gate;
   try { gate = await resolveDelivery('chat_message', recipients, null); }
   catch { return; }
-  const { ids, push } = gate;
-  if (!push || !ids.length) return;
+  const ids = gate.pushIds;
+  if (!ids.length) return;
   pushNow(ids, {
     title: senderName || 'New message',
     body:  preview || 'Sent you a message',
@@ -149,8 +149,8 @@ async function pushMentions({ conversationId, senderId, senderName, convTitle, m
   let gate;
   try { gate = await resolveDelivery('chat_message', recipients, null); }
   catch { return; }
-  const { ids, push } = gate;
-  if (!push || !ids.length) return;
+  const ids = gate.pushIds;
+  if (!ids.length) return;
   pushNow(ids, {
     title: `${senderName || 'Someone'} mentioned you${where}`,
     body:  preview || 'You were mentioned in a message',

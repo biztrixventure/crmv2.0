@@ -215,17 +215,50 @@ async function withSuperadmins(type, userIds) {
  * The one call every emitter makes: given an event type and the recipients it
  * already computed, say who still gets it and by which channels.
  *
- * Returns { ids, inapp, push }. On the default path (no stored entry, quiet
- * hours off, roles null) this is { ids: userIds, inapp: true, push: true } and
- * costs one cached config read — no database query, no behaviour change.
+ * Returns { inappIds, pushIds } — two lists, not one list plus two booleans,
+ * because a per-user override can mute push while leaving the bell entry, so
+ * the two channels no longer reach the same set of people.
+ *
+ * On the default path (no stored entry, quiet hours off, roles null, no user
+ * overrides) both lists equal the ids passed in, and the whole thing costs two
+ * cached config reads — no database query, no behaviour change.
  */
+// Per-user overrides live in ONE config key (a map keyed by user id), so this
+// is a single cached read no matter how many recipients an event has.
+async function userOverrides() {
+  try {
+    const m = await getConfig(null, 'pwa_users', null);
+    return m && typeof m === 'object' ? m : {};
+  } catch { return {}; }
+}
+
 async function resolveDelivery(type, userIds, companyId) {
-  const [policy, muted] = await Promise.all([eventPolicy(type), pushMutedNow()]);
+  const [policy, muted, overrides] = await Promise.all([
+    eventPolicy(type), pushMutedNow(), userOverrides(),
+  ]);
   const base = (userIds || []).filter(Boolean);
   const ids  = policy.roles ? await narrowToRoles(base, policy.roles, companyId) : base;
+
   // Quiet hours mute the DEVICE, never the in-app record: the notification is
   // still there in the bell when they look, it just doesn't buzz at 3am.
-  return { ids, inapp: policy.inapp, push: policy.push && !muted };
+  const globalInapp = policy.inapp;
+  const globalPush  = policy.push && !muted;
+
+  // A per-user override can only ever REDUCE what the global matrix decided.
+  // There is deliberately no per-user "turn it on": that could create a
+  // delivery the event has no channel for, and would silently contradict the
+  // switch the superadmin set globally.
+  const inappIds = [];
+  const pushIds  = [];
+  for (const id of ids) {
+    const o = overrides[id];
+    if (o && o.mute_all === true) continue;
+    const choice = (o && o.events && o.events[type]) || 'inherit';
+    if (choice === 'off') continue;
+    if (globalInapp) inappIds.push(id);
+    if (globalPush && choice !== 'inapp' && !(o && o.push_off === true)) pushIds.push(id);
+  }
+  return { inappIds, pushIds };
 }
 
 /**

@@ -20,6 +20,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
+  Smartphone,
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -38,6 +39,7 @@ import EgressSection from './EgressSection';
 import ActivitySection from './ActivitySection';
 import QaSection from './QaSection';
 import ClientAccessSection from './ClientAccessSection';
+import PwaSection from './PwaSection';
 
 const QA_ROLES = ['qa_agent', 'qa_manager'];
 
@@ -62,6 +64,9 @@ const TABS = [
   { id: 'vicidial',     label: 'VICIdial',       icon: Headphones,     scope: 'user' },
   { id: 'record_views', label: 'Record Views',   icon: LayoutTemplate, scope: 'company' },
   { id: 'qa',           label: 'QA',             icon: ClipboardCheck, scope: 'company', qaOnly: true },
+  // Notification + install overrides. `scope:'user'` — these follow the person
+  // across companies, exactly like their push subscriptions do.
+  { id: 'pwa',          label: 'Notifications',  icon: Smartphone,     scope: 'user' },
   { id: 'governance',   label: 'Governance',     icon: Lock,           scope: 'user' },
   { id: 'egress',       label: 'Data Egress',    icon: Download,       scope: 'user' },
   { id: 'activity',     label: 'Activity',       icon: Activity,       scope: 'user' },
@@ -220,6 +225,7 @@ export default function UserControlCenter() {
             {tab === 'qa'           && (activeAssignment
               ? <QaSection account={account} assignment={activeAssignment} />
               : <NoAssignment />)}
+            {tab === 'pwa'          && <PwaSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}

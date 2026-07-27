@@ -188,6 +188,45 @@ function clampEvents(events) {
 
 const readSettings = async () => merge(await getConfig(null, CONFIG_KEY, null));
 
+// ─── per-user overrides ──────────────────────────────────────────────────────
+// ONE config key holding a map of userId → override, rather than a row per
+// user. A single cached read then covers every recipient of a bulk notify; a
+// per-user key would mean N lookups for an event that fans out to N people.
+// Only users who actually have an override appear here, so it stays small.
+//
+// An override can only ever REDUCE what the global matrix decided. There is no
+// 'turn it on for this one person' — that would let a per-user setting create a
+// delivery the event's channels do not support, and would quietly contradict
+// the switch the superadmin set globally.
+const USERS_KEY = 'pwa_users';
+
+const USER_DEFAULT = { install_prompt: 'inherit', mute_all: false, push_off: false, events: {} };
+const EVENT_CHOICES = ['inherit', 'inapp', 'off'];
+
+function mergeUser(saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  const events = {};
+  for (const [k, v] of Object.entries(s.events || {})) {
+    if (EVENT_CATALOG.some(e => e.id === k) && EVENT_CHOICES.includes(v) && v !== 'inherit') events[k] = v;
+  }
+  return {
+    install_prompt: ['show', 'hide'].includes(s.install_prompt) ? s.install_prompt : 'inherit',
+    mute_all: s.mute_all === true,
+    push_off: s.push_off === true,
+    events,
+  };
+}
+
+const readUsers = async () => {
+  const raw = await getConfig(null, USERS_KEY, null);
+  return raw && typeof raw === 'object' ? raw : {};
+};
+
+// An override that says nothing is not stored — it would grow the map forever
+// with rows that mean "default".
+const isEmptyOverride = (o) =>
+  o.install_prompt === 'inherit' && !o.mute_all && !o.push_off && Object.keys(o.events).length === 0;
+
 // ─── PUBLIC: manifest ───────────────────────────────────────────────────────
 // Merged with Branding so the installed app carries the same identity as the
 // site — one place to rename the product, not two.
@@ -247,6 +286,28 @@ const publicFlags = asyncHandler(async (req, res) => {
     install_audience: s.install.audience,
   });
 });
+
+// ─── the caller's own effective install answer ──────────────────────────────
+// Authenticated but NOT superadmin-gated: every user needs to know whether the
+// install prompt is for them. Resolving it here rather than in the browser means
+// the rule lives in one place and the client cannot get it subtly wrong.
+router.get('/me', asyncHandler(async (req, res) => {
+  const [s, users] = await Promise.all([readSettings(), readUsers()]);
+  const mine = mergeUser(users[req.user.id]);
+  const superadmin = await isSuperAdmin(req.user.id);
+
+  const byAudience = s.install.audience !== 'superadmin' || superadmin;
+  const show = mine.install_prompt === 'show' ? true
+             : mine.install_prompt === 'hide' ? false
+             : byAudience;
+
+  res.json({
+    install_prompt: !!(s.enabled && show),
+    // Why, so the admin UI can explain the answer instead of just asserting it.
+    reason: mine.install_prompt !== 'inherit' ? 'user' : (byAudience ? 'audience' : 'audience_excluded'),
+    muted: mine.mute_all,
+  });
+}));
 
 // ─── superadmin guard ───────────────────────────────────────────────────────
 const superadminOnly = asyncHandler(async (req, res, next) => {
@@ -356,6 +417,74 @@ router.delete('/devices/:id', superadminOnly, asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('push_subscriptions').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+}));
+
+// ─── per-user overrides (User Control Center) ───────────────────────────────
+// The effective answer is always computed here, never in the browser, so the
+// admin screen shows the same verdict the notification pipeline will reach.
+router.get('/user/:userId', superadminOnly, asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const [s, users, subs] = await Promise.all([
+    readSettings(),
+    readUsers(),
+    supabaseAdmin.from('push_subscriptions')
+      .select('id, endpoint, user_agent, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+  ]);
+
+  const override = mergeUser(users[userId]);
+  const superadmin = await isSuperAdmin(userId);
+
+  // What the GLOBAL matrix would do for this user, per event — so the UI can
+  // label "Inherit" with what inheriting actually means instead of leaving the
+  // admin to cross-reference two screens.
+  const effective = {};
+  for (const e of EVENT_CATALOG) {
+    const g = s.events[e.id] || {};
+    const choice = override.events[e.id] || 'inherit';
+    const inapp = g.inapp && !override.mute_all && choice !== 'off';
+    const push  = g.push && !override.mute_all && !override.push_off
+                  && choice !== 'off' && choice !== 'inapp';
+    effective[e.id] = {
+      global: { inapp: !!g.inapp, push: !!g.push },
+      result: { inapp: !!inapp, push: !!push },
+      choice,
+    };
+  }
+
+  const byAudience = s.install.audience !== 'superadmin' || superadmin;
+  res.json({
+    override,
+    effective,
+    catalog: EVENT_CATALOG,
+    install: {
+      audience: s.install.audience,
+      by_audience: byAudience,
+      result: override.install_prompt === 'show' ? true
+            : override.install_prompt === 'hide' ? false
+            : byAudience,
+    },
+    pwa_enabled: !!s.enabled,
+    devices: (subs.data || []).map(d => ({
+      id: d.id,
+      user_agent: d.user_agent || null,
+      provider: (() => { try { return new URL(d.endpoint).host; } catch { return 'unknown'; } })(),
+      created_at: d.created_at,
+    })),
+  });
+}));
+
+router.put('/user/:userId', superadminOnly, asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const users = await readUsers();
+  const next = mergeUser(req.body?.override);
+  // Storing "everything is default" would grow this map forever with rows that
+  // mean nothing. An override that says nothing is a deletion.
+  if (isEmptyOverride(next)) delete users[userId];
+  else users[userId] = next;
+  await setConfig('global', USERS_KEY, users, req.user.id);
+  res.json({ override: next });
 }));
 
 // ─── test push ──────────────────────────────────────────────────────────────

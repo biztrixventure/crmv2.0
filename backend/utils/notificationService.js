@@ -51,9 +51,9 @@ async function shouldNotify(companyId, key, fallback = true) {
 async function pushForEvent(type, userId, companyId, payload) {
   if (!userId) return;
   try {
-    const { ids, push } = await resolveDelivery(type, [userId], companyId);
-    if (!push || !ids.length) return;
-    pushNow(ids, payload).catch(() => {});
+    const { pushIds } = await resolveDelivery(type, [userId], companyId);
+    if (!pushIds.length) return;
+    pushNow(pushIds, payload).catch(() => {});
   } catch { /* a push is never worth failing the business write for */ }
 }
 
@@ -85,8 +85,8 @@ const hourBlock = () => new Date().toISOString().slice(0, 13);
 async function createNotification({ userId, companyId, type, title, message, data, dedupKey }) {
   // The in-app half of the gate. Push is sent separately by the callers, each
   // through pushForEvent, so the two channels stay independently controllable.
-  const { ids, inapp } = await resolveDelivery(type, [userId], companyId);
-  if (!inapp || !ids.length) return;
+  const { inappIds } = await resolveDelivery(type, [userId], companyId);
+  if (!inappIds.length) return;
 
   const row = {
     user_id:    userId,
@@ -117,12 +117,12 @@ async function notifyUsers(userIds, payload) {
   // One gate for both channels. `ids` is the caller's list unless an admin has
   // narrowed this event to specific roles; inapp/push are the per-channel
   // switches, with push additionally false inside quiet hours.
-  const { ids, inapp, push } = await resolveDelivery(payload.type, userIds, payload.companyId);
-  if (!ids.length) return;
+  const { inappIds, pushIds } = await resolveDelivery(payload.type, userIds, payload.companyId);
+  if (!inappIds.length && !pushIds.length) return;
 
-  if (inapp) {
+  if (inappIds.length) {
     const hour = hourBlock();
-    const rows = ids.map(uid => {
+    const rows = inappIds.map(uid => {
       const row = {
         user_id:    uid,
         company_id: payload.companyId || null,
@@ -145,8 +145,10 @@ async function notifyUsers(userIds, payload) {
   }
 
   // Web Push (fire-and-forget) — type doubles as the tag for OS grouping.
-  if (push) {
-    pushNow(ids, {
+  // A separate list from the in-app one: a user can be muted for push and still
+  // get the bell entry, so the two are no longer the same set of people.
+  if (pushIds.length) {
+    pushNow(pushIds, {
       title: payload.title,
       body:  payload.message || payload.title,
       tag:   payload.type,
@@ -553,8 +555,8 @@ async function onFronterDuplicateEvent({ kind, companyId, fronterId, phone, prio
     // pass the same gate. In-app only, deliberately: these have never pushed,
     // and the matrix is a description of today's behaviour, not a licence to
     // make the floor noisier.
-    const { ids: targets, inapp } = await resolveDelivery(COPY.type, candidates, companyId);
-    if (!inapp || !targets.length) return;
+    const { inappIds: targets } = await resolveDelivery(COPY.type, candidates, companyId);
+    if (!targets.length) return;
 
     const day = new Date().toISOString().slice(0, 10);
     const rows = targets.map(uid => ({
