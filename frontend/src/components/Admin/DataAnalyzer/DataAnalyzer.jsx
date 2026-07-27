@@ -952,7 +952,11 @@ const DataAnalyzer = () => {
         <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a start and end date (or a quick range). Click <strong>Run query</strong> to apply with the other filters.</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5">
+      {/* minmax(0,1fr), not a bare 1fr: a `1fr` track still refuses to go below
+          its content's minimum, so the 1028px results table stretched this
+          track to 1030px at 1024 and the page scrolled sideways instead of the
+          table scrolling inside its own box. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)] gap-5">
         {/* Filters + Presets */}
         <div className="space-y-3">
           <Section title={<span className="flex items-center gap-1.5"><BookmarkPlus size={14} /> Saved Presets</span>}

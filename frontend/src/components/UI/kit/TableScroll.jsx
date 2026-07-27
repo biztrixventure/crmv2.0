@@ -51,7 +51,11 @@ export default function TableScroll({
   }, [measure, children]);
 
   return (
-    <div className="relative">
+    // `min-w-0` on the wrapper: this component can only contain a wide table if
+    // its ancestors are allowed to be narrower than it. As a flex/grid child it
+    // would otherwise inherit min-width:auto, size itself to the table, and
+    // hand the overflow up to the page — exactly what it exists to prevent.
+    <div className="relative min-w-0">
       <div
         ref={ref}
         onScroll={measure}
