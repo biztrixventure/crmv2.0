@@ -33,12 +33,26 @@ const MODES = [
   { key: 'push',  label: 'Push',   icon: BellRing },
 ];
 
-const modeOf = (ev) => (ev?.push ? 'push' : ev?.inapp ? 'inapp' : 'off');
-const fromMode = (m) => (
-  m === 'push'    ? { inapp: true,  push: true }
-  : m === 'inapp' ? { inapp: true,  push: false }
-                  : { inapp: false, push: false }
+// `channels` is what the emitting code actually sends. Five events only ever
+// write an in-app row and chat only ever pushes, so those switches are not
+// offered at all — a control that silently does nothing is worse than a missing
+// one, because it reads as a promise the system cannot keep.
+const ALL = ['inapp', 'push'];
+const chOf = (event) => (Array.isArray(event?.channels) && event.channels.length ? event.channels : ALL);
+const modesFor = (ch) => MODES.filter(m => m.key === 'off' || ch.includes(m.key));
+
+const modeOf = (ev, ch = ALL) => (
+  ch.includes('push') && ev?.push   ? 'push'
+  : ch.includes('inapp') && ev?.inapp ? 'inapp'
+  : 'off'
 );
+
+// Clamped to the event's channels, so a bulk "everything on" lands each event
+// on its own maximum rather than storing a delivery that will never happen.
+const fromMode = (m, ch = ALL) => ({
+  inapp: ch.includes('inapp') && (m === 'inapp' || m === 'push'),
+  push:  ch.includes('push')  && m === 'push',
+});
 
 const URGENCY = [
   { v: 'very-low', label: 'Very low — deliver whenever convenient' },
@@ -61,7 +75,8 @@ const prettyRole = (r) => r.replace(/_/g, ' ');
 
 function EventRow({ event, value, roles, onChange }) {
   const [open, setOpen] = useState(false);
-  const mode = modeOf(value);
+  const ch = chOf(event);
+  const mode = modeOf(value, ch);
   const custom = Array.isArray(value?.roles);
   const chosen = custom ? value.roles : [];
 
@@ -77,12 +92,18 @@ function EventRow({ event, value, roles, onChange }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{event.label}</span>
             {event.legacyKey && <Badge variant="info" size="sm">Also in Business Rules</Badge>}
+            {!ch.includes('push')  && <Badge variant="warning" size="sm">No push</Badge>}
+            {!ch.includes('inapp') && <Badge variant="warning" size="sm">Push only</Badge>}
           </div>
-          <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{event.detail}</p>
+          <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {event.detail}
+            {!ch.includes('push')  && ' This event has never sent a device push.'}
+            {!ch.includes('inapp') && ' Chat has its own unread badge, so it writes no bell notification.'}
+          </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <PillTabs items={MODES} value={mode} onChange={m => onChange({ ...value, ...fromMode(m) })} />
+          <PillTabs items={modesFor(ch)} value={mode} onChange={m => onChange({ ...value, ...fromMode(m, ch) })} />
           {/* Targeting is meaningless for an event nobody is told about, so the
               control disappears rather than sitting there disabled. */}
           {mode !== 'off' && (
@@ -114,11 +135,12 @@ function EventRow({ event, value, roles, onChange }) {
               <div className="min-w-0">
                 <p className="text-[11px] m-0" style={{ color: 'var(--color-text-secondary)' }}>
                   Whoever this event already notifies — the assigned closer, the submitting fronter, the compliance
-                  queue, and so on, exactly as today. Pick roles only to override that.
+                  queue, and so on, exactly as today. Choosing roles NARROWS that list; it never adds anyone who
+                  wasn't already going to be told, so a private outcome can't become a broadcast.
                 </p>
                 <div className="mt-2">
                   <Button variant="secondary" size="xs" onClick={() => onChange({ ...value, roles: [] })}>
-                    Choose roles instead
+                    Narrow to specific roles
                   </Button>
                 </div>
               </div>
@@ -161,7 +183,7 @@ export default function EventsSection({
     let off = 0, inapp = 0, pushed = 0, targeted = 0;
     for (const e of catalog) {
       const v = events[e.id] || {};
-      const m = modeOf(v);
+      const m = modeOf(v, chOf(e));
       if (m === 'off') off++; else if (m === 'inapp') inapp++; else pushed++;
       if (Array.isArray(v.roles)) targeted++;
     }
@@ -170,7 +192,7 @@ export default function EventsSection({
 
   const setMany = (list, m) => {
     const next = { ...events };
-    for (const e of list) next[e.id] = { ...(next[e.id] || { roles: null }), ...fromMode(m) };
+    for (const e of list) next[e.id] = { ...(next[e.id] || { roles: null }), ...fromMode(m, chOf(e)) };
     onEventsReplace(next);
   };
 
@@ -207,7 +229,7 @@ export default function EventsSection({
             ['Instant push',  tally.pushed,   'var(--color-success-600)', BellRing],
             ['In-app only',   tally.inapp,    'var(--color-info-600)',    Bell],
             ['Off',           tally.off,      'var(--color-text-tertiary)', BellOff],
-            ['Re-targeted',   tally.targeted, 'var(--color-warning-600)', Users],
+            ['Narrowed',      tally.targeted, 'var(--color-warning-600)', Users],
           ].map(([label, n, color, Icon]) => (
             <div key={label} className="rounded-xl px-3 py-2.5 flex items-center gap-2.5 min-w-0"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
@@ -229,6 +251,10 @@ export default function EventsSection({
             </Button>
           ))}
         </div>
+        <p className="text-[11px] m-0 mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+          An event that has no push channel lands on In-app instead; one that has no in-app channel lands on Off.
+          Nothing is stored that the code would not actually deliver.
+        </p>
       </Panel>
 
       {/* ── Delivery behaviour ────────────────────────────────────────────── */}
@@ -299,7 +325,7 @@ export default function EventsSection({
             subtitle={`${list.length} event${list.length === 1 ? '' : 's'}`}
             actions={
               <div className="flex items-center gap-1.5 flex-wrap">
-                {MODES.map(m => (
+                {modesFor([...new Set(list.flatMap(chOf))]).map(m => (
                   <Button key={m.key} variant="ghost" size="xs" onClick={() => setMany(list, m.key)}>
                     {m.label}
                   </Button>

@@ -15,11 +15,15 @@
 // Storage: business_config GLOBAL key `pwa` — the same mechanism Branding uses
 // (mig 068), so this needs no migration and no new table.
 //
-// IMPORTANT — why the push defaults are all true. Today notifyUsers() calls
-// sendPushToUsers() unconditionally, so EVERY event already pushes to every
-// subscribed device. Defaulting push:true across the board is therefore what
-// "preserve current behaviour" actually means. The value of this matrix is
-// being able to turn things DOWN and re-target them, not up.
+// IMPORTANT — why the defaults are all ON. notifyUsers() calls
+// sendPushToUsers() unconditionally, so every event it handles already pushes
+// to every subscribed device. Defaulting to on is therefore what "preserve
+// current behaviour" actually means. The value of this matrix is being able to
+// turn things DOWN and re-target them, not up.
+//
+// "On" means on for the channels an event HAS — see `channels` on each catalog
+// entry. Five events only write an in-app row and one only pushes; those are
+// not new restrictions, they are what the emitting code has always done.
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
@@ -41,26 +45,35 @@ const CONFIG_KEY = 'pwa';
 // notificationService (there were exactly three). Those keep working as before
 // and this UI becomes another way to set the same value — no silent behaviour
 // change, and no second setting that can disagree with the first.
+//
+// `channels` is what the emitting code ACTUALLY sends today, and it is the
+// reason this list is trustworthy. Five of these events only ever wrote an
+// in-app row and one only ever pushed; offering a "push" switch on an event
+// that has no push would be a control that silently does nothing — the exact
+// failure where a screen looks right and the behaviour isn't. Turning those on
+// would also mean making the floor NOISIER, which is the opposite of the point.
+// If an emitter later gains a channel, widen it here and the UI follows.
 const EVENT_CATALOG = [
-  { id: 'transfer_created',      group: 'Transfers',  label: 'Transfer created',        detail: 'A fronter sent a new transfer.' },
-  { id: 'transfer_assigned',     group: 'Transfers',  label: 'Transfer assigned',       detail: 'A transfer landed on a closer.', legacyKey: 'transfer_assigned_notify_closer' },
-  { id: 'transfer_rejected',     group: 'Transfers',  label: 'Transfer rejected',       detail: 'A closer rejected a transfer.',  legacyKey: 'transfer_reject_notify_fronter' },
-  { id: 'transfer_edited',       group: 'Transfers',  label: 'Transfer edited',         detail: 'A transfer was edited after the fact.' },
-  { id: 'transfer_refresh',      group: 'Transfers',  label: 'Duplicate — refreshed',   detail: 'Re-transfer inside the dedup window.' },
-  { id: 'transfer_reengaged',    group: 'Transfers',  label: 'Duplicate — re-engaged',  detail: 'Old lead transferred again.' },
-  { id: 'transfer_sale_overlap', group: 'Transfers',  label: 'Duplicate — sale exists', detail: 'New transfer despite a completed sale.' },
+  { id: 'transfer_created',      group: 'Transfers',  label: 'Transfer created',        detail: 'A fronter sent a new transfer.',            channels: ['inapp', 'push'] },
+  { id: 'transfer_assigned',     group: 'Transfers',  label: 'Transfer assigned',       detail: 'A transfer landed on a closer.',            channels: ['inapp', 'push'], legacyKey: 'transfer_assigned_notify_closer' },
+  { id: 'transfer_rejected',     group: 'Transfers',  label: 'Transfer rejected',       detail: 'A closer rejected a transfer.',             channels: ['inapp', 'push'], legacyKey: 'transfer_reject_notify_fronter' },
+  { id: 'transfer_edited',       group: 'Transfers',  label: 'Transfer edited',         detail: 'A transfer was edited after the fact.',     channels: ['inapp'] },
+  { id: 'transfer_refresh',      group: 'Transfers',  label: 'Duplicate — refreshed',   detail: 'Re-transfer inside the dedup window.',      channels: ['inapp'] },
+  { id: 'transfer_reengaged',    group: 'Transfers',  label: 'Duplicate — re-engaged',  detail: 'Old lead transferred again.',               channels: ['inapp'] },
+  { id: 'transfer_sale_overlap', group: 'Transfers',  label: 'Duplicate — sale exists', detail: 'New transfer despite a completed sale.',    channels: ['inapp'] },
 
-  { id: 'sale_pending_review',   group: 'Sales',      label: 'Sale submitted',           detail: 'A sale entered the compliance queue.' },
-  { id: 'sale_approved',         group: 'Sales',      label: 'Sale approved',            detail: 'Compliance approved a sale.' },
-  { id: 'sale_needs_revision',   group: 'Sales',      label: 'Sale returned',            detail: 'Compliance sent a sale back.' },
-  { id: 'compliance_updated',    group: 'Sales',      label: 'Compliance edited a sale', detail: 'A sale was changed by compliance.' },
-  { id: 'resell_created',        group: 'Sales',      label: 'Resell created',           detail: 'A customer was sold again.', legacyKey: 'resell_notify_compliance' },
-  { id: 'disposition_submitted', group: 'Sales',      label: 'Disposition submitted',    detail: 'A non-sale disposition was logged.' },
+  { id: 'sale_pending_review',   group: 'Sales',      label: 'Sale submitted',           detail: 'A sale entered the compliance queue.',     channels: ['inapp', 'push'] },
+  { id: 'sale_approved',         group: 'Sales',      label: 'Sale approved',            detail: 'Compliance approved a sale.',              channels: ['inapp', 'push'] },
+  { id: 'sale_needs_revision',   group: 'Sales',      label: 'Sale returned',            detail: 'Compliance sent a sale back.',             channels: ['inapp', 'push'] },
+  { id: 'compliance_updated',    group: 'Sales',      label: 'Compliance edited a sale', detail: 'A sale was changed by compliance.',        channels: ['inapp', 'push'] },
+  { id: 'resell_created',        group: 'Sales',      label: 'Resell created',           detail: 'A customer was sold again.',               channels: ['inapp', 'push'], legacyKey: 'resell_notify_compliance' },
+  { id: 'disposition_submitted', group: 'Sales',      label: 'Disposition submitted',    detail: 'A non-sale disposition was logged.',       channels: ['inapp', 'push'] },
 
-  { id: 'callback_due',          group: 'Callbacks',  label: 'Callback due',            detail: 'A scheduled callback came due.' },
-  { id: 'number_claimable',      group: 'Numbers',    label: 'Number claimable',        detail: 'An assigned number became claimable.' },
-  { id: 'chat_message',          group: 'Messaging',  label: 'Chat message',            detail: 'A new chat message arrived.' },
-  { id: 'email_received',        group: 'Messaging',  label: 'Internal email',          detail: 'A new internal email arrived.' },
+  { id: 'callback_due',          group: 'Callbacks',  label: 'Callback due',            detail: 'A scheduled callback came due.',            channels: ['inapp', 'push'] },
+  { id: 'number_claimable',      group: 'Numbers',    label: 'Number claimable',        detail: 'An assigned number became claimable.',      channels: ['inapp'] },
+  // Chat has its own unread badge, so it has never written a bell notification.
+  { id: 'chat_message',          group: 'Messaging',  label: 'Chat message',            detail: 'A new chat message arrived.',               channels: ['push'] },
+  { id: 'email_received',        group: 'Messaging',  label: 'Internal email',          detail: 'A new internal email arrived.',             channels: ['inapp', 'push'] },
 ];
 
 // Recipient targeting. `roles: null` means "whoever this event already
@@ -73,8 +86,15 @@ const ROLE_CHOICES = [
   'closer', 'fronter',
 ];
 
+// Every channel an event actually has, switched on — i.e. exactly what the code
+// does today. An event with no push channel defaults to push:false because a
+// stored `true` there would be a claim the emitter cannot honour.
 const defaultEvents = () => Object.fromEntries(
-  EVENT_CATALOG.map(e => [e.id, { inapp: true, push: true, roles: null }]),
+  EVENT_CATALOG.map(e => [e.id, {
+    inapp: e.channels.includes('inapp'),
+    push:  e.channels.includes('push'),
+    roles: null,
+  }]),
 );
 
 // Code defaults — a fresh install behaves exactly like today: the PWA layer is
@@ -124,8 +144,24 @@ function merge(saved) {
       ...DEFAULTS.push, ...(s.push || {}),
       quiet_hours: { ...DEFAULTS.push.quiet_hours, ...((s.push || {}).quiet_hours || {}) },
     },
-    events:  { ...defaultEvents(), ...(s.events || {}) },
+    // Clamp every stored event to the channels its emitter actually has, so a
+    // value saved before `channels` existed (or hand-edited in the table) can
+    // never claim a delivery the code does not perform.
+    events: clampEvents({ ...defaultEvents(), ...(s.events || {}) }),
   };
+}
+
+function clampEvents(events) {
+  const out = {};
+  for (const e of EVENT_CATALOG) {
+    const v = events[e.id] || {};
+    out[e.id] = {
+      inapp: e.channels.includes('inapp') && v.inapp !== false,
+      push:  e.channels.includes('push')  && v.push  !== false,
+      roles: Array.isArray(v.roles) ? v.roles : null,
+    };
+  }
+  return out;
 }
 
 const readSettings = async () => merge(await getConfig(null, CONFIG_KEY, null));
@@ -213,14 +249,18 @@ router.put('/', superadminOnly, asyncHandler(async (req, res) => {
   if (prev.sw.cache_enabled !== incoming.sw.cache_enabled) {
     incoming.sw.cache_version = (Number(prev.sw.cache_version) || 1) + 1;
   }
-  await setConfig(null, CONFIG_KEY, incoming, req.user.id);
+  // 'global' is the SCOPE string, not a company id. getConfig(companyId, …)
+  // takes a company and falls back to the global scope internally; setConfig
+  // takes the scope directly. Passing null here wrote rows under scope=null,
+  // which nothing could ever read back.
+  await setConfig('global', CONFIG_KEY, incoming, req.user.id);
 
   // Keep the three pre-existing notification flags in lockstep, so the older
   // Business Rules panel and this one can never disagree about one setting.
   for (const e of EVENT_CATALOG) {
     if (!e.legacyKey) continue;
     const ev = incoming.events[e.id];
-    if (ev) await setConfig(null, `notifications.${e.legacyKey}`, !!(ev.inapp || ev.push), req.user.id);
+    if (ev) await setConfig('global', `notifications.${e.legacyKey}`, !!(ev.inapp || ev.push), req.user.id);
   }
 
   logger.info('PWA', `Settings saved by ${req.user.email || req.user.id}`);

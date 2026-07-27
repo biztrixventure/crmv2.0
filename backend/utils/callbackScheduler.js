@@ -7,6 +7,12 @@
  */
 const { supabaseAdmin } = require('../config/database');
 const { sendPushToUser } = require('./pushService');
+// `callback_due` and `number_claimable` are two of the PWA event catalog's 17.
+// They are emitted here rather than in notificationService, so the gate has to
+// be applied here too — otherwise the admin matrix would describe them falsely.
+// The `charge_due` reminder below is deliberately left alone: it is not in the
+// catalog, and inventing an entry for it is not this stage's job.
+const { resolveDelivery, pushNow } = require('./pwaPolicy');
 const logger = require('./logger');
 
 let schedulerInterval = null;
@@ -74,33 +80,46 @@ async function processDueCallbacks() {
           cb.notes     || null,
         ].filter(Boolean).join(' · ') || 'Time for your scheduled callback';
 
+        // 0. The matrix gate. Defaults to both channels on, i.e. unchanged.
+        const gate = await resolveDelivery('callback_due', [cb.user_id], cb.company_id);
+        const reaches = gate.ids.length > 0;
+
         // 1. Create in-app notification
-        const { error: notifErr } = await supabaseAdmin.from('notifications').insert({
-          user_id:    cb.user_id,
-          company_id: cb.company_id,
-          type:       'callback_due',
-          title,
-          message,
-          data: {
-            callback_id:    cb.id,
-            customer_name:  cb.customer_name,
-            customer_phone: cb.customer_phone,
-            callback_at:    cb.callback_at,
-          },
-          is_read: false,
-        });
-        if (notifErr) logger.warn('SCHEDULER', `Notification insert error for ${cb.id}: ${notifErr.message}`);
+        if (reaches && gate.inapp) {
+          const { error: notifErr } = await supabaseAdmin.from('notifications').insert({
+            user_id:    cb.user_id,
+            company_id: cb.company_id,
+            type:       'callback_due',
+            title,
+            message,
+            data: {
+              callback_id:    cb.id,
+              customer_name:  cb.customer_name,
+              customer_phone: cb.customer_phone,
+              callback_at:    cb.callback_at,
+            },
+            is_read: false,
+          });
+          if (notifErr) logger.warn('SCHEDULER', `Notification insert error for ${cb.id}: ${notifErr.message}`);
+        }
 
-        // 2. Send Web Push
-        await sendPushToUser(cb.user_id, {
-          title,
-          body:               message,
-          tag:                `callback-${cb.id}`,
-          requireInteraction: true,
-          data:               { type: 'callback_due', callback_id: cb.id },
-        });
+        // 2. Send Web Push. requireInteraction stays hardcoded true here and
+        // overrides the global preference: a callback that came due is the one
+        // notification that must not scroll away before it is seen.
+        if (reaches && gate.push) {
+          await pushNow(gate.ids, {
+            title,
+            body:               message,
+            tag:                `callback-${cb.id}`,
+            requireInteraction: true,
+            data:               { type: 'callback_due', callback_id: cb.id },
+          });
+        }
 
-        // 3. Mark notified so we don't fire again
+        // 3. Mark notified so we don't fire again — regardless of whether the
+        // admin has muted this event. "Notified" tracks that the scheduler
+        // handled it; re-firing every 60s because a channel is off would be a
+        // loop, not a courtesy.
         await supabaseAdmin
           .from('callbacks')
           .update({ notified: true })
@@ -201,7 +220,12 @@ async function processCallbackNumberExpiry() {
           .filter(r => MANAGER_LEVELS.includes(r.custom_roles?.level))
           .map(r => r.user_id);
 
-        for (const mgrId of mgrIds) {
+        // Gate once for the whole manager set — one config read, not one per
+        // manager per number. In-app only: this event has never pushed.
+        const claimGate = await resolveDelivery('number_claimable', mgrIds, companyId);
+        const claimTargets = claimGate.inapp ? claimGate.ids : [];
+
+        for (const mgrId of claimTargets) {
           for (const n of nums) {
             await supabaseAdmin.from('notifications').insert({
               user_id:    mgrId,

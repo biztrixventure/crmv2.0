@@ -11,7 +11,10 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
-const { sendPushToUsers } = require('./pushService');
+// Chat is `chat_message` in the PWA event catalog. It goes through the same
+// gate as every other event — push-only, because chat has always had its own
+// unread badge and has never written a bell notification.
+const { resolveDelivery, pushNow } = require('./pwaPolicy');
 
 // Deterministic DM key — sorted so (a,b) and (b,a) collapse to one conversation.
 function buildDmKey(userA, userB) {
@@ -82,7 +85,17 @@ async function pushNewMessage({ conversationId, senderId, senderName, body, memb
   const recipients = (memberIds || []).filter(id => id && id !== senderId);
   if (!recipients.length) return;
   const preview = (body || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-  sendPushToUsers(recipients, {
+  // No company id: chat conversations cross company boundaries, so a role
+  // narrowing is resolved against whatever active role each member holds.
+  // Both call sites are fire-and-forget with no .catch(), so nothing in here
+  // may reject — an unhandled rejection would take the process down over a
+  // chat notification.
+  let gate;
+  try { gate = await resolveDelivery('chat_message', recipients, null); }
+  catch { return; }
+  const { ids, push } = gate;
+  if (!push || !ids.length) return;
+  pushNow(ids, {
     title: senderName || 'New message',
     body:  preview || 'Sent you a message',
     tag:   `chat_${conversationId}`,
@@ -123,12 +136,22 @@ async function createInvites(conversationId, inviterId, inviteeIds) {
 }
 
 /** Web Push to users @mentioned in a message (best-effort, never blocks). */
-function pushMentions({ conversationId, senderId, senderName, convTitle, mentionIds, body }) {
+async function pushMentions({ conversationId, senderId, senderName, convTitle, mentionIds, body }) {
   const recipients = (mentionIds || []).filter(id => id && id !== senderId);
   if (!recipients.length) return;
   const where = convTitle ? ` in ${convTitle}` : '';
   const preview = (body || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  sendPushToUsers(recipients, {
+  // A mention is still a chat message as far as the catalog is concerned —
+  // one switch, so turning chat down cannot leave a second channel open.
+  // Both call sites are fire-and-forget with no .catch(), so nothing in here
+  // may reject — an unhandled rejection would take the process down over a
+  // chat notification.
+  let gate;
+  try { gate = await resolveDelivery('chat_message', recipients, null); }
+  catch { return; }
+  const { ids, push } = gate;
+  if (!push || !ids.length) return;
+  pushNow(ids, {
     title: `${senderName || 'Someone'} mentioned you${where}`,
     body:  preview || 'You were mentioned in a message',
     tag:   `chat_mention_${conversationId}`,

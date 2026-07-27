@@ -66,7 +66,10 @@ function drainQueue() {
 }
 
 // ── Build JSON payload string ─────────────────────────────────────────────────
-function buildPayload({ title, body, icon, badge, tag, data = {}, requireInteraction = false }) {
+// `vibrate` is part of the PAYLOAD (the service worker reads it); `urgency` and
+// `ttl` are transport options for the push service itself, so they are split
+// out into sendOptions() below rather than serialized here.
+function buildPayload({ title, body, icon, badge, tag, data = {}, requireInteraction = false, vibrate }) {
   return JSON.stringify({
     title,
     body:               body || '',
@@ -75,18 +78,33 @@ function buildPayload({ title, body, icon, badge, tag, data = {}, requireInterac
     tag:                tag   || 'biztrix-notification',
     data,
     requireInteraction,
+    // Only emit the key when the caller has an opinion, so a payload built the
+    // old way stays byte-identical and the worker keeps its own default pattern.
+    ...(vibrate === undefined ? {} : { vibrate: vibrate ? [200, 100, 200] : [] }),
     timestamp:          Date.now(),
   });
 }
 
+// TTL: how long the push service holds an undelivered message for a device that
+// is offline. Urgency: how hard it tries to wake one that is asleep. The
+// defaults are exactly what this file has always sent.
+const VALID_URGENCY = ['very-low', 'low', 'normal', 'high'];
+function sendOptions({ ttl, urgency } = {}) {
+  const n = Number(ttl);
+  return {
+    TTL: Number.isFinite(n) && n >= 0 ? n : 86400,
+    ...(VALID_URGENCY.includes(urgency) ? { urgency } : {}),
+  };
+}
+
 // ── Single send with 1 retry on transient error ───────────────────────────────
 // Returns stale subscription id if the subscription is no longer valid, null otherwise.
-async function trySend(sub, payloadStr, attempt = 0) {
+async function trySend(sub, payloadStr, opts = { TTL: 86400 }, attempt = 0) {
   try {
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } },
       payloadStr,
-      { TTL: 86400 }
+      opts
     );
     return null;
   } catch (err) {
@@ -96,7 +114,7 @@ async function trySend(sub, payloadStr, attempt = 0) {
     // Retry once on server-side errors or rate limiting
     if (attempt === 0 && (!err.statusCode || err.statusCode >= 500 || err.statusCode === 429)) {
       await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
-      return trySend(sub, payloadStr, 1);
+      return trySend(sub, payloadStr, opts, 1);
     }
     logger.warn('PUSH', `Push failed sub ${sub.id}: ${err.message}`);
     return null;
@@ -140,11 +158,12 @@ async function sendPushToUser(userId, notifOpts) {
   if (!subs.length) return;
 
   const payloadStr = buildPayload(notifOpts);
+  const opts       = sendOptions(notifOpts);
   const staleIds   = [];
 
   await Promise.allSettled(
     subs.map(sub =>
-      runLimited(() => trySend(sub, payloadStr)).then(staleId => {
+      runLimited(() => trySend(sub, payloadStr, opts)).then(staleId => {
         if (staleId) staleIds.push(staleId);
       })
     )
@@ -175,11 +194,12 @@ async function sendPushToUsers(userIds, notifOpts) {
   for (const [uid, subs] of Object.entries(byUser)) setCachedSubs(uid, subs);
 
   const payloadStr = buildPayload(notifOpts);
+  const opts       = sendOptions(notifOpts);
   const staleIds   = [];
 
   await Promise.allSettled(
     allSubs.map(sub =>
-      runLimited(() => trySend(sub, payloadStr)).then(staleId => {
+      runLimited(() => trySend(sub, payloadStr, opts)).then(staleId => {
         if (staleId) staleIds.push(staleId);
       })
     )

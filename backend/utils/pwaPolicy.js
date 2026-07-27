@@ -1,0 +1,189 @@
+// ============================================================================
+// pwaPolicy — the single gate every notification passes through.
+//
+// The settings live in business_config scope 'global', key `pwa`, written by
+// PUT /api/pwa. This module only READS them, and only through getConfig, whose
+// 60s in-process cache means the default path costs nothing per event.
+//
+// THE INVARIANT THAT MAKES THIS SAFE TO SHIP: an event with no stored entry, a
+// missing config row, or a failed read all resolve to { inapp: true, push: true,
+// roles: null } — which is byte-for-byte what the code did before this existed.
+// Notifications are the mechanism by which a closer learns their sale came back
+// and compliance learns a sale arrived, so every failure mode here fails OPEN.
+// A config hiccup that silently muted the queue would be far worse than one
+// that ignored an admin's preference for sixty seconds.
+//
+// `roles` narrows the recipients an event ALREADY computed; it never adds
+// anyone. That direction is deliberate. The recipient lists in
+// notificationService are meaningful — "the assigned closer", "the submitting
+// fronter", "this sale's compliance queue" — and replacing one with "everybody
+// holding role X" would turn a private outcome into a broadcast. Narrowing can
+// only ever mean fewer people learning something they were already entitled to
+// learn, which is not a disclosure decision. So: null = today's recipients,
+// a list = that subset of them, an empty list = nobody.
+// ============================================================================
+const { supabaseAdmin } = require('../config/database');
+const { getConfig } = require('./businessConfig');
+const { sendPushToUsers } = require('./pushService');
+
+const CONFIG_KEY = 'pwa';
+
+// What every event does when nothing says otherwise — i.e. what the code did
+// before the matrix existed.
+const DEFAULT_POLICY = Object.freeze({ inapp: true, push: true, roles: null });
+
+const DEFAULT_PUSH = Object.freeze({
+  require_interaction: false,
+  vibrate:             true,
+  urgency:             'high',
+  ttl:                 86400,
+});
+
+async function readPwa() {
+  try {
+    const s = await getConfig(null, CONFIG_KEY, null);
+    return s && typeof s === 'object' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The delivery policy for one event type.
+ * `type` is the same string written to notifications.type and used as the push
+ * tag, so the UI, the stored rows and this gate all speak one vocabulary.
+ */
+async function eventPolicy(type) {
+  const s = await readPwa();
+  const e = s && s.events && s.events[type];
+  if (!e || typeof e !== 'object') return DEFAULT_POLICY;
+  return {
+    // `!== false` rather than truthiness: a settings object written before a
+    // field existed must read as ON, not as OFF.
+    inapp: e.inapp !== false,
+    push:  e.push  !== false,
+    roles: Array.isArray(e.roles) ? e.roles : null,
+  };
+}
+
+/** Delivery options shared by every push (urgency, TTL, vibrate, stickiness). */
+async function pushOptions() {
+  const s = await readPwa();
+  const p = (s && s.push) || {};
+  return {
+    requireInteraction: p.require_interaction === true,
+    vibrate:            p.vibrate !== false,
+    urgency:            typeof p.urgency === 'string' ? p.urgency : DEFAULT_PUSH.urgency,
+    ttl:                Number.isFinite(Number(p.ttl)) ? Number(p.ttl) : DEFAULT_PUSH.ttl,
+  };
+}
+
+// A window is [start, end) on the server clock. A window that crosses midnight
+// (22:00 → 07:00) is read as overnight rather than as an empty range, and a
+// zero-width window means "off" rather than "always", because the alternative
+// silences everything from one careless pair of identical dropdowns.
+function inWindow(start, end, now = new Date()) {
+  const parse = (t) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
+    if (!m) return null;
+    const h = Number(m[1]), min = Number(m[2]);
+    if (h > 23 || min > 59) return null;
+    return h * 60 + min;
+  };
+  const s = parse(start), e = parse(end);
+  if (s === null || e === null || s === e) return false;
+  const cur = now.getHours() * 60 + now.getMinutes();
+  return s < e ? (cur >= s && cur < e) : (cur >= s || cur < e);
+}
+
+/** True when device pushes are currently suppressed by quiet hours. */
+async function pushMutedNow() {
+  const s = await readPwa();
+  const q = (s && s.push && s.push.quiet_hours) || {};
+  if (!q.enabled) return false;
+  return inWindow(q.start, q.end);
+}
+
+/**
+ * Narrow a recipient list to the roles the policy allows.
+ *
+ * Returns the list unchanged when there is nothing to apply (`levels` null) and
+ * — deliberately — also when the lookup FAILS. A transient database error must
+ * not silently mute a compliance queue; the worst case of failing open is that
+ * an admin's narrowing preference is ignored for one event.
+ */
+async function narrowToRoles(userIds, levels, companyId) {
+  const ids = (userIds || []).filter(Boolean);
+  if (!ids.length || !Array.isArray(levels)) return ids;
+  if (!levels.length) return [];          // an explicit empty list means nobody
+
+  try {
+    let q = supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, custom_roles(level)')
+      .in('user_id', ids)
+      .eq('is_active', true);
+    // Scope to the company when the event has one. Several events legitimately
+    // reach across companies (a fronter in the fronting company hearing that
+    // their lead closed), and those pass that company's id, not the closer's.
+    if (companyId) q = q.eq('company_id', companyId);
+
+    const { data, error } = await q;
+    if (error || !data) return ids;
+    const allowed = new Set(
+      data.filter(r => levels.includes(r.custom_roles?.level)).map(r => r.user_id),
+    );
+    return ids.filter(id => allowed.has(id));
+  } catch {
+    return ids;
+  }
+}
+
+/**
+ * The one call every emitter makes: given an event type and the recipients it
+ * already computed, say who still gets it and by which channels.
+ *
+ * Returns { ids, inapp, push }. On the default path (no stored entry, quiet
+ * hours off, roles null) this is { ids: userIds, inapp: true, push: true } and
+ * costs one cached config read — no database query, no behaviour change.
+ */
+async function resolveDelivery(type, userIds, companyId) {
+  const [policy, muted] = await Promise.all([eventPolicy(type), pushMutedNow()]);
+  const base = (userIds || []).filter(Boolean);
+  const ids  = policy.roles ? await narrowToRoles(base, policy.roles, companyId) : base;
+  // Quiet hours mute the DEVICE, never the in-app record: the notification is
+  // still there in the bell when they look, it just doesn't buzz at 3am.
+  return { ids, inapp: policy.inapp, push: policy.push && !muted };
+}
+
+/**
+ * Send a push with the admin's delivery preferences applied. Gating is the
+ * caller's job (via resolveDelivery) — this only decorates and sends.
+ * An explicit `requireInteraction` on the payload wins, because a caller that
+ * asks for a sticky notification (a due callback) means it.
+ */
+async function pushNow(userIds, payload) {
+  const ids = (Array.isArray(userIds) ? userIds : [userIds]).filter(Boolean);
+  if (!ids.length) return;
+  const opts = await pushOptions();
+  return sendPushToUsers(ids, {
+    ...payload,
+    requireInteraction: payload.requireInteraction === undefined
+      ? opts.requireInteraction
+      : payload.requireInteraction,
+    vibrate: opts.vibrate,
+    urgency: opts.urgency,
+    ttl:     opts.ttl,
+  });
+}
+
+module.exports = {
+  eventPolicy,
+  pushOptions,
+  pushMutedNow,
+  narrowToRoles,
+  resolveDelivery,
+  pushNow,
+  inWindow,          // exported for tests — the midnight-crossing case is the point
+  DEFAULT_POLICY,
+};

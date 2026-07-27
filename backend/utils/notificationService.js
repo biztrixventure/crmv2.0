@@ -20,16 +20,41 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
-const { sendPushToUser, sendPushToUsers } = require('./pushService');
 const { getConfig } = require('./businessConfig');
+const { resolveDelivery, pushNow } = require('./pwaPolicy');
 
 // Config-driven gate. Returns true when the named notification flag is on.
 // Cached via businessConfig's 60s TTL so each event is a cheap lookup.
+//
+// This is the ORIGINAL gate and it still runs, on the three events that always
+// had one. Those three flags are written in lockstep by PUT /api/pwa, so the
+// admin matrix and the older Business Rules panel can never disagree — and this
+// file needs no special case for them.
 async function shouldNotify(companyId, key, fallback = true) {
   try {
     const v = await getConfig(companyId, `notifications.${key}`, fallback);
     return !!v;
   } catch { return !!fallback; }
+}
+
+// ─── the matrix gate ─────────────────────────────────────────────────────────
+// Every notification and every push in this file now passes through
+// resolveDelivery(). With no configuration — which is the shipped state — it
+// returns the ids it was handed with inapp and push both true, so everything
+// below behaves exactly as it did before the gate existed. That property is
+// what makes it safe to put in front of the code that tells a closer their sale
+// came back and compliance that a sale arrived.
+//
+// Push for a single, individually-targeted recipient. A helper so the seven
+// direct sends in this file cannot drift apart from one another, and so each
+// one names the event type it belongs to instead of implying it.
+async function pushForEvent(type, userId, companyId, payload) {
+  if (!userId) return;
+  try {
+    const { ids, push } = await resolveDelivery(type, [userId], companyId);
+    if (!push || !ids.length) return;
+    pushNow(ids, payload).catch(() => {});
+  } catch { /* a push is never worth failing the business write for */ }
 }
 
 // All management roles — notified for company-wide events.
@@ -58,6 +83,11 @@ const hourBlock = () => new Date().toISOString().slice(0, 13);
  * @param {string} [dedupKey] - If set, upsert with ignoreDuplicates to prevent duplicates on retry.
  */
 async function createNotification({ userId, companyId, type, title, message, data, dedupKey }) {
+  // The in-app half of the gate. Push is sent separately by the callers, each
+  // through pushForEvent, so the two channels stay independently controllable.
+  const { ids, inapp } = await resolveDelivery(type, [userId], companyId);
+  if (!inapp || !ids.length) return;
+
   const row = {
     user_id:    userId,
     company_id: companyId || null,
@@ -83,35 +113,46 @@ async function createNotification({ userId, companyId, type, title, message, dat
  */
 async function notifyUsers(userIds, payload) {
   if (!userIds?.length) return;
-  const hour = hourBlock();
-  const rows = userIds.map(uid => {
-    const row = {
-      user_id:    uid,
-      company_id: payload.companyId || null,
-      type:       payload.type,
-      title:      payload.title,
-      message:    payload.message  || null,
-      data:       payload.data     || null,
-      is_read:    false,
-    };
-    if (payload.dedupBase) row.dedup_key = `${payload.dedupBase}_${uid}_${hour}`;
-    return row;
-  });
 
-  const op = payload.dedupBase
-    ? supabaseAdmin.from('notifications').upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true })
-    : supabaseAdmin.from('notifications').insert(rows);
+  // One gate for both channels. `ids` is the caller's list unless an admin has
+  // narrowed this event to specific roles; inapp/push are the per-channel
+  // switches, with push additionally false inside quiet hours.
+  const { ids, inapp, push } = await resolveDelivery(payload.type, userIds, payload.companyId);
+  if (!ids.length) return;
 
-  const { error } = await op;
-  if (error) logger.warn('NOTIF', `Bulk insert failed: ${error.message}`);
+  if (inapp) {
+    const hour = hourBlock();
+    const rows = ids.map(uid => {
+      const row = {
+        user_id:    uid,
+        company_id: payload.companyId || null,
+        type:       payload.type,
+        title:      payload.title,
+        message:    payload.message  || null,
+        data:       payload.data     || null,
+        is_read:    false,
+      };
+      if (payload.dedupBase) row.dedup_key = `${payload.dedupBase}_${uid}_${hour}`;
+      return row;
+    });
 
-  // Web Push (fire-and-forget) — pass type as tag for OS notification grouping
-  sendPushToUsers(userIds, {
-    title: payload.title,
-    body:  payload.message || payload.title,
-    tag:   payload.type,
-    data:  payload.data || {},
-  }).catch(() => {});
+    const op = payload.dedupBase
+      ? supabaseAdmin.from('notifications').upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true })
+      : supabaseAdmin.from('notifications').insert(rows);
+
+    const { error } = await op;
+    if (error) logger.warn('NOTIF', `Bulk insert failed: ${error.message}`);
+  }
+
+  // Web Push (fire-and-forget) — type doubles as the tag for OS grouping.
+  if (push) {
+    pushNow(ids, {
+      title: payload.title,
+      body:  payload.message || payload.title,
+      tag:   payload.type,
+      data:  payload.data || {},
+    }).catch(() => {});
+  }
 }
 
 /** Get user IDs in a company that match certain role levels */
@@ -154,12 +195,12 @@ async function onTransferCreated({ transfer, fronterName, closerUserId }) {
       data:     { transfer_id: transfer.id, customer_name: customerName },
       dedupKey: `transfer_assigned_${transfer.id}_${closerUserId}_${hourBlock()}`,
     });
-    sendPushToUser(closerUserId, {
+    await pushForEvent('transfer_assigned', closerUserId, companyId, {
       title: 'New transfer assigned',
       body:  `${fronterName} → ${customerName}`,
       tag:   'transfer_assigned',
       data:  { transfer_id: transfer.id },
-    }).catch(() => {});
+    });
   }
 
   await notifyFloorManagers(companyId, {
@@ -185,12 +226,12 @@ async function onTransferRejected({ transfer, closerName, reason }) {
       message: `${closerName} rejected your transfer for ${customerName}. Reason: ${reason || 'No reason given'}`,
       data:    { transfer_id: transfer.id, customer_name: customerName, reason },
     });
-    sendPushToUser(fronterUserId, {
+    await pushForEvent('transfer_rejected', fronterUserId, companyId, {
       title: 'Transfer rejected',
       body:  `${closerName} rejected ${customerName}${reason ? ': ' + reason : ''}`,
       tag:   'transfer_rejected',
       data:  { transfer_id: transfer.id },
-    }).catch(() => {});
+    });
   }
 
   const fronterMgrIds = await getUserIdsByLevel(companyId, ['manager', 'fronter_manager', 'operations_manager']);
@@ -272,12 +313,12 @@ async function onSaleApproved({ sale, reviewerName }) {
       data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
       dedupKey: `sale_approved_${sale.id}_${closerId}_${hour}`,
     });
-    sendPushToUser(closerId, {
+    await pushForEvent('sale_approved', closerId, companyId, {
       title: 'Sale approved!',
       body:  `${customerName} — Ref: ${refNo} approved by compliance`,
       tag:   'sale_approved',
       data:  { sale_id: sale.id },
-    }).catch(() => {});
+    });
   }
 
   const closerMgrIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
@@ -313,12 +354,14 @@ async function onSaleApproved({ sale, reviewerName }) {
       data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
       dedupKey: `sale_approved_${sale.id}_${fronterUserId}_${hour}`,
     });
-    sendPushToUser(fronterUserId, {
+    // The fronter's company, not the closer's — a role narrowing has to be
+    // resolved against the company the recipient actually holds a role in.
+    await pushForEvent('sale_approved', fronterUserId, fronterCompanyId || companyId, {
       title: 'Lead confirmed!',
       body:  `${customerName} — Ref: ${refNo} closed won${dispoSuffix}`,
       tag:   'sale_approved',
       data:  { sale_id: sale.id },
-    }).catch(() => {});
+    });
   }
 
   if (fronterCompanyId && fronterCompanyId !== companyId) {
@@ -347,12 +390,12 @@ async function onSaleReturned({ sale, reviewerName, note }) {
       data:     { sale_id: sale.id, reference_no: refNo, customer_name: customerName, note },
       dedupKey: `sale_returned_${sale.id}_${closerId}_${hourBlock()}`,
     });
-    sendPushToUser(closerId, {
+    await pushForEvent('sale_needs_revision', closerId, companyId, {
       title: 'Sale needs revision',
       body:  `${customerName}: ${note}`,
       tag:   'sale_needs_revision',
       data:  { sale_id: sale.id },
-    }).catch(() => {});
+    });
   }
 
   const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager']);
@@ -419,12 +462,12 @@ async function onDispositionSubmitted({ action, transfer, config, submitterId, s
       data:     { transfer_id: transfer.id, action_id: action.id, disposition: config.name, color: config.color },
       dedupKey: `disposition_${action.id}_${fronterUserId}_${hourBlock()}`,
     });
-    sendPushToUser(fronterUserId, {
+    await pushForEvent('disposition_submitted', fronterUserId, fronterCompanyId, {
       title: `Lead outcome: ${config.name}`,
       body:  `${customerName} — ${config.name}`,
       tag:   'disposition_submitted',
       data:  { transfer_id: transfer.id },
-    }).catch(() => {});
+    });
   }
 
   if (config.notify_fronter_manager && fronterCompanyId) {
@@ -489,8 +532,16 @@ async function onFronterDuplicateEvent({ kind, companyId, fronterId, phone, prio
     if (!COPY) return;
 
     const managerIds = await getUserIdsByLevel(companyId, FRONTER_MGR_LEVELS);
-    const targets = managerIds.filter(id => id !== fronterId);
-    if (!targets.length) return;
+    const candidates = managerIds.filter(id => id !== fronterId);
+    if (!candidates.length) return;
+
+    // This path writes its own rows (the dedup key is per manager/fronter/DAY,
+    // not per hour, so it can't go through notifyUsers) — but it still has to
+    // pass the same gate. In-app only, deliberately: these have never pushed,
+    // and the matrix is a description of today's behaviour, not a licence to
+    // make the floor noisier.
+    const { ids: targets, inapp } = await resolveDelivery(COPY.type, candidates, companyId);
+    if (!inapp || !targets.length) return;
 
     const day = new Date().toISOString().slice(0, 10);
     const rows = targets.map(uid => ({
@@ -527,12 +578,12 @@ async function onResellCreated({ newSale, oldSale, closerName, intent }) {
       message: `${closerName} resold ${customer} (#${policy}). Intent: ${intent}.`,
       data:    { sale_id: newSale.id, original_sale_id: oldSale.id, intent },
     });
-    sendPushToUser(oldSale.fronter_id, {
+    await pushForEvent('resell_created', oldSale.fronter_id, companyId, {
       title: 'Customer resold',
       body:  `${customer} → ${closerName} (${intent})`,
       tag:   'resell_created',
       data:  { sale_id: newSale.id },
-    }).catch(() => {});
+    });
   }
 
   if (mode === 'manager' || mode === 'everyone') {
