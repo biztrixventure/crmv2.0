@@ -495,12 +495,12 @@ function FieldsTab() {
               {cat.fields.map(field => {
                 const on = isOn(field);
                 const sens = /uuid|phone|email|vin|payment/i.test(field) || field === 'customer_name';
+                // Checked state is a TINT of the accent, not the --color-primary-50
+                // step: the -50 scales stay light under the dark theme while the
+                // text token flips to near-white, which measured 1.15:1 at 390 in
+                // dark — invisible. color-mix composites over whatever the surface
+                // is, so the selection reads in both themes.
                 return (
-                  {/* A TINT of the accent, not the --color-primary-50 step. The
-                      -50 scales stay light under the dark theme while the text
-                      token flips to near-white: measured 1.15:1 at 390 in dark,
-                      i.e. invisible. color-mix keeps the checked state legible
-                      in both themes because it composites over the surface. */}
                   <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'color-mix(in srgb, var(--color-primary-600) 18%, transparent)' : 'transparent', border: `1px solid ${on ? 'color-mix(in srgb, var(--color-primary-600) 45%, transparent)' : 'var(--color-border)'}` }}>
                     <input type="checkbox" checked={on} onChange={() => toggleCol(field)} />
                     <span className="flex-1">{labelFor(dataset, field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
