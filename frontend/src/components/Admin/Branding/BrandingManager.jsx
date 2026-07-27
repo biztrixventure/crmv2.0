@@ -145,7 +145,11 @@ export default function BrandingManager() {
             <Field label="Preview title" hint="Falls back to the tab title."><input value={b.og_title || ''} onChange={set('og_title')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
             <Field label="Preview description" hint="Falls back to the meta description."><textarea value={b.og_description || ''} onChange={set('og_description')} rows={2} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
             <Field label="Canonical URL" hint="e.g. https://crm.yourdomain.com"><input value={b.og_url || ''} onChange={set('og_url')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
-            <div className="grid grid-cols-2 gap-3">
+            {/* Two tracks of a ThemedSelect whose min-content is ~205px come to
+                422px, and a grid track never shrinks below its content's
+                minimum — so this pair, not the inputs, was what made the whole
+                Branding panel 92px too wide at 390. One column below `sm`. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Twitter card">
                 <ThemedSelect value={b.twitter_card || 'summary_large_image'} onChange={set('twitter_card')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle}>
                   <option value="summary_large_image">Large image</option>
