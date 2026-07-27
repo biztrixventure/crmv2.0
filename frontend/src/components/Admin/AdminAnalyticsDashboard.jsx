@@ -673,7 +673,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                 {segments.map(s => s.label).join(' · ')}
               </p>
             </div>
-            <div className="flex items-center gap-3 text-[11px] flex-shrink-0 flex-wrap">
+            <div className="flex items-center gap-3 text-[11px] min-w-0 flex-wrap">
               {segments.map(s => (
                 <button key={s.key} onClick={() => jumpToData('sales', s.key)}
                   className="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer"

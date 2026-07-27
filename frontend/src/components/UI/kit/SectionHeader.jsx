@@ -36,8 +36,10 @@ export default function SectionHeader({
             </div>
           )}
           <div className="min-w-0">
+            {/* clamp, not a fixed 26px: at 390 a long tab title either
+                truncated to a few characters or shoved the actions off-screen. */}
             <h1 className="font-bold leading-tight truncate"
-              style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: 26, letterSpacing: '-0.015em' }}>
+              style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: 'clamp(20px, 4.5vw, 26px)', letterSpacing: '-0.015em' }}>
               {title}
             </h1>
             {subtitle && (
@@ -45,7 +47,11 @@ export default function SectionHeader({
             )}
           </div>
         </div>
-        {actions && <div className="flex items-center gap-2 flex-wrap flex-shrink-0">{actions}</div>}
+        {/* `flex-wrap` with `flex-shrink-0` cancel each other out: the container
+            refuses to narrow, so a wide action group pushes past the viewport
+            instead of wrapping inside it. That one pairing was the entire
+            +304px overflow on Data Analyzer and +92px on Branding. */}
+        {actions && <div className="flex items-center gap-2 flex-wrap min-w-0">{actions}</div>}
       </div>
     );
   }
@@ -75,7 +81,7 @@ export default function SectionHeader({
           <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2 flex-wrap flex-shrink-0">{actions}</div>}
+      {actions && <div className="flex items-center gap-2 flex-wrap min-w-0">{actions}</div>}
     </div>
   );
 }

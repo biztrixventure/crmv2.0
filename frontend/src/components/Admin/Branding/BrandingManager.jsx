@@ -49,9 +49,13 @@ function ImageField({ label, hint, kind, value, onChange }) {
         <div className="w-14 h-14 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
           {value ? <img src={value} alt="" className="max-w-full max-h-full object-contain" /> : <ImageIcon size={18} style={{ color: 'var(--color-text-muted)' }} />}
         </div>
+        {/* `min-w-0` on the input ITSELF, not just its wrapper: an <input> has
+            an intrinsic ~20-character min-width that `w-full` does not override,
+            so this row refused to narrow below ~372px and pushed the whole
+            panel past a 390px viewport. */}
         <div className="flex-1 min-w-0">
           <input value={value || ''} onChange={e => onChange(e.target.value)} placeholder="https://…  or upload →"
-            className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} />
+            className="w-full min-w-0 px-3 py-2 text-sm rounded-lg" style={inputStyle} />
         </div>
         <button type="button" onClick={() => ref.current?.click()} disabled={busy}
           className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg flex-shrink-0" style={card}>
