@@ -303,20 +303,45 @@ router.get('/devices', superadminOnly, asyncHandler(async (req, res) => {
 
   const ids = [...new Set((data || []).map(d => d.user_id).filter(Boolean))];
   let profiles = {};
+  let emails   = {};
   if (ids.length) {
-    const { data: rows } = await supabaseAdmin
-      .from('user_profiles').select('id, email, first_name, last_name').in('id', ids);
-    profiles = Object.fromEntries((rows || []).map(p => [p.id, p]));
+    // `user_id` is the FK to auth.users; `id` is the table's OWN primary key, a
+    // separate random uuid. Joining on `id` matched nothing — and since
+    // user_profiles has no `email` column either, the whole select errored and
+    // every row fell back to "Unknown".
+    const { data: rows, error: pErr } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
+    if (pErr) logger.warn('PWA', `device profiles: ${pErr.message}`);
+    profiles = Object.fromEntries((rows || []).map(p => [p.user_id, p]));
+
+    // Email lives in auth, not in user_profiles. Resolve it ONLY for users with
+    // no name — a fully-named org costs zero auth calls, and nobody has to read
+    // "Unknown" just because their profile was never filled in.
+    const unnamed = ids.filter(id => {
+      const p = profiles[id];
+      return !p || !(p.first_name || p.last_name);
+    });
+    if (unnamed.length) {
+      const results = await Promise.allSettled(unnamed.map(uid => supabaseAdmin.auth.admin.getUserById(uid)));
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value.data?.user?.email) emails[unnamed[i]] = r.value.data.user.email;
+      });
+    }
   }
 
   res.json({
     devices: (data || []).map(d => {
       const p = profiles[d.user_id] || {};
+      const email = emails[d.user_id] || null;
       return {
         id:         d.id,
         user_id:    d.user_id,
-        user:       [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || 'Unknown',
-        email:      p.email || null,
+        // Last resort is the user id, not the word "Unknown": a truncated uuid
+        // is at least something you can search for.
+        user:       [p.first_name, p.last_name].filter(Boolean).join(' ')
+                      || email
+                      || (d.user_id ? `User ${String(d.user_id).slice(0, 8)}` : 'Unknown'),
+        email,
         user_agent: d.user_agent || null,
         // A push endpoint is a capability URL — anyone holding it can push to
         // that device. Only the host is returned; the token never leaves here.

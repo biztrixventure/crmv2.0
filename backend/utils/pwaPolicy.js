@@ -163,13 +163,22 @@ async function superadminIds() {
 
   // A system superadmin can have no company assignment at all — isSuperAdmin()
   // has the same fallback. Without this they would be invisible here.
-  try {
-    const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-    if (emails.length) {
-      const { data } = await supabaseAdmin.from('user_profiles').select('id, email').in('email', emails);
-      for (const p of data || []) if (p.id) ids.add(p.id);
-    }
-  } catch { /* best effort */ }
+  //
+  // Email lives in auth.users, NOT in user_profiles (which has no email column
+  // at all — an earlier version of this queried one and silently found nobody).
+  // There is no email→id lookup in the admin API, so this pages through users;
+  // it runs only when the role-row path found nothing, which is the rare case.
+  if (!ids.size) {
+    try {
+      const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (emails.length) {
+        const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        for (const u of data?.users || []) {
+          if (u.email && emails.includes(u.email.toLowerCase())) ids.add(u.id);
+        }
+      }
+    } catch { /* best effort */ }
+  }
 
   const out = [...ids];
   // Never cache an empty result: it is far more likely to be a failed query
