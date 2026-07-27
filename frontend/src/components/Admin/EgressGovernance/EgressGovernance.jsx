@@ -431,9 +431,12 @@ function FieldsTab() {
   // Unconfigured does NOT mean "every catalog column" — it means "whatever that
   // role's export button writes today". Seeding the first edit from the real
   // default is what keeps a save from silently WIDENING someone's export.
+  // For a USER scope this must be that person's OWN role, not the generic
+  // fallback: a compliance manager's sale export is 12 columns, the fallback is
+  // 9, and saving from the wrong baseline would silently narrow their file.
   const defaultCols = useMemo(
-    () => new Set(defaultColumnsForRole(dataset, scopeType === 'role' ? role : undefined)),
-    [dataset, role, scopeType],
+    () => new Set(defaultColumnsForRole(dataset, scopeType === 'role' ? role : colUser?.role)),
+    [dataset, role, scopeType, colUser],
   );
   const isOn = (field) => (cols == null ? defaultCols.has(field) : cols.has(field));
 
@@ -476,7 +479,7 @@ function FieldsTab() {
           </div>
           {scopeType === 'role'
             ? <ThemedSelect value={role} onChange={e => setRole(e.target.value)} style={inp}>{ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</ThemedSelect>
-            : <UserSearchPicker onPick={(u) => setColUser({ id: u.id, name: u.name })} />}
+            : <UserSearchPicker onPick={(u) => setColUser({ id: u.id, name: u.name, role: u.role })} />}
         </div>
         {scopeType === 'user' && (
           <p className="text-xs mb-2" style={{ color: colUser ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>

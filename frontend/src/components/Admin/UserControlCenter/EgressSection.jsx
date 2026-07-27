@@ -244,7 +244,7 @@ export default function EgressSection({ account, assignment }) {
       </Panel>
 
       {/* 3 — Export columns per dataset */}
-      <ColumnsCard userId={userId} onErr={m => flash('error', m)} onOk={m => flash('success', m)} />
+      <ColumnsCard userId={userId} role={roleLevel} onErr={m => flash('error', m)} onOk={m => flash('success', m)} />
     </div>
   );
 }
@@ -285,7 +285,7 @@ function CsvCapRow({ label, row, busy, inhRows, inhExp, onSave }) {
   );
 }
 
-function ColumnsCard({ userId, onErr, onOk }) {
+function ColumnsCard({ userId, role, onErr, onOk }) {
   // Only datasets that have a fixed field catalog (data_analyzer is dynamic → skip).
   const datasets = Object.keys(EXPORT_DATASETS).filter(k => (EXPORT_DATASETS[k].fields || []).length);
   const [ds, setDs] = useState(datasets[0]);
@@ -305,7 +305,10 @@ function ColumnsCard({ userId, onErr, onOk }) {
   // Unconfigured means "whatever this export writes today", NOT every catalog
   // column — seeding an edit from the real defaults keeps a save from silently
   // widening this person's export.
-  const defaults = defaultColumnsForRole(ds);
+  // THIS user's role, not the generic fallback — a compliance manager's sale
+  // export is 12 columns where the fallback is 9, and seeding an edit from the
+  // wrong baseline would silently narrow their file on the first save.
+  const defaults = defaultColumnsForRole(ds, role);
   const isOn = (f) => selected == null ? defaults.includes(f) : selected.includes(f);
   const toggle = (f) => {
     const base = selected == null ? [...defaults] : selected;
