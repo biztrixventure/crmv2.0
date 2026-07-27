@@ -13,6 +13,7 @@
 const webpush = require('web-push');
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
+const { getConfig } = require('./businessConfig');
 
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -65,6 +66,47 @@ function drainQueue() {
   }
 }
 
+// ── Notification icon ─────────────────────────────────────────────────────────
+// The OS was showing a generic browser glyph instead of the configured logo,
+// and the reason is a detail that is easy to miss: NOBODY was sending an icon.
+// Every push fell through to sw.js's '/favicon.svg' default — and Chrome on
+// Windows, which is 310 of the 318 subscribed devices here, does not render SVG
+// notification icons at all. A PNG is required.
+//
+// So the icon is resolved here, at the one choke point every push passes
+// through, rather than at each of the call sites (which would guarantee one of
+// them is forgotten). Order matches what an admin would expect: the PWA icons
+// they uploaded, then the branding favicon, then the built-in fallback.
+//
+// Cached for a minute: this runs per push, and a logo does not change often.
+let iconCache = { at: 0, icon: null };
+const ICON_TTL = 60_000;
+
+const isSvg = (u) => /\.svg(\?|#|$)/i.test(String(u || ''));
+
+async function brandIcon() {
+  if (iconCache.icon && Date.now() - iconCache.at < ICON_TTL) return iconCache.icon;
+  let icon = null;
+  try {
+    const [pwa, branding] = await Promise.all([
+      getConfig(null, 'pwa', null),
+      getConfig(null, 'branding', null),
+    ]);
+    const i = (pwa && pwa.install) || {};
+    const b = branding || {};
+    // 192 before 512: notification icons render around 64–128px, so the smaller
+    // asset is the better fit and the cheaper download on a phone.
+    const candidates = [i.icon_192, i.icon_512, i.icon_maskable, b.favicon_url].filter(Boolean);
+    // An SVG here would silently show nothing on Windows, so it is only taken
+    // when there is no raster alternative at all.
+    icon = candidates.find(u => !isSvg(u)) || candidates[0] || null;
+  } catch { /* fall through to the built-in default */ }
+
+  const resolved = icon || '/favicon.svg';
+  if (icon) iconCache = { at: Date.now(), icon: resolved };
+  return resolved;
+}
+
 // ── Build JSON payload string ─────────────────────────────────────────────────
 // `vibrate` is part of the PAYLOAD (the service worker reads it); `urgency` and
 // `ttl` are transport options for the push service itself, so they are split
@@ -74,7 +116,10 @@ function buildPayload({ title, body, icon, badge, tag, data = {}, requireInterac
     title,
     body:               body || '',
     icon:               icon  || '/favicon.svg',
-    badge:              badge || '/favicon.svg',
+    // The badge is the small monochrome glyph in an Android status bar; Windows
+    // ignores it. Falling back to the same icon is better than the SVG default,
+    // which renders as nothing.
+    badge:              badge || icon || '/favicon.svg',
     tag:                tag   || 'biztrix-notification',
     data,
     requireInteraction,
@@ -157,7 +202,9 @@ async function sendPushToUser(userId, notifOpts) {
   }
   if (!subs.length) return;
 
-  const payloadStr = buildPayload(notifOpts);
+  // An explicit icon from the caller still wins; otherwise every push now
+  // carries the configured logo instead of an unrenderable SVG default.
+  const payloadStr = buildPayload({ ...notifOpts, icon: notifOpts.icon || await brandIcon() });
   const opts       = sendOptions(notifOpts);
   const staleIds   = [];
 
@@ -193,7 +240,9 @@ async function sendPushToUsers(userIds, notifOpts) {
   }
   for (const [uid, subs] of Object.entries(byUser)) setCachedSubs(uid, subs);
 
-  const payloadStr = buildPayload(notifOpts);
+  // An explicit icon from the caller still wins; otherwise every push now
+  // carries the configured logo instead of an unrenderable SVG default.
+  const payloadStr = buildPayload({ ...notifOpts, icon: notifOpts.icon || await brandIcon() });
   const opts       = sendOptions(notifOpts);
   const staleIds   = [];
 

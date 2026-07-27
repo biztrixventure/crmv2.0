@@ -190,6 +190,14 @@ export default function InstallSection({ install, branding = {}, onChange }) {
         <Panel pad="lg">
           <SectionHeader icon={ImageIcon} title="Icons"
             subtitle="Square PNG. Without at least one, a browser will not offer to install." />
+          {/* Two facts that stay invisible until a notification looks wrong. */}
+          <Panel tone="inset" radius="xl" pad="sm" className="mb-4">
+            <p className="text-[11px] m-0" style={{ color: 'var(--color-text-secondary)' }}>
+              These are also the logo on every OS notification — <span className="font-semibold">Icon 192</span> is
+              used first, then 512, then the Branding favicon. <span className="font-semibold">Use PNG, not SVG</span>:
+              Chrome on Windows silently renders no icon at all for an SVG, which is what a “missing logo” usually is.
+            </p>
+          </Panel>
           <div className="space-y-4">
             <IconField label="Icon 192" size="192×192" kind="pwa_192"
               hint="The everyday icon — home screen, task switcher."
